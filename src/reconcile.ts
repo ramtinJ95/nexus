@@ -64,8 +64,11 @@ export interface PlanInput {
   /** The secrets the node holds: those in its secret file, and the held secrets the control plane has handed its probe. */
   nodeSecrets: ReadonlySet<string>;
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
-  /** Consecutive failed jobs, and the last one's. A success clears both. */
-  attempts: { count: number; last: FailedAttempt | null };
+  /**
+   * Consecutive failed jobs, and the last one's. A success clears both. `readFailure` is a failed wake for reading, which
+   * only the usage backfill acts on, so it neither counts nor fails the pylon.
+   */
+  attempts: Attempts;
   /** A human retried the pylon after the planner gave up, and no job has succeeded nor the planner finished or given up since. */
   retrying: boolean;
   /** Online nodes other than `node` that hold the artifact. */
@@ -74,17 +77,15 @@ export interface PlanInput {
   artifactSha256(artifact: ArtifactId): string;
 }
 
-/**
- * `message` is the job's message and the end of its log, bounded by failureMessage. `reading` marks a wake
- * for reading that failed, which only the usage backfill acts on, so the planner counts it only while desired is `reading`.
- */
-export interface FailedAttempt { at: number; code: JobErrorCode; message: string; reading?: true }
+/** `message` is the job's message and the end of its log, bounded by failureMessage. */
+export interface FailedAttempt { at: number; code: JobErrorCode; message: string }
+export interface Attempts { count: number; last: FailedAttempt | null; readFailure?: FailedAttempt }
 
 export type PlanStep =
   | { kind: "done" }
   | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" }
   | { kind: "submit"; job: Job }
-  | { kind: "fail"; reason: string }; // the registry marks the pylon failed until a human retries
+  | { kind: "fail"; code: JobErrorCode; reason: string }; // the registry marks the pylon failed until a human retries
 
 export const maxAttempts = 5;
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
@@ -100,7 +101,7 @@ type Rule = (input: PlanInput, now: number) => PlanStep | null;
 const done: PlanStep = { kind: "done" };
 const wait = (reason: Extract<PlanStep, { kind: "wait" }>["reason"]): PlanStep => ({ kind: "wait", reason });
 const submit = (job: Job): PlanStep => ({ kind: "submit", job });
-const fail = (reason: string): PlanStep => ({ kind: "fail", reason });
+const fail = (code: JobErrorCode, reason: string): PlanStep => ({ kind: "fail", code, reason });
 
 function bootSource(input: PlanInput): PylonSource {
   const o = input.observed;
@@ -115,10 +116,10 @@ const planRules: readonly Rule[] = [
   // 3. Delete ignores the attempt budget. A pylon removed by hand is absent but may still have previews published.
   (i) => i.desired !== "deleted" ? null : i.observed === "absent" && !i.previewsRouted ? done : submit({ kind: "delete", pylonId: i.pylonId }),
   // A failed wake for reading is tried once and never fails the pylon. The backfill gives up on it and clears the attempt.
-  (i) => i.desired === "reading" && i.attempts.last !== null ? wait("backoff") : null,
+  ({ desired, attempts: { last, readFailure } }) => desired === "reading" && (readFailure !== undefined || last !== null) ? wait("backoff") : null,
   // 4.
-  ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(`last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
-  ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(`gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
+  ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(last.code, `last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
+  ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(last.code, `gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
   ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
   // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
@@ -146,7 +147,7 @@ const planRules: readonly Rule[] = [
     const missing = requiredArtifacts({ ...i.boot, source: bootSource(i) }).find((id) => !i.nodeArtifacts.has(id));
     if (missing === undefined) return null;
     const from = i.holders(missing)[0];
-    if (from === undefined) return fail(`artifact-missing: no online node holds ${missing}`);
+    if (from === undefined) return fail("artifact-missing", `no online node holds ${missing}`);
     return submit({ kind: "fetch-artifact", artifact: missing, from, sha256: i.artifactSha256(missing) });
   },
   // 7c. A pylon woken for reading needs nothing of `live`, and its probe reports no liveHash for a spawn that did not
@@ -172,7 +173,7 @@ export function retryRefusal(observed: PylonObservation | "absent"): string | nu
 }
 
 const brokenFailure = (observed: Extract<PylonObservation, { phase: "broken" }>, refused: string | null): PlanStep =>
-  fail(failureMessage(`pylon is broken: ${observed.detail}${refused === null ? "" : `. ${refused}`}`, observed.logTail));
+  fail("backend", failureMessage(`pylon is broken: ${observed.detail}${refused === null ? "" : `. ${refused}`}`, observed.logTail));
 
 const maxMessageChars = 500;
 const maxLogLines = 60;
@@ -187,13 +188,9 @@ export function failureMessage(message: string, logTail: string): string {
   return [message.trim().slice(0, maxMessageChars), log].filter((part) => part !== "").join("\n");
 }
 
-const noAttempts: PlanInput["attempts"] = { count: 0, last: null };
-
 export function planPylon(input: PlanInput, now: number): PlanStep {
-  // A wake for reading can fail after the backfill let go of the pylon, as when it stopped or gave up waiting.
-  const i = input.desired !== "reading" && input.attempts.last?.reading === true ? { ...input, attempts: noAttempts } : input;
   for (const rule of planRules) {
-    const step = rule(i, now);
+    const step = rule(input, now);
     if (step !== null) return step;
   }
   throw new Error("unreachable: the last plan rule always returns a step");

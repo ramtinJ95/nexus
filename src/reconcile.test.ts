@@ -60,7 +60,7 @@ const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "ru
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
   : { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, finishedAt: "2027-01-01T00:00:00Z" };
 
-/** [count, failed this many ms before now, last code, and "reading" for a failed wake for reading]. */
+/** [count, failed this many ms before now, last code, and "reading" for a failed wake for reading, kept apart from the count]. */
 type Attempts = readonly [number, number | null, JobErrorCode | null, "reading"?];
 
 interface Row {
@@ -99,12 +99,12 @@ const rows: Record<string, Row> = {
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
   "a wake for reading that failed past the attempt budget still waits": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
-  "a failed wake for reading still waits while the thread is read": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: wait("backoff") },
-  "a wake for reading that failed once the backfill let go of the pylon neither fails nor holds its pause": { desired: "paused", observed: running(null), inFlight: null, attempts: [1, 1_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: pause },
-  "a wake for reading that failed is no failure for a later wake, which boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 1_000, "backend", "reading"], online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
+  "a failed wake for reading still waits while the thread is read": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [0, 600_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a wake for reading that failed once the backfill let go of the pylon neither fails nor holds its pause": { desired: "paused", observed: running(null), inFlight: null, attempts: [0, 1_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: pause },
+  "a wake for reading that failed is no failure for a later wake, which boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: [0, 1_000, "backend", "reading"], online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   // 4
-  "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", reason: "last job failed with setup-failed, which is not retryable: the probe's setup-failed message" } },
-  "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", reason: "gave up after 5 failed attempts, the last with backend: the probe's backend message" } },
+  "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", code: "setup-failed", reason: "last job failed with setup-failed, which is not retryable: the probe's setup-failed message" } },
+  "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "gave up after 5 failed attempts, the last with backend: the probe's backend message" } },
   "backoff waits": { desired: "running", observed: "absent", inFlight: null, attempts: [2, 10_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
   "an elapsed backoff retries": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 5_000, "deadline"], online: true, present: imageOnly, expect: spawn(fresh) },
   "backoff also holds a pause": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: [3, 44_000, "checkpoint-failed"], online: true, present: imageOnly, expect: wait("backoff") },
@@ -119,21 +119,21 @@ const rows: Record<string, Row> = {
   "paused and running submits pause": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
   "paused and broken submits pause": { desired: "paused", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
   "paused and broken by a setup that failed on this boot submits pause, which removes the VM": { desired: "paused", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
-  "paused and broken with a saved setup fails, since a pause would save the failure": { desired: "paused", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
-  "paused and broken for a reason the node did not say fails rather than pausing": { desired: "paused", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
+  "paused and broken with a saved setup fails, since a pause would save the failure": { desired: "paused", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
+  "paused and broken for a reason the node did not say fails rather than pausing": { desired: "paused", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
   // 7a
   "running and stopped resumes from the checkpoint": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   "running and stopped without a checkpoint boots the first source": { desired: "running", observed: stopped(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
-  "running and broken fails, never booting over the disk": { desired: "running", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable" } },
-  "a broken pylon's failure ends with the last lines of its controller log, trimmed": { desired: "running", observed: { ...broken, logTail: "\nqemu: booting\nError: Guest command got no answer within 13000 ms\n" }, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable\nqemu: booting\nError: Guest command got no answer within 13000 ms" } },
+  "running and broken fails, never booting over the disk": { desired: "running", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable" } },
+  "a broken pylon's failure ends with the last lines of its controller log, trimmed": { desired: "running", observed: { ...broken, logTail: "\nqemu: booting\nError: Guest command got no answer within 13000 ms\n" }, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable\nqemu: booting\nError: Guest command got no answer within 13000 ms" } },
   "a retried broken pylon pauses, to resume its newest disk": { desired: "running", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: pause },
   "a retried pylon whose setup failed on this boot pauses, which removes the VM and its failure": { desired: "running", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: pause },
-  "a retried pylon whose disk holds a failed setup fails, since a resume would fail the same way": { desired: "running", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
+  "a retried pylon whose disk holds a failed setup fails, since a resume would fail the same way": { desired: "running", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", code: "backend", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
   "a retried pylon that is not broken plans as usual": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: spawn(fresh) },
-  "a retried pylon whose probe cannot say why it broke fails, never pausing it": { desired: "running", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
+  "a retried pylon whose probe cannot say why it broke fails, never pausing it": { desired: "running", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
   "a retried broken pylon still waits out its backoff": { desired: "running", observed: broken, inFlight: null, attempts: [1, 1_000, "backend"], online: true, present: imageOnly, retrying: true, expect: wait("backoff") },
   "reading and stopped resumes from the checkpoint without bringing the sessions back": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawnForReading({ kind: "resume", checkpoint: lastCheckpoint }) },
-  "reading and broken fails like running, which is why the backfill wakes only a stopped pylon": { desired: "reading", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", reason: "pylon is broken: qcow2 header unreadable" } },
+  "reading and broken fails like running, which is why the backfill wakes only a stopped pylon": { desired: "reading", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable" } },
   // 7b
   "a missing image is fetched before the template, from the first holder": {
     desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate,
@@ -145,7 +145,7 @@ const rows: Record<string, Row> = {
   },
   "no holder fails artifact-missing": {
     desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate,
-    holders: { [template]: [peer] }, expect: { kind: "fail", reason: `artifact-missing: no online node holds ${image}` },
+    holders: { [template]: [peer] }, expect: { kind: "fail", code: "artifact-missing", reason: `no online node holds ${image}` },
   },
   "a resume needs only the image": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, firstBoot: fromTemplate, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   // 7c
@@ -169,6 +169,7 @@ const rows: Record<string, Row> = {
 
 function input(row: Row): PlanInput {
   const [count, failedAgo, lastCode, reading] = row.attempts;
+  const attempt = lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` };
   return {
     pylonId, node, live, liveHash, nextCheckpoint,
     boot: asking(row.secrets?.asked ?? []),
@@ -180,7 +181,7 @@ function input(row: Row): PlanInput {
     nodeArtifacts: new Set(row.present),
     nodeSecrets: new Set(row.secrets?.holds ?? []),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
-    attempts: { count, last: lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message`, ...(reading === undefined ? {} : { reading: true }) } },
+    attempts: { count, last: reading === undefined ? attempt : null, ...(reading === undefined || attempt === null ? {} : { readFailure: attempt }) },
     retrying: row.retrying ?? false,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
