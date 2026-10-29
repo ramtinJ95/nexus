@@ -2,6 +2,13 @@ import { attentions } from "../attention.ts";
 
 const needsPerson = (row) => attentions[row.attention]?.needsPerson === true;
 export const noticeText = (row) => attentions[row.attention].label;
+/** A notice opens the inbox's card for what the thread waits on. A reply waits on no one, so it opens the thread. */
+export const noticeUrl = (row) => row.attention === "reply" ? `/threads/${row.id}` : `/#needs-you:${row.id}:${row.attention}`;
+/** The cards a notice's hash names, best first: the thread's card for that attention, then any of the thread's. */
+export function needSelectors(hash) {
+  const m = /^#needs-you:([\w-]+):(\w+)$/.exec(hash);
+  return m === null ? null : [`.need[data-thread="${m[1]}"][data-attention="${m[2]}"]`, `.need[data-thread="${m[1]}"]`];
+}
 export function notificationChannel(focused, current, id, secure, permission) {
   if (focused) return current === id ? null : "toast";
   return secure && permission === "granted" ? "system" : null;
