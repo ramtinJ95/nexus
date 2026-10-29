@@ -450,7 +450,10 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
 export async function interruptClaude(guest: Guest, session: string): Promise<InterruptClaudeOutcome> {
   const found = await claudePane(guest, session);
   if (found?.runs !== true) return "not-running";
-  const { status, herdrPane } = found.pane;
+  const { herdrPane } = found.pane;
+  // Finding the pane inspects its processes, during which Claude may have opened a dialog.
+  const status = (await livePanes(guest)).find((p) => p.herdrPane === herdrPane)?.status;
+  if (status === undefined) return "not-running";
   if (status !== "working") return status === "blocked" || status === "unknown" ? status : "idle";
   try {
     await herdr(guest, ["pane", "send-keys", herdrPane, "esc"]);

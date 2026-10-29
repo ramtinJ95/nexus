@@ -1138,6 +1138,11 @@ test("an interrupt finds the session's pane as a send does, and resumes nothing 
     assert.equal(w.guest.herdrCalls().some((c) => c === "workspace create" || c === "agent start"), false, `${why}: nothing is resumed`);
   }
 
+  const asking = [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })];
+  const dialog = claudeWorkers(t, asking, { ...runningClaude }, (reads) => { if (reads === 1) queueMicrotask(() => { asking[0]!.agent_status = "blocked"; }); });
+  assert.equal(await interruptClaude(dialog.guest, session), "blocked", "a dialog that opened while the pane was found");
+  assert.deepEqual(pressed(dialog), []);
+
   const panes = [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })];
   const closing = claudeWorkers(t, panes, { ...runningClaude }, (reads) => { if (reads === 1) queueMicrotask(() => panes.splice(0)); });
   assert.equal(await interruptClaude(closing.guest, session), "not-running", "a pane that closed before Esc reached it");

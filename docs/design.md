@@ -775,7 +775,9 @@ finds the session's pane as a send does and presses Esc there with Herdr's `send
 the key a person at the terminal presses to stop a turn. It takes no key from the
 caller. It presses nothing unless Herdr reports Claude working: a dialog would be
 cancelled by Esc, and two quick presses at an idle prompt open Claude's rewind picker,
-which Herdr still reports as idle. It never resumes a session that no live Claude runs,
+which Herdr still reports as idle. It reads Claude's state again right before the key, since finding the pane
+inspects its processes first, but Herdr has no conditional key press, so a dialog that opens between that read and the
+key would still get the Esc. It never resumes a session that no live Claude runs,
 since that session runs no turn. It waits behind the session's sends, so Esc never
 lands between the pieces of a typed message. The person-only abort route sends it for a
 Claude worker thread, and never wakes a paused pylon.
