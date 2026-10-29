@@ -555,16 +555,26 @@ function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions[
     if (!holds && t.sessionWaiting !== true && (attention === "reply" || !needsPerson(attention))) return [];
     const d = detail(t);
     const needs: Need[] = [
-      ...landOffered(d) && (d.review!.phase.kind === "needs-person" || holds) ? [{ kind: "land" as const, d, since: d.review!.since }] : [],
+      ...landOffered(d) && (d.review!.phase.kind === "needs-person" || holds) ? [{ kind: "land" as const, d, since: heldSince(c.registry, d.review!) }] : [],
       ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
     ];
     const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention
       : attention === "decision" ? (needs.length === 0 ? "decision" : null)
       : t.sessionWaiting === true ? "waiting" : null;
-    const since = t.usageLimit?.stoppedAt ?? (stuck === "decision" && d.review?.phase.kind === "needs-person" ? d.review.since : Math.max(t.createdAt, t.lastAgentActivityAt));
+    const since = t.usageLimit?.stoppedAt ?? (stuck === "decision" && d.review?.phase.kind === "needs-person" ? heldSince(c.registry, d.review) : Math.max(t.createdAt, t.lastAgentActivityAt));
     if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since });
     return needs;
   }).sort((a, b) => a.since - b.since);
+}
+
+/**
+ * When the review entered the phase it is in, from the oldest of the `review.changed` events in a row that record it
+ * there, as a label change records one again. The review's own `since` stands in once those events are gone.
+ */
+function heldSince(registry: Registry, r: Review): number {
+  const changes = registry.events("0", { thread: r.builder, kinds: ["review.changed"] });
+  const at = changes.findLastIndex((e) => e.payload.review !== r.id || (e.payload.phase as Review["phase"] | undefined)?.kind !== r.phase.kind);
+  return changes[at + 1]?.time ?? r.since;
 }
 
 const needId = (n: Need) => `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;

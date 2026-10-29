@@ -517,12 +517,12 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   const now = Date.now();
   const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const held = await s.start("acme", "Cache the list");
-  s.registry.saveReview(approvedReview(held.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending.", reserved] }, { land: { requestedBy: laptop }, since: now - 50_000 }));
+  s.registry.saveReview(approvedReview(held.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending.", reserved] }, { land: { requestedBy: laptop } }));
   s.registry.savePrWatch(held.id, { links: [{ pr: { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open", checks: "pending", review: "none", conflict: false, summary: "Caches the thread list between polls." }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const asked = await s.start("acme", "Rebuild the image");
-  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: now - 40_000 });
+  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
   const claude = await claudeThread(s, [{ kind: "prompt", at: now, text: "Make me a drink", from: "person" }]);
-  s.registry.setWaitingAsks(claude.id, [waitingAsk("toolu_1", now - 30_000)]);
+  s.registry.setWaitingAsks(claude.id, [waitingAsk("toolu_1", Date.now())]);
   const dialog = await s.start("acme", "Run the migration");
   s.observe(dialog);
   s.registry.reportSession(node, { sequence: 1, pylon: dialog.pylonId, time: now, event: { kind: "session.waiting", session: "s1", at: now, message: "Claude needs your permission to use Bash" } });
@@ -532,7 +532,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   const limited = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Write the docs", claude: "write them" })).text) as Thread;
   s.registry.setClaudeWorker(limited.id, "write them", "started", undefined, "s1");
   const resetsAt = now + 3_600_000;
-  assert.ok(s.registry.appendClaudeRead(limited.id, { session: "s1", from: transcriptStart, entries: [{ kind: "notice", at: now, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: now }));
+  assert.ok(s.registry.appendClaudeRead(limited.id, { session: "s1", from: transcriptStart, entries: [{ kind: "notice", at: Date.now(), tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: now }));
   const replied = await s.start("acme", "Answer a reply");
   s.registry.recordReply(replied.id, now);
   await s.start("acme", "Quiet");
@@ -547,7 +547,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}">`), "each card links its thread");
 
   const land = cards[0]!;
-  assert.match(land.text, /^Held review acme \/ Cache the list 1 min ago Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Held for you #7 Cache ↗ /);
+  assert.match(land.text, /^Held review acme \/ Cache the list just now Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Held for you #7 Cache ↗ /);
   assert.match(land.text, /pending\. not waivable .* src\/control\/api\.ts\. you may waive /);
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(land.html)![0];
   assert.match(button, new RegExp(`id="land-${held.id}" data-action="land" data-thread="${held.id}" data-head="${head}"`), "the thread page's Land button, under an ID of the card's own");
@@ -563,6 +563,20 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   assert.match(by(failed.id).text, /^Failed beta \/ Port the CLI .* The Claude worker failed: Claude launch did not complete: executable missing Archive$/);
   assert.match(by(failed.id).html, new RegExp(`data-action="archive" data-thread="${failed.id}"`));
   assert.match(by(limited.id).text, new RegExp(`^Usage limit acme / Write the docs .* It stopped on its usage limit until ${new Date(resetsAt).toISOString().slice(11, 16)} UTC\\. Nexus has it continue once the limit resets, or archive it to stop it\\. Archive$`));
+});
+
+test("a held review waits from when it was held, not from when its review last messaged an agent, so a question asked before that comes first", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const held = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(held.id, { kind: "reviewing" }, { since: Date.now() - 3_600_000 }));
+  const asked = await s.start("acme", "Rebuild the image");
+  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() - 1 });
+  const review = approvedReview(held.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { since: Date.now() - 3_600_000 });
+  s.registry.saveReview(review);
+  s.registry.saveReview({ ...review, phase: { ...review.phase, label: { state: "added" } } as Review["phase"] });
+  const { cards } = needsOf((await s.call("GET", "/")).text);
+  assert.deepEqual(cards.map((c) => c.thread), [asked.id, held.id], "the label added after it was held does not date it again");
+  assert.match(cards[1]!.text, /^Held review acme \/ Cache the list just now /);
 });
 
 test("acting on a card through the route its button calls takes the card off the list and the count down", async (t) => {
