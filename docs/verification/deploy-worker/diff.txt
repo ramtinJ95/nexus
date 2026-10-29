@@ -1,0 +1,53 @@
+--- main/capture.txt
++++ branch/capture.txt
+@@ -1,10 +1,7 @@
+ # A control release rolled back at the desired commit, with its report file cleared (#228)
+ poll, control role:
+   GET /v1/deployer/release; drain now none
+-  run: systemctl is-active --quiet nexus-control.service
+-  POST /v1/deployer/drain {"commit":"<desired>"}; drain now held
+-  POST /v1/deployer/report {"state":"installing","target":"<desired>","reason":null}; drain now held
+-  POST /v1/deployer/report {"state":"rolled-back","target":"<desired>","reason":"release health check failed\njournal tail"}; drain now held
++  POST /v1/deployer/report {"state":"rolled-back","target":"<desired>","reason":"release health check failed\njournal tail"}; drain now none
+   POST /v1/deployer/drain {"commit":"<desired>","release":true}; drain now none
+ control plane's reports:
+   control: commit <old> target <desired> rolled-back: release health check failed
+@@ -36,12 +33,11 @@
+   run: systemctl is-active --quiet nexus-control.service
+   POST /v1/deployer/report {"state":"healthy","target":"<desired>","reason":null}; drain now none
+   POST /v1/deployer/drain {"commit":"<desired>","release":true}; drain now none
+-  GET /v1/deployer/release; drain now none
+   run: systemctl is-active --quiet nexus-probe.service
+   POST /v1/deployer/report {"state":"healthy","target":"<desired>","reason":null}; drain now none
+-  release view reads: 2
+-  control report file: rewritten
+-  probe report file: rewritten
++  release view reads: 1
++  control report file: untouched
++  probe report file: untouched
+ control plane's reports:
+   control: commit <desired> target <desired> healthy
+   probe: commit <desired> target <desired> healthy
+--- main/bootstrap.txt
++++ branch/bootstrap.txt
+@@ -10,20 +10,13 @@
+   -rw------- root:root ./bootstrap/package.json
+   drwx------ root:root ./bootstrap/src
+   drwx------ root:root ./bootstrap/src/deploy
+-  -rw------- root:root ./bootstrap/src/deploy/credentials.test.ts
+   -rw------- root:root ./bootstrap/src/deploy/credentials.ts
+   -rw------- root:root ./bootstrap/src/deploy/health.ts
+-  -rw------- root:root ./bootstrap/src/deploy/http.test.ts
+   -rw------- root:root ./bootstrap/src/deploy/http.ts
+-  -rw------- root:root ./bootstrap/src/deploy/install.test.ts
+   -rw------- root:root ./bootstrap/src/deploy/install.ts
+   -rw------- root:root ./bootstrap/src/deploy/model.ts
+-  -rw------- root:root ./bootstrap/src/deploy/plan.test.ts
+   -rw------- root:root ./bootstrap/src/deploy/plan.ts
+-  -rw------- root:root ./bootstrap/src/deploy/prerequisites.test.ts
+-  -rw------- root:root ./bootstrap/src/deploy/setup.test.ts
+   -rw------- root:root ./bootstrap/src/deploy/setup.ts
+-  -rw------- root:root ./bootstrap/src/deploy/worker.test.ts
+   -rw------- root:root ./bootstrap/src/deploy/worker.ts
+   -rw------- root:root ./bootstrap/src/json-file.ts
+   -rw------- root:root ./bootstrap/src/tailscale.ts
