@@ -150,8 +150,7 @@ main() {
   fi
 
   # The deployer's lock, which every installer and the deployer's worker take, keeps two runs from merging at once.
-  install -d -o root -g root -m 0700 "$prefix/deployer"
-  PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}"
+  PATH=$service_path with_deployer_lock node "$repo/src/deploy/setup.ts" write "${args[@]}"
   if [ "$role" = control ]; then
     bash "$repo/deploy/install-control.sh"
     roles="control probe"
@@ -170,10 +169,10 @@ main() {
   echo
   # It runs runuser and chown, which live in the sbin directories the units' PATH lacks.
   next=$(PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" credentials "${args[@]}") || failed=$?
-  if grep -qx watch <<<"$next"; then
-    PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}" --github-watch
-  elif grep -qx config <<<"$next"; then
-    PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}"
+  watch=()
+  if grep -qx watch <<<"$next"; then watch=(--github-watch); fi
+  if [ ${#watch[@]} -gt 0 ] || grep -qx config <<<"$next"; then
+    PATH=$service_path with_deployer_lock node "$repo/src/deploy/setup.ts" write "${args[@]}" "${watch[@]}"
   fi
   if grep -qx config <<<"$next"; then
     bash "$repo/deploy/install-probe.sh"

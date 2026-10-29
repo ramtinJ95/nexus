@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { cp, glob, mkdtemp, mkdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -31,9 +31,11 @@ test("the bootstrap that install-deployer.sh copies loads without the repo's nod
   const dir = await mkdtemp(join(tmpdir(), "nexus-bootstrap-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const script = await readFile(join(repo, "deploy/install-deployer.sh"), "utf8");
-  const copied = [...script.matchAll(/"\$repo\/(src\/[^"]+)"([^\s"]*)/g)].map((m) => m[1]! + m[2]!);
-  assert.ok(copied.includes("src/deploy/*.ts"), "the copy list comes from the script");
-  for (const pattern of copied) for await (const file of glob(pattern, { cwd: repo })) {
+  const [, list, skip] = script.match(/^for source in (.+); do\n {2}\[\[ "\$source" = (\S+) \]\] \|\| install /m) ?? assert.fail("the copy loop comes from the script");
+  const copied = (await command("bash", ["-c", `for source in ${list}; do [[ "$source" = ${skip} ]] || echo "$source"; done`], repo)).split("\n");
+  assert.ok(copied.includes("src/deploy/worker.ts") && copied.includes("src/json-file.ts"), copied.join(" "));
+  assert.deepEqual(copied.filter((file) => file.endsWith(".test.ts")), [], "the root-only bootstrap holds no tests");
+  for (const file of copied) {
     await mkdir(join(dir, dirname(file)), { recursive: true });
     await cp(join(repo, file), join(dir, file));
   }
