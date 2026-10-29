@@ -366,6 +366,42 @@ test("a turn with no answer after a model failure gets a reminder, and a Claude 
   assert.equal(f.review().rounds.length, 2);
 });
 
+test("a failed turn whose end is reported twice, by a Claude worker's transcript and later by its hook, counts once", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const findings = f.sent.at(-1)!;
+  f.failedTurn(f.builder, "API Error: Request timed out.");
+  await loop.poll();
+  f.registry.recordReply(f.builder, f.now);
+  f.tick(61_000);
+  await loop.poll();
+  assert.match(phaseNote(f.review()), /\(1 in a row,/);
+  f.tick(60_000);
+  await loop.poll();
+  assert.equal(f.sent.at(-1)!.message.text, findings.message.text, "the findings go again 2 minutes after the failure, not 5");
+});
+
+test("a builder that answers after a model failure is no longer failing while the loop waits for its push", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  f.failedTurn(f.builder, "API Error: Request timed out.");
+  await loop.poll();
+  f.tick(2 * 60_000);
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "fixing" });
+  assert.equal(phaseNote(f.review()), "");
+});
+
 test("a Claude builder whose turn ends with a background shell running is read from its transcript, though it stays working", async (t) => {
   const f = fixture(t);
   const loop = f.loop();

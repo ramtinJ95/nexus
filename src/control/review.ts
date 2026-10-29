@@ -98,10 +98,10 @@ export interface Round { head: string; verdict: Verdict | null; check: { passed:
 export type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: boolean; output: string };
 
 /**
- * The agent's last `count` turns in a row ended because its model failed, the latest at `ended` with the error `last`.
- * The loop sends its request again at `retryAt`.
+ * The agent's last `count` turns in a row ended because its model failed, the latest with the error `last`. The loop
+ * sends its request again at `retryAt`.
  */
-export interface ModelFailure { count: number; last: string; ended: number; retryAt: number }
+export interface ModelFailure { count: number; last: string; retryAt: number }
 
 export type Phase =
   /** The reviewer has the round's request and owes its verdict. */
@@ -541,14 +541,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   async function waitOn(r: Review, phase: Extract<Phase, { kind: "reviewing" | "fixing" }>, t: Thread, missing: string | null = null): Promise<Review> {
     const who = phase.kind === "reviewing" ? "reviewer" : "builder";
     if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
+    // Until the request goes again, `since` is before `retryAt`, and the turn that ended is the failure already counted,
+    // whose end a Claude worker's transcript and its hook may each report at another time.
+    if (phase.failing !== undefined && r.since < phase.failing.retryAt) return now() < phase.failing.retryAt ? r : resend(r, who);
     const { ended, running } = heard(t, r.since);
     if (ended === null || running || now() - ended <= replyGraceMs) return r;
-    if (phase.failing?.ended === ended) return now() < phase.failing.retryAt ? r : resend(r, who);
     const failed = await modelFailure(t);
     if (failed !== null) {
       const count = (phase.failing?.count ?? 0) + 1;
       if (count > retryMs.length) return toPerson(r, `The ${who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
-      return { ...r, phase: { kind: phase.kind, failing: { count, last: failed, ended, retryAt: now() + retryMs[count - 1]! } } };
+      return { ...r, phase: { kind: phase.kind, failing: { count, last: failed, retryAt: now() + retryMs[count - 1]! } } };
     }
     if (r.nudges >= maxNudges) return toPerson(r, `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
     return send(r, who, (token) => reminder(who, missing, token), { kind: phase.kind }, r.nudges + 1);
@@ -571,6 +573,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const round = r.rounds.at(-1)!;
       const found = answeredSince(r, builder) ? latest(await replies(builder), "nexus-review-answers", answersSchema, r.expect) : null;
       if (found === null) return waitOn(r, phase, builder);
+      // An answer ends the model's failures in a row, though the loop may still wait for the push it promises.
+      if (phase.failing !== undefined) return { ...r, phase: { kind: "fixing" } };
       const unanswered = findingsOf(round).filter(blocks).filter((f) => !found.answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== "")));
       if (unanswered.length) return waitOn(r, phase, builder, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
       const answered = withRound(r, { answers: found.answers });
