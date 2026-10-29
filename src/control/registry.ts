@@ -477,79 +477,6 @@ export function openRegistry(path: string, clock = Date.now) {
     return statement;
   };
 
-  const q = {
-    upsertNode: db.prepare(`INSERT INTO nodes (name, tailnet_host, tailnet_node_id, state) VALUES (?, ?, ?, 'offline')
-      ON CONFLICT (name) DO UPDATE SET tailnet_host = excluded.tailnet_host, tailnet_node_id = excluded.tailnet_node_id`),
-    nodes: db.prepare("SELECT * FROM nodes ORDER BY name"),
-    node: db.prepare("SELECT * FROM nodes WHERE name = ?"),
-    nodeState: db.prepare("UPDATE nodes SET state = ? WHERE name = ?"),
-    nodeFacts: db.prepare("UPDATE nodes SET state = ?, capacity = ? WHERE name = ?"),
-    observation: db.prepare("UPDATE nodes SET observation = ? WHERE name = ?"),
-    insertProject: db.prepare("INSERT INTO projects (id, record) VALUES (?, ?)"),
-    projects: db.prepare("SELECT record FROM projects ORDER BY id"),
-    project: db.prepare("SELECT record FROM projects WHERE id = ?"),
-    insertThread: db.prepare(`INSERT INTO threads (id, title, project, status, conversation_id, started_by, created_at,
-      agent_turn_running, last_agent_activity_at, last_human_activity_at, placement, setup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    threads: db.prepare("SELECT * FROM threads ORDER BY created_at, id"),
-    threadsOf: db.prepare("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id"),
-    thread: db.prepare("SELECT * FROM threads WHERE id = ?"),
-    threadOfPylon: db.prepare("SELECT thread FROM pylons WHERE id = ?"),
-    threadStatus: db.prepare("UPDATE threads SET status = ? WHERE id = ?"),
-    humanActivity: db.prepare("UPDATE threads SET last_human_activity_at = max(last_human_activity_at, ?) WHERE id = ?"),
-    agentActivity: db.prepare("UPDATE threads SET last_agent_activity_at = max(last_agent_activity_at, ?) WHERE id = ?"),
-    // A turn that keeps running keeps its start, and a turn that ends forgets it.
-    agentTurn: db.prepare(`UPDATE threads SET agent_turn_running = $running,
-      agent_turn_started_at = CASE WHEN $running = 0 THEN NULL WHEN agent_turn_running = 1 THEN agent_turn_started_at ELSE $start END WHERE id = $id`),
-    insertPylon: db.prepare(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)
-      VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`),
-    updatePylon: db.prepare(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
-      live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed, retrying = $retrying WHERE id = $id`),
-    markSeen: db.prepare("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE max(coalesce(seen_at, 0), min(max(?, coalesce(last_reply_at, 0)), ?)) END WHERE id = ?"),
-    recordReply: db.prepare("UPDATE threads SET last_reply_at = max(coalesce(last_reply_at, 0) + 1, coalesce(seen_at, 0) + 1, ?) WHERE id = ?"),
-    retryPylon: db.prepare(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`),
-    pylon: db.prepare("SELECT * FROM pylons WHERE id = ?"),
-    pylonsOn: db.prepare("SELECT * FROM pylons WHERE node = ? ORDER BY id"),
-    pylonIdsToTick: db.prepare(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status != 'deleted'
-      OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
-      OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id AND state = 'starting'))
-      ORDER BY p.id`),
-    // A null status keeps the one the row has.
-    upsertSession: db.prepare(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
-      VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
-      ON CONFLICT (pylon, id) DO UPDATE SET herdr_pane = excluded.herdr_pane, harness = excluded.harness, harness_session_id = excluded.harness_session_id,
-      status = coalesce($status, sessions.status), title = excluded.title, state = excluded.state, message = excluded.message`),
-    deleteSession: db.prepare("DELETE FROM sessions WHERE pylon = ? AND id = ?"),
-    pauseSessions: db.prepare("UPDATE sessions SET state = 'paused', message = NULL WHERE pylon = ?"),
-    resumeSessions: db.prepare(`UPDATE sessions SET status = 'unknown', state = CASE WHEN herdr_pane IS NULL THEN 'failed' ELSE 'running' END,
-      message = CASE WHEN herdr_pane IS NULL THEN 'its last wake did not bring it back, and whether this one did is not read yet' END
-      WHERE pylon = ? AND state = 'paused'`),
-    sessions: db.prepare("SELECT * FROM sessions WHERE pylon = ? ORDER BY id"),
-    session: db.prepare("SELECT * FROM sessions WHERE pylon = ? AND id = ?"),
-    insertPreview: db.prepare("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?"),
-    previewReady: db.prepare("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?"),
-    deletePreviews: db.prepare("DELETE FROM previews WHERE pylon = ?"),
-    deletePreview: db.prepare("DELETE FROM previews WHERE pylon = ? AND service = ?"),
-    portsOn: db.prepare("SELECT https_port FROM previews WHERE node = ?"),
-    previews: db.prepare("SELECT previews.*, nodes.tailnet_host FROM previews JOIN nodes ON nodes.name = previews.node WHERE pylon = ? ORDER BY service"),
-    insertOutput: db.prepare("INSERT INTO outputs (thread, kind, ref) VALUES (?, ?, ?) ON CONFLICT DO NOTHING"),
-    outputs: db.prepare("SELECT * FROM outputs WHERE thread = ? ORDER BY kind, ref"),
-    insertOrphan: db.prepare("INSERT INTO orphans (node, pylon_id) VALUES (?, ?) ON CONFLICT DO NOTHING"),
-    orphans: db.prepare("SELECT * FROM orphans ORDER BY node, pylon_id"),
-    // A snapshot read before a job finished can arrive after its result. It must not make the job look running again.
-    upsertJob: db.prepare(`INSERT INTO jobs (subject, job_id, state, status) VALUES (?, ?, ?, ?)
-      ON CONFLICT (subject) DO UPDATE SET job_id = excluded.job_id, state = excluded.state, status = excluded.status
-      WHERE NOT (jobs.job_id = excluded.job_id AND jobs.state <> 'running')`),
-    job: db.prepare("SELECT status FROM jobs WHERE subject = ?"),
-    upsertImage: db.prepare("INSERT INTO images (id, manifest) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET manifest = excluded.manifest"),
-    image: db.prepare("SELECT manifest FROM images WHERE id = ?"),
-    images: db.prepare("SELECT manifest FROM images ORDER BY id"),
-    upsertTemplate: db.prepare("INSERT INTO templates (id, project, record) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record"),
-    templates: db.prepare("SELECT record FROM templates WHERE project = ? ORDER BY id"),
-    buildingTemplates: db.prepare("SELECT record FROM templates WHERE json_extract(record, '$.state') = 'building' AND json_extract(record, '$.on') = ? ORDER BY id"),
-    deleteTemplate: db.prepare("DELETE FROM templates WHERE id = ?"),
-    setSetting: db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value"),
-    setting: db.prepare("SELECT value FROM settings WHERE key = ?"),
-  };
 
   const pylonParams = (p: StoredPylon) => ({
     $id: p.pylonId, $thread: p.thread, $node: p.node,
@@ -558,11 +485,46 @@ export function openRegistry(path: string, clock = Date.now) {
     $retrying: p.retrying ? 1 : 0,
   });
 
+  const threadRecord = (id: ThreadId) => sql("SELECT * FROM threads WHERE id = ?").get(id);
+  const humanActivity = (at: number, id: ThreadId) => sql("UPDATE threads SET last_human_activity_at = max(last_human_activity_at, ?) WHERE id = ?").run(at, id);
+  const agentActivity = (at: number, id: ThreadId) => sql("UPDATE threads SET last_agent_activity_at = max(last_agent_activity_at, ?) WHERE id = ?").run(at, id);
+  const recordReply = (at: number, id: ThreadId) => sql("UPDATE threads SET last_reply_at = max(coalesce(last_reply_at, 0) + 1, coalesce(seen_at, 0) + 1, ?) WHERE id = ?").run(at, id);
+
+  function pylon(id: PylonId): StoredPylon | undefined {
+    const row = sql("SELECT * FROM pylons WHERE id = ?").get(id);
+    return row && pylonRow(row);
+  }
+
+  function node(name: NodeName): NodeRecord | undefined {
+    const row = sql("SELECT * FROM nodes WHERE name = ?").get(name);
+    return row && nodeRow(row);
+  }
+
+  function upsertNode(node: Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">) {
+    sql(`INSERT INTO nodes (name, tailnet_host, tailnet_node_id, state) VALUES (?, ?, ?, 'offline')
+      ON CONFLICT (name) DO UPDATE SET tailnet_host = excluded.tailnet_host, tailnet_node_id = excluded.tailnet_node_id`).run(node.name, node.tailnetHost, node.tailnetNodeId);
+  }
+
+  function project(id: ProjectId): Project | undefined {
+    const row = sql("SELECT record FROM projects WHERE id = ?").get(id);
+    return row && json<Project>(row.record);
+  }
+
+  const sessions = (pylon: PylonId) => sql("SELECT * FROM sessions WHERE pylon = ? ORDER BY id").all(pylon).map(sessionRow);
+
+  function image(id: ImageId): RecordedImage | undefined {
+    const row = sql("SELECT manifest FROM images WHERE id = ?").get(id);
+    return row && recordedImage(row);
+  }
+
+  const setting = (key: string): string | null => (sql("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null) as string | null;
+  const setSetting = (key: string, value: string) => sql("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
+
   function previews(pylon: PylonId): Preview[] {
-    const rows = q.previews.all(pylon) as Row[];
+    const rows = sql("SELECT previews.*, nodes.tailnet_host FROM previews JOIN nodes ON nodes.name = previews.node WHERE pylon = ? ORDER BY service").all(pylon);
     if (rows.length === 0) return [];
     // A pylon's previews are all on its node.
-    const observed = observationOf((q.node.get(rows[0]!.node as string) as Row).observation)?.pylons.find((p) => p.pylonId === pylon);
+    const observed = node(rows[0]!.node as NodeName)!.observation?.pylons.find((p) => p.pylonId === pylon);
     // Only a running pylon's services are known. A paused one's preview shows the waking page, which answers.
     const facts = new Map(observed?.phase === "running" ? (observed.services ?? []).map((s) => [s.name, s]) : []);
     return rows.map((r): Preview => {
@@ -594,7 +556,7 @@ export function openRegistry(path: string, clock = Date.now) {
   }
 
   function threadOfPylon(pylonId: PylonId): ThreadId | undefined {
-    return (q.threadOfPylon.get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
+    return (sql("SELECT thread FROM pylons WHERE id = ?").get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
   }
 
   function withSessions(row: Row): Thread {
@@ -652,11 +614,11 @@ export function openRegistry(path: string, clock = Date.now) {
   }
 
   function updateAttention(id: ThreadId) {
-    const row = q.thread.get(id);
+    const row = threadRecord(id);
     if (row === undefined) return;
     const t = withSessions(row);
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
-    const p = q.pylon.get(t.pylonId);
+    const p = pylon(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null))
       || sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(id) !== undefined
@@ -669,7 +631,7 @@ export function openRegistry(path: string, clock = Date.now) {
 
   function setThreadStatus(id: ThreadId, status: ThreadStatus) {
     transaction(() => {
-      q.threadStatus.run(status, id);
+      sql("UPDATE threads SET status = ? WHERE id = ?").run(status, id);
       if (status === "archived" || status === "deleted") {
         // The thread's pylon pauses, so no turn of it runs and no dialog waits.
         for (const table of ["session_activity", "waiting_asks"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
@@ -694,7 +656,7 @@ export function openRegistry(path: string, clock = Date.now) {
   function appendEvent(kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time = clock()): NexusEvent {
     return transaction(() => {
       pruneSessions();
-      const project = thread === null ? null : (q.thread.get(thread)?.project as string | undefined) ?? null;
+      const project = thread === null ? null : (threadRecord(thread)?.project as string | undefined) ?? null;
       const result = sql("INSERT INTO events (time, thread, project, kind, payload) VALUES (?, ?, ?, ?, ?)").run(time, thread, project, kind, JSON.stringify(payload));
       const id = Number(result.lastInsertRowid);
       sql("DELETE FROM events WHERE id <= ?").run(id - 10_000);
@@ -739,8 +701,6 @@ export function openRegistry(path: string, clock = Date.now) {
       session: row.session as string, cursor: { offset: row.byte_offset as number, skipping: row.skipping === 1, before: row.before_hash as string }, dropped: row.dropped as number, readAt: row.read_at as number,
     };
   }
-
-  const setting = (key: string): string | null => ((q.setting.get(key) as Row | undefined)?.value ?? null) as string | null;
 
   pruneSessions();
   // A release that computes attention differently, or a thread from before attention was stored, is right from the start.
@@ -797,7 +757,7 @@ export function openRegistry(path: string, clock = Date.now) {
      * the recorded counts grew by. `backfill` adds them to the thread's usage backfill row in the same transaction.
      */
     recordUsage(thread: ThreadId, calls: readonly AgentCall[], cursors: readonly UsageCursor[] = [], backfill = false): { calls: number; tokens: number } {
-      const t = q.thread.get(thread) as Row | undefined;
+      const t = threadRecord(thread);
       if (t === undefined) throw new Error(`no thread ${thread} to record usage under`);
       const role = roleOf(t.started_by as string);
       const added = { calls: 0, tokens: 0 };
@@ -978,16 +938,16 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     reportSession(node: NodeName, report: ReportedEvent) {
       const event = pylonEventSchema.parse(report.event);
-      const pylon = q.pylon.get(report.pylon);
-      if (pylon === undefined || pylon.node !== node) return;
-      const thread = pylon.thread as ThreadId;
+      const stored = pylon(report.pylon);
+      if (stored === undefined || stored.node !== node) return;
+      const thread = stored.thread as ThreadId;
       transaction(() => {
         const receipt = sql("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
         if (receipt !== undefined && Number(receipt.sequence) >= report.sequence) return;
         sql("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
         pruneSessions();
         const session = event.session ?? "default";
-        const status = q.thread.get(thread)?.status;
+        const status = threadRecord(thread)?.status;
         if (status === "archived" || status === "deleted") return;
         const at = event.at ?? report.time;
         const previous = sql("SELECT at, kind, event_ids FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
@@ -1027,8 +987,8 @@ export function openRegistry(path: string, clock = Date.now) {
             .run(thread, session, event.kind === "session.heartbeat" ? "session.turn-started" : event.kind, clock(), startedAt, event.kind === "session.waiting" ? event.message ?? null : null);
           sql("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
         }
-        if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);
-        if (event.kind === "session.turn-ended") q.recordReply.run(clock(), thread);
+        if (event.kind !== "session.waiting") agentActivity(clock(), thread);
+        if (event.kind === "session.turn-ended") recordReply(clock(), thread);
         appendEvent(event.kind, thread, { at, ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
         updateAttention(thread);
       });
@@ -1086,7 +1046,7 @@ export function openRegistry(path: string, clock = Date.now) {
      */
     setWaitingAsks(thread: ThreadId, asks: readonly WaitingAsk[]): boolean {
       return transaction(() => {
-        const status = q.thread.get(thread)?.status;
+        const status = threadRecord(thread)?.status;
         if (status === undefined || status === "archived" || status === "deleted") return false;
         sql("INSERT INTO waiting_asks (thread, report) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET report = excluded.report").run(thread, JSON.stringify(asks));
         const changed = reconcileAsks(thread);
@@ -1215,14 +1175,11 @@ export function openRegistry(path: string, clock = Date.now) {
     },
 
     /** Nodes come from the config file or a join. Their state and capacity come from observations. */
-    upsertNode(node: Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">) { q.upsertNode.run(node.name, node.tailnetHost, node.tailnetNodeId); },
-    nodes: () => (q.nodes.all() as Row[]).map(nodeRow),
-    node(name: NodeName): NodeRecord | undefined {
-      const row = q.node.get(name) as Row | undefined;
-      return row && nodeRow(row);
-    },
+    upsertNode,
+    nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeRow),
+    node,
     /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
-    markOffline(name: NodeName) { q.nodeState.run("offline", name); },
+    markOffline(name: NodeName) { sql("UPDATE nodes SET state = ? WHERE name = ?").run("offline", name); },
     addJoinToken(hash: string, expiresAt: number) { sql("INSERT INTO join_tokens (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt); },
     joinToken(hash: string): { expiresAt: number; usedAt: number | null } | undefined {
       const row = sql("SELECT expires_at, used_at FROM join_tokens WHERE hash = ?").get(hash);
@@ -1232,7 +1189,7 @@ export function openRegistry(path: string, clock = Date.now) {
     joinNode(hash: string, node: Omit<JoinedNode, "joinedAt">, at: number): boolean {
       return transaction(() => {
         if (sql("UPDATE join_tokens SET used_at = ?, used_by = ? WHERE hash = ? AND used_at IS NULL AND expires_at > ?").run(at, node.tailnetNodeId, hash, at).changes === 0) return false;
-        q.upsertNode.run(node.name, node.tailnetHost, node.tailnetNodeId);
+        upsertNode(node);
         sql("INSERT INTO joined_nodes VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET deploy_key = excluded.deploy_key, joined_at = excluded.joined_at").run(node.name, node.deployKey, at);
         return true;
       });
@@ -1243,20 +1200,17 @@ export function openRegistry(path: string, clock = Date.now) {
 
     editProject(id: ProjectId, edit: (stored: Project) => Project): Project | undefined {
       return transaction(() => {
-        const row = q.project.get(id) as Row | undefined;
-        if (row === undefined) return undefined;
-        const project = edit(json<Project>(row.record));
-        sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), id);
-        return project;
+        const stored = project(id);
+        if (stored === undefined) return undefined;
+        const edited = edit(stored);
+        sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(edited), id);
+        return edited;
       });
     },
     updateProject(project: Project) { sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), project.id); },
-    createProject(project: Project) { q.insertProject.run(project.id, JSON.stringify(project)); },
-    projects: () => (q.projects.all() as Row[]).map((r) => json<Project>(r.record)),
-    project(id: ProjectId): Project | undefined {
-      const row = q.project.get(id) as Row | undefined;
-      return row && json<Project>(row.record);
-    },
+    createProject(project: Project) { sql("INSERT INTO projects (id, record) VALUES (?, ?)").run(project.id, JSON.stringify(project)); },
+    projects: () => (sql("SELECT record FROM projects ORDER BY id").all() as Row[]).map((r) => json<Project>(r.record)),
+    project,
 
     /**
      * A thread and its pylon are created together, because a thread always has exactly one pylon. A `queued` thread's
@@ -1271,10 +1225,13 @@ export function openRegistry(path: string, clock = Date.now) {
           if (record === undefined || record.status !== "queued") throw new Error(`thread ${thread.id} is no longer queued`);
           saveQueued({ ...record, status: "started", startedAt: thread.createdAt, lastError: null, firstMessage: record.message === null ? null : "pending" });
         }
-        q.insertThread.run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
+        sql(`INSERT INTO threads (id, title, project, status, conversation_id, started_by, created_at,
+          agent_turn_running, last_agent_activity_at, last_human_activity_at, placement, setup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
           thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt, thread.placement === undefined ? null : JSON.stringify(thread.placement),
           thread.setup === undefined ? null : JSON.stringify(thread.setup));
-        q.insertPylon.run(pylonParams(pylon));
+        sql(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)
+          VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`).run(pylonParams(pylon));
         if (claudePrompt !== undefined) sql("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
         if (key !== undefined) saveStartKey(key, thread.id);
       });
@@ -1294,45 +1251,50 @@ export function openRegistry(path: string, clock = Date.now) {
     queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
     queuedThread,
     saveQueued,
-    threads: (project?: ProjectId) => ((project === undefined ? q.threads.all() : q.threadsOf.all(project)) as Row[]).map(withSessions),
+    threads: (project?: ProjectId) => ((project === undefined ? sql("SELECT * FROM threads ORDER BY created_at, id").all() : sql("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id").all(project)) as Row[]).map(withSessions),
     thread(id: ThreadId): Thread | undefined {
-      const row = q.thread.get(id) as Row | undefined;
+      const row = threadRecord(id);
       return row && withSessions(row);
     },
     markSeen(id: ThreadId, unread: boolean, now = Date.now(), lastReplyAt?: number | null) {
       if (!unread && lastReplyAt === null) return;
       transaction(() => {
-        q.markSeen.run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);
+        sql("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE max(coalesce(seen_at, 0), min(max(?, coalesce(last_reply_at, 0)), ?)) END WHERE id = ?").run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);
         updateAttention(id);
       });
     },
     // The timestamp also identifies a reply, including two events in one millisecond or a clock correction.
     recordReply(id: ThreadId, at: number) {
-      transaction(() => { q.recordReply.run(at, id); appendEvent("thread.turn-ended", id, {} , at); updateAttention(id); });
+      transaction(() => { recordReply(at, id); appendEvent("thread.turn-ended", id, {} , at); updateAttention(id); });
     },
     setThreadStatus,
     /** Timestamps only move forward, so a late or repeated report cannot make a thread look idle sooner. */
     recordActivity(id: ThreadId, activity: { human?: number; agent?: number; agentTurnRunning?: boolean }) {
       transaction(() => {
-        if (activity.human !== undefined) q.humanActivity.run(activity.human, id);
-        if (activity.agent !== undefined) q.agentActivity.run(activity.agent, id);
-        // The harness reports its last activity as the moment the turn flipped.
-        if (activity.agentTurnRunning !== undefined) q.agentTurn.run({ $running: activity.agentTurnRunning ? 1 : 0, $start: activity.agent ?? clock(), $id: id });
+        if (activity.human !== undefined) humanActivity(activity.human, id);
+        if (activity.agent !== undefined) agentActivity(activity.agent, id);
+        // The harness reports its last activity as the moment the turn flipped. A turn that keeps running keeps its
+        // start, and a turn that ends forgets it.
+        if (activity.agentTurnRunning !== undefined) {
+          sql(`UPDATE threads SET agent_turn_running = $running,
+            agent_turn_started_at = CASE WHEN $running = 0 THEN NULL WHEN agent_turn_running = 1 THEN agent_turn_started_at ELSE $start END WHERE id = $id`)
+            .run({ $running: activity.agentTurnRunning ? 1 : 0, $start: activity.agent ?? clock(), $id: id });
+        }
         updateAttention(id);
       });
     },
 
-    pylon(id: PylonId): StoredPylon | undefined {
-      const row = q.pylon.get(id) as Row | undefined;
-      return row && pylonRow(row);
-    },
-    pylonsOn: (node: NodeName) => (q.pylonsOn.all(node) as Row[]).map(pylonRow),
+    pylon,
+    pylonsOn: (node: NodeName) => (sql("SELECT * FROM pylons WHERE node = ? ORDER BY id").all(node) as Row[]).map(pylonRow),
     /**
      * The node's pylons less those of deleted threads with nothing left to tear down: the node neither has nor routes
      * them, as `present` says, and no job, preview, retry or Claude launch is left to settle, so a tick would change nothing.
      */
     pylonIdsToTick: (node: NodeName, present: readonly PylonId[]) =>
-      (q.pylonIdsToTick.all({ $node: node, $present: JSON.stringify(present) }) as Row[]).map((r) => r.id as PylonId),
+      (sql(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status != 'deleted'
+        OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
+        OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id AND state = 'starting'))
+        ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present) }) as Row[]).map((r) => r.id as PylonId),
     /** Returns what releases it, once the pylon's row counts it or the start failed. */
     reserve(pylonId: PylonId, node: NodeName, resources: BootInputs["resources"]): () => void {
       reservations.set(pylonId, { node, resources });
@@ -1340,13 +1302,14 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     reserved: (node: NodeName) => [...reservations.values()].filter((r) => r.node === node).map((r) => r.resources),
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
-    savePylon(pylon: StoredPylon) {
+    savePylon(saved: StoredPylon) {
       transaction(() => {
-        const previous = q.pylon.get(pylon.pylonId);
-        const { changes } = q.updatePylon.run(pylonParams(pylon));
-        if (changes !== 1) throw new Error(`no pylon ${pylon.pylonId} to save`);
-        if (pylon.failed !== null && previous?.failed !== pylon.failed) appendEvent("thread.failed", pylon.thread as ThreadId, { message: pylon.failed });
-        updateAttention(pylon.thread as ThreadId);
+        const previous = pylon(saved.pylonId);
+        const { changes } = sql(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
+          live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed, retrying = $retrying WHERE id = $id`).run(pylonParams(saved));
+        if (changes !== 1) throw new Error(`no pylon ${saved.pylonId} to save`);
+        if (saved.failed !== null && previous?.failed !== saved.failed) appendEvent("thread.failed", saved.thread as ThreadId, { message: saved.failed });
+        updateAttention(saved.thread as ThreadId);
       });
     },
     /** Forgets the pylon's failed jobs, and only those, as the usage backfill does for a wake it gave up on. */
@@ -1369,15 +1332,15 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     /** Clears a failed pylon's verdict and attempts, and marks a human retry. False when the pylon has not failed. */
     retryPylon: (pylonId: PylonId): boolean => transaction(() => {
-      const changed = q.retryPylon.run(pylonId).changes === 1;
+      const changed = sql(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`).run(pylonId).changes === 1;
       const thread = threadOfPylon(pylonId);
       if (thread !== undefined) updateAttention(thread);
       return changed;
     }),
 
-    sessions: (pylon: PylonId) => (q.sessions.all(pylon) as Row[]).map(sessionRow),
+    sessions,
     session(pylon: PylonId, id: string): Session | undefined {
-      const row = q.session.get(pylon, id) as Row | undefined;
+      const row = sql("SELECT * FROM sessions WHERE pylon = ? AND id = ?").get(pylon, id) as Row | undefined;
       return row && sessionRow(row);
     },
     /**
@@ -1388,67 +1351,64 @@ export function openRegistry(path: string, clock = Date.now) {
      * the range is used up, after allocating the services before it.
      */
     allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange) {
-      const node = (q.pylon.get(pylonId) as Row | undefined)?.node as NodeName | undefined;
-      if (node === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
-      const routed = (observationOf((q.node.get(node) as Row).observation)?.previewRoutes ?? []).map((r) => r.httpsPort);
-      const held = new Set((q.previews.all(pylonId) as Row[]).map((r) => r.service as string));
+      const on = pylon(pylonId)?.node;
+      if (on === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
+      const routed = (node(on)!.observation?.previewRoutes ?? []).map((r) => r.httpsPort);
+      const held = new Set(previews(pylonId).map((p) => p.service));
       for (const service of services) {
         if (held.has(service)) continue;
-        const taken = new Set([...routed, ...(q.portsOn.all(node) as Row[]).map((r) => r.https_port as number)]);
+        const taken = new Set([...routed, ...(sql("SELECT https_port FROM previews WHERE node = ?").all(on) as Row[]).map((r) => r.https_port as number)]);
         let port = range.first;
         while (port <= range.last && taken.has(port)) port++;
-        if (port > range.last) throw new Error(`no https port is free for the preview of ${service}: pylons on ${node} hold or ${node} serves every port from ${range.first} to ${range.last}`);
-        q.insertPreview.run(service, port, pylonId);
+        if (port > range.last) throw new Error(`no https port is free for the preview of ${service}: pylons on ${on} hold or ${on} serves every port from ${range.first} to ${range.last}`);
+        sql("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?").run(service, port, pylonId);
         held.add(service);
       }
     },
     /** Frees a deleted pylon's ports for other pylons on its node. */
-    releasePreviews(pylonId: PylonId) { q.deletePreviews.run(pylonId); },
+    releasePreviews(pylonId: PylonId) { sql("DELETE FROM previews WHERE pylon = ?").run(pylonId); },
     /** Drops one service's preview, such as an unlinked port's, and frees its port. A service with none is left as it is. */
-    releasePreview(pylonId: PylonId, service: string) { q.deletePreview.run(pylonId, service); },
+    releasePreview(pylonId: PylonId, service: string) { sql("DELETE FROM previews WHERE pylon = ? AND service = ?").run(pylonId, service); },
     previews,
     outputs(thread: ThreadId): Output[] {
       const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
       return [
-        ...(q.outputs.all(thread) as Row[]).map((r): Output => ({ thread, kind: r.kind as Output["kind"], ref: r.ref as string })),
+        ...(sql("SELECT * FROM outputs WHERE thread = ? ORDER BY kind, ref").all(thread) as Row[]).map((r): Output => ({ thread, kind: r.kind as Output["kind"], ref: r.ref as string })),
         ...(row ? json<PrWatchState>(row.record).links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),
       ];
     },
-    orphans: () => (q.orphans.all() as Row[]).map((r): Orphan => ({ node: r.node as NodeName, pylonId: r.pylon_id as PylonId })),
+    orphans: () => (sql("SELECT * FROM orphans ORDER BY node, pylon_id").all() as Row[]).map((r): Orphan => ({ node: r.node as NodeName, pylonId: r.pylon_id as PylonId })),
 
     /** The latest job the node reported for a pylon or an artifact. */
     job(subject: Subject): JobStatus | undefined {
-      const row = q.job.get(subject) as Row | undefined;
+      const row = sql("SELECT status FROM jobs WHERE subject = ?").get(subject) as Row | undefined;
       return row && json<JobStatus>(row.status);
     },
 
     /** Kept in the manifest column, so a control plane older than `release` still reads the row. */
-    saveImage(manifest: ImageManifest, release: string | null) { q.upsertImage.run(manifest.id, JSON.stringify({ ...manifest, release })); },
-    image(id: ImageId): RecordedImage | undefined {
-      const row = q.image.get(id) as Row | undefined;
-      return row && recordedImage(row);
-    },
-    images: () => (q.images.all() as Row[]).map(recordedImage),
+    saveImage(manifest: ImageManifest, release: string | null) { sql("INSERT INTO images (id, manifest) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET manifest = excluded.manifest").run(manifest.id, JSON.stringify({ ...manifest, release })); },
+    image,
+    images: () => (sql("SELECT manifest FROM images ORDER BY id").all() as Row[]).map(recordedImage),
     /** The image every new pylon boots. Only a recorded image can become current, and the one it replaces becomes the previous image. */
     setCurrentImage(id: ImageId) {
       transaction(() => {
-        if (q.image.get(id) === undefined) throw new Error(`no image ${id} is recorded`);
+        if (image(id) === undefined) throw new Error(`no image ${id} is recorded`);
         const current = setting("current");
-        if (current !== null && current !== id) q.setSetting.run("previous-image", current);
-        q.setSetting.run("current", id);
+        if (current !== null && current !== id) setSetting("previous-image", current);
+        setSetting("current", id);
       });
     },
     currentImage: (): ImageId | null => setting("current") as ImageId | null,
     previousImage: (): ImageId | null => setting("previous-image") as ImageId | null,
     /** The latest image build or rollout. One runs at a time, and it stays readable once it has finished. */
     imageOperation: (): ImageOperation | null => jsonOrNull<ImageOperation>(setting("image-operation")),
-    saveImageOperation(operation: ImageOperation) { q.setSetting.run("image-operation", JSON.stringify(operation)); },
+    saveImageOperation(operation: ImageOperation) { setSetting("image-operation", JSON.stringify(operation)); },
 
-    saveTemplate(template: TemplateRecord) { q.upsertTemplate.run(template.id, template.key.project, JSON.stringify(template)); },
-    templates: (project: ProjectId) => (q.templates.all(project) as Row[]).map((r) => json<TemplateRecord>(r.record)),
+    saveTemplate(template: TemplateRecord) { sql("INSERT INTO templates (id, project, record) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(template.id, template.key.project, JSON.stringify(template)); },
+    templates: (project: ProjectId) => (sql("SELECT record FROM templates WHERE project = ? ORDER BY id").all(project) as Row[]).map((r) => json<TemplateRecord>(r.record)),
     /** The builds the node's loop pass moves along, in every project. */
-    buildingTemplates: (node: NodeName) => (q.buildingTemplates.all(node) as Row[]).map((r) => json<BuildingTemplate>(r.record)),
-    deleteTemplate(id: TemplateId) { q.deleteTemplate.run(id); },
+    buildingTemplates: (node: NodeName) => (sql("SELECT record FROM templates WHERE json_extract(record, '$.state') = 'building' AND json_extract(record, '$.on') = ? ORDER BY id").all(node) as Row[]).map((r) => json<BuildingTemplate>(r.record)),
+    deleteTemplate(id: TemplateId) { sql("DELETE FROM templates WHERE id = ?").run(id); },
 
     /**
      * Stores the node's new observation together with the writes ingest derived from it. One transaction,
@@ -1458,7 +1418,7 @@ export function openRegistry(path: string, clock = Date.now) {
     ingested(observation: NodeObservation | null, writes: readonly RegistryWrite[]) {
       if (observation === null && writes.length === 0) return;
       transaction(() => {
-        if (observation !== null) q.observation.run(JSON.stringify(observation), observation.node);
+        if (observation !== null) sql("UPDATE nodes SET observation = ? WHERE name = ?").run(JSON.stringify(observation), observation.node);
         for (const write of writes) apply(write);
       });
     },
@@ -1469,13 +1429,17 @@ export function openRegistry(path: string, clock = Date.now) {
   function apply(write: RegistryWrite) {
     switch (write.record) {
       case "node":
-        q.nodeFacts.run(write.state, JSON.stringify(write.capacity), write.node);
+        sql("UPDATE nodes SET state = ?, capacity = ? WHERE name = ?").run(write.state, JSON.stringify(write.capacity), write.node);
         return;
       case "sessions": {
         const listed = new Set(write.sessions.map((s) => s.id));
-        for (const r of q.sessions.all(write.pylonId) as Row[]) if (!listed.has(r.id as string)) q.deleteSession.run(write.pylonId, r.id as string);
+        for (const { id } of sessions(write.pylonId)) if (!listed.has(id)) sql("DELETE FROM sessions WHERE pylon = ? AND id = ?").run(write.pylonId, id);
         for (const s of write.sessions) {
-          q.upsertSession.run({
+          // A null status keeps the one the row has.
+          sql(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
+            VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
+            ON CONFLICT (pylon, id) DO UPDATE SET herdr_pane = excluded.herdr_pane, harness = excluded.harness, harness_session_id = excluded.harness_session_id,
+            status = coalesce($status, sessions.status), title = excluded.title, state = excluded.state, message = excluded.message`).run({
             $pylon: write.pylonId, $id: s.id, $herdrPane: s.herdrPane, $harness: s.harness, $harnessSessionId: s.harnessSessionId,
             $status: s.status, $title: s.title, $state: s.state, $message: s.message,
           });
@@ -1483,33 +1447,38 @@ export function openRegistry(path: string, clock = Date.now) {
         return;
       }
       case "sessions-paused":
-        q.pauseSessions.run(write.pylonId);
+        sql("UPDATE sessions SET state = 'paused', message = NULL WHERE pylon = ?").run(write.pylonId);
         return;
       case "sessions-resumed":
-        q.resumeSessions.run(write.pylonId);
+        sql(`UPDATE sessions SET status = 'unknown', state = CASE WHEN herdr_pane IS NULL THEN 'failed' ELSE 'running' END,
+          message = CASE WHEN herdr_pane IS NULL THEN 'its last wake did not bring it back, and whether this one did is not read yet' END
+          WHERE pylon = ? AND state = 'paused'`).run(write.pylonId);
         return;
       case "output": {
         const thread = threadOfPylon(write.pylonId);
-        if (thread !== undefined) q.insertOutput.run(thread, write.kind, write.ref);
+        if (thread !== undefined) sql("INSERT INTO outputs (thread, kind, ref) VALUES (?, ?, ?) ON CONFLICT DO NOTHING").run(thread, write.kind, write.ref);
         return;
       }
       case "activity": {
         const thread = threadOfPylon(write.pylonId);
         if (thread === undefined) return;
-        if (write.human !== null) q.humanActivity.run(write.human, thread);
-        if (write.agent !== null) q.agentActivity.run(write.agent, thread);
+        if (write.human !== null) humanActivity(write.human, thread);
+        if (write.agent !== null) agentActivity(write.agent, thread);
         return;
       }
       case "preview":
         // A port the control plane no longer assigns, such as a released one, has no row to mark.
-        q.previewReady.run(write.ready ? 1 : 0, write.pylonId, write.service, write.httpsPort);
+        sql("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?").run(write.ready ? 1 : 0, write.pylonId, write.service, write.httpsPort);
         return;
       case "orphan":
-        q.insertOrphan.run(write.node, write.pylonId);
+        sql("INSERT INTO orphans (node, pylon_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(write.node, write.pylonId);
         return;
       case "job":
-        // For the dashboard. The tick settles its own job against the observation, which may lag this.
-        q.upsertJob.run(write.status.subject, write.status.jobId, write.status.state, JSON.stringify(write.status));
+        // For the dashboard. The tick settles its own job against the observation, which may lag this. A snapshot read
+        // before a job finished can arrive after its result. It must not make the job look running again.
+        sql(`INSERT INTO jobs (subject, job_id, state, status) VALUES (?, ?, ?, ?)
+          ON CONFLICT (subject) DO UPDATE SET job_id = excluded.job_id, state = excluded.state, status = excluded.status
+          WHERE NOT (jobs.job_id = excluded.job_id AND jobs.state <> 'running')`).run(write.status.subject, write.status.jobId, write.status.state, JSON.stringify(write.status));
         return;
     }
   }
