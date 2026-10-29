@@ -9,7 +9,7 @@ MODULES=<node_modules with @sparticuz/chromium and puppeteer-core> LD_LIBRARY_PA
   docs/verification/thread-page-interaction/run.sh origin/main HEAD
 ```
 
-`run.sh` checks out main and the branch into two worktrees, copies `stack.ts` into each, builds the dashboard and runs `stack.ts drive` there. Each run's captures land in `main/` or `branch/`, with the commit in `commit.txt`. Both runs use the same file and the same steps, so the captures differ only by the code under test. `RUNS=main` or `RUNS=branch` runs one of them. It needs passwordless sudo and the Claude token placeholder in `/etc/profile.d/nexus-secrets.sh`, as a pylon has. The fonts `@sparticuz/chromium` ships have no monospace face, so this run's `fonts.conf` also named DejaVu Sans Mono from the npm package `dejavu-fonts-ttf`. Neither has a ⌘ glyph, so the shortcut hints show a box in the screenshots.
+`run.sh` checks out main and the branch into two worktrees, copies `stack.ts` into each, builds the dashboard and runs `stack.ts drive` there. Each run's captures land in `main/` or `branch/`, with the commit in `commit.txt`. Both runs use the same file and the same steps, so the captures differ only by the code under test. `RUNS=main` or `RUNS=branch` runs one of them. The branch run's commit, `31c7ca3`, differs from the branch's head only in docs and one comment. It needs passwordless sudo and the Claude token placeholder in `/etc/profile.d/nexus-secrets.sh`, as a pylon has. The fonts `@sparticuz/chromium` ships have no monospace face, so this run's `fonts.conf` also named DejaVu Sans Mono from the npm package `dejavu-fonts-ttf`. Neither has a ⌘ glyph, so the shortcut hints show a box in the screenshots.
 
 ## The stack
 
@@ -22,6 +22,7 @@ The driver starts a Claude worker and a Nexus agent thread in project `drinks`, 
 3. Runs `nexus show` on both threads, opens a shell session in the Claude worker's pylon with `nexus session open --harness shell`, and focuses its Herdr workspace, as a person's last attach that switched to it would leave Herdr.
 4. Runs `nexus attach` on the Claude worker in a pty, types `Reply with the word PINEAPPLE.` and Enter, and reads every Herdr pane.
 5. Focuses the shell again, opens the thread page's Terminal tab at both widths, types `Reply with the word MANGO.` and Enter into it on the desktop, waits for Claude's answer, and presses Detach.
+6. Presses Attach again and Detach twice more, and counts the page's terminals and adopted stylesheets. Then archives and unarchives the Claude worker with the CLI while the page stays open.
 
 `timeline.txt` holds each step with the body each page posted to the messages route, `cli-*.txt` each CLI call, `panes-*.txt` what each Herdr pane showed and which was focused, and the screenshots are at 1360 by 1000 and at a phone's 390 by 844.
 
@@ -35,9 +36,10 @@ The driver starts a Claude worker and a Nexus agent thread in project `drinks`, 
 | Alt+Enter while it ran | Nothing was posted, and the text stayed in the composer | Posted with `"mode": "followUp"`, and it got a turn of its own after the run |
 | Ctrl+Enter while Claude worked | Typed into Claude, which put BANANA in its reply | The same, posted as a steer. A Claude worker types both modes into its prompt, so only the label changed |
 | `nexus show`, `cli-08-show-claude.txt` | No attach line | `attach: nexus attach <thread>` under the pylon line |
-| `nexus attach` with the shell focused, `panes-after-cli-attach.txt` | Landed in the shell, which ran the text: `bash: Reply: command not found` | Landed in Claude's pane, focused, and Claude answered PINEAPPLE 1.8 s later |
-| The thread page's terminal, `11-terminal-*.png` | No Terminal tab. The inspector's Pylon tab shows `herdr --session nexus` to copy, which works only from a shell in the pylon | A Terminal tab beside the conversation. One click attached it in 0.7 s at both widths, in Claude's pane though the shell was focused |
-| Typing into the page's terminal, `12-terminal-typed-desktop.png` | Not possible | `Reply with the word MANGO.` and Enter reached Claude, which answered 5.1 s later. Detach said `Detached. Herdr keeps its sessions running.` |
+| `nexus attach` with the shell focused, `panes-after-cli-attach.txt` | Landed in the shell, which ran the text: `bash: Reply: command not found` | Landed in Claude's pane, focused, and Claude answered PINEAPPLE 2.2 s later |
+| The thread page's terminal, `11-terminal-*.png` | No Terminal tab. The inspector's Pylon tab shows `herdr --session nexus` to copy, which works only from a shell in the pylon | A Terminal tab beside the conversation. One click attached it in 1.1 s on the desktop and 0.9 s on the phone, in Claude's pane though the shell was focused |
+| Typing into the page's terminal, `12-terminal-typed-desktop.png` | Not possible | `Reply with the word MANGO.` and Enter reached Claude, which answered 5.2 s later. Detach said `Detached. Herdr keeps its sessions running.` |
+| Two more attaches, then an archive and an unarchive, `13-unarchived-desktop.png` | Not possible | No terminal left in the tab after the last Detach, and one adopted stylesheet before and after. The tab hid 3.5 s after the archive and came back 4.0 s after the unarchive, without a reload |
 
 Branch, a Nexus agent run that works, at a desktop width:
 

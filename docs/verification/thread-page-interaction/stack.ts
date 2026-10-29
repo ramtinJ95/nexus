@@ -379,6 +379,21 @@ async function drive(out: string) {
       await desktop.click("#term-detach");
       await sleep(1000);
       log(`detached; the terminal says ${JSON.stringify(await desktop.evaluate('document.getElementById("term-status")?.textContent'))}`);
+      const sheets = () => desktop.evaluate("document.adoptedStyleSheets.length") as Promise<number>;
+      const before = await sheets();
+      for (const n of [1, 2]) {
+        await desktop.click("#term-again");
+        await until(`the terminal attaches again (${n})`, () => desktop.evaluate('document.getElementById("term-status")?.textContent === "" && document.getElementById("term-detach")?.hidden === false'), 30_000);
+        await desktop.click("#term-detach");
+        await sleep(500);
+      }
+      log(`after two more attaches: ${await desktop.evaluate('document.querySelectorAll("#term-host .xterm").length')} terminal in the tab, adopted stylesheets ${before} -> ${await sheets()}`);
+      await nexus("archive-claude", "archive", claude);
+      await until("the Terminal tab hides", () => desktop.evaluate('document.querySelector(\'[data-tab="term"]\')?.hidden === true'), 30_000);
+      await nexus("unarchive-claude", "unarchive", claude);
+      await until("the Terminal tab is back without a reload", () => desktop.evaluate('document.querySelector(\'[data-tab="term"]\')?.hidden === false'), 30_000);
+      await desktop.screenshot({ path: join(out, "13-unarchived-desktop.png") });
+      log("-> 13-unarchived-desktop.png");
     }
     await nexus("delete-agent", "delete", agent);
     await nexus("delete-claude", "delete", claude);

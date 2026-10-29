@@ -1,4 +1,4 @@
-$ nexus conversation th-7e79c049d338
+$ nexus conversation th-b8770588e426
 > hello
 
 scripted answer after user

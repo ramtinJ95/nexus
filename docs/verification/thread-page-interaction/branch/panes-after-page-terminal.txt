@@ -4,39 +4,39 @@
 
   Ran 2 shell commands
 
-● The sleep is running in the background. I'll reply DONE when it
-  finishes.
+● The foreground sleep 30 was blocked, so I started it in the
+  background instead. I'll reply DONE once it finishes.
 
-✻ Cogitated for 6s · done 7:38 AM
+✻ Cogitated for 5s · done 8:07 AM
 
 ❯ Also put the word BANANA in that reply.
 
-● The sleep is still running. When it finishes, my reply will have
-  DONE and BANANA in it.
+● Still waiting on the background sleep 30. When it finishes, my
+  reply will be DONE BANANA.
 
-✻ Brewed for 3s · done 7:39 AM
+✻ Cooked for 2s · done 8:08 AM
 
 ● Background command "Wait 30 seconds in background" completed
 (exit code 0)
 
 ● DONE BANANA
 
-✻ Baked for 2s · done 7:39 AM
+✻ Brewed for 2s · done 8:08 AM
 
 ❯ Reply with the word PINEAPPLE.
 
 ● PINEAPPLE
 
-✻ Cooked for 2s · done 7:39 AM
+✻ Crunched for 2s · done 8:08 AM
 
 ❯ Reply with the word MANGO.
 
 ● MANGO
 
-✻ Sautéed for 2s · done 7:40 AM
+✻ Worked for 2s · done 8:09 AM
 
 ───────────────────────────────────────────────────────────────────
-❯ Reply with the word GUAVA.
+❯ Reply with the word KIWI.
 ───────────────────────────────────────────────────────────────────
   ⏵⏵ bypass permissions on (shift+tab to cycle)
 

@@ -1,0 +1,3 @@
+$ nexus delete th-0b983b741dea
+Deleted th-0b983b741dea.
+[exit 0]
