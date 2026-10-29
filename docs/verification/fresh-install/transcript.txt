@@ -1,0 +1,386 @@
+Fresh install of Nexus at bde432b48dfeab22620a05004634cd8612ec0693
+
+== Three fresh Debian machines
+fresh-box$ cat /etc/debian_version && id person
+    12.15
+    uid=1000(person) gid=1000(person) groups=1000(person)
+    (exit 0)
+
+== fresh-box: the person clones Nexus
+stand-in for `sudo apt-get install -y git`, from this host's Debian packages:
+    installed git libcurl3-gnutls libexpat1 perl liberror-perl git-man libbrotli1 libldap-2.5-0 libnghttp2-14 libpsl5 librtmp1 libssh2-1 perl-modules-5.36 libperl5.36 libsasl2-2 libgdbm-compat4 libgdbm6 libsasl2-modules-db
+fresh-box$ git clone -q /srv/nexus.git nexus && git -C nexus log -1 --format='%H on %D'
+    bde432b48dfeab22620a05004634cd8612ec0693 on HEAD -> main, origin/main, origin/HEAD
+    (exit 0)
+
+== fresh-box: the first run checks the prerequisites and changes nothing
+fresh-box$ cd nexus && sudo deploy/install.sh --admit fresh-mac --dotfiles https://github.com/ramtinJ95/dotfiles.git
+    This machine is missing 5 prerequisite(s). Nothing was changed. Fix each, then rerun:
+    - Node 26 or newer must be in /usr/local/bin:/usr/bin, found none.
+        curl -fsSL https://deb.nodesource.com/setup_26.x | sudo bash - && sudo apt-get install -y nodejs
+    - Pylons are QEMU VMs, and qemu-system-x86_64 or qemu-img is not in /usr/local/bin:/usr/bin.
+        sudo apt-get install -y qemu-system-x86 qemu-utils
+    - /dev/kvm is missing, so QEMU cannot run pylons with KVM.
+        Turn on hardware virtualization (Intel VT-x or AMD-V) in the firmware, then:
+        sudo modprobe kvm_intel || sudo modprobe kvm_amd
+    - Tailscale is not installed in /usr/local/bin:/usr/bin. Nexus reaches its nodes and callers over the tailnet.
+        curl -fsSL https://tailscale.com/install.sh | sh
+        sudo tailscale up
+    - tailscaled does not let nexus-control fetch the dashboard's certificate. Restarting tailscaled drops tailnet connections for a moment.
+        sudo mkdir -p /etc/systemd/system/tailscaled.service.d
+        printf '[Service]\nEnvironment=TS_PERMIT_CERT_UID=nexus-control\n' | sudo tee /etc/systemd/system/tailscaled.service.d/nexus-cert.conf >/dev/null
+        sudo systemctl daemon-reload && sudo systemctl restart tailscaled
+    (exit 1)
+
+== fresh-box: the person fixes each prerequisite it named
+Node: curl -fsSL https://deb.nodesource.com/setup_26.x | sudo bash - && sudo apt-get install -y nodejs
+  stand-in: this host's Node 26 and npm, since this host reaches no NodeSource repository
+QEMU: sudo apt-get install -y qemu-system-x86 qemu-utils
+  stand-in: qemu-system-x86_64 and qemu-img that fail, since this host has no KVM to run a pylon
+KVM: Turn on hardware virtualization (Intel VT-x or AMD-V) in the firmware, then: sudo modprobe kvm_intel || sudo modprobe kvm_amd
+  stand-in: a /dev/kvm device node in the kvm group, which nothing opens, since this host has no KVM
+fresh-box# groupadd --system --force kvm && mknod -m 660 /dev/kvm c 10 232 && chgrp kvm /dev/kvm
+    (exit 0)
+Tailscale: curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up
+  stand-in: a tailscale CLI and a tailscaled unit for the made-up tailnet, whose LocalAPI this test serves
+  the install script starts tailscaled:
+fresh-box$ sudo systemctl enable --now tailscaled
+    (exit 0)
+fresh-box$ sudo tailscale up
+    (exit 0)
+
+== fresh-box: the second run finds what the first could not check
+fresh-box$ cd nexus && sudo deploy/install.sh --admit fresh-mac --dotfiles https://github.com/ramtinJ95/dotfiles.git
+    This machine is missing 1 prerequisite(s). Nothing was changed. Fix each, then rerun:
+    - tailscaled does not let nexus-control fetch the dashboard's certificate. Restarting tailscaled drops tailnet connections for a moment.
+        sudo mkdir -p /etc/systemd/system/tailscaled.service.d
+        printf '[Service]\nEnvironment=TS_PERMIT_CERT_UID=nexus-control\n' | sudo tee /etc/systemd/system/tailscaled.service.d/nexus-cert.conf >/dev/null
+        sudo systemctl daemon-reload && sudo systemctl restart tailscaled
+    (exit 1)
+fresh-box$ sudo mkdir -p /etc/systemd/system/tailscaled.service.d
+    (exit 0)
+fresh-box$ printf '[Service]\nEnvironment=TS_PERMIT_CERT_UID=nexus-control\n' | sudo tee /etc/systemd/system/tailscaled.service.d/nexus-cert.conf >/dev/null
+    (exit 0)
+fresh-box$ sudo systemctl daemon-reload && sudo systemctl restart tailscaled
+    (exit 0)
+
+== fresh-box: the third run installs, with the credentials as test values
+stand-in for `ssh-keyscan github.com`, which this host cannot reach on port 22: the host keys api.github.com/meta publishes
+fresh-box$ cd nexus && sudo env NEXUS_HARNESS_LOGIN=api-key NEXUS_OPENAI_API_KEY=sk-fresh-install-test NEXUS_CLAUDE_TOKEN=sk-ant-oat01-fresh-install-test NEXUS_GH_TOKEN=github_pat_fresh_install_test deploy/install.sh --admit fresh-mac --dotfiles https://github.com/ramtinJ95/dotfiles.git --non-interactive
+    wrote /etc/nexus/control.json
+    wrote /etc/nexus/probe.json
+    wrote /etc/nexus/deployer.json
+    npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+    
+    added 164 packages in 5s
+    npm warn install-scripts 4 packages have install scripts not yet covered by allowScripts:
+    npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+    npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+    npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+    npm warn install-scripts   ssh2@1.17.0 (install: node install.js)
+    npm warn install-scripts
+    npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+    npm notice
+    npm notice New major version of npm available! 11.20.0 -> 12.2.1
+    npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+    npm notice To update run: npm install -g npm@12.2.1
+    npm notice
+    
+    > nexus@0.0.0 build
+    > node src/control/dashboard/build.ts
+    
+    
+    removed 58 packages in 320ms
+    npm warn install-scripts 3 packages have install scripts not yet covered by allowScripts:
+    npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+    npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+    npm warn install-scripts   ssh2@1.17.0 (install: node install.js)
+    npm warn install-scripts
+    npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+    installed release 0c984434c791
+    nexus-control.service is installed and waits for the harness's ChatGPT login
+    release 0c984434c791 is already installed
+    nexus-probe.service is running release 0c984434c791
+    
+    Wrote the API key to /var/lib/nexus-control/harness-credentials.json. A harness on an API key hands pylons no ChatGPT login, so pi in a pylon needs its own.
+    Added CLAUDE_CODE_OAUTH_TOKEN to /etc/nexus/secrets.env.
+    Added GH_TOKEN to /etc/nexus/secrets.env.
+    The installer names /etc/nexus/github-token as github.tokenFile in /etc/nexus/control.json next.
+    Made the git SSH key /etc/nexus/git_ed25519. Add its public key to the GitHub account the pylons push as, at https://github.com/settings/ssh/new:
+    ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINCNXaN08/x50h9L4hsJYgC7favkCyKcNddk+4QpcjI/ nexus@fresh-box
+    updated /etc/nexus/control.json
+      added github {"tokenFile":"/etc/nexus/github-token"}
+    updated /etc/nexus/probe.json
+      added backend.gitSsh {"privateKeyFile":"/etc/nexus/git_ed25519","knownHostsFile":"/etc/nexus/git_known_hosts"}
+    /etc/nexus/deployer.json needs nothing new
+      kept the existing deployer token
+    release 0c984434c791 is already installed
+    nexus-probe.service is running release 0c984434c791
+    release 0c984434c791 is already installed
+    nexus-control.service is running release 0c984434c791
+    
+    What is left:
+    1. Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. When the Mac reaches the tailnet through a SOCKS proxy rather than the Tailscale app, add --socks localhost:1055 to nexus connect.
+         deploy/mac/install
+         nexus connect fresh-box.tailfake0.ts.net
+    2. Image builds run here and need Docker with its buildx plugin. Docker's install script installs both, and systemd starts the daemon.
+         curl -fsSL https://get.docker.com | sudo sh
+         sudo systemctl enable --now docker
+    3. Image builds run here and need Docker. Membership of the docker group is root-equivalent, so adding nexus to it is your call.
+         sudo usermod --append --groups docker nexus && sudo systemctl restart nexus-probe
+    
+    Then, with the control plane running:
+    4. Build the first pylon image from your Mac, then roll out the image ID it printed.
+         nexus image build --wait
+         nexus image rollout <image ID it printed> --wait
+    (exit 0)
+fresh-box$ systemctl is-active nexus-control
+    active
+    (exit 0)
+fresh-box$ systemctl is-active nexus-probe
+    active
+    (exit 0)
+fresh-box$ sudo cut -d= -f1 /etc/nexus/secrets.env | grep -v '^#'
+    CLAUDE_CODE_OAUTH_TOKEN
+    GH_TOKEN
+    (exit 0)
+fresh-box$ sudo cat /etc/nexus/git_ed25519.pub && sudo grep -c gitSsh /etc/nexus/probe.json
+    ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINCNXaN08/x50h9L4hsJYgC7favkCyKcNddk+4QpcjI/ nexus@fresh-box
+    1
+    (exit 0)
+fresh-box$ systemctl show nexus-control --property=MainPID --value && systemctl show nexus-probe --property=MainPID --value
+    983
+    856
+    (exit 0)
+
+== fresh-mac: the person installs the CLI and connects
+stand-in for Node 26 from Homebrew and git from Xcode's tools: this host's Node and Debian's git
+fresh-mac$ git clone -q /srv/nexus.git nexus && nexus/deploy/mac/install
+    npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+    
+    added 164 packages in 5s
+    npm warn install-scripts 4 packages have install scripts not yet covered by allowScripts:
+    npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+    npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+    npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+    npm warn install-scripts   ssh2@1.17.0 (install: node install.js)
+    npm warn install-scripts
+    npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+    npm notice
+    npm notice New major version of npm available! 11.20.0 -> 12.2.1
+    npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+    npm notice To update run: npm install -g npm@12.2.1
+    npm notice
+    nexus 0.43.0
+    /home/person/.local/bin is not on PATH. Add it to your shell's profile, such as with: echo 'export PATH="/home/person/.local/bin:$PATH"' >> ~/.zprofile
+    Next: nexus connect <host>, with the control plane's tailnet name
+    (exit 0)
+stand-in for the public CA that signs tailscaled's certificates: this run's own, trusted through NODE_EXTRA_CA_CERTS
+fresh-mac$ export NODE_EXTRA_CA_CERTS=/home/person/tailnet-ca.pem; export PATH=$HOME/.local/bin:$PATH && nexus connect fresh-box.tailfake0.ts.net
+    Connected to https://fresh-box.tailfake0.ts.net:7443, saved in /home/person/.config/nexus/cli.json.
+    This device is tailnet node nFRESHMAC0001. It
+      may read threads, projects and nodes
+      may start and message threads
+      may deploy, land reviews and build images
+    (exit 0)
+
+== fresh-box and fresh-mac: the first image
+stand-in for `nexus image build --wait`, which needs Docker and builds for 8 minutes: an image's directory
+in fresh-box's artifact store, recorded through the API, which no pylon can boot
+fresh-box# node /srv/place-image.mjs && chown -R nexus:nexus /var/lib/nexus/artifacts
+    {"id":"img-f7e5a1c0ffee","gondolinBuildId":"standin","pins":{"debianDigest":"sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8","node":"26.12.1","nodeSha256":"6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd","claudeCode":"2.1.310","pi":"1.4.0","herdr":"0.9.5","piEnv":"1.4.0","piEnvSha256":"46dde0e25b5cf1a327a10ddcb25f746f85b783492f5b225dfaa1a0d84cf5b56a","gondolin":"0.13.0","alpineKernel":"6.18.58-0-virt","dotfilesCommon":"placeholder","gh":"2.103.2","ghSha256":"62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8","neovim":"0.12.6","neovimSha256":"474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87"},"builtOn":"fresh-box","builtAt":"2026-10-29T12:11:07.344Z","sha256":"b8ee763ccf8659280138fa37a02aeae3754e52124f2704ecb620fe94d41d576b"}
+    (exit 0)
+fresh-mac$ export NODE_EXTRA_CA_CERTS=/home/person/tailnet-ca.pem; node -e 'fetch(JSON.parse(require("fs").readFileSync(process.env.HOME + "/.config/nexus/cli.json")).url + "/v1/images", { method: "POST", headers: { "content-type": "application/json" }, body: process.argv[1] }).then(async (r) => { console.log(r.status); if (!r.ok) process.exit(1); })' '{"id":"img-f7e5a1c0ffee","gondolinBuildId":"standin","pins":{"debianDigest":"sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8","node":"26.12.1","nodeSha256":"6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd","claudeCode":"2.1.310","pi":"1.4.0","herdr":"0.9.5","piEnv":"1.4.0","piEnvSha256":"46dde0e25b5cf1a327a10ddcb25f746f85b783492f5b225dfaa1a0d84cf5b56a","gondolin":"0.13.0","alpineKernel":"6.18.58-0-virt","dotfilesCommon":"placeholder","gh":"2.103.2","ghSha256":"62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8","neovim":"0.12.6","neovimSha256":"474430d53e6264f6d6dd18db42d6dc9df3a1b56ca9e88a325bbf860e1a811d87"},"builtOn":"fresh-box","builtAt":"2026-10-29T12:11:07.344Z","sha256":"b8ee763ccf8659280138fa37a02aeae3754e52124f2704ecb620fe94d41d576b"}'
+    201
+    (exit 0)
+fresh-mac$ nexus image rollout until fresh-box's probe reports the image it holds
+    img-f7e5a1c0ffee  current  built 2026-10-29T12:11:07.344Z on fresh-box  release unknown  on fresh-box
+    rollout img-f7e5a1c0ffee: done
+      fresh-box: done
+
+== fresh-mac: a first thread starts, and fresh-box's probe tries to boot its pylon
+a project that fits this host, whose machines have less memory than a project's default 6 GiB
+fresh-mac$ export NODE_EXTRA_CA_CERTS=/home/person/tailnet-ca.pem; $HOME/.local/bin/nexus project add hello --scratch --cpus 1 --memory 3 --disk 2
+    Added scratch project hello on auto
+    (exit 0)
+fresh-mac$ export NODE_EXTRA_CA_CERTS=/home/person/tailnet-ca.pem; $HOME/.local/bin/nexus start --project hello --title 'First thread' --message 'hello from a fresh install' --json
+    {
+      "id": "th-66bf8eb8a891",
+      "title": "First thread",
+      "project": "hello",
+      "pylonId": "pylon-th-66bf8eb8a891",
+      "status": "active",
+      "conversationId": "2",
+      "startedBy": "nFRESHMAC0001",
+      "createdAt": 1793275920528,
+      "agentTurnRunning": false,
+      "working": false,
+      "lastAgentActivityAt": 0,
+      "lastHumanActivityAt": 1793275920528,
+      "seenAt": null,
+      "lastReplyAt": null,
+      "placement": {
+        "how": "auto",
+        "node": "fresh-box",
+        "weighed": [
+          {
+            "node": "fresh-box",
+            "left": {
+              "cpus": 3,
+              "memoryGiB": 2.7967185974121094,
+              "diskGiB": 12.84622573852539
+            }
+          }
+        ]
+      },
+      "setup": {
+        "how": "fresh",
+        "reason": "the project is scratch, so it has no template"
+      }
+    }
+    (exit 0)
+    th-66bf8eb8a891  First thread
+    project: hello
+    attention: failed
+    status: active, agent working
+    pylon: pylon-th-66bf8eb8a891 on fresh-box, failed, observed 6s ago
+    attach: nexus attach th-66bf8eb8a891
+    size: 1 CPUs, 3 GiB memory, 2 GiB disk
+    placement: auto chose fresh-box, which had the most room left after this pylon; fresh-box had 2.8 GiB memory, 3 CPUs and 12.8 GiB disk left
+    setup: fresh boot runs .nexus/setup, because the project is scratch, so it has no template
+    failed: pylon is broken: the controller failed to boot the VM. Read controller.log in the instance directory
+      Error: Missing guest assets in /var/lib/nexus/artifacts/img-f7e5a1c0ffee: vmlinuz-virt, initramfs.cpio.lz4
+      Run 'gondolin build' to create custom assets, or ensure the directory contains all required files.
+          at loadGuestAssets (file:///opt/nexus/releases/0c984434c791/node_modules/@earendil-works/gondolin/dist/src/assets.js:224:15)
+          at resolveImageSelector (file:///opt/nexus/releases/0c984434c791/node_modules/@earendil-works/gondolin/dist/src/images.js:392:9)
+          at ensureImageSelector (file:///opt/nexus/releases/0c984434c791/node_modules/@earendil-works/gondolin/dist/src/images.js:690:16)
+          at resolveSandboxServerOptionsAsync (file:///opt/nexus/releases/0c984434c791/node_modules/@earendil-works/gondolin/dist/src/sandbox/server-options.js:513:37)
+          at VM.create (file:///opt/nexus/releases/0c984434c791/node_modules/@earendil-works/gondolin/dist/src/vm/core.js:153:46)
+          at SandboxRuntime.boot (file:///opt/nexus/releases/0c984434c791/src/pylon-vm/runtime.ts:214:15)
+          at async main (file:///opt/nexus/releases/0c984434c791/src/pylon-vm/daemon.ts:24:3)
+          at async file:///opt/nexus/releases/0c984434c791/src/pylon-vm/daemon.ts:115:1
+      Sandbox is failed since 2026-10-29T12:12:00.879Z, so it settles the guest actions in flight: none
+    PR watch: on
+
+== fresh-node: the admin adds a machine with a join token
+fresh-box$ cd nexus && sudo deploy/install.sh --join-token
+    On the new machine, in a nexus checkout, run:
+    
+      sudo deploy/install.sh --join mgscIZZkFOaflM1Kt_CsT-AVYxuqp00yw_Tc4CbsHug --node fresh-box
+    
+    The token joins one machine until 2026-10-29T13:12:07.826Z.
+    (exit 0)
+fresh-node has the prerequisites fresh-box was given above, with the same stand-ins
+  the install script starts tailscaled:
+fresh-node$ sudo systemctl enable --now tailscaled
+    (exit 0)
+fresh-node$ git clone -q /srv/nexus.git nexus
+    (exit 0)
+stand-in: fresh-node's preview gateway on port 7491, since it shares fresh-box's 127.0.0.1, where fresh-box's takes 7481
+fresh-node$ cd nexus && sudo env NEXUS_CLAUDE_TOKEN=sk-ant-oat01-fresh-install-test NEXUS_GH_TOKEN=github_pat_fresh_install_test deploy/install.sh --join mgscIZZkFOaflM1Kt_CsT-AVYxuqp00yw_Tc4CbsHug --node fresh-box --non-interactive
+    updated /etc/nexus/probe.json
+      added node "fresh-node"
+      added listen {"host":"100.77.0.3","port":7480}
+      added auth {"controlPlane":"nFRESHBOX0001","peers":["nFRESHBOX0001"]}
+      added backend {"kind":"pylon-vm","stateRoot":"/var/lib/nexus/pylons","artifacts":"/var/lib/nexus/artifacts"}
+      added secretsFile "/etc/nexus/secrets.env"
+      left previews.gatewayPort alone: it is 7491, and this run would write 7481. Edit the file to change it
+    wrote /etc/nexus/deployer.json
+    npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+    
+    added 164 packages in 4s
+    npm warn install-scripts 4 packages have install scripts not yet covered by allowScripts:
+    npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+    npm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)
+    npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+    npm warn install-scripts   ssh2@1.17.0 (install: node install.js)
+    npm warn install-scripts
+    npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+    npm notice
+    npm notice New major version of npm available! 11.20.0 -> 12.2.1
+    npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+    npm notice To update run: npm install -g npm@12.2.1
+    npm notice
+    
+    > nexus@0.0.0 build
+    > node src/control/dashboard/build.ts
+    
+    
+    removed 58 packages in 295ms
+    npm warn install-scripts 3 packages have install scripts not yet covered by allowScripts:
+    npm warn install-scripts   @google/genai@2.21.0 (preinstall: echo 'preinstall: no-op')
+    npm warn install-scripts   protobufjs@7.6.6 (postinstall: node scripts/postinstall)
+    npm warn install-scripts   ssh2@1.17.0 (install: node install.js)
+    npm warn install-scripts
+    npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+    installed release 0c984434c791
+    nexus-probe.service is running release 0c984434c791
+    joined the control plane as node fresh-node. It follows this node's probe from now on
+    
+    Added CLAUDE_CODE_OAUTH_TOKEN to /etc/nexus/secrets.env.
+    Added GH_TOKEN to /etc/nexus/secrets.env.
+    Made the git SSH key /etc/nexus/git_ed25519. Add its public key to the GitHub account the pylons push as, at https://github.com/settings/ssh/new:
+    ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExbqEYNYKl1CwodZAVIiaV7TYW+dIfF1cBx2rgr4SJi nexus@fresh-node
+    updated /etc/nexus/probe.json
+      added backend.gitSsh {"privateKeyFile":"/etc/nexus/git_ed25519","knownHostsFile":"/etc/nexus/git_known_hosts"}
+      left previews.gatewayPort alone: it is 7491, and this run would write 7481. Edit the file to change it
+    /etc/nexus/deployer.json needs nothing new
+      kept the existing deployer token
+    release 0c984434c791 is already installed
+    nexus-probe.service is running release 0c984434c791
+    
+    What is left:
+    1. Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. When the Mac reaches the tailnet through a SOCKS proxy rather than the Tailscale app, add --socks localhost:1055 to nexus connect.
+         deploy/mac/install
+         nexus connect fresh-box.tailfake0.ts.net
+    (exit 0)
+fresh-node$ systemctl is-active nexus-probe
+    active
+    (exit 0)
+fresh-mac$ nexus nodes
+    fresh-box   online  observed 22s ago  0/4 CPUs, 0/5.8 GiB memory committed, 2 GiB disk committed, 14.8 GiB disk free
+      pylons: 1 crashed needing 3 GiB to retry
+    fresh-node  online  observed 1s ago   0/4 CPUs, 0/5.8 GiB memory committed, 0 GiB disk committed, 14.3 GiB disk free
+fresh-box$ systemctl show nexus-control --property=MainPID --value && systemctl show nexus-probe --property=MainPID --value
+    983
+    856
+    (exit 0)
+
+== fresh-box: a rerun changes nothing
+fresh-box$ systemctl show nexus-control --property=MainPID --value && systemctl show nexus-probe --property=MainPID --value
+    983
+    856
+    (exit 0)
+fresh-box$ cd nexus && sudo deploy/install.sh --non-interactive
+    /etc/nexus/control.json needs nothing new
+    /etc/nexus/probe.json needs nothing new
+    /etc/nexus/deployer.json needs nothing new
+      kept the existing deployer token
+    release 0c984434c791 is already installed
+    nexus-control.service is running release 0c984434c791
+    release 0c984434c791 is already installed
+    nexus-probe.service is running release 0c984434c791
+    
+    Left the harness's login in /var/lib/nexus-control/harness-credentials.json alone.
+    Left CLAUDE_CODE_OAUTH_TOKEN in /etc/nexus/secrets.env alone.
+    Left GH_TOKEN in /etc/nexus/secrets.env alone.
+    Left github.tokenFile /etc/nexus/github-token in /etc/nexus/control.json alone.
+    Left the git SSH key /etc/nexus/git_ed25519 alone.
+    
+    What is left:
+    1. Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. When the Mac reaches the tailnet through a SOCKS proxy rather than the Tailscale app, add --socks localhost:1055 to nexus connect.
+         deploy/mac/install
+         nexus connect fresh-box.tailfake0.ts.net
+    2. Image builds run here and need Docker with its buildx plugin. Docker's install script installs both, and systemd starts the daemon.
+         curl -fsSL https://get.docker.com | sudo sh
+         sudo systemctl enable --now docker
+    3. Image builds run here and need Docker. Membership of the docker group is root-equivalent, so adding nexus to it is your call.
+         sudo usermod --append --groups docker nexus && sudo systemctl restart nexus-probe
+    (exit 0)
+fresh-box$ systemctl show nexus-control --property=MainPID --value && systemctl show nexus-probe --property=MainPID --value
+    983
+    856
+    (exit 0)
+
+== PASS
+cleaned up /var/tmp/nexus-fresh-install
