@@ -546,19 +546,22 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
 }
 
 /**
- * One thing that waits on the person, for a card in the inbox: a review they can land, a question of the thread's, or
- * the thread itself, stopped where only they move it. `since` is when it began to wait, so far as the records say.
+ * One thing that waits on the person, for a card in the inbox: a review held for them or one they can land, a question
+ * of the thread's, a builder its nudges did not move, or the thread itself, stopped where only they move it. The first
+ * three are each a source of the `decision` attention, and the card is the thread page's own. `since` is when it began
+ * to wait, so far as the records say.
  */
 type Need =
-  | { kind: "land"; d: ThreadDetail; since: number }
+  | { kind: "review"; d: ThreadDetail; since: number }
   | { kind: "question"; d: ThreadDetail; question: Question; since: number }
-  | { kind: "thread"; d: ThreadDetail; attention: Exclude<Attention, "reply" | "working" | null>; since: number };
+  | { kind: "nudge"; d: ThreadDetail; since: number }
+  | { kind: "thread"; d: ThreadDetail; attention: Exclude<Attention, "reply" | "working" | "decision" | null>; since: number };
 
 /**
  * What waits on the person in the open threads, oldest first, so each card keeps its place while the person works down
- * the list and the one that has waited longest is first. A thread whose attention needs the person gets a card for it
- * unless its review or questions are already the decision. A new reply does not wait on the person, so it has none, but
- * it outranks a dialog in the terminal, which the session's own state says waits.
+ * the list and the one that has waited longest is first. Each source of a thread's `decision` gets its card, and any
+ * other attention that needs the person one for the thread. A new reply does not wait on the person, so it has none,
+ * but it outranks a dialog in the terminal, which the session's own state says waits.
  */
 function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions["detail"]): Need[] {
   return c.registry.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
@@ -567,15 +570,14 @@ function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions[
     const holds = review !== null && review.phase.kind === "approved" && heldBy(review).length > 0;
     if (!holds && t.sessionWaiting !== true && (attention === "reply" || !needsPerson(attention))) return [];
     const d = detail(t);
+    const nudged = c.registry.nudge(t.id);
     const needs: Need[] = [
-      ...landOffered(d) && (d.review!.phase.kind === "needs-person" || holds) ? [{ kind: "land" as const, d, since: heldSince(c.registry, d.review!) }] : [],
+      ...d.review?.phase.kind === "needs-person" || (holds && landOffered(d)) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
       ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
+      ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
     ];
-    const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention
-      : attention === "decision" ? (needs.length === 0 ? "decision" : null)
-      : t.sessionWaiting === true ? "waiting" : null;
-    const since = t.usageLimit?.stoppedAt ?? (stuck === "decision" && d.review?.phase.kind === "needs-person" ? heldSince(c.registry, d.review) : Math.max(t.createdAt, t.lastAgentActivityAt));
-    if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since });
+    const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
+    if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
     return needs;
   }).sort((a, b) => a.since - b.since);
 }
@@ -606,20 +608,23 @@ ${body}
 })}</div>`}`;
 }
 
-/** What the card is, and what it shows: a review or question as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
+/** What the card is, and what it shows: a review, question or nudge as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
 function needCard(c: Context, n: Need): [what: string, body: Html] {
   const { d } = n;
   const t = d.thread;
   const button = (action: string, label: string) => html`<button type="button" class="btn btn-xs" data-action="${action}" data-thread="${t.id}">${label}</button>`;
   const fix = (why: Part, act: Part) => html`<p class="land-note">${why}</p><div class="need-act">${act}</div>`;
   switch (n.kind) {
-    case "land": {
+    case "review": {
+      const card = landing(c, d, (name) => `${name}-${t.id}`);
+      if (!landOffered(d)) return ["Review needs you", html`${card}`];
       const summary = d.pullRequests?.find((p) => p.repo === d.review!.pr.repo && p.number === d.review!.pr.number)?.summary;
       const quote = d.review!.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
       return [d.review!.phase.kind === "needs-person" ? "Held review" : "Approved review", html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}
 <div class="need-unchecked"><h3>Not checked live</h3>${quote === null ? html`<p class="land-note">The reviewer quoted nothing.</p>` : prose(quote)}</div>
-${landing(c, d, (name) => `${name}-${t.id}`)}`];
+${card}`];
     }
+    case "nudge": return ["Stopped short", nudgeCard(c, t, (name) => `${name}-${t.id}`)!];
     case "question": {
       const q = n.question;
       const judgment = (d.judgments ?? []).filter((j) => j.question === q.id);
@@ -635,8 +640,6 @@ ${landing(c, d, (name) => `${name}-${t.id}`)}`];
         return ["Failed", d.pylon.failed !== null && d.pylon.retryRefused === null ? fix(`The planner gave up on its pylon: ${why}`, button("retry-pylon", "Retry"))
           : fix(d.pylon.failed !== null ? `The planner gave up on its pylon: ${why} ${d.pylon.retryRefused}.` : `The Claude worker failed: ${why}`, button("archive", "Archive"))];
       }
-      case "decision": return ["Needs your decision", fix(d.review?.phase.kind === "needs-person" ? d.review.phase.reasons.join(" ") : c.registry.nudge(t.id)?.state === "person" ? "It stopped short of a pull request after two nudges." : attentions.decision.label,
-        html`<a class="btn btn-xs" href="/threads/${t.id}">Open thread</a>`)];
     }
   }
 }
@@ -841,6 +844,7 @@ ${t.status !== "deleted" && termView(t, agent)}
 <p id="action-status" class="comp-note" role="status" hidden></p>
 <div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
+<div id="nudge" data-live>${nudgeCard(c, t)}</div>
 <div id="landing" data-live>${landing(c, d)}</div>
 <div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, agent, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
@@ -1003,10 +1007,12 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   : phase.kind === "deploying" ? html`<p class="land-note">Deploying the merge commit ${short(phase.commit)} until every service reports it healthy.</p>`
   : phase.kind === "rolling-back" ? html`<p class="error">${phase.why} Rolling back to ${short(phase.previous)}.</p>`
   : phase.kind === "landed" ? html`<p class="land-note">Merged as ${short(phase.commit)}${deploys && ", deployed, and every service reports it healthy"}.</p>`
-  : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
+  : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>
+<p class="land-note">The merge commit ${short(r.merged!)} is on the default branch, but not deployed. Deploy it from a deployer with nexus deploy ${r.merged!.slice(0, 12)}, or leave the fleet where it is, and cancel the review once nothing more is needed.</p>
+<div class="land-act need-act">${cancelReview(d.thread.id, r, "btn-ghost")}</div>`}
 </section>`;
   }
-  if (!landOffered(d)) return null;
+  if (!landOffered(d)) return r.phase.kind === "needs-person" ? heldReview(c, d, r, r.phase.reasons, id) : null;
   const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
@@ -1041,6 +1047,50 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
   : stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
   : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="${id("land")}" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} only. Landing checks everything else again.</p>`}</div>`
   : html`<div class="land-act"><button type="button" class="btn" id="${id("land")}" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
+</section>`;
+}
+
+/**
+ * A review that ended for the person with nothing to land: why it ended, its round and reviewer, and what moves it on.
+ * A pull request still open is reviewed again from round 1, landing once approved when the project lands its reviews.
+ * One that merged or closed outside the review has nothing left to review. Cancelling it ends it for the person, who
+ * then owns the pull request, and archives its reviewer.
+ */
+function heldReview(c: Context, d: ThreadDetail, r: Review, reasons: readonly string[], id: (name: string) => string): Html {
+  const pr = d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+  const outside = pr === undefined || pr.state === "open" ? null : pr.state;
+  const land = c.registry.project(d.thread.project)?.autoReview?.land === true;
+  const refusal = land || c.landRefusal === "no review loop" ? c.landRefusal : null;
+  const again = outside === null && d.thread.status === "active";
+  const confirm = `Review pull request #${r.pr.number}, "${r.pr.title}", again? A new reviewer thread starts at round 1${land ? ", and Nexus lands the pull request once it approves, as this project lands its reviews" : ""}.`;
+  return html`<section class="landing held-review" aria-labelledby="${id("landing-h")}">
+<div class="land-top"><h2 id="${id("landing-h")}">${outside === "merged" ? "Merged outside its review" : outside === "closed" ? "Closed outside its review" : "Review needs you"}</h2><a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a></div>
+<p class="land-meta">Ended in round ${roundsSpent(r)} of ${r.maxRounds} · reviewer <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})</p>
+<ul class="error">${reasons.map((reason) => html`<li>${reason}</li>`)}</ul>
+${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} merged on GitHub outside this review, so nothing is left to review or land.${c.deploys(r) && " Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run."} Cancel the review once nothing more is needed.</p>`
+  : outside === "closed" ? html`<p class="land-note">Pull request #${r.pr.number} closed on GitHub, so nothing is left to review or land. Cancel the review once nothing more is needed.</p>`
+  : !again && html`<p class="land-note">The thread is ${d.thread.status}, so it cannot be reviewed again.</p>`}
+<div class="land-act need-act">${again && (refusal === null
+  ? html`<button type="button" class="btn btn-primary" data-action="review-again" data-thread="${d.thread.id}" data-pr="${r.pr.number}"${land && html` data-land="true"`} data-confirm="${confirm}">Review again</button>`
+  : html`<button type="button" class="btn" disabled>Review again</button>`)}${cancelReview(d.thread.id, r, "btn-ghost")}</div>
+${again && refusal !== null && html`<p class="error">${landRefusals[refusal](c.caller)}</p>`}
+</section>`;
+}
+
+/** As `nexus review --cancel`, wherever the review can be cancelled. */
+const cancelReview = (thread: ThreadId, r: Review, look: string) => cancellable(r)
+  && html`<button type="button" class="btn ${look}" data-action="cancel-review" data-thread="${thread}" data-confirm="Cancel review ${r.id} of pull request #${r.pr.number}?${r.phase.kind === "needs-person" && " It stops waiting on you."} Its reviewer thread is archived, and this thread stays as it is.">Cancel review</button>`;
+
+/**
+ * Above the landing card, for a builder that ended its turns short of a pull request after two nudges: Nexus stopped
+ * nudging it and waits on the person, whose message makes the thread theirs. `id` names its elements, as `landing`'s.
+ */
+function nudgeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
+  if (c.registry.nudge(t.id)?.state !== "person") return null;
+  return html`<section class="landing nudge" aria-labelledby="${id("nudge-h")}">
+<div class="land-top"><h2 id="${id("nudge-h")}">Stopped short of a pull request</h2></div>
+<p class="land-note">Its turn ended without a pull request after two nudges, so Nexus stopped nudging it. Write to it to say what to do next: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
+<div class="land-act need-act"><a class="btn btn-primary" href="/threads/${t.id}#write" data-write>Write to it</a></div>
 </section>`;
 }
 
@@ -1260,7 +1310,7 @@ ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.fa
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
 ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
 ${(d.pullRequests ?? []).map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
-${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}</p>${roundNote(d.review) !== null && html`<p class="dim">${roundNote(d.review)}</p>`}${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}${cancellable(d.review) && html`<button type="button" class="btn btn-xs btn-ghost danger" data-action="cancel-review" data-thread="${t.id}" data-confirm="Cancel review ${d.review.id} of pull request #${d.review.pr.number}? Its reviewer thread is archived, and this thread stays as it is.">Cancel review</button>`}`}
+${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}</p>${roundNote(d.review) !== null && html`<p class="dim">${roundNote(d.review)}</p>`}${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}${cancelReview(t.id, d.review, "btn-xs btn-ghost danger")}`}
 ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}

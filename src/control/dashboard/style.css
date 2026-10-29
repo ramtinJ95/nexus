@@ -503,6 +503,7 @@ h4.md-h { font-size: 1.07em; }
 .land-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .land-top a { color: var(--accent); overflow-wrap: anywhere; }
 .land-meta, .land-note { margin: 0; color: var(--text-2); font-size: 12.5px; }
+.land-meta a, .land-note a { color: var(--accent); }
 .land-act { display: grid; gap: 6px; justify-items: start; }
 /* Each card keeps its whole height, options included, and the stack scrolls instead. */
 #questions, #judgments { display: grid; grid-auto-rows: max-content; gap: 6px; max-height: 40vh; overflow-y: auto; }
