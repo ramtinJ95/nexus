@@ -1745,3 +1745,22 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
     left: { cpus: 8, memoryGiB: 42, diskGiB: 388 },
   }, "a stopped pylon about to wake or be read holds its CPUs and memory again, an unreported one all it asked for, and a start placed here what it reserved");
 });
+
+test("a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const stopped = (id: string, after: number) => {
+    addPylon(registry, id);
+    registry.setClaudeWorker(id as ThreadId, "hello", "started", undefined, "s1");
+    const bookkeeping = Array.from({ length: after }, (_, i): ClaudeEntry => ({ kind: "turn", at: 60 + i, durationMs: 1 }));
+    registry.appendClaudeRead(id as ThreadId, { session: "s1", from: transcriptStart, cursor: cursorAt(10), reset: false, readAt: 10, entries: [
+      ...Array.from({ length: 30 }, (_, i) => reply(i)), { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } }, ...bookkeeping,
+    ] });
+  };
+  stopped("th-15-after", 15);
+  stopped("th-16-after", 16);
+  assert.deepEqual(registry.thread("th-15-after" as ThreadId)!.usageLimit, { stoppedAt: 50, resetsAt: 9000 });
+  assert.equal(registry.thread("th-16-after" as ThreadId)!.usageLimit, undefined, "a stop older than the newest 16 entries is not read");
+  const listed = registry.threads();
+  for (const id of ["th-15-after", "th-16-after"]) assert.deepEqual(listed.find((l) => l.id === id), registry.thread(id as ThreadId), id);
+});

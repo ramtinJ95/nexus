@@ -626,8 +626,9 @@ export function openRegistry(path: string, clock = Date.now) {
       WHERE w.thread IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids)).map((r) => [r.thread as ThreadId, r.turn_at as number | null]));
     if (turns.size === 0) return limits;
     const entries = new Map<ThreadId, ClaudeEntry[]>();
-    for (const r of sql(`SELECT thread, entry FROM (SELECT thread, seq, entry, row_number() OVER (PARTITION BY thread ORDER BY seq DESC) AS n
-      FROM claude_entries WHERE thread IN (SELECT value FROM json_each(?))) WHERE n <= 16 ORDER BY thread, seq`).all(JSON.stringify([...turns.keys()]))) {
+    // Each thread's newest 16 through the index, as a window over the threads' entries would rank every one it keeps.
+    for (const r of sql(`SELECT j.value AS thread, e.entry FROM json_each(?) j JOIN claude_entries e ON e.thread = j.value
+      AND e.seq > coalesce((SELECT seq FROM claude_entries WHERE thread = j.value ORDER BY seq DESC LIMIT 1 OFFSET 16), -1) ORDER BY j.value, e.seq`).all(JSON.stringify([...turns.keys()]))) {
       const of = r.thread as ThreadId;
       entries.set(of, [...entries.get(of) ?? [], json<ClaudeEntry>(r.entry)]);
     }
