@@ -326,6 +326,28 @@ test("a Claude builder that answers it fixed findings in a turn that has not end
   assert.deepEqual((f.review().phase as { reasons: string[] }).reasons, ["The builder gave no answer Nexus could read within 3 hours in round 1."]);
 });
 
+test("a fixed failed check answered in a Claude builder's newer turn waits for that turn's end and push, not an earlier held turn's", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = await approved(f, null);
+  assert.equal(f.review().phase.kind, "fixing");
+  heldTurn(f, "Started the tests in the background.");
+  claudeRead(f, [{ kind: "task", at: f.now, toolUseId: "b1", status: "completed", summary: "Background command finished", result: null }], ["session.turn-started"]);
+  f.tick(11 * 60_000);
+  const text = answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the failing test." }]);
+  f.replies.set(f.builder, [...f.replies.get(f.builder) ?? [], text]);
+  claudeRead(f, [{ kind: "reply", at: f.now, text }], []);
+  f.tick(1_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the turn that answered still runs, so its push may still come");
+  f.check = { kind: "done", passed: true, output: "ok" };
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  heldTurn(f, "Pushed.");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().rounds[1]!.head, head2);
+});
+
 test("a message the inbox cannot deliver yet is sent again under the same request ID, never twice", async (t) => {
   const f = fixture(t);
   const loop = f.loop();

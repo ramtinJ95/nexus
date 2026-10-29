@@ -520,8 +520,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (snapshot.pr.state !== "open") return outside(answered, snapshot.pr.state) ?? toPerson(answered, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
-        const { ended } = heard(builder, r.since);
-        if (ended === null) return waitOn(r, builder, "builder");
+        const { ended, running } = heard(builder, r.since);
+        if (ended === null || running) return waitOn(r, builder, "builder");
         if (now() - ended < pushGraceMs) return r;
         if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
