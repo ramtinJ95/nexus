@@ -17,6 +17,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { posix } from "node:path";
 import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
@@ -28,7 +29,7 @@ import { attentions, needsPerson, type Attention } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, ThreadId } from "./registry.ts";
 import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
-import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
+import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource, type TranscriptImage } from "../claude-transcript.ts";
 import { queuedOf } from "./claude-conversation.ts";
 import { blocks as blocking, findingsOf, landable, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
@@ -808,7 +809,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
   const { thread: t } = d;
   const agent = c.registry.agent(t).kind;
   const read = view === null || view instanceof Error ? null : view;
-  const items = read === null ? [] : itemsOf(read, d.questions ?? []);
+  const items = read === null ? [] : itemsOf(read, d.questions ?? [], t.id);
   const run = runOf(d, read, items);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read?.kind === "claude" ? shownKey(read.view, model) : null;
@@ -1146,7 +1147,7 @@ export function liveFrames(t: Thread, claudeModel: string | null = null, now: ()
   let shown: string | null = null;
   return (served) => {
     const view = agentView(served);
-    const region = convo(t, view, itemsOf(view, questions()), view.kind === "claude" ? claudeModel : modelOf(view.view), now()).text;
+    const region = convo(t, view, itemsOf(view, questions(), t.id), view.kind === "claude" ? claudeModel : modelOf(view.view), now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
@@ -1284,9 +1285,9 @@ ${s.state === "failed" && html`<p class="error s-why">It did not come back from 
  * recorded it.
  */
 type Item =
-  | { kind: "user"; text: string; queued: string | null; at: number; from: PromptFrom }
-  | { kind: "agent"; text: string; streaming: boolean }
-  | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; ms: number | null; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result"> }
+  | { kind: "user"; text: string; queued: string | null; at: number; from: PromptFrom; images?: readonly Shot[] }
+  | { kind: "agent"; text: string; streaming: boolean; images?: readonly Shot[] }
+  | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; ms: number | null; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result">; images?: readonly Shot[] }
   /** A Claude worker's AskUserQuestion call, with its question while one was asked for it. */
   | { kind: "ask"; id: string; questions: readonly AskedQuestion[]; result: ToolResult; question: Question | null }
   | { kind: "notice"; text: string; tone: Tone }
@@ -1306,22 +1307,73 @@ const promptLabel: Record<PromptFrom, string> = {
 
 const contentText = (content: UserMessage["content"]) => typeof content === "string" ? content
   : content.map((part: TextContent | ImageContent) => part.type === "text" ? part.text : `[${part.mimeType} image]`).join("");
+/** A committed message's text, whose images show as images. */
+const textOf = (content: UserMessage["content"]) => typeof content === "string" ? content
+  : content.map((part: TextContent | ImageContent) => part.type === "text" ? part.text : "").join("");
+
+/** An image a row shows, linked to its full size. `caption` is a checkout file's path. */
+interface Shot { src: string; label: string; caption: string | null }
+const imageRoute = (thread: ThreadId, query: Record<string, string | number>) =>
+  `/v1/threads/${thread}/image?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]))}`;
+const inlineShots = (images: readonly { src: string }[]): Shot[] => images.map(({ src }, i) => ({ src, label: `Image ${i + 1}`, caption: null }));
+const transcriptShots = (thread: ThreadId, images: readonly TranscriptImage[] = []): Shot[] => inlineShots(images.map((image) => ({ src: imageRoute(thread, { source: "transcript", ...image }) })));
+const fileShots = (thread: ThreadId, paths: readonly string[]): Shot[] => paths.map((path) => ({ src: imageRoute(thread, { source: "file", path }), label: path, caption: path }));
+/** A part's hash, once per part, since a page renders the same committed parts again and again. */
+const partHashes = new WeakMap<ImageContent, string>();
+const partHash = (part: ImageContent) => partHashes.get(part) ?? partHashes.set(part, createHash("sha256").update(part.data).digest("hex")).get(part)!;
+/** The image parts of a harness message, each named by its entry's ID, the message's place in the entry, its own place and its hash. */
+function harnessShots(thread: ThreadId, entry: number, message: number, content: UserMessage["content"]): Shot[] {
+  if (typeof content === "string") return [];
+  return inlineShots(content.flatMap((part: TextContent | ImageContent, i) => part.type !== "image" ? []
+    : [{ src: imageRoute(thread, { source: "harness", entry, message, part: i, sha256: partHash(part) }) }]));
+}
+
+const imageFile = /\.(?:png|jpe?g|gif|webp)$/i;
+/** What ends a path in prose: space, quotes, brackets and punctuation, but no period, which a sentence's end strips. */
+const pathBreaks = /[\s`'"()<>[\]{}:,;|*!?]+/;
+/**
+ * The checkout's image files that prose names: bare, in backticks or as a markdown image, relative to the checkout
+ * once normalised, at most 6 and each once. A path outside the checkout, as under /tmp, or a URL, is no file the
+ * checkout serves.
+ */
+export function imagePaths(text: string): string[] {
+  const paths = new Set<string>();
+  for (const word of text.split(pathBreaks)) {
+    const token = word.replace(/\.$/, "");
+    if (!imageFile.test(token)) continue;
+    const path = checkoutPath(token);
+    if (path !== null) paths.add(path);
+    if (paths.size === 6) break;
+  }
+  return [...paths];
+}
+function checkoutPath(path: string): string | null {
+  if (path.startsWith("~") || (path.startsWith("/") && !path.startsWith(`${checkoutDir}/`))) return null;
+  const relative = posix.normalize(path.startsWith("/") ? path.slice(checkoutDir.length + 1) : path);
+  return relative === ".." || relative.startsWith("../") || relative.startsWith("/") ? null : relative;
+}
+/** The argument naming the file a write tool writes, for pi and for Claude Code. */
+const writtenFile: Readonly<Record<string, string>> = { write: "path", Write: "file_path" };
+const writtenImages = (name: string, args: Readonly<Record<string, unknown>>): string[] => {
+  const path = Object.hasOwn(writtenFile, name) ? args[writtenFile[name]!] : undefined;
+  return typeof path === "string" && imageFile.test(path) ? [checkoutPath(path)].filter((p) => p !== null) : [];
+};
 
 /**
  * The transcript's messages, then what pi-durable shows of the current run: tool output as it streams, the
  * partial answer and a model request waiting to be retried, then the messages queued behind the run.
  */
-function conversationItems(view: ConversationView): Item[] {
+function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
   const live = view.docs["pi.live"] as LiveState | undefined;
   const inbox = view.docs["pi.inbox"] as InboxState | undefined;
   const items: Item[] = [];
   const tools = new Map<string, ToolItem>();
   const answer = (message: AssistantMessage, streaming: boolean) => {
     for (const part of message.content) {
-      if (part.type === "text" && part.text !== "") items.push({ kind: "agent", text: part.text, streaming });
+      if (part.type === "text" && part.text !== "") items.push({ kind: "agent", text: part.text, streaming, ...(streaming ? {} : { images: fileShots(thread, imagePaths(part.text)) }) });
       // A streaming call's arguments are not whole yet. Its committed answer shows it.
       if (part.type === "toolCall" && !streaming) {
-        const tool: ToolItem = { kind: "tool", call: part, result: { state: "none" }, ms: null };
+        const tool: ToolItem = { kind: "tool", call: part, result: { state: "none" }, ms: null, images: fileShots(thread, writtenImages(part.name, part.arguments)) };
         tools.set(part.id, tool);
         items.push(tool);
       }
@@ -1330,17 +1382,25 @@ function conversationItems(view: ConversationView): Item[] {
     if (message.stopReason === "aborted") items.push({ kind: "notice", text: "Aborted.", tone: "muted" });
   };
 
-  for (const { entry, message } of view.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })))) {
-    if (message.role === "user") items.push({ kind: "user", text: contentText(message.content), queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : entry.kind === "nexus.review" ? "review" : entry.kind === "nexus.nudge" ? "nudge" : "person" });
+  for (const { entry, message, place } of view.entries.flatMap((entry) => (entry.model ?? []).map((message, place) => ({ entry, message, place })))) {
+    if (message.role === "user") {
+      const text = textOf(message.content);
+      items.push({
+        kind: "user", text, queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : entry.kind === "nexus.review" ? "review" : entry.kind === "nexus.nudge" ? "nudge" : "person",
+        images: [...harnessShots(thread, entry.id, place, message.content), ...fileShots(thread, imagePaths(text))],
+      });
+    }
     if (message.role === "assistant") answer(message, false);
     if (message.role === "toolResult") {
-      const result: ToolResult = { state: "done", output: contentText(message.content), isError: message.isError };
+      const result: ToolResult = { state: "done", output: textOf(message.content), isError: message.isError };
       const ms = typeof message.durationMs === "number" ? message.durationMs : null;
+      const images = harnessShots(thread, entry.id, place, message.content);
       const tool = tools.get(message.toolCallId);
-      if (tool === undefined) items.push({ kind: "tool", call: { id: message.toolCallId, name: message.toolName, arguments: {} }, result, ms });
+      if (tool === undefined) items.push({ kind: "tool", call: { id: message.toolCallId, name: message.toolName, arguments: {} }, result, ms, images });
       else {
         tool.result = result;
         tool.ms = ms;
+        tool.images = [...tool.images ?? [], ...images];
       }
     }
   }
@@ -1357,7 +1417,7 @@ function conversationItems(view: ConversationView): Item[] {
   return items;
 }
 
-const itemsOf = (view: AgentView, questions: readonly Question[]): Item[] => view.kind === "claude" ? claudeItems(view.view, questions) : conversationItems(view.view);
+const itemsOf = (view: AgentView, questions: readonly Question[], thread: ThreadId): Item[] => view.kind === "claude" ? claudeItems(view.view, questions, thread) : conversationItems(view.view, thread);
 
 /**
  * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a
@@ -1365,7 +1425,7 @@ const itemsOf = (view: AgentView, questions: readonly Question[]): Item[] => vie
  * Claude works. An AskUserQuestion call is its own row, with the thread's question for it. A message Claude Code
  * queued and has not taken shows queued at the end. A pull request shows once.
  */
-function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[]): Item[] {
+function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[], thread: ThreadId): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, ToolItem>();
   const calledAt = new Map<string, number>();
@@ -1374,8 +1434,8 @@ function claudeItems({ entries, working }: ClaudeConversation, questions: readon
   let turn: ToolItem[] = [];
   for (const entry of entries) {
     switch (entry.kind) {
-      case "prompt": items.push({ kind: "user", text: entry.text, queued: null, at: entry.at, from: entry.from }); break;
-      case "reply": items.push({ kind: "agent", text: entry.text, streaming: false }); break;
+      case "prompt": items.push({ kind: "user", text: entry.text, queued: null, at: entry.at, from: entry.from, images: [...transcriptShots(thread, entry.images), ...fileShots(thread, imagePaths(entry.text))] }); break;
+      case "reply": items.push({ kind: "agent", text: entry.text, streaming: false, images: fileShots(thread, imagePaths(entry.text)) }); break;
       case "tool": {
         const asked = askedIn(entry);
         if (asked !== null) {
@@ -1384,7 +1444,7 @@ function claudeItems({ entries, working }: ClaudeConversation, questions: readon
           items.push(ask);
           break;
         }
-        const tool: ToolItem = { kind: "tool", call: { id: entry.id, name: entry.name, arguments: entry.input }, result: { state: "none" }, ms: null };
+        const tool: ToolItem = { kind: "tool", call: { id: entry.id, name: entry.name, arguments: entry.input }, result: { state: "none" }, ms: null, images: fileShots(thread, writtenImages(entry.name, entry.input)) };
         tools.set(entry.id, tool);
         calledAt.set(entry.id, entry.at);
         turn.push(tool);
@@ -1393,9 +1453,13 @@ function claudeItems({ entries, working }: ClaudeConversation, questions: readon
       }
       case "result": {
         const result: ToolResult = { state: "done", output: entry.output, isError: entry.isError };
+        const images = transcriptShots(thread, entry.images);
         const tool = tools.get(entry.toolUseId) ?? asks.get(entry.toolUseId);
-        if (tool === undefined) items.push({ kind: "tool", call: { id: entry.toolUseId, name: "tool", arguments: {} }, result, ms: null });
-        else tool.result = result;
+        if (tool === undefined) items.push({ kind: "tool", call: { id: entry.toolUseId, name: "tool", arguments: {} }, result, ms: null, images });
+        else {
+          tool.result = result;
+          if (tool.kind === "tool") tool.images = [...tool.images ?? [], ...images];
+        }
         const at = calledAt.get(entry.toolUseId);
         if (tool?.kind === "tool" && at !== undefined && entry.at >= at) tool.ms = entry.at - at;
         break;
@@ -1551,11 +1615,11 @@ function blockView(block: Block, now: number): Html {
     case "user": {
       const from: PromptFrom = block.from !== "person" ? block.from : block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.text.startsWith("[Nexus review") ? "review" : block.text.startsWith("[Nexus nudge") ? "nudge" : "person";
       const named = from !== "person" && from !== "pr-watch" && from !== "review" && from !== "nudge";
-      return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div></div>`;
+      return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     }
     case "agent": return block.streaming
       ? html`<div class="msg agent streaming"><div class="text" data-grow>${grows(prose(block.text, html`<span class="caret" aria-hidden="true"></span>`))}</div></div>`
-      : html`<div class="msg agent"><div class="text">${prose(block.text)}</div></div>`;
+      : html`<div class="msg agent"><div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
     case "note": return html`<p class="note">${block.text}</p>`;
     case "link": return html`<p class="note"><a class="link" href="${block.url}" target="_blank" rel="noopener">${block.text} ↗</a></p>`;
@@ -1589,6 +1653,10 @@ ${choices === undefined && item.result.state === "done" && html`<pre class="t-ou
 <p class="land-meta">${status}</p>
 </section>`;
 }
+
+/** Each image links to its full size in a new tab. A broken one becomes a note, which client.js writes. */
+const shotsView = (images: readonly Shot[] = []) => images.length > 0 && html`<div class="shots">${images.map((shot) =>
+  html`<a class="shot" href="${shot.src}" target="_blank" rel="noopener"><img src="${shot.src}" alt="${shot.label}" loading="lazy">${shot.caption !== null && html`<span class="shot-cap">${shot.caption}</span>`}</a>`)}</div>`;
 
 /** A reply or prompt's markdown, with `end` after its last character, where a streaming reply's caret goes. */
 function prose(text: string, end: Part = null): Html {
@@ -1864,8 +1932,8 @@ function toolView(tool: ToolItem): Html {
   const bad = failed(tool);
   const running = result.state === "running";
   const state = running ? "run" : result.state === "none" ? "none" : result.isError ? "bad" : "ok";
-  // Only what needs a look starts open: a failure, an edit's diff and a call still running.
-  const open = bad || diff !== null || running;
+  // Only what needs a look starts open: a failure, an edit's diff, an image and a call still running.
+  const open = bad || diff !== null || running || (tool.images?.length ?? 0) > 0;
   const added = diff?.lines.filter(([sign]) => sign === "+").length ?? 0;
   // A running call's line count and output grow in place, so a reader scrolled in its output keeps their place.
   const grow = (inside: Part) => running ? grows(inside) : inside;
@@ -1878,9 +1946,10 @@ ${subject !== undefined && html`<pre class="t-full">${subject.value}</pre>`}
 ${text !== undefined && html`<div class="t-text">${prose(text.value)}</div>`}
 ${Object.keys(rest).length > 0 && html`<pre class="t-args">${JSON.stringify(rest, null, 2)}</pre>`}
 ${diff !== null && clipped(`more-${call.id}-diff`, diff.lines, (lines, part) => html`<pre class="t-out diff${part}">${lines.map(([sign, line]) => html`<span class="d d-${sign === "+" ? "add" : "del"}">${sign === "+" ? "+" : "−"} ${line}</span>`)}</pre>`)}
-${(diff === null || bad) && (output === "" ? html`<p class="t-empty">${running ? "No output yet." : "No output."}</p>`
+${(diff === null || bad) && (output === "" ? (tool.images?.length ?? 0) === 0 && html`<p class="t-empty">${running ? "No output yet." : "No output."}</p>`
     : running ? html`<pre class="t-out" data-grow>${grows(output)}</pre>`
     : clipped(`more-${call.id}`, outLines, (lines, part) => html`<pre class="t-out${part}">${lines.join("\n")}</pre>`))}
+${shotsView(tool.images)}
 ${task !== undefined && html`<p class="t-task">Background task ${task.status}: ${task.summary}</p>${task.result !== null && html`<div class="t-text">${prose(task.result)}</div>`}`}
 </details>`;
 }

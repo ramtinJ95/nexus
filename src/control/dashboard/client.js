@@ -686,6 +686,14 @@ function el(tag, props = {}, ...children) {
 }
 /** The children that are there, so a child given as `cond && el(...)` is left out rather than written as "false". */
 const present = (children) => children.filter((c) => c !== null && c !== false && c !== undefined);
+/** An image of the conversation or a diff that does not load becomes a note naming it. */
+const shotGone = (img) => img.closest(".shot").replaceWith(el("p", { className: "shot-gone", textContent: `${img.alt} can't be shown now: its pylon is paused, or the file is gone` }));
+document.addEventListener("error", (event) => {
+  if (event.target instanceof HTMLImageElement && event.target.matches(".shot img")) shotGone(event.target);
+}, true);
+// An image that failed before this script ran sent its error to no listener.
+for (const img of document.querySelectorAll(".shot img")) if (img.complete && img.currentSrc !== "" && img.naturalWidth === 0) shotGone(img);
+
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
 const statusLetter = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T" };
