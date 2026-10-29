@@ -1,17 +1,17 @@
-$ nexus show th-c817b40e7012 --json
+$ nexus show th-24acb3f47f5b --json
 {
   "thread": {
-    "id": "th-c817b40e7012",
+    "id": "th-24acb3f47f5b",
     "title": "Ask about drinks",
     "project": "drinks",
-    "pylonId": "pylon-th-c817b40e7012",
+    "pylonId": "pylon-th-24acb3f47f5b",
     "status": "active",
     "conversationId": null,
     "startedBy": "nVERIFYLAPTOP",
-    "createdAt": 1793237030900,
+    "createdAt": 1793238250596,
     "agentTurnRunning": false,
-    "lastAgentActivityAt": 1793237034389,
-    "lastHumanActivityAt": 1793237030900,
+    "lastAgentActivityAt": 1793238254030,
+    "lastHumanActivityAt": 1793238250596,
     "seenAt": null,
     "lastReplyAt": null,
     "placement": {
@@ -35,10 +35,10 @@ $ nexus show th-c817b40e7012 --json
   "desired": "running",
   "pylon": {
     "grantsOutdated": false,
-    "id": "pylon-th-c817b40e7012",
+    "id": "pylon-th-24acb3f47f5b",
     "node": "node-a",
     "failed": null,
-    "observedAt": "2026-10-29T01:23:52.367Z",
+    "observedAt": "2026-10-29T01:44:11.968Z",
     "resources": {
       "cpus": 1,
       "memoryGiB": 3,
@@ -49,11 +49,11 @@ $ nexus show th-c817b40e7012 --json
   },
   "sessions": [
     {
-      "pylon": "pylon-th-c817b40e7012",
+      "pylon": "pylon-th-24acb3f47f5b",
       "id": "w1:p1",
       "herdrPane": "w1:p1",
       "harness": "claude-code",
-      "harnessSessionId": "0b718297-af65-44df-8012-18bd6bd38c26",
+      "harnessSessionId": "fb97c455-2166-422c-a554-b8eb03b96a5f",
       "title": "Ask about drinks",
       "status": "unknown",
       "state": "running",
@@ -83,7 +83,7 @@ $ nexus show th-c817b40e7012 --json
       "preview": null
     },
     {
-      "port": 40393,
+      "port": 38357,
       "service": null,
       "preview": null
     }
@@ -98,16 +98,16 @@ $ nexus show th-c817b40e7012 --json
   "review": null,
   "questions": [
     {
-      "id": "ask-toolu_01RDvh19ALeNg3qt41e4LMbi",
-      "thread": "th-c817b40e7012",
+      "id": "ask-toolu_01EW6Wh3QcMXDndrWBYEhsUy",
+      "thread": "th-24acb3f47f5b",
       "text": "Drink: Tea or coffee?\nToppings: Which toppings?",
       "options": [],
       "reserved": null,
       "answerer": "person",
-      "askedAt": 1793237037260,
+      "askedAt": 1793238256238,
       "ask": {
-        "session": "0b718297-af65-44df-8012-18bd6bd38c26",
-        "toolUseId": "toolu_01RDvh19ALeNg3qt41e4LMbi",
+        "session": "fb97c455-2166-422c-a554-b8eb03b96a5f",
+        "toolUseId": "toolu_01EW6Wh3QcMXDndrWBYEhsUy",
         "questions": [
           {
             "question": "Tea or coffee?",

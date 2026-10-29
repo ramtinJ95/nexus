@@ -69,7 +69,7 @@ Main, the same moment:
 
 ## Checks
 
-`npm run typecheck` passes, and `npm test` passes 1551 of 1551 on the branch.
+`npm run typecheck` passes, and `npm test` passes 1554 of 1554 on the branch.
 
 ## Not verified
 
