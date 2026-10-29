@@ -108,21 +108,41 @@ export async function diffView(files, layout) {
   const entries = [];
   let selected = null;
   let cursor = null;
-  for (const [entry, file] of files.entries()) {
-    const renderer = new DiffHunksRenderer({ diffStyle: layout, overflow: "wrap", disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber));
-    const result = await renderer.asyncRender(file);
-    if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system")), sheet(cursorSheet)];
-    const pre = drawn(renderer.renderFullAST(result), entry);
-    root.append(pre);
-    entries.push({ file, renderer, pre, rows: rowElements(pre), slotKey: "[]" });
-  }
-
   const paint = (attr, at) => {
     for (const el of root.querySelectorAll(`[${attr}]`)) el.removeAttribute(attr);
     if (at === null) return;
     const { rows } = entries[at.entry];
     for (let i = at.from; i <= at.to; i++) for (const el of rows.get(i) ?? []) el.setAttribute(attr, "");
   };
+  const redraw = (drawnFile) => {
+    const pre = drawn(drawnFile.renderer.renderFullAST(drawnFile.renderer.renderDiff(drawnFile.file)), drawnFile.entry);
+    drawnFile.pre.replaceWith(pre);
+    Object.assign(drawnFile, { pre, rows: rowElements(pre) });
+    paint("data-selected-line", selected);
+    paint("data-cursor", cursor);
+  };
+
+  for (const [entry, file] of files.entries()) {
+    let update = () => {};
+    const renderer = new DiffHunksRenderer({ diffStyle: layout, overflow: "wrap", disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber), () => update());
+    // renderDiff keeps what it highlighted for the redraws a note's slot needs, which asyncRender does not. Until the
+    // file's grammar has loaded, it draws nothing or the plain text, and says when the highlighted lines are ready or
+    // that they failed.
+    let result = renderer.renderDiff(file);
+    if (result === undefined) {
+      await new Promise((resolve, reject) => {
+        update = resolve;
+        renderer.onHighlightError = reject;
+      });
+      result = renderer.renderDiff(file);
+    }
+    if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system")), sheet(cursorSheet)];
+    const pre = drawn(renderer.renderFullAST(result), entry);
+    root.append(pre);
+    const drawnFile = { entry, file, renderer, pre, rows: rowElements(pre), slotKey: "[]" };
+    entries.push(drawnFile);
+    update = () => redraw(drawnFile);
+  }
 
   return {
     node,
@@ -134,11 +154,7 @@ export async function diffView(files, layout) {
       if (key === drawnFile.slotKey) return names;
       drawnFile.slotKey = key;
       drawnFile.renderer.setLineAnnotations(anchors.map((a) => ({ side: a.side, lineNumber: a.line })));
-      const pre = drawn(drawnFile.renderer.renderFullAST(drawnFile.renderer.renderDiff(drawnFile.file)), entry);
-      drawnFile.pre.replaceWith(pre);
-      Object.assign(drawnFile, { pre, rows: rowElements(pre) });
-      paint("data-selected-line", selected);
-      paint("data-cursor", cursor);
+      redraw(drawnFile);
       return names;
     },
     /** Marks rows `from` to `to` of file `entry` by their unified index as selected, or none when given null. */
