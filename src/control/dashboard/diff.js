@@ -1,6 +1,7 @@
 // The diff of one changed file as the dashboard shows it, highlighted by @pierre/diffs. client.js imports this
 // module only once a diff opens, so the library loads then, and each language's grammar once a file needs it.
 import { DiffHunksRenderer, parsePatchFiles, wrapCoreCSS, wrapThemeCSS } from "@pierre/diffs";
+import { themeValue } from "./theme.js";
 
 /** A diff this long is shown up to here, so a huge one does not stall the page. */
 export const maxDiffRows = 2_000;
@@ -102,6 +103,7 @@ const cursorSheet = `[data-line][data-cursor] { box-shadow: inset 2px 0 0 light-
  * a slot under each row a note ends on, marks rows as selected, and says which row a pointer is over.
  */
 export async function diffView(files, layout) {
+  const syntax = themeValue("--syntax");
   const node = document.createElement("div");
   node.className = "diff-view";
   const root = node.attachShadow({ mode: "open" });
@@ -124,7 +126,7 @@ export async function diffView(files, layout) {
 
   for (const [entry, file] of files.entries()) {
     let update = () => {};
-    const renderer = new DiffHunksRenderer({ diffStyle: layout, overflow: "wrap", disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber), () => update());
+    const renderer = new DiffHunksRenderer({ diffStyle: layout, overflow: "wrap", disableFileHeader: true, theme: { light: syntax, dark: syntax } }, (a) => slotName(entry, a.side, a.lineNumber), () => update());
     // renderDiff keeps what it highlighted for the redraws a note's slot needs, which asyncRender does not. Until the
     // file's grammar has loaded, it draws nothing or the plain text, and says when the highlighted lines are ready or
     // that they failed.

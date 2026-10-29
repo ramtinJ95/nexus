@@ -156,10 +156,18 @@ const assets = new Map([
 }));
 const assetUrl = (file: string) => `/assets/${file}?v=${assets.get(file)!.version}`;
 
+/** The themes the sidebar's picker offers. Each but System is a block of style.css, and System is the device's light or dark. */
+export const themes = [["system", "System"], ["light", "Light"], ["dark", "Dark"], ["tokyo-night", "Tokyo Night"], ["catppuccin-mocha", "Catppuccin Mocha"], ["kanagawa-wave", "Kanagawa Wave"]] as const;
+/**
+ * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
+ * that refuses the page its storage throws on reading it, and the device's theme stands.
+ */
+const themeScript = `{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
+
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
-  "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  "content-security-policy": `default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(themeScript).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
 };
@@ -208,6 +216,8 @@ const iconPaths = {
   globe: "M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12",
   server: "M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01",
   plus: "M8 3v10M3 8h10",
+  palette: "M8 2.5a5.5 5.5 0 0 0 0 11c.8 0 1.2-.5 1.2-1.1 0-.7-.5-1-.5-1.6 0-.6.5-1 1.1-1h1.4a2.3 2.3 0 0 0 2.3-2.3C13.5 4.6 11.1 2.5 8 2.5zM5 8h.01M6.5 5.2h.01M9.7 5.2h.01",
+  contrast: "M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11zM8 2.5v11",
   up: "M8 13V3M4 7l4-4 4 4",
   chart: "M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6",
   list: "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01",
@@ -296,6 +306,7 @@ function layout(c: Context, page: Shell): Html {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>${page.title} · Nexus</title>
+<script>${new Html(themeScript)}</script>
 <link rel="icon" href="${assetUrl("favicon.svg")}" type="image/svg+xml">
 <link rel="stylesheet" href="${assetUrl("style.css")}">
 <script type="module" src="${assetUrl("client.js")}"></script>
@@ -373,6 +384,7 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 })}
 </nav>
 <div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
+<div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
 }
