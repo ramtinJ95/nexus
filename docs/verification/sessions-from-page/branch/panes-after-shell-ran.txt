@@ -1,0 +1,15 @@
+== pane w1:p1
+● READY
+
+✻ Crunched for 5s · done 6:33 PM
+
+────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+
+== pane w2:p1, focused
+verify@pylon:~/workspace/repo$ echo from the page $((6
+* 7))
+from the page 42
+verify@pylon:~/workspace/repo$

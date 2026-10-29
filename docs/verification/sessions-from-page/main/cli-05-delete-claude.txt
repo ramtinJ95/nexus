@@ -1,0 +1,3 @@
+$ nexus delete th-71f7ee2addc8
+Deleted th-71f7ee2addc8.
+[exit 0]

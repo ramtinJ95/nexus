@@ -1,0 +1,9 @@
+== pane w1:p1, focused
+● READY
+
+✻ Crunched for 5s · done 6:33 PM
+
+────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
