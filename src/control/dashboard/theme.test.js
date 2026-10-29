@@ -60,3 +60,25 @@ test("another tab's change is heard, and its clearing the storage goes back to S
   assert.equal(store.heard({ key: null, newValue: null }), true);
   assert.equal(store.choice, "system");
 });
+
+test("a dark theme another tab picked is where this tab's toggle goes back to", () => {
+  const kept = storage();
+  const here = themeStore(kept);
+  const there = themeStore(kept);
+  there.pick("tokyo-night");
+  there.pickDark("tokyo-night");
+  assert.equal(here.heard({ key: "nexus.theme", newValue: "tokyo-night" }), true);
+  assert.equal(here.heard({ key: "nexus.theme.dark", newValue: "tokyo-night" }), false);
+  const light = toggled("dark", here.lastDark);
+  here.pick(light);
+  assert.deepEqual([light, toggled("light", here.lastDark)], ["light", "tokyo-night"]);
+});
+
+test("another tab clearing the storage forgets the remembered dark theme too", () => {
+  const store = themeStore(storage());
+  store.pickDark("kanagawa-wave");
+  store.pick("light");
+  assert.equal(store.heard({ key: null, newValue: null }), true);
+  assert.deepEqual([store.choice, store.lastDark], ["system", null]);
+  assert.equal(toggled("light", store.lastDark), "dark");
+});

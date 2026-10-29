@@ -46,12 +46,15 @@ export function themeStore(storage) {
       lastDark = next;
       write(darkKey, next);
     },
-    /** Takes another tab's change from its storage event, where clearing the storage names no key. */
+    /**
+     * Takes another tab's change from its storage event, where clearing the storage names no key, and says whether
+     * the shown theme may have changed.
+     */
     heard(event) {
-      if (event.key === key) choice = event.newValue ?? "system";
-      else if (event.key === null) choice = "system";
-      else return false;
-      return true;
+      if (event.key === darkKey) lastDark = event.newValue;
+      else if (event.key === key) choice = event.newValue ?? "system";
+      else if (event.key === null) [choice, lastDark] = ["system", null];
+      return event.key === key || event.key === null;
     },
   };
 }
