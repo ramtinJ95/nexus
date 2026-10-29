@@ -549,6 +549,8 @@ h4.md-h { font-size: 1.07em; }
 .tv-head .btn { background: var(--term-raised); color: var(--term-text); border-color: var(--term-line); box-shadow: none; }
 .tv-head .btn-ghost { background: transparent; border-color: transparent; }
 .tv-host { flex: 1; min-height: 0; font-family: var(--mono); }
+/* xterm.css paints the viewport black, which shows around the rows in a terminal of another colour. */
+.tv-host .xterm .xterm-viewport { background-color: var(--term-bg); }
 .tv-host .xterm { height: 100%; padding: 6px 0 0 8px; }
 
 .fv-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 9px; padding: 10px 20px; background: var(--bg); border-bottom: 1px solid var(--line-soft); font-size: 13px; }

@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import css from "@xterm/xterm/css/xterm.css";
 import { attachUrl, joinTerminal } from "./terminal.js";
+import { onThemeChange, themeValue } from "./theme.js";
 
 const base = new CSSStyleSheet();
 base.replaceSync(css);
@@ -33,14 +34,24 @@ function adoptStyles(host) {
   };
 }
 
+const ansi = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+/** The shown theme's terminal colours in xterm.js's terms. */
+function terminalTheme() {
+  const colors = themeValue("--term-ansi").split(/\s+/);
+  return {
+    background: themeValue("--term-bg"), foreground: themeValue("--term-text"), cursor: themeValue("--term-cursor"),
+    selectionBackground: themeValue("--term-selection"), selectionForeground: themeValue("--term-selection-text"),
+    ...Object.fromEntries(ansi.flatMap((name, i) => [[name, colors[i]], [`bright${name[0].toUpperCase()}${name.slice(1)}`, colors[i + 8]]])),
+  };
+}
+
 /** A terminal in `host` attached to the thread's pylon, fitted to `host` whenever it shows at a new size. */
 export function openTerminal(host, thread, status) {
   const unstyle = adoptStyles(host);
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, scrollback: 5000,
     fontFamily: getComputedStyle(host).fontFamily,
-    // A terminal reads as one in both of the page's themes, and Herdr and Claude Code draw for a dark one.
-    theme: { background: "#16181d", foreground: "#e3e5e8", cursor: "#e3e5e8", selectionBackground: "#3b4252" },
+    theme: terminalTheme(),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -49,10 +60,12 @@ export function openTerminal(host, thread, status) {
   const detach = joinTerminal(term, new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows })), status);
   const sized = new ResizeObserver(() => { if (host.offsetParent !== null) fit.fit(); });
   sized.observe(host);
+  const unwatch = onThemeChange(() => { term.options.theme = terminalTheme(); });
   return {
     focus: () => term.focus(),
     close() {
       sized.disconnect();
+      unwatch();
       detach();
       term.dispose();
       unstyle();
