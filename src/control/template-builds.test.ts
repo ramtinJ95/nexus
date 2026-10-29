@@ -47,6 +47,7 @@ function fakeProbe() {
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
     putSecret: () => Promise.reject(new Error("unused")),
+    putPeers: () => Promise.reject(new Error("unused")),
     health: () => Promise.reject(new Error("unused")),
   };
   const ended = (jobId: JobId) => ({ jobId, subject: building.id, kind: "build-template" as const, finishedAt: new Date().toISOString() });
