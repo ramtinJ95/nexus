@@ -1,0 +1,4 @@
+{"id":"2","time":1793288618099,"thread":"th-caa7dc21f076","project":"nexus","kind":"pull-request.error","payload":{"error":"PR watch could not read GitHub or deliver its message; it will retry."}}
+{"id":"3","time":1793288626105,"thread":"th-caa7dc21f076","project":"nexus","kind":"pull-request.error-cleared","payload":{}}
+{"id":"4","time":1793288628100,"thread":"th-caa7dc21f076","project":"nexus","kind":"pull-request.error","payload":{"error":"PR watch could not read the pull requests a queued thread waits for; it will retry."}}
+{"id":"5","time":1793288636100,"thread":"th-caa7dc21f076","project":"nexus","kind":"pull-request.error-cleared","payload":{}}

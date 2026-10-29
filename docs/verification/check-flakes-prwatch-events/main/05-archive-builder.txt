@@ -1,0 +1,3 @@
+$ nexus archive th-5356ab534623
+Archived th-5356ab534623.
+[exit 0]

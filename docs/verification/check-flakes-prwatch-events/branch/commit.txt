@@ -1,0 +1,1 @@
+branch: eeb464f fix(verification): the capture's cleanup ignores directories that are not worktrees

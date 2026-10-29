@@ -1,0 +1,3 @@
+$ nexus events --follow --since latest --kind pull-request.error --kind pull-request.error-cleared --json
+4 events
+[exit 0]
