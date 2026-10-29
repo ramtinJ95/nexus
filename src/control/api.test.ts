@@ -3387,6 +3387,8 @@ test("a review needs the GitHub token's loop, and landing, at its start or later
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { land: true })).status, 403, "the control node itself never lands, even listed as a deployer");
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/land`)).status, 403);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, {})).status, 403, "the control node never starts a review either, since a thread never drives another");
+  s.callAs(phone);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, {})).status, 201, "a review that stops at approval needs no deploy right");
   assert.deepEqual(asked, [
     ["start", s.thread.id, { pr: 7, rounds: 5, land: null }],
@@ -3402,9 +3404,11 @@ test("only a project edit turns on reviews of its own, landing needs a deployer,
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", autoReview: { land: true, enabledBy: laptop } })).status, 400, "a new project cannot name who turned it on");
   s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } }), { status: 403, body: { error: "caller may not edit a project: only a person may, never the control plane, infrastructure nodes or pylons" } });
+  s.callAs(phone);
   assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons" } });
   const reviewing = await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } });
-  assert.deepEqual(reviewing.body.autoReview, { land: false, enabledBy: "nFIREBAT" }, "reviewing alone lands nothing, so it needs no deployer");
+  assert.deepEqual(reviewing.body.autoReview, { land: false, enabledBy: phone }, "reviewing alone lands nothing, so it needs no deployer");
   s.callAs(laptop);
   assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).body.autoReview, { land: true, enabledBy: laptop });
   assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { defaultBranch: "trunk" })).body.autoReview, { land: true, enabledBy: laptop }, "another edit keeps it");
@@ -3525,6 +3529,56 @@ test("only a person starts a thread, starts a queued one now or messages one, ne
     assert.equal(answer.status, status, `a person who is not a deployer may ${action}: ${JSON.stringify(answer.body)}`);
   }
   assert.deepEqual(s.calls.map((c) => c[0]), ["start", "start", "start", "send"]);
+});
+
+test("only a person acts on a thread, its pylon or a project, never the control node, an infrastructure node or a pylon", async (t) => {
+  const reviewed: unknown[][] = [];
+  const reviews = {
+    async start(...args: unknown[]) { reviewed.push(["start", ...args]); return { id: "rv-1" }; },
+    cancel(...args: unknown[]) { reviewed.push(["cancel", ...args]); return { id: "rv-1" }; },
+  } as never as ReviewLoop;
+  const s = await withThread(t, { reviews });
+  const testbench = "nTESTBENCH" as TailnetNodeId;
+  s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
+  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.pylon(s.thread.pylonId)!.node)!.tailnetNodeId;
+  const id = s.thread.id;
+  const routes = [
+    ["abort a thread's turn", "POST", `/v1/threads/${id}/abort`, undefined, 204],
+    ["retry a thread's turn", "POST", `/v1/threads/${id}/retry`, undefined, 204],
+    ["retry a thread's pylon", "POST", `/v1/threads/${id}/pylon/retry`, undefined, 204],
+    ["open a session in a thread's pylon", "POST", `/v1/threads/${id}/sessions`, { harness: "shell" }, 201],
+    ["close a session in a thread's pylon", "DELETE", `/v1/threads/${id}/sessions/${encodeURIComponent("w1:p1")}`, {}, 204],
+    ["publish a preview", "POST", `/v1/threads/${id}/previews`, { port: 3000 }, 200],
+    ["unpublish a preview", "DELETE", `/v1/threads/${id}/previews/3000`, {}, 204],
+    ["start a review", "POST", `/v1/threads/${id}/review`, {}, 201],
+    ["cancel a review", "POST", `/v1/threads/${id}/review/cancel`, undefined, 200],
+    ["edit a project", "PATCH", "/v1/projects/acme", { defaultBranch: "trunk" }, 200],
+    ["archive a thread", "POST", `/v1/threads/${id}/archive`, undefined, 200],
+    ["unarchive a thread", "POST", `/v1/threads/${id}/unarchive`, undefined, 200],
+    ["delete a thread", "DELETE", `/v1/threads/${id}`, {}, 200],
+  ] as const;
+  const harnessCalls = s.calls.length;
+  for (const [who, caller] of [["the control node", "nFIREBAT" as TailnetNodeId], ["an infrastructure node", testbench], ["a pylon", pylonNode]] as const) {
+    s.callAs(caller);
+    for (const [action, method, path, body] of routes) {
+      const error = `caller may not ${action}: only a person may, never the control plane, infrastructure nodes or pylons`;
+      assert.deepEqual(await s.call(method, path, body), { status: 403, body: { error } }, `${who} may not ${action}`);
+    }
+    const attached = await attachTo(s.port, attachPathOf(id));
+    assert.ok("status" in attached, `${who} is refused before the 101`);
+    assert.deepEqual([attached.status, attached.body.error], [403, "caller may not attach to a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons"]);
+  }
+  assert.deepEqual([s.calls.length, s.commands, s.streams, reviewed], [harnessCalls, [], [], []], "no refused request reached the harness, the probe or the review loop");
+  assert.equal(s.registry.thread(id)!.status, "active");
+  assert.equal(s.registry.project("acme" as ProjectId)!.defaultBranch, project.defaultBranch);
+
+  s.callAs(phone);
+  s.registry.savePylon({ ...s.registry.pylon(s.thread.pylonId)!, failed: "last job failed with setup-failed" });
+  for (const [action, method, path, body, status] of routes) {
+    const answer = await s.call(method, path, body);
+    assert.equal(answer.status, status, `a person who is not a deployer may ${action}: ${JSON.stringify(answer.body)}`);
+  }
+  assert.deepEqual(reviewed.map((r) => r[0]), ["start", "cancel"]);
 });
 
 test("a start after other threads is queued with no row or pylon, until start-queued starts it as any start", async (t) => {

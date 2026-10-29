@@ -369,8 +369,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return options.pipeline;
   }
   /**
-   * Threads and items are the person's, so no pylon, harness thread or the control plane itself starts or messages a
-   * thread, or adds, approves or cancels an item. The control plane's own passes start and message threads in-process.
+   * Threads, projects and items are the person's, so no pylon, harness thread or the control plane itself acts on a
+   * thread or its pylon, edits a project, or adds, approves or cancels an item. A thread never drives another. The
+   * control plane's own passes start, message, review and archive threads in-process.
    */
   function personOnly(caller: TailnetNodeId, action: string) {
     if (!isPerson(registry, options.deployment, caller)) throw new HttpError(403, `caller may not ${action}: only a person may, never the control plane, infrastructure nodes or pylons`);
@@ -1108,9 +1109,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       };
     }],
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
+      personOnly(r.caller, "edit a project");
       const { autoReview, pipeline, ...patch } = parse(projectEditSchema, await r.body());
       if (autoReview?.land) mayLand(r.caller);
-      if (pipeline !== undefined && !isPerson(registry, options.deployment, r.caller)) throw new HttpError(403, "caller may not set a project's pipeline: whether briefs start builders is the person's, never the control plane's, an infrastructure node's or a pylon's");
       const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
@@ -1180,15 +1181,24 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller));
     }],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
-    ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m) => ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "deleted") : queuedStatus(m[1]!, "deleted"))],
+    ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m, r) => {
+      personOnly(r.caller, "delete a thread");
+      return ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "deleted") : queuedStatus(m[1]!, "deleted"));
+    }],
     ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
       const t = thread(m[1]!);
       const body = parse(seenSchema, await r.body({}));
       registry.markSeen(t.id, m[2] === "unseen", Date.now(), body.lastReplyAt);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m) => ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "archived") : queuedStatus(m[1]!, "archived"))],
-    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m) => ok(queuedRecord(m[1]!) === undefined ? unarchive(thread(m[1]!)) : queuedStatus(m[1]!, "queued"))],
+    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m, r) => {
+      personOnly(r.caller, "archive a thread");
+      return ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "archived") : queuedStatus(m[1]!, "archived"));
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m, r) => {
+      personOnly(r.caller, "unarchive a thread");
+      return ok(queuedRecord(m[1]!) === undefined ? unarchive(thread(m[1]!)) : queuedStatus(m[1]!, "queued"));
+    }],
     ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
     // The body first, so the thread's status is read after the last await before the message is submitted.
     ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, async (m, r) => {
@@ -1201,10 +1211,15 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return { status: 202, body: await sendClaude(refuseDeleted(t), agent.worker.session, agent.worker.model, body) };
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/review$/, async (m, r) => {
+      personOnly(r.caller, "start a review");
       const body = parse(reviewSchema, await r.body({}));
       const t = thread(m[1]!);
       if (body.land) mayLand(r.caller);
       return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/review\/cancel$/, (m, r) => {
+      personOnly(r.caller, "cancel a review");
+      return ok(reviewsOrRefuse().cancel(thread(m[1]!).id, r.caller));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/land$/, async (m, r) => {
       const body = parse(landSchema, await r.body({}));
@@ -1230,23 +1245,39 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (answered.proposal !== undefined) await options.pipeline?.poll();
       return ok(answered);
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m) => { await harness.abort(conversing(thread(m[1]!)).id); return noContent; }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m) => { await harness.retry(runnable(thread(m[1]!)).id); return noContent; }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, (m) => { retryPylon(thread(m[1]!)); return noContent; }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m, r) => {
+      personOnly(r.caller, "abort a thread's turn");
+      await harness.abort(conversing(thread(m[1]!)).id);
+      return noContent;
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m, r) => {
+      personOnly(r.caller, "retry a thread's turn");
+      await harness.retry(runnable(thread(m[1]!)).id);
+      return noContent;
+    }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, (m, r) => {
+      personOnly(r.caller, "retry a thread's pylon");
+      retryPylon(thread(m[1]!));
+      return noContent;
+    }],
     ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, async (m, r) => {
+      personOnly(r.caller, "publish a preview");
       const body = await r.body();
       return ok(await linkPort(thread(m[1]!), body));
     }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, async (m) => {
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, async (m, r) => {
+      personOnly(r.caller, "unpublish a preview");
       const { port } = parse(previewSchema, { port: /^\d+$/.test(m[2]!) ? Number(m[2]) : m[2] });
       await unlinkPort(thread(m[1]!), port);
       return noContent;
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, async (m, r) => {
+      personOnly(r.caller, "open a session in a thread's pylon");
       const body = await r.body();
       return created(await openSession(thread(m[1]!), body));
     }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, async (m) => {
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, async (m, r) => {
+      personOnly(r.caller, "close a session in a thread's pylon");
       await closeSession(thread(m[1]!), m[2]!);
       return noContent;
     }],
@@ -1425,7 +1456,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * as it maps any route's. A terminal takes a place among the streams, so a delete ends it too.
    */
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    await admit(req);
+    personOnly(await admit(req), "attach to a thread's pylon");
     if (stopping) throw new HttpError(503, "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
