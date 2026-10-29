@@ -1323,7 +1323,7 @@ ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul c
   : state("failed", "bad")}${s.herdrPane !== null && html`<code class="dim pane">${s.herdrPane}</code>`}
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}
 ${s.state === "failed" && html`<p class="error s-why">It did not come back from the last wake, which the next tries again: ${s.message}</p>`}
-${t.status === "active" && sessionActions(t.id, s, s.harness === "claude-code" && s.harnessSessionId === worker)}
+${t.status === "active" && sessionActions(t.id, s, worker !== null && s.harness === "claude-code" && s.harnessSessionId === worker)}
 </li>`)}</ul>`}
 ${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, label]) => html`<button type="button" class="btn btn-xs" data-action="open-session" data-thread="${t.id}" data-harness="${harness}">${label}</button>`)}</div>
 <p class="dim small">Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, <code>nexus attach</code> included.</p>`}

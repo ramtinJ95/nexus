@@ -52,7 +52,8 @@ const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
 
 /**
  * A terminal in `host` attached to the thread's pylon, landing in `pane` when it is not null, and fitted to `host`
- * whenever it shows at a new size. An attach again after a drop lands where any attach does.
+ * whenever it shows at a new size. An attach again after a drop lands where any attach does. `landed` resolves true
+ * once Herdr's client draws, which is after the attach focused its pane, or false when the terminal ends first.
  */
 export function openTerminal(host, thread, status, pane) {
   const unstyle = adoptStyles(host);
@@ -79,18 +80,27 @@ export function openTerminal(host, thread, status, pane) {
   });
   term.open(host);
   fit.fit();
+  let land;
+  const landed = new Promise((resolve) => { land = resolve; });
+  const drawn = term.onWriteParsed(() => land(true));
   let landing = pane;
   const detach = keepAttached(term, () => {
     const socket = new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, landing));
     landing = null;
     return socket;
-  }, status);
+  }, (s) => {
+    if (s.over) land(false);
+    status(s);
+  });
   const sized = new ResizeObserver(() => { if (host.offsetParent !== null) fit.fit(); });
   sized.observe(host);
   const unwatch = onThemeChange(() => { term.options.theme = terminalTheme(); });
   return {
     focus: () => term.focus(),
+    landed,
     close() {
+      drawn.dispose();
+      land(false);
       sized.disconnect();
       unwatch();
       detach();

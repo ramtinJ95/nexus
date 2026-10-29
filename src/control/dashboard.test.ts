@@ -868,6 +868,14 @@ test("the thread page's sessions open, show in the terminal and close from the p
   ]);
   assert.equal((await s.call("POST", `/v1/threads/${worker.id}/archive`)).status, 200);
   assert.deepEqual(await buttons(), []);
+
+  const plain = await s.start("acme", "Fix checkout");
+  s.observe(plain);
+  s.registry.apply({ record: "sessions", pylonId: plain.pylonId, sessions: [
+    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "login", status: "blocked", message: null },
+  ] });
+  const closes = [...sectionOf((await s.call("GET", `/threads/${plain.id}`)).text, "sessions-h").matchAll(/data-action="close-session" [^>]*data-session="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(closes, ["w1:p1"], "a Claude session with no ID yet closes on a thread with no Claude worker");
 });
 
 test("the thread page lists a session of a harness this control plane does not know, such as a newer probe's, with no label", async (t) => {

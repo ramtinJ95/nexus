@@ -1,7 +1,7 @@
 /**
  * Drives the Sessions list of a Claude worker's thread page on a local stack whose pylon is this machine: opens a
  * shell from the page, runs a command in it through the page's terminal, shows Claude's pane and the shell's in turn,
- * and closes the shell. It captures the page, the pylon's Herdr panes and which one was focused:
+ * shows the shell while a new attach is under way, and closes the shell. It captures the page, the pylon's Herdr panes and which one was focused:
  *
  *   MODULES=<node_modules with @sparticuz/chromium and puppeteer-core> node docs/verification/sessions-from-page/stack.ts drive <src> <out>
  *
@@ -316,6 +316,17 @@ async function drive(out: string) {
       await sleep(1000);
       await shot("05-shell-shown-desktop");
 
+      await page.click("#term-detach");
+      await until("the page's terminal detaches", () => page.evaluate('document.getElementById("term-again")?.hidden === false'), 10_000);
+      herdr("agent", "focus", claudePane);
+      await pylonTab(page);
+      await page.evaluate(`document.getElementById("term-again").click(); document.querySelector('[data-action="show-session"][data-pane="${shellPane}"]').click();`);
+      log("pressed Attach again and, before it attached, Show in terminal on the shell's session");
+      await until(`Herdr focuses the shell's pane ${shellPane}`, async () => focused() === shellPane, 30_000);
+      await sleep(3000);
+      log(`3 s later Herdr's focused pane is ${focused()}`);
+      await shot("06-show-while-attaching-desktop");
+
       await pylonTab(page);
       log(`Sessions reads: ${await sessionsText()}`);
       await page.click(`[data-action="close-session"][data-session="${shellPane}"]`);
@@ -323,7 +334,7 @@ async function drive(out: string) {
       await until("Herdr closed the shell's pane", async () => !listedPanes().some((p) => p.pane_id === shellPane), 30_000);
       await until("the Sessions list drops the shell", async () => !(await sessionsText()).includes(shellPane!), 30_000);
       await pylonTab(page);
-      await shot("06-shell-closed-desktop");
+      await shot("07-shell-closed-desktop");
       log(`Sessions reads: ${await sessionsText()}`);
       panes("panes-after-close");
     }
