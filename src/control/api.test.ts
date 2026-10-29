@@ -2267,7 +2267,7 @@ test("a root-authenticated drain blocks every turn-entry route and can be releas
   assert.equal(drain.status, 200);
   assert.equal(drain.body.idle, true);
   s.callAs(laptop);
-  for (const path of ["/v1/threads", "/v1/threads/anything/messages", "/v1/threads/anything/retry"]) {
+  for (const path of ["/v1/threads", "/v1/threads/anything/messages", "/v1/threads/anything/retry", "/v1/threads/anything/start"]) {
     const refused = await s.call("POST", path, {});
     assert.equal(refused.status, 409);
     assert.deepEqual(refused.body, { error: "control plane is draining for deployment; retry after the release completes" });
