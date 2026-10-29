@@ -10,12 +10,22 @@ class Scroller extends EventTarget {
     super();
     Object.assign(this, { scrollHeight, clientHeight });
   }
-  get scrollTop() { return this.#top; }
+  hidden = false;
+  /** A hidden element has no box, so it reads as empty and unscrolled, and keeps its place for when it shows. */
+  #shown = { scrollHeight: 0, clientHeight: 0 };
+  get scrollTop() { return this.hidden ? 0 : this.#top; }
   set scrollTop(value) {
     const top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
     if (top === this.#top) return;
     this.#top = top;
     this.dispatchEvent(new Event("scroll"));
+  }
+  hide() {
+    this.#shown = { scrollHeight: this.scrollHeight, clientHeight: this.clientHeight };
+    Object.assign(this, { hidden: true, scrollHeight: 0, clientHeight: 0 });
+  }
+  show(grew = 0) {
+    Object.assign(this, { hidden: false, scrollHeight: this.#shown.scrollHeight + grew, clientHeight: this.#shown.clientHeight });
   }
   observe = (callback) => { this.#resized = callback; };
   resize(clientHeight) {
@@ -81,4 +91,15 @@ test("a reader at the end who opens a fold reads it, rather than being taken pas
   el.scrollHeight += 200;
   end.settle();
   assert.equal(el.scrollTop, 2200);
+});
+
+test("a reader who scrolled up keeps their place when a diff tab covers the conversation and an update restores a fold", () => {
+  const el = scroller(3000, 800);
+  const end = endFollower(el, el.observe);
+  el.scrollTop = 600;
+  el.hide();
+  el.dispatchEvent(new Event("toggle"));
+  el.show(400);
+  end.settle();
+  assert.equal(el.scrollTop, 600);
 });
