@@ -22,11 +22,11 @@ Needs you at 1280: {"count":"7","cards":["Stopped short: nexus / Draft the insta
 screenshot 09-needs-you.png
 the page asked: "Review pull request #51, \"Read the reviewer's answer from its last turn\", again? A new reviewer thread starts at round 1, and Nexus lands the pull request once it approves, as this project lands its reviews.", and the driver pressed OK
 after Review again: {"chip":"running","cards":[]}
-the review is now rv-4a3d6ec2, reviewing, round 1, reviewer th-b0bbf6f99739, land {"requestedBy":"nLAPTOP"}
+the review is now rv-80fef9b4, reviewing, round 1, reviewer th-1d15b6d6f0d4, land {"requestedBy":"nLAPTOP"}
 screenshot 10-after-review-again.png
 the page asked: "Cancel review rv-52000000 of pull request #52? It stops waiting on you. Its reviewer thread is archived, and this thread stays as it is.", and the driver pressed OK
 after Cancel review: {"count":"5","cards":["Stopped short: nexus / Draft the install guide [Write to it]","Question: nexus / Rebuild the pylon image [Rebuild, Not now]","Proposed item: nexus / Plan the install wave [Accept, Reject]","Review needs you: nexus / Rename the deploy flag [Cancel review]","Held review: nexus / Cache the thread list [Land #54]"]}
 screenshot 11-after-cancel.png
 its page after Cancel review: {"chip":"running","cards":[]}
-Write to it opened /threads/th-8b502627fef6#write, with the focus on #prompt-text
+Write to it opened /threads/th-2a9dba8cdbec#write, with the focus on #prompt-text
 screenshot 12-write-to-it.png
