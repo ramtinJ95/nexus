@@ -14,19 +14,21 @@ export function statusOf(message) {
   switch (message.type) {
     case "waiting": return { text: `Waiting for the pylon, which is ${message.pylon}. Attaching wakes it.`, over: false };
     case "attached": return { text: null, over: false };
-    case "exit": return { text: message.code === 0 ? "Detached from Herdr. Its sessions keep running." : `Herdr exited with code ${message.code}. Its sessions keep running.`, over: true };
-    case "error": return { text: message.message, over: true };
+    case "exit": return { text: message.code === 0 ? "Detached from Herdr. Its sessions keep running." : `Herdr exited with code ${message.code}. Its sessions keep running.`, over: true, why: "exit" };
+    case "error": return { text: message.message, over: true, why: "error", kind: message.kind };
     default: return undefined;
   }
 }
 
 /** A close before any message is a refusal, which a browser's WebSocket cannot read, such as an archived thread's. */
-const refused = { text: "The terminal could not attach. The thread may be archived, or the control plane unreachable.", over: true };
-const dropped = { text: "The connection dropped. Herdr keeps the session, so attach again.", over: true };
+const refused = { text: "The terminal could not attach. The thread may be archived, or the control plane unreachable.", over: true, why: "refused" };
+const dropped = { text: "The connection dropped. Herdr keeps the session, so attach again.", over: true, why: "dropped" };
+const detached = { text: "Detached. Herdr keeps its sessions running.", over: true, why: "detached" };
 
 /**
  * Joins `term` to the attach route over `socket`: keys go as binary messages, each resize as a resize message, and
- * the pylon's output is written to `term`. `status` hears each change, and once with `over`. Returns its detach.
+ * the pylon's output is written to `term`. `status` hears each change, and once with `over` and `why` it ended:
+ * `exit`, `error` with the error's `kind`, `refused`, `dropped` or `detached`. Returns its detach.
  */
 export function joinTerminal(term, socket, status) {
   let heard = false;
@@ -62,7 +64,7 @@ export function joinTerminal(term, socket, status) {
   const resized = term.onResize(({ cols, rows }) => send(JSON.stringify({ type: "resize", cols, rows })));
   return () => {
     for (const listener of [typed, binary, resized]) listener.dispose();
-    end({ text: "Detached. Herdr keeps its sessions running.", over: true });
+    end(detached);
     socket.close();
   };
 }
@@ -84,4 +86,80 @@ export function clipboardOf(clipboard) {
     // A browser refuses a write from a page without focus, and has no clipboard outside a secure context.
     writeText: async (selection, text) => { if (selection !== "p") await clipboard?.writeText(text).catch(() => {}); },
   };
+}
+
+/** How long a page stays attached while hidden, short of the 20 minutes without a human that pause a pylon. */
+export const hiddenDetachMs = 10 * 60_000;
+const maxTries = 8;
+
+/** Whether a join that ended so may be tried again. A control plane that is restarting refuses a retry's upgrade. */
+const transient = (s, retry) => s.why === "dropped" || (s.why === "error" && s.kind === "unreachable") || (s.why === "refused" && retry);
+
+/**
+ * Joins `term` as joinTerminal does over a socket `open()` gives, and again after the link drops: with backoff while
+ * `page` shows, and once it shows when it was hidden. A page hidden for `hiddenDetachMs` detaches, so the pylon can
+ * pause, and attaches again when it shows. `status` hears what joinTerminal says, and the waits between. Returns the
+ * person's detach.
+ */
+export function keepAttached(term, open, status, page = document) {
+  let state = { kind: "over" };
+  let tries = 0;
+  const enter = (next) => {
+    const was = state;
+    state = next;
+    if (was.kind === "joined") {
+      clearTimeout(was.hiding);
+      was.detach();
+    }
+    if (was.kind === "retrying") clearTimeout(was.timer);
+  };
+  const end = (s) => {
+    enter({ kind: "over" });
+    page.removeEventListener("visibilitychange", visibility);
+    status(s);
+  };
+  const sleep = (retry, text) => {
+    enter({ kind: "asleep", retry });
+    status({ text, over: false });
+  };
+  const untilShown = "The connection dropped. It attaches again when the page shows.";
+  const join = (retry) => {
+    const joined = { kind: "joined", retry, hiding: undefined, detach: () => {} };
+    enter(joined);
+    joined.detach = joinTerminal(term, open(), (s) => { if (state === joined) heard(joined, s); });
+  };
+  const heard = (joined, s) => {
+    if (!s.over) {
+      // `attached`: Herdr redraws the screen, and a reattach must not keep the modes the dropped client set.
+      if (s.text === null) {
+        tries = 0;
+        term.reset();
+      }
+      return status(s);
+    }
+    if (!transient(s, joined.retry)) return end(s);
+    if (tries === maxTries) return end({ text: `The connection dropped, and attaching again failed ${maxTries} times. Herdr keeps the session, so attach again.`, over: true });
+    if (page.visibilityState === "hidden") return sleep(true, untilShown);
+    const delay = Math.min(30_000, 1000 * 2 ** tries++);
+    enter({ kind: "retrying", timer: setTimeout(() => (page.visibilityState === "hidden" ? sleep(true, untilShown) : join(true)), delay) });
+    status({ text: `The connection dropped. Attaching again in ${delay / 1000} s.`, over: false });
+  };
+  const visibility = () => {
+    if (page.visibilityState === "hidden") {
+      if (state.kind === "joined") state.hiding ??= setTimeout(() => sleep(false, "Detached while the page was hidden, so the pylon can pause. It attaches again when the page shows."), hiddenDetachMs);
+      return;
+    }
+    if (state.kind === "joined") {
+      clearTimeout(state.hiding);
+      state.hiding = undefined;
+    }
+    if (state.kind === "asleep") {
+      tries = 0;
+      join(state.retry);
+    }
+  };
+  page.addEventListener("visibilitychange", visibility);
+  join(false);
+  visibility();
+  return () => { if (state.kind !== "over") end(detached); };
 }

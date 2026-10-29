@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import css from "@xterm/xterm/css/xterm.css";
-import { attachUrl, clipboardOf, joinTerminal, keyFor } from "./terminal.js";
+import { attachUrl, clipboardOf, keepAttached, keyFor } from "./terminal.js";
 import { onThemeChange, themeValue } from "./theme.js";
 
 const base = new CSSStyleSheet();
@@ -76,7 +76,7 @@ export function openTerminal(host, thread, status) {
   });
   term.open(host);
   fit.fit();
-  const detach = joinTerminal(term, new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows })), status);
+  const detach = keepAttached(term, () => new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows })), status);
   const sized = new ResizeObserver(() => { if (host.offsetParent !== null) fit.fit(); });
   sized.observe(host);
   const unwatch = onThemeChange(() => { term.options.theme = terminalTheme(); });
