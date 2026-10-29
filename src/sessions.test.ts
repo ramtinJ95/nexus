@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
-import { attachedTerminals, attachScript, claudeTextProblem, closeSession, dropFailedSession, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { attachedTerminals, attachScript, claudeTextProblem, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply, type FakeGuest } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
@@ -987,6 +987,8 @@ echo '{"id":"cli:test","result":{"type":"ok"}}'
         onSnapshot(++reads);
         return herdrOk(herdrSnapshot([...new Set(panes.map((p) => p.workspace_id))].map((id) => ({ id, label: "Claude Code" })), panes));
       case "pane process-info": return processInfo(foreground)(argv);
+      // Herdr 0.9.5 prints nothing for a key it pressed.
+      case "pane send-keys": return panes.some((p) => p.pane_id === argv[2]) ? { exitCode: 0, output: "" } : herdrError("pane_not_found");
       case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
       case "workspace create": return created("w5", "w5:p1");
       case "agent start": {
@@ -1104,6 +1106,41 @@ test("a failed chunk stops the typing before Enter, and the error says how far i
   const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })], { ...runningClaude });
   await assert.rejects(sendToClaude(w.guest, { session, text: "a".repeat(64) + "FAILME" + "b".repeat(64) }), /part of the message may sit unsent.*typed 1 of 3 chunks/s);
   assert.deepEqual(w.herdrCalls().map((call) => call[3]), ["send-text", "send-text"]);
+});
+
+const pressed = (w: ReturnType<typeof claudeWorkers>) => w.guest.execs.filter((a) => a[3] === "pane" && a[4] === "send-keys").map((a) => a.slice(5));
+
+test("an interrupt presses Esc, and only Esc, in the pane of a working Claude, and nothing for an idle Claude, a dialog or a state Herdr cannot tell", async (t) => {
+  const working = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })], { ...runningClaude });
+  assert.equal(await interruptClaude(working.guest, session), "interrupted");
+  assert.deepEqual(pressed(working), [["w1:p1", "esc"]]);
+  for (const [status, outcome] of [["idle", "idle"], ["done", "idle"], ["blocked", "blocked"], ["unknown", "unknown"]] as const) {
+    const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", status, { kind: "id", value: session })], { ...runningClaude });
+    assert.equal(await interruptClaude(w.guest, session), outcome, status);
+    assert.deepEqual(pressed(w), [], `nothing is pressed for a Claude that is ${status}`);
+  }
+});
+
+test("an interrupt finds the session's pane as a send does, and resumes nothing when no Claude runs it", async (t) => {
+  const byCommandLine = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "another-session" }), herdrPane("w2:p1", "w2", "claude", "working")],
+    { "w1:p1": ["claude", "--resume", session], "w2:p1": ["claude", "--resume", session] });
+  assert.equal(await interruptClaude(byCommandLine.guest, session), "interrupted");
+  assert.deepEqual(pressed(byCommandLine), [["w2:p1", "esc"]], "a pane whose Claude moved on to another session, as after /clear, is not pressed");
+
+  for (const [why, panes, foreground] of [
+    ["another session", [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "another-session" })], { "w1:p1": ["claude", "--resume", "another-session"] }],
+    ["a Claude that exited to its shell", [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })], {}],
+    ["no pane", [], {}],
+  ] as const) {
+    const w = claudeWorkers(t, [...panes], { ...foreground });
+    assert.equal(await interruptClaude(w.guest, session), "not-running", why);
+    assert.deepEqual(pressed(w), [], why);
+    assert.equal(w.guest.herdrCalls().some((c) => c === "workspace create" || c === "agent start"), false, `${why}: nothing is resumed`);
+  }
+
+  const panes = [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })];
+  const closing = claudeWorkers(t, panes, { ...runningClaude }, (reads) => { if (reads === 1) queueMicrotask(() => panes.splice(0)); });
+  assert.equal(await interruptClaude(closing.guest, session), "not-running", "a pane that closed before Esc reached it");
 });
 
 test("a message Claude's prompt cannot take exactly is refused with a reason, and newlines are fine", () => {
