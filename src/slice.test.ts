@@ -23,7 +23,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer, request } from "node:http";
+import { request } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
@@ -41,6 +41,7 @@ import type { BackendPylon, Guest, VmBackend } from "./backend.ts";
 import { loginHosts, renderOverlay, type BootInputs, type CloneRepo, type OverlayFile, type PreviewAssignment, type ProjectId } from "./project.ts";
 import { checkoutDir, sessionFacts, sessionsFile, type SessionHarness } from "./sessions.ts";
 import type { CheckpointId, ImageId } from "./images.ts";
+import { freePort } from "./test-kit.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -482,10 +483,7 @@ const serviceFiles: OverlayFile[] = [
 
 before(async () => {
   stateDir = await mkdtemp(join(tmpdir(), "nexus-slice-probe-"));
-  const free = createServer().listen(0, "127.0.0.1");
-  await new Promise((resolve) => free.once("listening", resolve));
-  gatewayPort = (free.address() as { port: number }).port;
-  await new Promise((resolve) => free.close(resolve));
+  gatewayPort = await freePort();
   await fixture.setUp();
   await startTestProbe();
 });

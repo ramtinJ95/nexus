@@ -14,6 +14,7 @@ import { agentModelFailure, agentReplies, humanLabel, phaseNote, reviewerCaller,
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { watch } from "../test-kit.ts";
 import { checkCaller, verifyCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 import { HttpError } from "./http-error.ts";
@@ -545,13 +546,6 @@ test("a message the inbox cannot deliver yet is sent again under the same reques
   await loop.poll();
   assert.deepEqual(f.sent.map((s) => s.message.id), [`${f.review().id}:1`]);
 });
-
-/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
-function watch(promise: Promise<unknown>) {
-  let settled = false;
-  void promise.then(() => { settled = true; });
-  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
-}
 
 /** A review whose request to the reviewer the inbox keeps putting off, so each pass tries to deliver it once. */
 async function undelivered(t: import("node:test").TestContext) {

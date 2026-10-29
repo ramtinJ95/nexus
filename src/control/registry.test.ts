@@ -7,51 +7,28 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type StoredPylon, type ThreadId } from "./registry.ts";
+import { seedRegistry, testPylon, testProject, testThread } from "./test-kit.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { PullRequest } from "./github.ts";
-import { newPylonRecord, type PylonRecord } from "../tick.ts";
+import type { PylonRecord } from "../tick.ts";
 import { trackActivity } from "../harness/activity.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
 import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
-import type { ProjectId, RemoteProject } from "../project.ts";
-import type { ImageManifest, TemplateRecord } from "../images.ts";
+import type { ProjectId } from "../project.ts";
+import type { TemplateRecord } from "../images.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { testImage } from "../test-kit.ts";
 import type { WaitingAsk } from "./questions.ts";
 
 const node = "rj-firebat" as NodeName;
 const threadId = "th-1" as ThreadId;
 const pylonId = "pylon-th-1" as PylonId;
-const project: RemoteProject = {
-  id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
-  resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: ["registry.npmjs.org"],
-  secrets: [{ name: "TOKEN", hosts: ["api.example.com"] }], logins: ["chatgpt"], preSetup: null,
-};
-const thread: Thread = {
-  seenAt: null, lastReplyAt: null,
-  id: threadId, title: "fix it", project: project.id, pylonId, status: "active", conversationId: null, startedBy: "nLAPTOP",
-  createdAt: 1_000, agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: 1_000,
-};
-const { desired: _, ...pylon } = newPylonRecord({
-  thread: threadId, pylonId, node, desired: "running",
-  boot: {
-    pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: ["a.example"], secrets: [] },
-    repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
-    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
-  },
-  firstBoot: { kind: "fresh", preSetup: null },
-  live: { previews: [], overlay: [] },
-  liveHash: "hash-1" as LiveHash,
-});
-const image: ImageManifest = {
-  id: "img-000000000000", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "0".repeat(64),
-  pins: {
-    debianDigest: "d", node: "24", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s",
-    gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-    neovim: "0.12.6", neovimSha256: "b".repeat(64),
-  },
-};
+const project = testProject({ allowedHosts: ["registry.npmjs.org"], secrets: [{ name: "TOKEN", hosts: ["api.example.com"] }], logins: ["chatgpt"] });
+const thread = testThread({ id: threadId, title: "fix it", createdAt: 1_000, lastHumanActivityAt: 1_000 });
+const pylon = testPylon(thread, { node, boot: { network: { allowedHosts: ["a.example"], secrets: [] } } });
+const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
 
 // One directory for the file, so each test's registry is closed before it is removed.
 const dir = await mkdtemp(join(tmpdir(), "nexus-registry-"));
@@ -59,9 +36,7 @@ after(() => rm(dir, { recursive: true }));
 const tempDb = () => join(dir, `${randomUUID()}.db`);
 
 function seeded(path: string, clock = Date.now) {
-  const registry = openRegistry(path, clock);
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  registry.createProject(project);
+  const registry = seedRegistry(openRegistry(path, clock), { project });
   registry.createThread(thread, pylon);
   return registry;
 }

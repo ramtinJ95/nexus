@@ -6,11 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { addThread as addTestThread, seedRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { desiredPhase, envelope } from "../reconcile.ts";
-import { newPylonRecord } from "../tick.ts";
-import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, PylonObservation, TailnetNodeId } from "../protocol.ts";
-import type { ProjectId } from "../project.ts";
+import type { JobId, NodeName, NodeObservation, PylonId, PylonObservation } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
 
 const image: ImageId = "img-000000000000";
@@ -20,35 +19,12 @@ const dir = await mkdtemp(join(tmpdir(), "nexus-backfill-"));
 after(() => rm(dir, { recursive: true }));
 
 function opened(path = join(dir, `${randomUUID()}.db`)): Registry {
-  const registry = openRegistry(path);
-  for (const name of [n1, n2]) registry.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name}` as TailnetNodeId });
-  if (registry.project("acme" as ProjectId) === undefined) {
-    registry.createProject({
-      id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: n1,
-      resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-    });
-  }
-  return registry;
+  return seedRegistry(openRegistry(path), { nodes: [n1, n2] });
 }
 
 let created = 0;
 function addThread(registry: Registry, node: NodeName, title: string, status: Thread["status"] = "archived"): Thread {
-  const id = `th-${randomUUID().slice(0, 8)}` as ThreadId;
-  const pylonId = `pylon-${id}` as PylonId;
-  const thread: Thread = {
-    seenAt: null, lastReplyAt: null, id, title, project: "acme" as ProjectId, pylonId, status: "active", conversationId: null,
-    startedBy: "nLAPTOP", createdAt: 1_000 + created++, agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0,
-  };
-  const { desired: _, ...pylon } = newPylonRecord({
-    thread: id, pylonId, node, desired: "paused",
-    boot: {
-      pylonId, image, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, network: { allowedHosts: [], secrets: [] },
-      repo: { kind: "clone", url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
-      dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
-    },
-    firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash-1" as LiveHash,
-  });
-  registry.createThread(thread, pylon);
+  const { id } = addTestThread(registry, { node, boot: { image }, thread: { title, createdAt: 1_000 + created++, lastHumanActivityAt: 0 } });
   if (status !== "active") registry.setThreadStatus(id, status);
   return registry.thread(id)!;
 }

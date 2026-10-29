@@ -1,7 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDockerBackend } from "./docker-backend.ts";
@@ -9,6 +8,7 @@ import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { dockerServices } from "./docker-services.ts";
 import type { PylonId } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
+import { freePort } from "./test-kit.ts";
 
 type Reply = { stdout?: string; stderr?: string; code?: number };
 
@@ -158,14 +158,6 @@ test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause aft
   const commit = calls.find((argv) => argv[0] === "commit")!;
   assert.ok(hasPair(commit, "--change", `LABEL nexus.sessions="${paused}"`) && hasPair(commit, "--change", 'LABEL nexus.checkpoint="ckpt-a-2"'), commit.join(" "));
 });
-
-async function freePort(): Promise<number> {
-  const server = createServer().listen(0, "127.0.0.1");
-  await new Promise((resolve) => server.once("listening", resolve));
-  const { port } = server.address() as { port: number };
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
 
 test("the host bridge names the pylon from the one running container carrying the token, scoped by a --filter for each label", async (t) => {
   const token = "0123456789abcdef0123456789abcdef";

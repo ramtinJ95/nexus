@@ -7,14 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { addThread as addTestThread, seedRegistry } from "./test-kit.ts";
 import { usageCounter } from "./usage-counter.ts";
 import { roleOf, tokenCount, usageFilter, type AgentCall, type Tokens } from "./usage.ts";
 import { reviewerCaller } from "./review.ts";
 import { checkCaller, verifyCaller } from "./gate.ts";
-import { newPylonRecord } from "../tick.ts";
 import { processStream } from "../process-stream.ts";
 import type { ConversationId } from "../harness/host.ts";
-import type { LiveHash, NodeName, ProbeClient, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { LiveHash, NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
 
@@ -30,35 +30,13 @@ const dir = await mkdtemp(join(tmpdir(), "nexus-usage-"));
 after(() => rm(dir, { recursive: true }));
 
 function openOnline(path = join(dir, `${randomUUID()}.db`)): Registry {
-  const registry = openRegistry(path);
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  if (registry.project("acme" as ProjectId) === undefined) {
-    registry.createProject({
-      id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
-      resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-    });
-  }
-  return registry;
+  return seedRegistry(openRegistry(path), { nodes: [node] });
 }
 
 function addThread(registry: Registry, options: { startedBy?: string; conversationId?: string | null; phase?: "running" | "paused" } = {}): Thread {
-  const id = `th-${randomUUID().slice(0, 8)}` as ThreadId;
-  const pylonId = `pylon-${id}` as PylonId;
-  const thread: Thread = {
-    seenAt: null, lastReplyAt: null, id, title: "t", project: "acme" as ProjectId, pylonId, status: "active", conversationId: options.conversationId ?? null,
-    startedBy: options.startedBy ?? "nLAPTOP", createdAt: Date.now(), agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(),
-  };
-  const { desired: _, ...pylon } = newPylonRecord({
-    thread: id, pylonId, node, desired: "running",
-    boot: {
-      pylonId, image, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, network: { allowedHosts: [], secrets: [] },
-      repo: { kind: "clone", url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
-      dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
-    },
-    firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash-1" as LiveHash,
-  });
+  const conversationId = options.conversationId ?? null;
   // As a start does: a harness thread has no Claude worker.
-  registry.createThread(thread, pylon, thread.conversationId === null ? "hello" : undefined);
+  const { id, pylonId } = addTestThread(registry, { node, boot: { image }, thread: { conversationId, startedBy: options.startedBy ?? "nLAPTOP" }, claudePrompt: conversationId === null ? "hello" : undefined });
   observe(registry, pylonId, options.phase ?? "running");
   return registry.thread(id)!;
 }

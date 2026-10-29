@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as wait } from "node:timers/promises";
 import { drain, enqueue, maxAgeMs, maxEntries, settleMs, type OutboxEvent, type Outcome } from "../images/pylon/nexus-outbox.ts";
+import { until } from "./test-kit.ts";
 
 const sender = fileURLToPath(new URL("../images/pylon/nexus-outbox.ts", import.meta.url));
 const lockless = process.platform !== "linux" && "the sender's lock is a Linux abstract socket";
@@ -40,15 +41,6 @@ async function bridge(t: TestContext, answer: (event: OutboxEvent, res: ServerRe
   return { requests, url: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
 }
 
-/** Waits for the check. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
-async function until(check: () => boolean) {
-  const deadline = Date.now() + 60_000;
-  while (!check()) {
-    if (Date.now() > deadline) throw new Error("timed out");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
 function runSender(env: NodeJS.ProcessEnv) {
   const child = spawn(process.execPath, [sender], { env: { ...process.env, ...env }, stdio: "ignore" });
   return once(child, "exit").then(([code]) => code as number | null);
@@ -73,7 +65,7 @@ test("events written while the probe is down reach it in order and once when it 
   const now = Date.now();
   await enqueue({ kind: "session.turn-started", at: now - 1, session: "c1" }, outbox);
   const exited = runSender(env);
-  await until(() => requests.length > 0);
+  await until("the sender posts", () => requests.length > 0);
 
   // The hook reports only under the pylon user's own HOME, so another process writes as it does.
   const writer = execFile(process.execPath, ["--input-type=module", "-e",
@@ -105,7 +97,7 @@ test("a second sender leaves the spool to the one that holds it", { skip: lockle
   await enqueue({ kind: "session.turn-started", at: Date.now() - settleMs, session: "c1" }, outbox);
   await enqueue({ kind: "session.turn-ended", at: Date.now() - settleMs + 1, session: "c1" }, outbox);
   const first = runSender(env);
-  await until(() => requests.length === 1);
+  await until("the sender posts once", () => requests.length === 1);
 
   assert.equal(await runSender(env), 0);
   assert.equal(requests.length, 1, "the second sender sent nothing");

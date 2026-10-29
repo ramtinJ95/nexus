@@ -20,28 +20,26 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { request } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import type { JobStatus } from "../protocol.ts";
+import type { PylonId } from "../protocol.ts";
 import { scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
+import { callText } from "../test-kit.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane } from "./main.ts";
 import { apiClient, fetchUntil, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
+import { openRegistry } from "./registry.ts";
 
-const { probeConfig, stateRoot, image, dnsName, host, serveJson, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "a preview", resolvesToProbe: true });
+const { probeConfig, stateRoot, image, dnsName, host, serveStatus, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "a preview", resolvesToProbe: true });
 const holdMs = Number(process.argv[4] ?? 0) * 1000;
-const serveStatus = async () => JSON.parse(await serveJson()) as { TCP?: Record<string, unknown> };
 const serveBefore = await serveStatus();
 console.log(`tailscale serve status before: ${JSON.stringify(serveBefore)}`);
-// The check's registry is new, so its one preview gets the first port. Taking over an entry there would break whatever owns it.
-const firstPort = String(defaultPreviewPorts.first);
-if (Object.keys(serveBefore.TCP ?? {}).includes(firstPort)) throw new Error(`tailscale serve already serves port ${firstPort}, which this check's preview would get. Free it first`);
+// The check's registry is new, so its one preview gets the first port.
+await refuseServedPorts({ first: defaultPreviewPorts.first, last: defaultPreviewPorts.first });
 const dir = await mkdtemp(join(tmpdir(), "nexus-thread-on-node-"));
 const config = planeConfig(dir);
 let controlPlane = await startPlane(config);
@@ -56,17 +54,10 @@ const reaches = (state: string, timeoutMs: number) => api.reaches(threadId!, sta
 const runTool = (requestId: string, command: string) => api.runTool(threadId!, requestId, command);
 
 /** The dashboard's thread page, which the API serves outside /v1 under the same host check. */
-function threadPage(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const req = request({ host, port: controlPlane.port, method: "GET", path: `/threads/${threadId}`, headers: { host: `${host}:${controlPlane.port}` } }, (res) => {
-      let text = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { text += chunk; });
-      res.on("end", () => res.statusCode === 200 ? resolve(text) : reject(new Error(`GET /threads/${threadId}: HTTP ${res.statusCode}: ${text}`)));
-    });
-    req.on("error", reject);
-    req.end();
-  });
+async function threadPage(): Promise<string> {
+  const { status, text } = await callText({ host, port: controlPlane.port, method: "GET", path: `/threads/${threadId}` });
+  if (status !== 200) throw new Error(`GET /threads/${threadId}: HTTP ${status}: ${text}`);
+  return text;
 }
 function conversationSection(html: string): string {
   const conversation = html.split('id="convo"')[1]?.split('<div class="dock">')[0];
@@ -82,16 +73,7 @@ function conversationSection(html: string): string {
 const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
 
 /** Runs the real CLI against this check's control plane, directly on the tailnet. */
-function nexus(...args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [cli, ...args, "--url", `http://${host}:${controlPlane.port}`, "--socks", "none"], { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
-    child.on("exit", (code) => resolve({ code, stdout, stderr }));
-  });
-}
+const nexus = (...args: string[]) => api.runCli(args);
 
 async function checkStreamedAnswer(seconds: number, quietMs: number) {
   const words = Math.round((seconds * 1000) / streamedWordMs);
@@ -302,20 +284,13 @@ async function deleteThread(pylonId: string): Promise<string> {
 }
 
 /** The registry row's planner state and the last job the probe reported for the pylon, which ThreadDetail does not carry. */
-function plannerState(pylonId: string) {
-  const db = new DatabaseSync(config.db, { readOnly: true });
+function plannerState(pylonId: PylonId) {
+  const registry = openRegistry(config.db);
   try {
-    const pylon = db.prepare("SELECT failed, attempts, retrying, submitted FROM pylons WHERE id = ?").get(pylonId) as { failed: string | null; attempts: string; retrying: number; submitted: string | null };
-    const job = db.prepare("SELECT status FROM jobs WHERE subject = ?").get(pylonId) as { status: string } | undefined;
-    return {
-      failed: pylon.failed,
-      attempts: JSON.parse(pylon.attempts) as { count: number; last: { at: number; code: string } | null },
-      retrying: pylon.retrying === 1,
-      job: job === undefined ? null : JSON.parse(job.status) as JobStatus,
-      submitted: pylon.submitted === null ? null : JSON.parse(pylon.submitted) as unknown,
-    };
+    const { failed, attempts, retrying, submitted } = registry.pylon(pylonId)!;
+    return { failed, attempts, retrying, job: registry.job(pylonId) ?? null, submitted };
   } finally {
-    db.close();
+    registry.close();
   }
 }
 

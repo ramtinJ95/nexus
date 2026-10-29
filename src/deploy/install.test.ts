@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { checkoutMerged, command, ReleaseInstaller, type InstallBoundary } from "./install.ts";
+import { snapshot } from "../test-kit.ts";
 
 const commit = "a".repeat(40);
 async function directory(t: TestContext): Promise<string> {
@@ -155,15 +156,6 @@ test("a journal that is not JSON is refused rather than read as no deployment", 
   await assert.rejects(installer.observed(), SyntaxError);
   await assert.rejects(installer.install(commit), SyntaxError);
 });
-
-/** Each file under `root`, with its bytes, mode, owner and modification time. */
-async function snapshot(root: string): Promise<Record<string, string>> {
-  const entries = await Promise.all((await readdir(root, { recursive: true })).map(async (name) => {
-    const s = await stat(join(root, name));
-    return s.isDirectory() ? [] : [[name, `${(await readFile(join(root, name))).toString("base64")} ${(s.mode & 0o777).toString(8)} ${s.uid}:${s.gid} ${s.mtimeMs}`]];
-  }));
-  return Object.fromEntries(entries.flat());
-}
 
 /**
  * The role installers of this checkout, run as the deployer runs them, with stdin open and never written. Only what

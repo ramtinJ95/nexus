@@ -15,12 +15,12 @@
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { CheckpointId, ImageId } from "./images.ts";
+import type { CheckpointId } from "./images.ts";
 import type { BootInputs } from "./project.ts";
 import type { PylonId } from "./protocol.ts";
-import { createPylonVmBackend } from "./pylon-vm-backend.ts";
+import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 
 const [imageArg, stateArg, roundsArg, readersArg] = process.argv.slice(2);
 if (imageArg === undefined || stateArg === undefined) throw new Error("usage: node src/pylon-vm-stop-race.check.ts <image directory> <state root> [rounds] [readers]");
@@ -33,17 +33,9 @@ assert.ok(Number.isInteger(rounds) && rounds > 0 && Number.isInteger(readers) &&
 const settleLimitMs = 8_000;
 
 const pylonId = `pylon-race-${Date.now().toString(36)}` as PylonId;
-const image = basename(imageDir) as ImageId;
 const signal = () => AbortSignal.timeout(20 * 60_000);
-const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(imageDir), secrets: { value: () => undefined, names: () => [] } });
-const boot = (source: BootInputs["source"]): BootInputs => ({
-  pylonId, image, source,
-  resources: { cpus: 2, memoryGiB: 4, diskGiB: 8 },
-  network: { allowedHosts: ["github.com"], secrets: [] },
-  repo: { kind: "clone", url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
-  dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
-});
-const live = { previews: [], overlay: [] };
+const { backend, image } = checkBackend(imageDir, stateRoot);
+const boot = (source: BootInputs["source"]) => checkBoot(pylonId, image, source, { memoryGiB: 4 });
 const step = (name: string, value = "ok") => console.log(`${name}: ${value}`);
 const seconds = (ms: number) => (ms / 1000).toFixed(1);
 
@@ -84,7 +76,7 @@ async function running(marker: string, pin: Promise<Read>): Promise<void> {
 
 let failure: unknown = null;
 try {
-  await backend.ensureRunning(boot({ kind: "fresh", preSetup: null }), live, signal());
+  await backend.ensureRunning(boot({ kind: "fresh", preSetup: null }), emptyLive, signal());
   step("BOOTED");
   let raced = 0;
   for (let round = 1; round <= rounds; round++) {
@@ -120,7 +112,7 @@ try {
     step(`ROUND_${round}`, `pinned in ${seconds(pinMs)} s, pause ${seconds(pausedAt - pauseAt)} s (${phases}), ${reads.length} reads, pinned execs settled ${held.map((r) => `${seconds(late(r))} s into the stop (${r.outcome})`).join(" and ")}, latest ${seconds(late(slowest))} s after its start or the stop's (${slowest.outcome}), ${closed.length === 0 ? "all settled before the close" : closed.join("; ")}`);
     assert.equal(crossed.length, held.length, `round ${round}: a pinned exec did not cross the stop, so the round proved nothing`);
     assert.ok(late(slowest) < settleLimitMs, `round ${round}: a request in flight through the stop settled ${seconds(late(slowest))} s late (${slowest.outcome})`);
-    await backend.ensureRunning(boot({ kind: "resume", checkpoint: `ckpt-${pylonId}-${round}` as CheckpointId }), live, signal());
+    await backend.ensureRunning(boot({ kind: "resume", checkpoint: `ckpt-${pylonId}-${round}` as CheckpointId }), emptyLive, signal());
   }
   step("ROUNDS_RACED", `${raced} of ${rounds}`);
 } catch (err) {

@@ -5,6 +5,7 @@ import { fakeGuest } from "../fake-guest.ts";
 import { renderOverlay, type ProjectId, type PylonOverlay, type ServiceDecl } from "../project.ts";
 import type { NodeName, PylonId, ServiceFact } from "../protocol.ts";
 import { createPylonApi, pylonInfoFile, type PylonApiDeps } from "./pylon-api.ts";
+import { until } from "../test-kit.ts";
 
 const pylonId = "pylon-t1" as PylonId;
 const overlay: PylonOverlay = {
@@ -15,15 +16,6 @@ const overlay: PylonOverlay = {
 const pylonJson = renderOverlay(overlay).find((f) => f.path === pylonInfoFile)!.content;
 const fact = (name: string, wantsPreview: boolean): ServiceFact => ({ name, state: "ready", port: 3000, declared: true, wantsPreview });
 const url = (port: number) => `https://infra-testbench.tail0.ts.net:${port}/`;
-
-/** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
-async function until(what: string, predicate: () => boolean) {
-  const deadline = Date.now() + 60_000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
 
 /** The tailscale serve stand-in serves every port the test publishes. A call's wait for a URL only ends a hang, unless the test sets its own. */
 function setup(guest: Partial<Guest>, deps: Partial<PylonApiDeps> = {}) {

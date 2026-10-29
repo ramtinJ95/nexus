@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { createServer, request } from "node:http";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentReader } from "@earendil-works/pi-durable";
@@ -31,19 +31,18 @@ import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
 import { nodeSecrets } from "./probe/config.ts";
 import { startProbe } from "./probe/server.ts";
 import { connectProbe, type Job, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "./protocol.ts";
-import { createPylonVmBackend } from "./pylon-vm-backend.ts";
+import { checkBackend, checkBoot } from "./pylon-vm-check-kit.ts";
 import { envelope } from "./reconcile.ts";
 import { snapshot } from "./tick.ts";
 import { checkoutDir, harnesses as harnessTable, herdrSession, sessionFacts, sessionsFile, type SessionHarness } from "./sessions.ts";
 import { loginHosts, type BootInputs, type LiveSpec, type OverlayFile } from "./project.ts";
-import type { ImageId } from "./images.ts";
+import { freePort } from "./test-kit.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
 if (assets === undefined || stateRoot === undefined) throw new Error("usage: node src/pylon-guest.check.ts <image dir in an artifact store> <state root>");
 const harnesses = (process.env["NEXUS_CHECK_SESSIONS"] ?? "shell,claude-code,pi").split(",").filter(Boolean) as SessionHarness[];
 const unknown = harnesses.filter((h) => !["shell", "claude-code", "pi"].includes(h));
 if (unknown.length > 0) throw new Error(`NEXUS_CHECK_SESSIONS names no harness ${unknown.join(", ")}`);
-const image = basename(assets) as ImageId;
 const run = randomUUID().slice(0, 8);
 const pylonId = `pylon-check-${run}` as PylonId;
 const node = "check-node" as NodeName;
@@ -51,12 +50,9 @@ const controlPlaneId = "nCHECKCONTROL" as TailnetNodeId;
 const probeId = "nCHECKPROBE" as TailnetNodeId;
 const step = (name: string, value: unknown = "ok") => console.log(`${name}: ${typeof value === "string" ? value : JSON.stringify(value, null, 2)}`);
 
-const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets: { value: () => undefined, names: () => [] }, previewHost: nodeHost });
+const { backend, image } = checkBackend(assets, stateRoot, { previewHost: nodeHost });
 const tailscale = fakeTailscale();
-const free = createServer().listen(0, "127.0.0.1");
-await new Promise((resolve) => free.once("listening", resolve));
-const gatewayPort = (free.address() as { port: number }).port;
-await new Promise((resolve) => free.close(resolve));
+const gatewayPort = await freePort();
 const probe = await startProbe({
   node, host: "127.0.0.1", port: 0,
   auth: { controlPlane: controlPlaneId, peers: [] },
@@ -72,14 +68,12 @@ const tailscaled = join(stateRoot, `check-${run}.sock`);
 const localApi = createServer((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Node: { StableID: probeId } })));
 await new Promise<void>((resolve) => localApi.listen(tailscaled, resolve));
 
-const boot: BootInputs = {
-  pylonId, image, source: { kind: "fresh", preSetup: null },
-  resources: { cpus: 2, memoryGiB: 4, diskGiB: 8 },
+const boot = checkBoot(pylonId, image, { kind: "fresh", preSetup: null }, {
+  memoryGiB: 4,
   // The hosts a project with a Claude login gets, which Claude Code needs to start at all.
-  network: { allowedHosts: ["github.com", ...harnesses.includes("claude-code") ? loginHosts.claude : []], secrets: [] },
-  repo: { kind: "clone", url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
+  allowedHosts: ["github.com", ...harnesses.includes("claude-code") ? loginHosts.claude : []],
   dotfiles: { repo: "https://dotfiles.invalid/common.git", ref: "main" },
-};
+});
 const web = { service: "web", httpsPort: 10100 };
 
 async function job(j: Job): Promise<void> {

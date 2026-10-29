@@ -5,14 +5,13 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { once } from "node:events";
-import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import type { Guest } from "./backend.ts";
 import { fakeGuest } from "./fake-guest.ts";
 import { renderOverlay, type ProjectId, type ServiceDecl } from "./project.ts";
 import type { DeclaredOutput, NodeName, PylonId, ServiceFact } from "./protocol.ts";
 import { createPylonApi, listenHostBridge, pylonInfoFile } from "./probe/pylon-api.ts";
+import { freePort } from "./test-kit.ts";
 
 const cli = fileURLToPath(new URL("../images/pylon/nexus", import.meta.url));
 const pylonId = "pylon-t1" as PylonId;
@@ -26,10 +25,7 @@ const output: DeclaredOutput = { id: "out-1-00000000", kind: "file", path: "/hom
 /** Every guest call the CLI caused, as [member, ...args]. */
 async function probe(t: TestContext, guest: Partial<Guest> = {}) {
   const calls: unknown[][] = [];
-  const free = createServer().listen(0, "127.0.0.1");
-  await once(free, "listening");
-  const port = (free.address() as { port: number }).port;
-  await new Promise((resolve) => free.close(resolve));
+  const port = await freePort();
   const base = fakeGuest((argv) => {
     calls.push(["exec", ...argv]);
     if (argv[0] === "cat") return { exitCode: 0, output: pylonJson };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, appendFile, chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
 import { harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
 import { provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
+import { snapshot } from "../test-kit.ts";
 
 const exec = promisify(execFile);
 const repo = resolve(import.meta.dirname, "../..");
@@ -67,17 +68,6 @@ async function machine(t: TestContext, role: "control" | "node", scan = githubSc
     },
   };
   return { root, at, put, host, owners, runs };
-}
-
-/** Each file under `root`, with its bytes, mode, owner and modification time. */
-async function snapshot(root: string): Promise<Record<string, string>> {
-  const files = await readdir(root, { recursive: true });
-  const entries = await Promise.all(files.map(async (name) => {
-    const s = await stat(join(root, name));
-    if (s.isDirectory()) return [];
-    return [[name, `${(await readFile(join(root, name))).toString("base64")} ${(s.mode & 0o777).toString(8)} ${s.uid}:${s.gid} ${s.mtimeMs}`]];
-  }));
-  return Object.fromEntries(entries.flat());
 }
 
 /** Answers from `given`, by each question's variable. A question it has no answer for fails the test. */

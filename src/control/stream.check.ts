@@ -23,6 +23,7 @@ import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from ".
 import type { ImageId } from "../images.ts";
 import type { ProjectId } from "../project.ts";
 import type { NodeName, TailnetNodeId } from "../protocol.ts";
+import { testImage } from "../test-kit.ts";
 import { startApi, type ThreadHarness } from "./api.ts";
 import { threadStarter } from "./threads.ts";
 import { readEvents } from "./event-reader.ts";
@@ -63,10 +64,8 @@ registry.createProject({
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 });
 const image = "img-0123456789ab" as ImageId;
-registry.saveImage({
-  id: image, gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "a".repeat(64),
-  pins: { debianDigest: "d", node: "n", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s", gondolin: "g", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64), neovim: "0.12.6", neovimSha256: "b".repeat(64) },
-}, null);
+registry.saveImage(testImage({ id: image }), null);
+
 registry.setCurrentImage(image);
 const api = await startApi({
   registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
