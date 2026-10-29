@@ -28,7 +28,8 @@ async function report() {
   const payload = await hookInput();
   const { session_id: session } = payload ?? {};
   if (typeof session !== "string" || session.length > 200) return null;
-  if (payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion") await forgetAsk(asks, session, payload.tool_input).catch(() => {});
+  const answered = payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion";
+  if (answered) await forgetAsk(asks, session, payload.tool_input).catch(() => {});
   const { kind, shells } = reportedKind(process.argv[2], payload);
   // Before the event is queued, so the control plane's pull of the asks after it lists none of the session's.
   if (kind === "session.turn-started" || kind === "session.turn-ended" || kind === "session.ended") await forgetSession(asks, session).catch(() => {});
@@ -40,7 +41,9 @@ async function report() {
   const path = join(dir, sessionFile(session));
   if (kind === "session.heartbeat") {
     await mkdir(dir, { recursive: true });
-    if (!await heartbeatDue(path)) return session;
+    // An answered AskUserQuestion's heartbeat skips the throttle, since only the read after it withdraws the dashboard's
+    // question for it and ends the session's wait.
+    if (!answered && !await heartbeatDue(path)) return session;
   } else if (kind === "session.ended") {
     await rm(path, { force: true });
   }

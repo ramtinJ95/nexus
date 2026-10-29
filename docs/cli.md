@@ -761,7 +761,9 @@ once and fails while the probe is unavailable.
 
 A session's working lease expires after 30 minutes without reports. PostToolUse
 sends at most one heartbeat per five minutes per session, renewing the lease
-without human activity. Expiry stops working attention and returns to ordinary
+without human activity. AskUserQuestion's PostToolUse always sends one, since the
+read after it withdraws the question the dashboard shows for the dialog.
+Expiry stops working attention and returns to ordinary
 pause rules. This bounds killed sessions and lost Stop reports; a silent single
 operation longer than the lease also expires. Session state is capped at 16 rows
 per thread, with oldest activity evicted, and ended/expired working rows are deleted.
