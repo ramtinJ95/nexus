@@ -37,6 +37,7 @@ import { snapshot } from "./tick.ts";
 import { checkoutDir, harnesses as harnessTable, herdrSession, sessionFacts, sessionsFile, type SessionHarness } from "./sessions.ts";
 import { loginHosts, type BootInputs, type LiveSpec, type OverlayFile } from "./project.ts";
 import type { ImageId } from "./images.ts";
+import { freePort } from "./test-kit.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
 if (assets === undefined || stateRoot === undefined) throw new Error("usage: node src/pylon-guest.check.ts <image dir in an artifact store> <state root>");
@@ -53,10 +54,7 @@ const step = (name: string, value: unknown = "ok") => console.log(`${name}: ${ty
 
 const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(assets), secrets: { value: () => undefined, names: () => [] }, previewHost: nodeHost });
 const tailscale = fakeTailscale();
-const free = createServer().listen(0, "127.0.0.1");
-await new Promise((resolve) => free.once("listening", resolve));
-const gatewayPort = (free.address() as { port: number }).port;
-await new Promise((resolve) => free.close(resolve));
+const gatewayPort = await freePort();
 const probe = await startProbe({
   node, host: "127.0.0.1", port: 0,
   auth: { controlPlane: controlPlaneId, peers: [] },

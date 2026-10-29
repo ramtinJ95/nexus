@@ -39,6 +39,7 @@ import type { ByteStream, CommandResult, InterruptClaudeOutcome, NodeHealth, Nod
 import { checkoutDir } from "../sessions.ts";
 import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { testCertificate } from "../test-certificate.ts";
+import { freePort, testImage, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
@@ -52,38 +53,13 @@ const project: Project = {
   id: "acme" as ProjectId, repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: node,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 };
-const image: ImageManifest = {
-  id: "img-0123456789ab" as ImageId, gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "a".repeat(64),
-  pins: {
-    debianDigest: "d", node: "24.22.1", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s",
-    gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-    neovim: "0.12.6", neovimSha256: "b".repeat(64),
-  },
-};
+const image = testImage();
 
 async function listening(t: TestContext, server: Server): Promise<number> {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => new Promise((resolve) => server.close(resolve)));
   return (server.address() as { port: number }).port;
-}
-
-/** A port nothing listens on. */
-async function closedPort(): Promise<number> {
-  const server = createServer().listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const { port } = server.address() as { port: number };
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
-
-/** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
-async function until(what: string, predicate: () => boolean) {
-  const deadline = Date.now() + 60_000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
-    await new Promise((r) => setTimeout(r, 10));
-  }
 }
 
 /**
@@ -323,7 +299,7 @@ test("each failure has its own exit code, and with --json its error is one JSON 
   await fails(["start", "--project", "acme", "--node", "nowhere", "--title", "x"], 64, { kind: "invalid", status: 400, error: "no node nowhere" });
   await fails(["show"], 64, { kind: "invalid", status: null });
 
-  const down = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` });
+  const down = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${await freePort()}` });
   assert.match(down, /nothing is listening on the SOCKS proxy .*ts-home/);
   const refusing = await socksProxy(t, 4);
   const offline = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${refusing.port}` });
@@ -342,7 +318,7 @@ test("each failure has its own exit code, and with --json its error is one JSON 
 test("the URL and the proxy come from the flags, then the environment, then the config file", async (t) => {
   const s = await setup(t);
   const unset = { NEXUS_URL: "", NEXUS_SOCKS: "" };
-  const dead = `http://127.0.0.1:${await closedPort()}`;
+  const dead = `http://127.0.0.1:${await freePort()}`;
   const config = join(s.home, ".config", "nexus", "cli.json");
   const none = await s.nexus(["projects"], unset);
   assert.deepEqual([none.code, none.stderr], [64, "nexus: no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL. Run nexus --help for usage\n"], "no URL is built in");
@@ -419,7 +395,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
   assert.deepEqual((({ kind, status, error }) => ({ kind, status, error }))(JSON.parse(pinned.stderr)), { kind: "invalid", status: 400, error: "project sketch is a scratch project, so it has no commit to check out" });
 
   // Through a proxy nothing listens on, so each of these fails before it sends a request.
-  const offline = { NEXUS_SOCKS: `127.0.0.1:${await closedPort()}` };
+  const offline = { NEXUS_SOCKS: `127.0.0.1:${await freePort()}` };
   const refused = async (args: readonly string[], error: string) => {
     const res = await s.nexus(["project", "add", "other", ...args, "--node", node, "--json"], offline);
     assert.deepEqual([res.code, res.stdout], [64, ""], `${args.join(" ")}: ${res.stderr}`);
@@ -1284,7 +1260,7 @@ test("connect fails without saving when no control plane answers, or one does no
   const s = await setup(t);
   const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
   const config = join(s.home, ".config", "nexus", "cli.json");
-  const dead = await closedPort();
+  const dead = await freePort();
   const proxy = await socksProxy(t, 0, { 7443: dead, 7470: dead });
 
   const down = await s.nexus(["connect", apiName, "--socks", `127.0.0.1:${proxy.port}`], env);

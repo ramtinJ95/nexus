@@ -31,6 +31,7 @@ import type { ThreadDetail } from "../control/api.ts";
 import type { Thread } from "../control/registry.ts";
 import { openTerminal, terminalSize, type Terminal, type TerminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
+import { shellQuote } from "../project.ts";
 
 /** Threads people work in. The check refuses any command that names one. */
 const untouchable: readonly string[] = ["th-884e6960c34f", "th-9d91e1aa1625"];
@@ -101,8 +102,6 @@ async function pylonIs(name: string, state: "running" | "paused", withinMs: numb
 
 /** What a terminal printed, without its control sequences, which split none of the words the check looks for. */
 const plain = (bytes: string) => bytes.replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>78DEHM]/g, "");
-
-const shellQuote = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`;
 
 /** A shell command line that runs the CLI with the check's endpoint flags. */
 const nexusLine = (args: readonly string[]) => [process.execPath, cli, ...args, ...endpoint].map(shellQuote).join(" ");
