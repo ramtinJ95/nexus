@@ -13,12 +13,13 @@ import { chmod, rm } from "node:fs/promises";
 import { once } from "node:events";
 import { createServer, type IncomingMessage } from "node:http";
 import { z } from "zod";
-import type { Guest } from "../backend.ts";
+import type { Guest, PortLinks } from "../backend.ts";
 import { addOutput, listOutputs, OutputRefused } from "../outputs.ts";
-import { linkedName, serviceDecl, serviceName, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
+import { serviceDecl, serviceName, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
 import { pylonIdSchema, type DeclaredOutput, type PylonId, type ServiceFact } from "../protocol.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../pylon-vm/host-bridge.ts";
 import { privateDirectory } from "../pylon-vm/storage.ts";
+import { parseJson } from "../parse.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 
 /** What `nexus info --json` prints: /home/user/.nexus/pylon.json, which renderOverlay writes. */
@@ -66,12 +67,9 @@ export interface PylonApiDeps {
   published(pylonId: PylonId): readonly PreviewAssignment[];
   /** Publishes a fresh observation, so the control plane sees a new service or output without waiting for the next snapshot. */
   changed(): void;
-  /** The URL tailscale serves for an https port, or null when it serves none. */
-  previewUrl(httpsPort: number): Promise<string | null>;
-  /** Stops routing an unlinked port's preview now (TailscaleServe.withdraw). */
-  withdraw(pylonId: PylonId, service: ServiceName): Promise<void>;
-  /** A port was linked, so spawns may route its service again after a withdraw. */
-  linked(pylonId: PylonId, service: ServiceName): void;
+  /** The URL tailscale serves for each https port Nexus serves, from one `tailscale serve status`. */
+  previewUrls(): Promise<ReadonlyMap<number, string>>;
+  ports: PortLinks;
   /** How long `services ensure`, `service start` and `preview` wait for a URL. Default 30 s. */
   previewWaitMs?: number;
 }
@@ -107,16 +105,12 @@ const requestSchema = z.discriminatedUnion("op", [
 ]);
 
 function parseRequest(body: string): PylonApiRequest {
-  let json: unknown;
   try {
-    json = JSON.parse(body);
-  } catch {
-    throw new Invalid("the request body is not JSON");
+    // Zod types an optional field as `T | undefined`, but it never adds a key the body lacks.
+    return parseJson(requestSchema, body, "request") as PylonApiRequest;
+  } catch (err) {
+    throw new Invalid(`not a request this API takes: ${(err as Error).message}`);
   }
-  const parsed = requestSchema.safeParse(json);
-  if (!parsed.success) throw new Invalid(`not a request this API takes:\n${z.prettifyError(parsed.error)}`);
-  // Zod types an optional field as `T | undefined`, but it never adds a key the body lacks.
-  return parsed.data as PylonApiRequest;
 }
 
 export function createPylonApi(deps: PylonApiDeps): PylonApi {
@@ -142,8 +136,12 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
         waiters.delete(resolve);
       }
     }
-    const found = await Promise.all(assigned.map(async (p) => [p.service, await deps.previewUrl(p.httpsPort)] as const));
-    return new Map(found.flatMap(([service, url]) => url === null ? [] : [[service, url]]));
+    if (assigned.length === 0) return new Map();
+    const served = await deps.previewUrls();
+    return new Map(assigned.flatMap((p) => {
+      const url = served.get(p.httpsPort);
+      return url === undefined ? [] : [[p.service, url]];
+    }));
   }
 
   async function views(pylonId: PylonId, facts: readonly ServiceFact[], ms: number): Promise<ServiceView[]> {
@@ -154,15 +152,9 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
   async function info(guest: Guest, pylonId: PylonId): Promise<PylonInfo> {
     const read = await guest.exec(["cat", pylonInfoFile], { cwd: "/", timeoutMs: 10_000 });
     if (read.exitCode !== 0) throw new Error(`reading ${pylonInfoFile} failed with exit ${read.exitCode}: ${read.output}`);
-    let parsed: ReturnType<typeof pylonInfoSchema.safeParse>;
-    try {
-      parsed = pylonInfoSchema.safeParse(JSON.parse(read.output));
-    } catch {
-      throw new Error(`${pylonInfoFile} is not JSON`);
-    }
-    if (!parsed.success) throw new Error(`${pylonInfoFile} is not the file Nexus wrote:\n${z.prettifyError(parsed.error)}`);
-    if (parsed.data.pylonId !== pylonId) throw new Error(`${pylonInfoFile} names ${parsed.data.pylonId}, but the request came from ${pylonId}`);
-    return parsed.data;
+    const info = parseJson(pylonInfoSchema, read.output, `${pylonInfoFile} is not the file Nexus wrote`);
+    if (info.pylonId !== pylonId) throw new Error(`${pylonInfoFile} names ${info.pylonId}, but the request came from ${pylonId}`);
+    return info;
   }
 
   async function handle(pylonId: PylonId, request: PylonApiRequest): Promise<PylonApiReplies[PylonApiRequest["op"]]> {
@@ -193,16 +185,14 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
         return { services: await views(pylonId, services, waitMs) };
       }
       case "preview": {
-        const service = await guest.linkPort(request.port, request.title);
-        deps.linked(pylonId, service);
+        const service = await deps.ports.link(pylonId, request.port, request.title);
         deps.changed();
         const found = await urls(pylonId, [service], waitMs);
         return { service, port: request.port, url: found.get(service) ?? null };
       }
       case "unpreview":
-        const refused = await guest.unlinkPort(request.port);
+        const refused = await deps.ports.unlink(pylonId, request.port);
         if (refused !== null) throw new Refused(refused);
-        await deps.withdraw(pylonId, linkedName(request.port));
         deps.changed();
         return { port: request.port };
       case "output-add": {

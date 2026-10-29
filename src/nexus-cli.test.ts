@@ -39,21 +39,28 @@ async function probe(t: TestContext, guest: Partial<Guest> = {}) {
     if (argv[2]?.includes(".json.partial")) return { exitCode: 0, output: "" };
     return { exitCode: 127, output: "unexpected" };
   });
+  const pylon: Guest = {
+    ...base,
+    async services(op, name, lines) { calls.push(["services", op, name, lines]); return { services: [web], logs: "line 1\nline 2\n" }; },
+    async startService(name, decl) { calls.push(["startService", name, decl]); return [{ ...web, name, declared: false }]; },
+    async linkPort(p, title) { calls.push(["linkPort", p, title]); return `port-${p}`; },
+    async unlinkPort(p) { calls.push(["unlinkPort", p]); return null; },
+    ...guest,
+  };
   const api = createPylonApi({
     event: (pylon, event) => { calls.push(["event", pylon, event]); },
-    guest: () => ({
-      ...base,
-      async services(op, name, lines) { calls.push(["services", op, name, lines]); return { services: [web], logs: "line 1\nline 2\n" }; },
-      async startService(name, decl) { calls.push(["startService", name, decl]); return [{ ...web, name, declared: false }]; },
-      async linkPort(p, title) { calls.push(["linkPort", p, title]); return `port-${p}`; },
-      async unlinkPort(p) { calls.push(["unlinkPort", p]); return null; },
-      ...guest,
-    }),
+    guest: () => pylon,
     published: () => [],
     changed() {},
-    previewUrl: async () => null,
-    async withdraw(_pylonId, service) { calls.push(["withdraw", service]); },
-    linked() {},
+    previewUrls: async () => new Map(),
+    ports: {
+      link: (_pylonId, p, title) => pylon.linkPort(p, title),
+      async unlink(_pylonId, p) {
+        const refused = await pylon.unlinkPort(p);
+        if (refused === null) calls.push(["withdraw", `port-${p}`]);
+        return refused;
+      },
+    },
     previewWaitMs: 50,
   });
   const bridge = await listenHostBridge({ host: "127.0.0.1", port }, async (req) => req.url === "/token/v1/request" ? pylonId : null)(api.answer);

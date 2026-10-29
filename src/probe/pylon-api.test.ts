@@ -32,14 +32,29 @@ function setup(guest: Partial<Guest>, deps: Partial<PylonApiDeps> = {}) {
   const relinked: string[] = [];
   const served = new Set<number>();
   let published: { service: string; httpsPort: number }[] = [];
+  let serveStatusReads = 0;
   const base = fakeGuest((argv) => argv[0] === "cat" && argv[1] === pylonInfoFile ? { exitCode: 0, output: pylonJson } : { exitCode: 127, output: "unexpected" });
+  const pylon = { ...base, ...guest };
   const api = createPylonApi({
-    guest: () => ({ ...base, ...guest }),
+    guest: () => pylon,
     published: () => published,
     changed: () => { changes++; },
-    previewUrl: async (port) => served.has(port) ? url(port) : null,
-    async withdraw(_pylonId, service) { withdrawn.push(service); },
-    linked(_pylonId, service) { relinked.push(service); },
+    async previewUrls() {
+      serveStatusReads++;
+      return new Map([...served].map((port) => [port, url(port)]));
+    },
+    ports: {
+      async link(_pylonId, port, title) {
+        const service = await pylon.linkPort(port, title);
+        relinked.push(service);
+        return service;
+      },
+      async unlink(_pylonId, port) {
+        const refused = await pylon.unlinkPort(port);
+        if (refused === null) withdrawn.push(`port-${port}`);
+        return refused;
+      },
+    },
     previewWaitMs: 60_000,
     ...deps,
   });
@@ -48,6 +63,7 @@ function setup(guest: Partial<Guest>, deps: Partial<PylonApiDeps> = {}) {
     changes: () => changes,
     withdrawn,
     relinked,
+    serveStatusReads: () => serveStatusReads,
     publish(previews: { service: string; httpsPort: number }[]) {
       for (const p of previews) served.add(p.httpsPort);
       published = previews;
@@ -78,6 +94,7 @@ test("a body that is not a request this API takes is refused with 400", async ()
   for (const body of ["not json", { op: "shell" }, { op: "info", pylonId: "pylon-other" }, { op: "output-add", output: { kind: "file", path: "relative.png" } }, { op: "service-logs", name: "web", lines: 501 }]) {
     assert.equal((await call(body)).status, 400, JSON.stringify(body));
   }
+  assert.match(String((await call("not json")).reply), /^not a request this API takes: request: Unexpected token/);
 });
 
 test("preview links the port, reports the change at once, and answers with the URL once a spawn publishes it", async () => {
@@ -130,6 +147,15 @@ test("services list neither waits nor reports a change", async () => {
   const t = setup({ services: async () => ({ services: [fact("web", true)] }) }, { previewWaitMs: 60_000 });
   assert.deepEqual(await t.call({ op: "services", action: "list" }), { status: 200, reply: { services: [{ ...fact("web", true), url: null }] } });
   assert.equal(t.changes(), 0);
+});
+
+test("services list reads tailscale's routes once for every preview, and not at all with none published", async () => {
+  const t = setup({ services: async () => ({ services: [fact("web", true), fact("api", true), fact("worker", false)] }) });
+  assert.deepEqual(await t.call({ op: "services", action: "list" }), { status: 200, reply: { services: [{ ...fact("web", true), url: null }, { ...fact("api", true), url: null }, { ...fact("worker", false), url: null }] } });
+  assert.equal(t.serveStatusReads(), 0);
+  t.publish([{ service: "web", httpsPort: 10101 }, { service: "api", httpsPort: 10102 }]);
+  assert.deepEqual(await t.call({ op: "services", action: "list" }), { status: 200, reply: { services: [{ ...fact("web", true), url: url(10101) }, { ...fact("api", true), url: url(10102) }, { ...fact("worker", false), url: null }] } });
+  assert.equal(t.serveStatusReads(), 1);
 });
 
 test("services restart and stop pass the name through", async () => {

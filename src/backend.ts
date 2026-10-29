@@ -15,7 +15,7 @@
 import type { Readable } from "node:stream";
 import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact } from "./protocol.ts";
 import { checkoutDir, closeSession, dropFailedSession, interruptClaude, openSession, sendToClaude } from "./sessions.ts";
-import { linkedName, type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
+import { type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 import type { HostBridge } from "./probe/pylon-api.ts";
 
@@ -127,11 +127,19 @@ export interface ArtifactStore {
 /** `names` lists the secrets the node holds, which its probe reports. Values never leave the node. */
 export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
 
+/** Linking or unlinking a pylon's port together with its preview route, so no snapshot read overlaps either. */
+export interface PortLinks {
+  link(pylonId: PylonId, port: number, title?: string): Promise<ServiceName>;
+  /** The guest's refusal, or null once the port is unlinked and its route withdrawn. */
+  unlink(pylonId: PylonId, port: number): Promise<string | null>;
+}
+
 export interface ProbeDeps {
   node: NodeName;
   backend: VmBackend;
   secrets: SecretSource;
   serve: TailscaleServe;
+  ports: PortLinks;
   /** GET /v1/artifacts/{id} on the peer probe. The stream is unverified until ArtifactStore.import checks it. */
   fetchPeer(from: NodeName, artifact: PortableArtifactId, sha256: string, signal: AbortSignal): Promise<ArtifactCopy>;
 }
@@ -217,11 +225,10 @@ type CommandKind = PylonCommand["kind"];
 /** How the probe runs one kind of command, and whether a caller may send it again. */
 export interface CommandPolicy<K extends CommandKind> {
   /**
-   * What it waits for. "reads" runs it in the node's read queue, so no read overlaps it and each read queued before it
-   * is published before it starts. A function names the Claude session it waits on, if any, so the sends, launches and
-   * interrupts of one session run one at a time.
+   * What it waits for. A function names the Claude session it waits on, if any, so the sends, launches and interrupts
+   * of one session run one at a time.
    */
-  lock: "reads" | ((command: Extract<PylonCommand, { kind: K }>) => string | undefined) | null;
+  lock: ((command: Extract<PylonCommand, { kind: K }>) => string | undefined) | null;
   /** Held under its requestId, so a send-claude-outcome answers for it. */
   remembered: boolean;
   /** Whether its answer changes what the next snapshot lists, so the probe publishes one at once. */
@@ -242,8 +249,8 @@ export const commandPolicies: { readonly [K in CommandKind]: CommandPolicy<K> } 
   "send-claude-outcome": { lock: null, remembered: false, publishes: false, retrySafe: true },
   "interrupt-claude": { lock: (c) => c.session, remembered: false, publishes: false, retrySafe: false },
   "service": { lock: null, remembered: false, publishes: false, retrySafe: false },
-  "link-port": { lock: "reads", remembered: false, publishes: true, retrySafe: true },
-  "unlink-port": { lock: "reads", remembered: false, publishes: true, retrySafe: true },
+  "link-port": { lock: null, remembered: false, publishes: true, retrySafe: true },
+  "unlink-port": { lock: null, remembered: false, publishes: true, retrySafe: true },
 };
 
 /**
@@ -274,12 +281,9 @@ export async function runCommand(pylonId: PylonId, command: Exclude<PylonCommand
       return { kind: "service", services, ...(logs === undefined ? {} : { logs }) };
     }
     case "link-port":
-      return { kind: "link-port", service: await guest.linkPort(command.port) };
-    case "unlink-port": {
-      const refused = await guest.unlinkPort(command.port);
-      if (refused === null) await deps.serve.withdraw(pylonId, linkedName(command.port));
-      return { kind: "unlink-port", refused };
-    }
+      return { kind: "link-port", service: await deps.ports.link(pylonId, command.port) };
+    case "unlink-port":
+      return { kind: "unlink-port", refused: await deps.ports.unlink(pylonId, command.port) };
   }
 }
 

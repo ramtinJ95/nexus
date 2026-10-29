@@ -18,7 +18,7 @@ import {
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
   type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject, type TailnetNodeId,
 } from "../protocol.ts";
-import type { ServiceName } from "../project.ts";
+import { linkedName, type ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import { onePerClaudeSession } from "../session-wake.ts";
 import type { Whois } from "../tailscale.ts";
@@ -146,6 +146,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         if (kept !== undefined) published.set(pylonId, kept);
       },
     },
+    ports: { link: linkPort, unlink: unlinkPort },
     node,
     fetchPeer: (from, artifact, sha256, signal) => fetchArtifact(peerAddress(from), artifact, sha256, { whois, peers }, signal),
   };
@@ -165,12 +166,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     guest: (pylonId) => backend.guest(pylonId),
     published: (pylonId) => published.get(pylonId) ?? [],
     changed: () => void publishSnapshot(),
-    withdraw: (pylonId, service) => deps.serve.withdraw(pylonId, service),
-    linked: relinked,
-    async previewUrl(httpsPort) {
-      if (previews === null) return null;
-      const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin).get(httpsPort);
-      return served?.kind === "nexus" ? served.url : null;
+    ports: deps.ports,
+    async previewUrls() {
+      if (previews === null) return new Map();
+      const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin);
+      return new Map([...served].flatMap(([httpsPort, entry]) => entry.kind === "nexus" ? [[httpsPort, entry.url]] : []));
     },
   });
 
@@ -356,15 +356,30 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return betweenReads(readSnapshot);
   }
 
-  /**
-   * Runs `work` in the read queue, so no read overlaps it, and each read queued before it is published before it
-   * starts. A link or unlink runs here: the control plane writes its preview as soon as the command answers, and a
-   * read from before the command, published after that, would undo the write until the next read.
-   */
+  /** Runs `work` in the read queue, so no read overlaps it, and each read queued before it is published before it starts. */
   function betweenReads<T>(work: () => Promise<T>): Promise<T> {
     const next = snapshots.then(work);
     snapshots = next.catch(() => undefined); // the caller handles the error. The queue only needs to move on
     return next;
+  }
+
+  /*
+   * A link or unlink, with its route bookkeeping, runs in the read queue: the control plane writes its preview as soon
+   * as the call answers, and a read from before the call, published after that, would undo the write until the next read.
+   */
+  function linkPort(pylonId: PylonId, port: number, title?: string): Promise<ServiceName> {
+    return betweenReads(async () => {
+      const service = await backend.guest(pylonId).linkPort(port, title);
+      relinked(pylonId, service);
+      return service;
+    });
+  }
+  function unlinkPort(pylonId: PylonId, port: number): Promise<string | null> {
+    return betweenReads(async () => {
+      const refused = await backend.guest(pylonId).unlinkPort(port);
+      if (refused === null) await deps.serve.withdraw(pylonId, linkedName(port));
+      return refused;
+    });
   }
 
   /**
@@ -552,10 +567,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
       const run = () => asked.kind === "send-claude-outcome" ? outcomeOf(pylonId, asked.requestId) : runCommand(pylonId, asked, deps);
       const session = typeof policy.lock === "function" ? policy.lock(command) : undefined;
-      const running = policy.lock === "reads" ? betweenReads(run) : session !== undefined ? onePerClaudeSession(pylonId, [session], run) : run();
+      const running = session !== undefined ? onePerClaudeSession(pylonId, [session], run) : run();
       if (policy.remembered && "requestId" in command && command.requestId !== undefined) remember(pylonId, command.requestId, running);
       const result = await running;
-      if (result.kind === "link-port") relinked(pylonId, result.service);
       if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
     }
