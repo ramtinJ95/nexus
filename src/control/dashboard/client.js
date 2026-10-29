@@ -868,6 +868,7 @@ function renderTabs() {
     return el("div", { className: `tab tab-file${active ? " active" : ""}` }, pick, close);
   });
   tabsBar.replaceChildren(convoTab, ...fileTabs);
+  tabsBar.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   for (const button of document.querySelectorAll(".tree-file")) button.classList.toggle("active", button.dataset.path === activeTab);
   if (focused === undefined) return;
   const controls = [...tabsBar.querySelectorAll("[data-key]")];
@@ -969,7 +970,9 @@ async function readDiff(path) {
   const file = openTabs.find((f) => f.path === path);
   if (file === undefined || fileView === null) return;
   const read = ++diffRead;
-  const head = el("header", { className: "fv-head" }, badge(file.status), el("span", { className: "fv-path", textContent: file.path }),
+  const dir = file.path.slice(0, file.path.lastIndexOf("/") + 1);
+  const head = el("header", { className: "fv-head" }, badge(file.status),
+    el("span", { className: "fv-path", title: file.path }, dir !== "" && el("span", { className: "fv-dir", textContent: dir }), el("span", { className: "fv-name", textContent: file.path.slice(dir.length) })),
     el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions), layoutPicker());
   // A diff reaches into the pylon as the changes do, so a paused one is woken only when the reader says to, and
   // the read of the changes that wakes it reads the open diff again.
