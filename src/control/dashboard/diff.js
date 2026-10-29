@@ -98,8 +98,8 @@ const cursorSheet = `[data-line][data-cursor] { box-shadow: inset 2px 0 0 light-
 [data-column-number] { user-select: none; }`;
 
 /**
- * The lines of a diff's files in the given layout, "unified" or "split", in a view that draws a slot under each row a
- * note ends on, marks rows as selected, and says which row a pointer is over.
+ * The lines of a diff's files in the given layout, "unified" or "split", with long lines wrapped, in a view that draws
+ * a slot under each row a note ends on, marks rows as selected, and says which row a pointer is over.
  */
 export async function diffView(files, layout) {
   const node = document.createElement("div");
@@ -109,16 +109,13 @@ export async function diffView(files, layout) {
   let selected = null;
   let cursor = null;
   for (const [entry, file] of files.entries()) {
-    const renderer = new DiffHunksRenderer({ diffStyle: layout, disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber));
+    const renderer = new DiffHunksRenderer({ diffStyle: layout, overflow: "wrap", disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber));
     const result = await renderer.asyncRender(file);
     if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system")), sheet(cursorSheet)];
     const pre = drawn(renderer.renderFullAST(result), entry);
     root.append(pre);
     entries.push({ file, renderer, pre, rows: rowElements(pre), slotKey: "[]" });
   }
-
-  const observer = new ResizeObserver(() => fit(root));
-  observer.observe(node);
 
   const paint = (attr, at) => {
     for (const el of root.querySelectorAll(`[${attr}]`)) el.removeAttribute(attr);
@@ -140,7 +137,6 @@ export async function diffView(files, layout) {
       const pre = drawn(drawnFile.renderer.renderFullAST(drawnFile.renderer.renderDiff(drawnFile.file)), entry);
       drawnFile.pre.replaceWith(pre);
       Object.assign(drawnFile, { pre, rows: rowElements(pre) });
-      fit(root);
       paint("data-selected-line", selected);
       paint("data-cursor", cursor);
       return names;
@@ -168,19 +164,6 @@ export async function diffView(files, layout) {
       return entries[entry]?.rows.get(index)?.find((el) => el.hasAttribute("data-line")) ?? null;
     },
   };
-}
-
-/**
- * Sizes each column's note rows to the part of it on show, beside its line numbers, as the library's own component
- * measures them, so a note stays in view while the code beside it scrolls sideways.
- */
-function fit(root) {
-  for (const code of root.querySelectorAll("[data-code]")) {
-    if (code.clientWidth === 0) continue;
-    const numbers = code.querySelector("[data-gutter]")?.offsetWidth ?? 0;
-    code.style.setProperty("--diffs-column-number-width", `${numbers}px`);
-    code.style.setProperty("--diffs-column-content-width", `${code.clientWidth - numbers}px`);
-  }
 }
 
 function drawn(ast, entry) {
