@@ -1,4 +1,4 @@
-2026-10-29T15:49:59.993Z th-5ba18695be53 received rv-543cc304:1:
+2026-10-29T16:00:30.618Z th-11c8a62042b3 received rv-7b5bc823:1:
 [Nexus review — automated, not a message from the person]
 You are the independent reviewer of pull request #211, "PR 211" (https://github.com/ramtinJ95/demo/pull/211). An agent on claude-opus-5-5 wrote it; you run on gpt-6-astra. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 
@@ -19,11 +19,11 @@ Not checked live: The cache under real traffic could not be checked live; the st
 
 End your reply with exactly one block like this, with JSON in it:
 ```nexus-review
-{"token": "rv-543cc304:b4e460b49b64", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
+{"token": "rv-7b5bc823:1bed603aed3a", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
 ```
 
-2026-10-29T15:50:00.994Z th-5ba18695be53 requested changes at 2111000000000000000000000000000000000000 of #211
-2026-10-29T15:50:01.013Z th-52fb0aefbda1 received rv-53b3bf62:1:
+2026-10-29T16:00:31.621Z th-11c8a62042b3 requested changes at 2111000000000000000000000000000000000000 of #211
+2026-10-29T16:00:31.631Z th-02d411546959 received rv-efa27277:1:
 [Nexus review — automated, not a message from the person]
 You are the independent reviewer of pull request #212, "PR 212" (https://github.com/ramtinJ95/demo/pull/212). An agent on claude-opus-5-5 wrote it; you run on gpt-6-astra. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 
@@ -44,7 +44,7 @@ Not checked live: The cache under real traffic could not be checked live; the st
 
 End your reply with exactly one block like this, with JSON in it:
 ```nexus-review
-{"token": "rv-53b3bf62:71ec6167dbf9", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
+{"token": "rv-efa27277:fb4fd5cdc15c", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
 ```
 
-2026-10-29T15:50:02.019Z th-52fb0aefbda1 requested changes at 2121000000000000000000000000000000000000 of #212
+2026-10-29T16:00:32.634Z th-02d411546959 requested changes at 2121000000000000000000000000000000000000 of #212

@@ -3,7 +3,7 @@
     "kind": "needs-person",
     "reasons": [
       "The builder ended 3 turns in a row without an answer Nexus could read, in round 1.",
-      "The pull request's head moved to 2142000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-188f2d83e481 to review it."
+      "The pull request's head moved to 2142000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-2a7267cef9cf to review it."
     ],
     "unreviewed": "2142000000000000000000000000000000000000"
   },
@@ -19,21 +19,21 @@
   "lastReplyAt": null
 }
 
-$ nexus show th-188f2d83e481
-th-188f2d83e481  Builder of #214
+$ nexus show th-2a7267cef9cf
+th-2a7267cef9cf  Builder of #214
 project: demo
 Claude worker: started, model claude-opus-5-5
 attention: decision
 status: active
-pylon: pylon-th-188f2d83e481 on verify-node, running, observed 0s ago
-attach: nexus attach th-188f2d83e481
+pylon: pylon-th-2a7267cef9cf on verify-node, running, observed 0s ago
+attach: nexus attach th-2a7267cef9cf
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #214: PR 214 — open, checks passing, review none https://github.com/ramtinJ95/demo/pull/214
-review rv-held214 of PR #214: needs-person, round 1 of 5, reviewer th-09a53e3b6722 on gpt-6-astra
+review rv-held214 of PR #214: needs-person, round 1 of 5, reviewer th-95c3a929c310 on gpt-6-astra
 needs you: The builder ended 3 turns in a row without an answer Nexus could read, in round 1.
-needs you: The pull request's head moved to 2142000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-188f2d83e481 to review it.
+needs you: The pull request's head moved to 2142000000000000000000000000000000000000 after this review was held, so none of its rounds reviewed that commit. Run nexus review th-2a7267cef9cf to review it.
 output: branch origin/fix/pr-214
 output: pull-request https://github.com/ramtinJ95/demo/pull/214

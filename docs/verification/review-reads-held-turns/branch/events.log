@@ -1,13 +1,13 @@
-2026-10-29T15:52:25.058Z th-3d29e5ff7a5f {"review":"rv-c79953a8","reviewer":"th-08aec2006409","phase":{"kind":"reviewing"},"round":1}
-2026-10-29T15:52:25.058Z th-b08fe0edb316 {"review":"rv-e4d40a75","reviewer":"th-8c3fdb082b2e","phase":{"kind":"reviewing"},"round":1}
-2026-10-29T15:52:25.058Z th-c9ddeb28a857 {"review":"rv-held213","reviewer":"th-843f68ff359c","phase":{"kind":"needs-person","reasons":["The branch conflicts with main, and the builder did not rebase it: I will rebase once main settles."]},"round":1}
-2026-10-29T15:52:25.058Z th-188f2d83e481 {"review":"rv-held214","reviewer":"th-09a53e3b6722","phase":{"kind":"needs-person","reasons":["The builder ended 3 turns in a row without an answer Nexus could read, in round 1."]},"round":1}
-2026-10-29T15:52:25.058Z th-3d29e5ff7a5f {"review":"rv-c79953a8","reviewer":"th-08aec2006409","phase":{"kind":"fixing"},"round":1}
-2026-10-29T15:52:25.058Z th-3d29e5ff7a5f {"review":"rv-c79953a8","reviewer":"th-08aec2006409","phase":{"kind":"reviewing"},"round":2}
-2026-10-29T15:52:25.058Z th-b08fe0edb316 {"review":"rv-e4d40a75","reviewer":"th-8c3fdb082b2e","phase":{"kind":"fixing"},"round":1}
-2026-10-29T15:52:25.058Z th-c9ddeb28a857 {"review":"rv-held213","reviewer":"th-843f68ff359c","phase":{"kind":"reviewing"},"round":2}
-2026-10-29T15:52:25.058Z th-3d29e5ff7a5f {"review":"rv-c79953a8","reviewer":"th-08aec2006409","phase":{"kind":"checking","startedAt":1793289085616,"thread":null},"round":2}
-2026-10-29T15:52:25.058Z th-c9ddeb28a857 {"review":"rv-held213","reviewer":"th-843f68ff359c","phase":{"kind":"checking","startedAt":1793289086616,"thread":null},"round":2}
-2026-10-29T15:52:25.058Z th-3d29e5ff7a5f {"review":"rv-c79953a8","reviewer":"th-08aec2006409","phase":{"kind":"approved"},"round":2}
-2026-10-29T15:52:25.058Z th-c9ddeb28a857 {"review":"rv-held213","reviewer":"th-843f68ff359c","phase":{"kind":"merging","authorized":null},"round":2}
-2026-10-29T15:52:25.058Z th-c9ddeb28a857 {"review":"rv-held213","reviewer":"th-843f68ff359c","phase":{"kind":"landed","commit":"m213000000000000000000000000000000000000"},"round":2}
+2026-10-29T16:02:55.494Z th-84c22ae4550b {"review":"rv-fd9d3562","reviewer":"th-1d4d402e1930","phase":{"kind":"reviewing"},"round":1}
+2026-10-29T16:02:55.494Z th-2a6517e93d43 {"review":"rv-da59ca84","reviewer":"th-77e61025a11f","phase":{"kind":"reviewing"},"round":1}
+2026-10-29T16:02:55.494Z th-f13dc344f90e {"review":"rv-held213","reviewer":"th-42d9d527ae17","phase":{"kind":"needs-person","reasons":["The branch conflicts with main, and the builder did not rebase it: I will rebase once main settles."]},"round":1}
+2026-10-29T16:02:55.494Z th-2a7267cef9cf {"review":"rv-held214","reviewer":"th-95c3a929c310","phase":{"kind":"needs-person","reasons":["The builder ended 3 turns in a row without an answer Nexus could read, in round 1."]},"round":1}
+2026-10-29T16:02:55.494Z th-84c22ae4550b {"review":"rv-fd9d3562","reviewer":"th-1d4d402e1930","phase":{"kind":"fixing"},"round":1}
+2026-10-29T16:02:55.494Z th-2a6517e93d43 {"review":"rv-da59ca84","reviewer":"th-77e61025a11f","phase":{"kind":"fixing"},"round":1}
+2026-10-29T16:02:55.494Z th-84c22ae4550b {"review":"rv-fd9d3562","reviewer":"th-1d4d402e1930","phase":{"kind":"reviewing"},"round":2}
+2026-10-29T16:02:55.494Z th-f13dc344f90e {"review":"rv-held213","reviewer":"th-42d9d527ae17","phase":{"kind":"reviewing"},"round":2}
+2026-10-29T16:02:55.494Z th-84c22ae4550b {"review":"rv-fd9d3562","reviewer":"th-1d4d402e1930","phase":{"kind":"checking","startedAt":1793289716116,"thread":null},"round":2}
+2026-10-29T16:02:55.494Z th-f13dc344f90e {"review":"rv-held213","reviewer":"th-42d9d527ae17","phase":{"kind":"checking","startedAt":1793289717116,"thread":null},"round":2}
+2026-10-29T16:02:55.494Z th-84c22ae4550b {"review":"rv-fd9d3562","reviewer":"th-1d4d402e1930","phase":{"kind":"approved"},"round":2}
+2026-10-29T16:02:55.494Z th-f13dc344f90e {"review":"rv-held213","reviewer":"th-42d9d527ae17","phase":{"kind":"merging","authorized":null},"round":2}
+2026-10-29T16:02:55.494Z th-f13dc344f90e {"review":"rv-held213","reviewer":"th-42d9d527ae17","phase":{"kind":"landed","commit":"m213000000000000000000000000000000000000"},"round":2}

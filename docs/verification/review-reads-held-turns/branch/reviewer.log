@@ -1,4 +1,4 @@
-2026-10-29T15:51:20.605Z th-08aec2006409 received rv-c79953a8:1:
+2026-10-29T16:01:51.105Z th-1d4d402e1930 received rv-fd9d3562:1:
 [Nexus review — automated, not a message from the person]
 You are the independent reviewer of pull request #211, "PR 211" (https://github.com/ramtinJ95/demo/pull/211). An agent on claude-opus-5-5 wrote it; you run on gpt-6-astra. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 
@@ -19,11 +19,11 @@ Not checked live: The cache under real traffic could not be checked live; the st
 
 End your reply with exactly one block like this, with JSON in it:
 ```nexus-review
-{"token": "rv-c79953a8:b53c771a0cf9", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
+{"token": "rv-fd9d3562:1c367bb7c0db", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
 ```
 
-2026-10-29T15:51:21.607Z th-08aec2006409 requested changes at 2111000000000000000000000000000000000000 of #211
-2026-10-29T15:51:21.622Z th-8c3fdb082b2e received rv-e4d40a75:1:
+2026-10-29T16:01:52.107Z th-1d4d402e1930 requested changes at 2111000000000000000000000000000000000000 of #211
+2026-10-29T16:01:52.112Z th-77e61025a11f received rv-da59ca84:1:
 [Nexus review — automated, not a message from the person]
 You are the independent reviewer of pull request #212, "PR 212" (https://github.com/ramtinJ95/demo/pull/212). An agent on claude-opus-5-5 wrote it; you run on gpt-6-astra. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 
@@ -44,11 +44,11 @@ Not checked live: The cache under real traffic could not be checked live; the st
 
 End your reply with exactly one block like this, with JSON in it:
 ```nexus-review
-{"token": "rv-e4d40a75:3cdc591dbbb5", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
+{"token": "rv-da59ca84:eeef6b9b5842", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of "secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible", "why": "..."}], "notCheckedLive": "the quote" or null}
 ```
 
-2026-10-29T15:51:22.624Z th-8c3fdb082b2e requested changes at 2121000000000000000000000000000000000000 of #212
-2026-10-29T15:51:23.620Z th-08aec2006409 received rv-c79953a8:3:
+2026-10-29T16:01:53.113Z th-77e61025a11f requested changes at 2121000000000000000000000000000000000000 of #212
+2026-10-29T16:01:54.119Z th-1d4d402e1930 received rv-fd9d3562:3:
 [Nexus review — automated, not a message from the person]
 Round 2 of at most 5. The builder answered your findings:
 F1: fixed. Added a 5-minute TTL.
@@ -56,9 +56,9 @@ F1: fixed. Added a 5-minute TTL.
 Review the new commits:
   git fetch origin && git checkout --detach 2112000000000000000000000000000000000000
   git diff 2111000000000000000000000000000000000000..2112000000000000000000000000000000000000
-Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "rv-c79953a8:e7737c5c611f".
+Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "rv-fd9d3562:27cb7e99c8a6".
 
-2026-10-29T15:51:24.619Z th-843f68ff359c received rv-held213:4:
+2026-10-29T16:01:55.117Z th-42d9d527ae17 received rv-held213:4:
 [Nexus review — automated, not a message from the person]
 Round 2 of at most 5. The builder answered your findings:
 CONFLICT: rejected. I will rebase once main settles.
@@ -67,7 +67,7 @@ Review the new head against the base, and compare its commits with the ones you 
   git fetch origin && git checkout --detach 2132000000000000000000000000000000000000
   git diff origin/main...2132000000000000000000000000000000000000
   git range-diff origin/main 2131000000000000000000000000000000000000 2132000000000000000000000000000000000000
-Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "rv-held213:e4702974721c".
+Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "rv-held213:7982c7692e3f".
 
-2026-10-29T15:51:24.621Z th-08aec2006409 approved 2112000000000000000000000000000000000000 of #211
-2026-10-29T15:51:25.620Z th-843f68ff359c approved 2132000000000000000000000000000000000000 of #213
+2026-10-29T16:01:55.121Z th-1d4d402e1930 approved 2112000000000000000000000000000000000000 of #211
+2026-10-29T16:01:56.119Z th-42d9d527ae17 approved 2132000000000000000000000000000000000000 of #213

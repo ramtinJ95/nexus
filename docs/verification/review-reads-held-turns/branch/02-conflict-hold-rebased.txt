@@ -29,19 +29,19 @@
   "lastReplyAt": null
 }
 
-$ nexus show th-c9ddeb28a857
-th-c9ddeb28a857  Builder of #213
+$ nexus show th-f13dc344f90e
+th-f13dc344f90e  Builder of #213
 project: demo
 Claude worker: started, model claude-opus-5-5
 attention: none
 status: archived
-pylon: pylon-th-c9ddeb28a857 on verify-node, running, observed 0s ago
+pylon: pylon-th-f13dc344f90e on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #213: PR 213 — open, checks passing, review none https://github.com/ramtinJ95/demo/pull/213
-review rv-held213 of PR #213: landed as m213000000000000000000000000000000000000, round 2 of 5, reviewer th-843f68ff359c on gpt-6-astra, landing when approved
+review rv-held213 of PR #213: landed as m213000000000000000000000000000000000000, round 2 of 5, reviewer th-42d9d527ae17 on gpt-6-astra, landing when approved
 no live check: 213200000000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
 output: branch origin/fix/pr-213
 output: pull-request https://github.com/ramtinJ95/demo/pull/213

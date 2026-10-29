@@ -1,1 +1,1 @@
-branch: cbf8886 docs: a Claude builder's held turn is read from its transcript, and a gate hold reviews a later push
+branch: 83ee230 fix(review): wait out a Claude builder's newer turn, and an unended one that says it fixed
