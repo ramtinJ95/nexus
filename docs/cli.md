@@ -25,7 +25,7 @@ Two settings choose the endpoint. For each one, the first of these that is set w
 | Control plane URL, `http://` or `https://` | `--url` | `NEXUS_URL` | `"url"` | Every command but `connect` fails with exit code 64 and says to run `nexus connect <host>` |
 | SOCKS5 proxy, `HOST:PORT`, or `none` to connect directly | `--socks` | `NEXUS_SOCKS` | `"socks"` | Directly |
 
-An empty environment variable counts as unset. The config file is a JSON object with only those two optional keys, which `connect` writes. Any other key fails the command with exit code 64.
+An empty environment variable counts as unset. The config file is a JSON object with only those two optional keys, which `connect` writes, readable by its owner only, as mode 0600. Any other key fails the command with exit code 64.
 
 ### Connecting a device (0.41.0)
 

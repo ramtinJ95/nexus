@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { connect, createServer, type Server, type Socket } from "node:net";
@@ -834,7 +834,7 @@ test("the attach settings retired in 0.9.0 are unknown keys of the config file, 
   await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ ssh: { "rj-firebat": "rj-firebat" }, attach: "ssh -t x" }));
   const projects = await s.nexus(["projects"]);
   assert.equal(projects.code, 64);
-  assert.match(projects.stderr, /cli\.json is not a CLI config: ✖ Unrecognized keys: "ssh", "attach"/);
+  assert.match(projects.stderr, /cli\.json is not a CLI config: config: Unrecognized keys: "ssh", "attach"/);
   await writeFile(join(s.home, ".config", "nexus", "cli.json"), "{}");
   const attach = await s.nexus(["attach", "th-0123456789ab"], { NEXUS_ATTACH: "ssh -t y" });
   assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one. Run nexus --help for usage\n"]);
@@ -1211,6 +1211,7 @@ test("connect finds the API on the dashboard's HTTPS port, saves it, and the nex
     "",
   ].join("\n"));
   assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: `https://${apiName}:7443`, socks: `127.0.0.1:${proxy.port}` });
+  assert.equal((await stat(config)).mode & 0o777, 0o600, "only its owner reads the config");
   assert.deepEqual(await s.json(["projects"], env), [project], "the saved URL and proxy reach the API over TLS");
   assert.deepEqual(proxy.connects.slice(-1), [`${apiName}:7443`]);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "attach over TLS"], env);
