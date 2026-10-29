@@ -13,7 +13,7 @@ import { holdRule, landingHolds } from "./policy.ts";
 import { agentReplies, humanLabel, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { transcriptStart } from "../claude-transcript.ts";
+import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { checkCaller, verifyCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 import { HttpError } from "./http-error.ts";
@@ -141,19 +141,24 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   };
 }
 
+/** A read of the Claude builder's transcript that finds `entries`, and the pylon's reports of `kinds` for its session. */
+function claudeRead(f: ReturnType<typeof fixture>, entries: ClaudeEntry[], kinds: readonly ("session.turn-started" | "session.heartbeat")[]) {
+  const from = f.registry.claudeTranscript(f.builder)?.cursor ?? transcriptStart;
+  f.registry.appendClaudeRead(f.builder, { session: "s1", from, entries, cursor: { ...from, offset: from.offset + 1 }, reset: false, readAt: f.now });
+  for (const kind of kinds) {
+    f.registry.reportSession(node, { sequence: (f.registry.eventReceipt(node) ?? 0) + 1, time: f.now, pylon: "pylon-th-builder" as PylonId, event: { kind, session: "s1", at: f.now } });
+  }
+}
+
 /**
  * A Claude builder's turn that ends in its transcript while a background shell keeps it working, as the pylon's Stop
  * hook reports it with heartbeats and no turn end.
  */
 function heldTurn(f: ReturnType<typeof fixture>, text: string) {
   f.replies.set(f.builder, [...f.replies.get(f.builder) ?? [], text]);
-  const at = f.now + 1_000;
-  const from = f.registry.claudeTranscript(f.builder)?.cursor ?? transcriptStart;
-  f.registry.appendClaudeRead(f.builder, { session: "s1", from, entries: [{ kind: "reply", at, text }, { kind: "turn", at, durationMs: 60_000 }], cursor: { ...from, offset: from.offset + 1 }, reset: false, readAt: at });
-  for (const kind of ["session.turn-started", "session.heartbeat"] as const) {
-    f.registry.reportSession(node, { sequence: (f.registry.eventReceipt(node) ?? 0) + 1, time: at, pylon: "pylon-th-builder" as PylonId, event: { kind, session: "s1", at } });
-  }
-  f.tick(2_000);
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text }, { kind: "turn", at: f.now, durationMs: 60_000 }], ["session.turn-started", "session.heartbeat"]);
+  f.tick(1_000);
 }
 
 const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.setThreadStatus(id, "archived");
@@ -276,6 +281,47 @@ test("a Claude builder whose turn ends with a background shell running and no an
   assert.equal(f.registry.thread(f.builder)!.working, true);
 
   f.tick(3 * 60 * 60_000 + 1);
+  await loop.poll();
+  assert.deepEqual((f.review().phase as { reasons: string[] }).reasons, ["The builder gave no answer Nexus could read within 3 hours in round 1."]);
+});
+
+test("a Claude builder that starts a newer turn after a held one gets no reminder until that turn ends too", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const sent = f.sent.length;
+  heldTurn(f, "Started the tests in the background.");
+  claudeRead(f, [{ kind: "task", at: f.now, toolUseId: "b1", status: "completed", summary: "Background command finished", result: null }], ["session.turn-started"]);
+  f.tick(61_000);
+  await loop.poll();
+  assert.equal(f.sent.length, sent, "no reminder while the turn the finished shell started runs");
+  heldTurn(f, "The tests pass.");
+  f.tick(60_000);
+  await loop.poll();
+  assert.equal(f.sent.length, sent + 1);
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-review-answers block/);
+});
+
+test("a Claude builder that answers it fixed findings in a turn that has not ended is waited on, and asks the person after the hours", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const sent = f.sent.length;
+  const text = answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]);
+  f.replies.set(f.builder, [text]);
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text }], ["session.turn-started"]);
+  f.tick(20 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.equal(f.sent.length, sent, "no reminder before the turn ends");
+  f.tick(3 * 60 * 60_000);
   await loop.poll();
   assert.deepEqual((f.review().phase as { reasons: string[] }).reasons, ["The builder gave no answer Nexus could read within 3 hours in round 1."]);
 });
