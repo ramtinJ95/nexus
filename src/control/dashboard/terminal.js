@@ -66,3 +66,16 @@ export function joinTerminal(term, socket, status) {
     socket.close();
   };
 }
+
+/**
+ * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. It writes the browser's one clipboard for
+ * every selection but X11's primary, which would clobber it, and never reads it, so output in the pylon cannot see
+ * what the person copied: a query gets empty data.
+ */
+export function clipboardOf(clipboard) {
+  return {
+    readText: () => "",
+    // A browser refuses a write from a page without focus, and has no clipboard outside a secure context.
+    writeText: async (selection, text) => { if (selection !== "p") await clipboard?.writeText(text).catch(() => {}); },
+  };
+}

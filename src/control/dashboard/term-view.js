@@ -1,8 +1,9 @@
 // xterm.js for the thread page's terminal tab, which client.js loads on the tab's first show.
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
 import css from "@xterm/xterm/css/xterm.css";
-import { attachUrl, joinTerminal } from "./terminal.js";
+import { attachUrl, clipboardOf, joinTerminal } from "./terminal.js";
 import { onThemeChange, themeValue } from "./theme.js";
 
 const base = new CSSStyleSheet();
@@ -52,9 +53,11 @@ export function openTerminal(host, thread, status) {
     cursorBlink: true, fontSize: 13, scrollback: 5000,
     fontFamily: getComputedStyle(host).fontFamily,
     theme: terminalTheme(),
+    macOptionClickForcesSelection: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  term.loadAddon(new ClipboardAddon(undefined, clipboardOf(navigator.clipboard)));
   term.open(host);
   fit.fit();
   const detach = joinTerminal(term, new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows })), status);
