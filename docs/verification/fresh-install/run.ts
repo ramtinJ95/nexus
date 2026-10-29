@@ -351,6 +351,13 @@ async function main(): Promise<void> {
     assert.match(connected, / may start and message threads/);
     assert.match(connected, / may deploy/);
 
+    step("fresh-box: the deployer's first run, from the bootstrap install-deployer.sh copied");
+    say("stand-in for nexus-deployer.timer, which never fires here: the person starts its service");
+    assert.ok(!existsSync(join(box.root, "opt/nexus/deployer-current")), "no worker has promoted itself yet");
+    await b.ok("sudo systemctl start nexus-deployer");
+    const release = await m.ok("$HOME/.local/bin/nexus release", { env: cli });
+    for (const role of ["control", "probe"]) assert.match(release, new RegExp(`^${box.name} ${role}: [0-9a-f]{40} healthy$`, "m"), `the bootstrap reports ${role}`);
+
     step("fresh-box and fresh-mac: the first image");
     say("stand-in for `nexus image build --wait`, which needs Docker and builds for 8 minutes: an image's directory");
     say("in fresh-box's artifact store, recorded through the API, which no pylon can boot");
@@ -413,7 +420,7 @@ async function main(): Promise<void> {
     step("PASS");
   } catch (err) {
     step("What the services logged");
-    for (const machine of booted) for (const unit of ["nexus-control", "nexus-probe"]) await machine.run(`journalctl -u ${unit} -n 40`, { as: "root" }).catch(() => undefined);
+    for (const machine of booted) for (const unit of ["nexus-control", "nexus-probe", "nexus-deployer"]) await machine.run(`journalctl -u ${unit} -n 40`, { as: "root" }).catch(() => undefined);
     throw err;
   } finally {
     await cleanUp();
