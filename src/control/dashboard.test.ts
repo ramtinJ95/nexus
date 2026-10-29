@@ -250,6 +250,25 @@ test("a review the person cancelled says which thread they archived, and asks no
   assert.match(page, /Nexus review rv-1: cancelled, round 1 of 5, by th-reviewer on gpt-6-astra, the reviewer thread th-reviewer was archived/);
 });
 
+test("a running review's line offers to cancel it behind a confirm, and one that ended or began deploying offers nothing", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const review: Review = {
+    id: "rv-1", builder: fix.id, reviewer: "th-reviewer" as Thread["id"], pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
+    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" },
+  };
+  s.registry.saveReview(review);
+  const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.match(page, new RegExp(`<button type="button" class="btn btn-xs btn-ghost danger" data-action="cancel-review" data-thread="${fix.id}" data-confirm="Cancel review rv-1 of pull request #7\\? Its reviewer thread is archived, and this thread stays as it is\\.">Cancel review</button>`));
+  for (const phase of [{ kind: "deploying", commit: "m".repeat(40), previous: null, requested: true, deadline: 0 }, { kind: "approved" }] as const) {
+    s.registry.saveReview({ ...review, phase });
+    assert.doesNotMatch((await s.call("GET", `/threads/${fix.id}`)).text, /data-action="cancel-review"/, phase.kind);
+  }
+  s.registry.saveReview({ ...review, phase: { kind: "cancelled", who: "person", by: "nPHONE" } });
+  assert.match(textOf((await s.call("GET", `/threads/${fix.id}`)).text), /Nexus review rv-1: cancelled, round 1 of 5, by th-reviewer on gpt-6-astra, cancelled by nPHONE/);
+});
+
 const phone = "nPHONE" as TailnetNodeId;
 /** A control plane whose deployers are the laptop only, with a review loop whose PRs from acme/nexus deploy. */
 const landingOptions = (landed: string[] = []): Partial<ApiOptions> => ({

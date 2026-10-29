@@ -253,6 +253,8 @@ const actions = {
   "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
   // As `nexus unpreview`.
   unpublish: (thread, { port }) => whenRunning(thread, () => api("DELETE", `/v1/threads/${thread}/previews/${port}`, {})),
+  // As `nexus review --cancel`.
+  "cancel-review": (thread) => api("POST", `/v1/threads/${thread}/review/cancel`, {}),
   // As `nexus land`, for the commit the confirmation named, waiving the holds the card names the person may waive. The
   // page then shows the landing's steps as the review moves through them.
   land: (thread, { head, holds }) => api("POST", `/v1/threads/${thread}/land`, holds === undefined ? { head } : { head, waive: JSON.parse(holds) }),
