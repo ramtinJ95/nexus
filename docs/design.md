@@ -770,6 +770,31 @@ at a time, so a repeat made while the first is still asked waits for it rather t
 sharing its answer. Only a repeat the probe cannot answer, because the
 send failed partway or the probe restarted or forgot it, is refused.
 
+Interrupting a Claude worker goes through the probe command `interrupt-claude`, which
+finds the session's pane as a send does and presses Esc there with Herdr's `send-keys`,
+the key a person at the terminal presses to stop a turn. It takes no key from the
+caller. It presses nothing unless Herdr reports Claude working: a dialog would be
+cancelled by Esc, and two quick presses at an idle prompt open Claude's rewind picker,
+which Herdr still reports as idle. It reads Claude's state again right before the key, since finding the pane
+inspects its processes first, but Herdr has no conditional key press, so a dialog that opens between that read and the
+key would still get the Esc. It never resumes a session that no live Claude runs,
+since that session runs no turn. It waits behind the session's sends, so Esc never
+lands between the pieces of a typed message. The person-only abort route sends it for a
+Claude worker thread, and never wakes a paused pylon.
+
+Nexus follows a Claude worker by the session ID its launch gave it. `/clear` starts a
+new session in the same pane: Claude's SessionStart hook reports the new ID to Herdr,
+and Claude writes a new transcript, but the worker record, the conversation view and
+the AskUserQuestion questions stay on the old ID. A send after it then finds no pane
+running the old session and resumes it in a new workspace, beside the new one.
+`/resume`, `/branch` and `/exit` change or end the session the same way. Following a
+new session would mean moving the worker record, its transcript cursor and its asks
+to the new ID, so the dashboard's composer refuses these commands instead and points
+to the terminal, where the person sees what happens. It also refuses commands that
+open a picker, such as a bare `/model` or `/config`, because Herdr reports Claude idle
+while the picker is open, and the next message would be typed into it
+(`docs/verification/claude-interrupt/`).
+
 The API decides by the thread's Claude worker record before anything else, so no
 mode or retry of a Claude worker thread's message reaches the harness. Sending is
 human activity: it wakes a paused pylon, and clients retry the 409 until it runs with

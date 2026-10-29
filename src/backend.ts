@@ -14,7 +14,7 @@
  */
 import type { Readable } from "node:stream";
 import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact } from "./protocol.ts";
-import { checkoutDir, closeSession, dropFailedSession, openSession, sendToClaude } from "./sessions.ts";
+import { checkoutDir, closeSession, dropFailedSession, interruptClaude, openSession, sendToClaude } from "./sessions.ts";
 import { linkedName, type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 import type { HostBridge } from "./probe/pylon-api.ts";
@@ -218,8 +218,8 @@ type CommandKind = PylonCommand["kind"];
 export interface CommandPolicy<K extends CommandKind> {
   /**
    * What it waits for. "reads" runs it in the node's read queue, so no read overlaps it and each read queued before it
-   * is published before it starts. A function names the Claude session it waits on, if any, so the sends and launches
-   * of one session run one at a time.
+   * is published before it starts. A function names the Claude session it waits on, if any, so the sends, launches and
+   * interrupts of one session run one at a time.
    */
   lock: "reads" | ((command: Extract<PylonCommand, { kind: K }>) => string | undefined) | null;
   /** Held under its requestId, so a send-claude-outcome answers for it. */
@@ -240,6 +240,7 @@ export const commandPolicies: { readonly [K in CommandKind]: CommandPolicy<K> } 
   "drop-failed-session": { lock: null, remembered: false, publishes: false, retrySafe: false },
   "send-claude": { lock: (c) => c.session, remembered: true, publishes: (r) => r.resumed, retrySafe: false },
   "send-claude-outcome": { lock: null, remembered: false, publishes: false, retrySafe: true },
+  "interrupt-claude": { lock: (c) => c.session, remembered: false, publishes: false, retrySafe: false },
   "service": { lock: null, remembered: false, publishes: false, retrySafe: false },
   "link-port": { lock: "reads", remembered: false, publishes: true, retrySafe: true },
   "unlink-port": { lock: "reads", remembered: false, publishes: true, retrySafe: true },
@@ -266,6 +267,8 @@ export async function runCommand(pylonId: PylonId, command: Exclude<PylonCommand
       const { session, text, model } = command;
       return { kind: "send-claude", ...await sendToClaude(guest, { session, text, ...(model === undefined ? {} : { model }) }) };
     }
+    case "interrupt-claude":
+      return { kind: "interrupt-claude", outcome: await interruptClaude(guest, command.session) };
     case "service": {
       const { services, logs } = await guest.services(command.op, command.name, command.lines);
       return { kind: "service", services, ...(logs === undefined ? {} : { logs }) };

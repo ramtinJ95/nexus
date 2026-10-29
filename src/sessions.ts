@@ -19,7 +19,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { seedClaudeState } from "./claude-state.ts";
 import type { Guest } from "./backend.ts";
-import type { CommandResult, HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
+import type { CommandResult, HerdrStatus, InterruptClaudeOutcome, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
 import { nonEmpty, parse, parseJson } from "./parse.ts";
 
 export const herdrSession = "nexus";
@@ -440,6 +440,28 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
   if (typed.exitCode === null) throw new Error(`typing into Claude's pane ${herdrPane} did not finish within ${typeTimeoutMs / 1000} seconds, so part of the message may sit unsent in its prompt`);
   if (typed.exitCode !== 0) throw new Error(`typing into Claude's pane ${herdrPane} failed, so part of the message may sit unsent in its prompt: ${typed.output.trim().slice(-500)}`);
   return { outcome: status === "working" ? "queued" : "sent", herdrPane, resumed };
+}
+
+/**
+ * Presses Esc in the pane that runs `session` while Claude works, which interrupts its turn as it does at the terminal.
+ * Esc is the only key it ever presses. It presses nothing while Claude waits at a dialog, which Esc would cancel, and
+ * nothing while Claude is idle. A session in no live pane is not resumed, since it runs no turn.
+ */
+export async function interruptClaude(guest: Guest, session: string): Promise<InterruptClaudeOutcome> {
+  const found = await claudePane(guest, session);
+  if (found?.runs !== true) return "not-running";
+  const { herdrPane } = found.pane;
+  // Finding the pane inspects its processes, during which Claude may have opened a dialog.
+  const status = (await livePanes(guest)).find((p) => p.herdrPane === herdrPane)?.status;
+  if (status === undefined) return "not-running";
+  if (status !== "working") return status === "blocked" || status === "unknown" ? status : "idle";
+  try {
+    await herdr(guest, ["pane", "send-keys", herdrPane, "esc"]);
+  } catch (err) {
+    if (err instanceof HerdrError && err.code === "pane_not_found") return "not-running";
+    throw err;
+  }
+  return "interrupted";
 }
 
 /**

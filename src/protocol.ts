@@ -302,6 +302,11 @@ export type PylonCommand =
    * behind another to the same session is waited for, so a control plane whose wait ran out asks this, not again.
    */
   | { kind: "send-claude-outcome"; requestId: string }
+  /**
+   * Presses Esc in the pane that runs the Claude Code session `session`, which interrupts its turn as it does at the
+   * terminal. It presses no other key, and none at all unless Claude is working.
+   */
+  | { kind: "interrupt-claude"; session: string }
   | { kind: "service"; op: "ensure" | "restart" | "stop" | "logs"; name?: string; lines?: number }
   /** Previews a port that already listens, or will, as `nexus preview <port>` in the pylon does. */
   | { kind: "link-port"; port: number }
@@ -309,6 +314,7 @@ export type PylonCommand =
   | { kind: "unlink-port"; port: number };
 
 export type SendClaudeOutcome = "sent" | "queued" | "blocked" | "starting" | "moved";
+export type InterruptClaudeOutcome = "interrupted" | "idle" | "blocked" | "unknown" | "not-running";
 
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
@@ -335,6 +341,12 @@ export type CommandResult =
    * when the probe holds no send under the ID: it never got one, or forgot it in a restart or an hour after it settled.
    */
   | { kind: "send-claude-outcome"; send: { outcome: SendClaudeOutcome; herdrPane: string; resumed: boolean } | "failed" | "unknown" }
+  /**
+   * `interrupted`: Esc was pressed while Claude worked. The rest press nothing. `idle`: Claude was not working, and a second
+   * Esc there opens its rewind picker. `blocked`: Claude waits at a dialog, which Esc would cancel. `unknown`:
+   * Herdr could not tell Claude's state. `not-running`: no live pane runs the session.
+   */
+  | { kind: "interrupt-claude"; outcome: InterruptClaudeOutcome }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }
   /** The service the port is previewed under: `port-<port>`, or the service that already owns the port. */
   | { kind: "link-port"; service: string }
@@ -908,6 +920,7 @@ const openSession = (harness: SessionHarness) => {
     model: agent?.modelFlag === undefined ? onlyFor("modelFlag") : nonEmpty.max(200).exactOptional(),
   });
 };
+const claudeSessionId = z.string().regex(/^[A-Za-z0-9-]{1,200}$/, "expected a Claude Code session ID");
 const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), argv: z.array(z.string()).min(1), cwd: z.string().startsWith("/", "expected an absolute path"), timeoutMs: z.int().min(1).max(60_000) }),
   z.discriminatedUnion("harness", sessionHarnessSchema.options.map(openSession) as [ReturnType<typeof openSession>, ...ReturnType<typeof openSession>[]]),
@@ -918,7 +931,7 @@ const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("drop-failed-session"), id: nonEmpty }),
   z.looseObject({
     kind: z.literal("send-claude"),
-    session: z.string().regex(/^[A-Za-z0-9-]{1,200}$/, "expected a Claude Code session ID"),
+    session: claudeSessionId,
     text: nonEmpty.max(16_384).superRefine((t, ctx) => {
       const problem = claudeTextProblem(t);
       if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
@@ -927,6 +940,7 @@ const pylonCommandSchema = z.discriminatedUnion("kind", [
     requestId: nonEmpty.exactOptional(),
   }),
   z.looseObject({ kind: z.literal("send-claude-outcome"), requestId: nonEmpty }),
+  z.looseObject({ kind: z.literal("interrupt-claude"), session: claudeSessionId }),
   z.looseObject({
     kind: z.literal("service"), op: z.enum(["ensure", "restart", "stop", "logs"]), name: nonEmpty.exactOptional(),
     lines: z.number().min(1).refine(Number.isInteger, "expected an integer").exactOptional(),
@@ -951,6 +965,7 @@ const commandResultSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("drop-failed-session"), dropped: z.boolean() }),
   z.looseObject({ kind: z.literal("send-claude"), ...sendSchema.shape }),
   z.looseObject({ kind: z.literal("send-claude-outcome"), send: z.union([z.enum(["failed", "unknown"]), sendSchema], { error: "expected failed, unknown or what the send became" }) }),
+  z.looseObject({ kind: z.literal("interrupt-claude"), outcome: z.enum(["interrupted", "idle", "blocked", "unknown", "not-running"] satisfies InterruptClaudeOutcome[]) }),
   z.looseObject({ kind: z.literal("service"), services: unchecked<readonly ServiceFact[]>(), logs: unchecked<string>() }),
   z.looseObject({ kind: z.literal("link-port"), service: nonEmpty }),
   z.looseObject({ kind: z.literal("unlink-port"), refused: nonEmpty.nullable() }),

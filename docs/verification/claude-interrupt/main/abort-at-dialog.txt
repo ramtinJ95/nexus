@@ -1,0 +1,3 @@
+$ nexus abort th-3a7f0f5487eb
+nexus: thread th-3a7f0f5487eb has no conversation
+[exit 5]

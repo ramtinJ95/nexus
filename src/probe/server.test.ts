@@ -810,6 +810,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
       return herdrOk({ type: "agent_started", agent: {}, argv: [] });
     }
     if (sub === "pane close") return herdrError("pane_not_found");
+    if (sub === "pane send-keys") return { exitCode: 0, output: "" };
     throw new Error(`unscripted ${sub}`);
   });
   let typing: PromiseWithResolvers<void> | null = null;
@@ -845,6 +846,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     "drop-failed-session": { kind: "drop-failed-session", id: "s1" },
     "send-claude": { kind: "send-claude", session, text: "hi" },
     "send-claude-outcome": { kind: "send-claude-outcome", requestId: "msg:never" },
+    "interrupt-claude": { kind: "interrupt-claude", session },
     "service": { kind: "service", op: "ensure" },
     "link-port": { kind: "link-port", port: 3000 },
     "unlink-port": { kind: "unlink-port", port: 3000 },
@@ -890,7 +892,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     await typingHeld.promise;
     return () => typing!.resolve();
   });
-  assert.deepEqual(sessionWaits, ["open-session with prompt and resume", "send-claude"], "only a send and a prompted launch wait for another command to the same Claude session");
+  assert.deepEqual(sessionWaits, ["open-session with prompt and resume", "send-claude", "interrupt-claude"], "only a send, a prompted launch and an interrupt wait for another command to the same Claude session");
 
   const list = fake.backend.list;
   fake.backend.list = () => { listed++; return list(); };
@@ -914,12 +916,13 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   const published: Record<string, boolean> = {};
   for (const name of ["exec", "open-session", "close-session", "drop-failed-session", "send-claude-outcome", "service", "link-port", "unlink-port"]) published[name] = await publishes(commands[name]!);
   panes = working;
+  published["interrupt-claude"] = await publishes(commands["interrupt-claude"]!);
   published["send-claude to a running session"] = await publishes(commands["send-claude"]!);
   panes = [];
   published["send-claude that resumes its session"] = await publishes(commands["send-claude"]!);
   assert.deepEqual(published, {
     "exec": false, "open-session": true, "close-session": true, "drop-failed-session": false, "send-claude-outcome": false, "service": false, "link-port": true, "unlink-port": true,
-    "send-claude to a running session": false, "send-claude that resumes its session": true,
+    "send-claude to a running session": false, "send-claude that resumes its session": true, "interrupt-claude": false,
   });
 
   panes = working;
@@ -942,6 +945,7 @@ test("the command policy table gives each kind its lock, its memory by request I
     ["send-claude that resumes its session", { kind: "send-claude", session, text: "hi" }, sent(true)],
     ["send-claude to a running session", { kind: "send-claude", session, text: "hi" }, sent(false)],
     ["send-claude-outcome", { kind: "send-claude-outcome", requestId: "msg:1" }],
+    ["interrupt-claude", { kind: "interrupt-claude", session }],
     ["service", { kind: "service", op: "ensure" }],
     ["link-port", { kind: "link-port", port: 3000 }],
     ["unlink-port", { kind: "unlink-port", port: 3000 }],
@@ -961,6 +965,7 @@ test("the command policy table gives each kind its lock, its memory by request I
     "send-claude that resumes its session: waits for its Claude session, remembered, publishes, retry safe: false",
     "send-claude to a running session: waits for its Claude session, remembered, does not publish, retry safe: false",
     "send-claude-outcome: waits for nothing, not remembered, does not publish, retry safe: true",
+    "interrupt-claude: waits for its Claude session, not remembered, does not publish, retry safe: false",
     "service: waits for nothing, not remembered, does not publish, retry safe: false",
     "link-port: waits for reads, not remembered, publishes, retry safe: true",
     "unlink-port: waits for reads, not remembered, publishes, retry safe: true",

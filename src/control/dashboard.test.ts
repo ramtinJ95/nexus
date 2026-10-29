@@ -1767,13 +1767,15 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "Slash command /compact",
     "Bash npm test › npm test No output yet.",
   ], "only a call of the running turn runs");
-  assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
-    "the turn is timed from when control heard it start, and Claude cannot be aborted");
+  assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
+    "the turn is timed from when control heard it start, and Interrupt stops it");
   const since = s.registry.thread(thread.id)!.workingSince;
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
-  assert.doesNotMatch(html, /data-action="abort"/);
+  assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's pane");
   assert.match(html, /placeholder="Steer the run…"/);
   assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
+  s.registry.reportSession(node, { sequence: 2, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.waiting", session: "s1", message: "Claude needs your permission to use Bash" } });
+  assert.doesNotMatch((await s.call("GET", `/threads/${thread.id}`)).text, />Interrupt</, "a dialog outranks the turn, and Esc would cancel it");
 });
 
 test("a Claude worker's folds say what their calls did by action, a changed file once, and count the tools past three actions", async (t) => {
@@ -2168,7 +2170,7 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
   s.fake.transcript(harness.id).docs["pi.live"] = { run: { taskId: 1, inputs: [] } };
   s.registry.reportSession(node, { sequence: 1, pylon: claude.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: Date.now() } });
   assert.equal((await agentParts(harness)).run, "Working 0 tools this turn Abort nexus attach <id> Copy");
-  assert.equal((await agentParts(claude)).run, "Claude is working 0s · 0 tools this turn nexus attach <id> Copy");
+  assert.equal((await agentParts(claude)).run, "Claude is working 0s · 0 tools this turn Interrupt nexus attach <id> Copy");
   for (const thread of [harness, claude, bare]) assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   for (const thread of [harness, claude, bare]) {
     // A Claude worker's model comes from its worker, which outlives the delete.

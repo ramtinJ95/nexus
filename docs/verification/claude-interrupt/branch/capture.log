@@ -1,0 +1,58 @@
+feat/claude-interrupt at 8ca7c59: Claude worker thread th-9498b0f2ad97, session ab60e737-a852-4c96-b4df-49fe766ed74d
+$ nexus --version
+nexus 0.48.0
+[exit 0]
+probe command: {"kind":"send-claude","session":"ab60e737-a852-4c96-b4df-49fe766ed74d","text":"Write a 1500-word essay about lighthouses, in plain prose, with no tools.","requestId":"msg:ab0dcf1d43fc330db095b2461acbfccb","model":"claude-opus-5-5"}
+herdr: Claude went from idle to working
+waited: the state bar says Claude works
+state bar while Claude works: Claude is working 7s · 0 tools this turn Interrupt nexus attach th-9498b0f2ad97 Copy
+screenshot 01-working.png
+the state bar offers "Interrupt"; clicking it
+probe command: {"kind":"interrupt-claude","session":"ab60e737-a852-4c96-b4df-49fe766ed74d"}
+herdr: Claude went from working to idle
+waited: Claude stops working
+waited: the state bar says Idle
+Claude's terminal after:
+  The most important advance was optical. In the early 1820s, the French physicist Augustin-Jean Fresnel developed a
+  lens built from concentric rings of glass prisms, which could gather the light from a lamp and bend it into a tight
+  horizontal beam. Earlier reflectors captured only part of the light; Fresnel's design captured much more and
+  concentrated it so effectively that a lamp which had once been visible a few miles away could now be seen twenty
+  miles or more. The lenses were expensive and beautiful, and they were ground and assembled with great care. A large
+  first-order Fresnel lens, standing taller than a person and weighing several tons, is still one of the most striking
+  objects a visitor can see in a lighthouse museum. The lens also sol
+  ⎿  Interrupted · What should Claude do instead?
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts
+screenshot 02-after-turn.png
+probe command: {"kind":"send-claude","session":"ab60e737-a852-4c96-b4df-49fe766ed74d","text":"Use the Bash tool to run exactly: touch interrupt-marker","requestId":"msg:2326659b854b4a9724deaf9766cb5a4f","model":"claude-opus-5-5"}
+herdr: Claude went from idle to working
+herdr: Claude went from working to blocked
+waited: the permission dialog waits
+waited: the state bar says it waits
+state bar at the dialog: Waiting for you Claude needs your permission to use Bash, in the pylon's terminal. Open terminal nexus attach th-9498b0f2ad97 Copy
+probe command: {"kind":"interrupt-claude","session":"ab60e737-a852-4c96-b4df-49fe766ed74d"}
+$ nexus abort th-9498b0f2ad97
+nexus: Claude waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed. Attach to the pylon (`nexus attach th-9498b0f2ad97`) and answer it
+[exit 5]
+Claude's terminal after the abort:
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ Create an empty file named interrupt-marker
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ touch interrupt-marker
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /tmp/nxi.s6Qf/work from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+ Esc to cancel · Tab to amend
+screenshot 03-dialog.png
+the person cancels the dialog in the terminal
+herdr: Claude went from blocked to idle
+waited: the dialog closes
+composer after /clear: error "/clear ends or replaces Claude's session, and Nexus follows only the session the worker started, so this page would stop showing what Claude does and its messages would go to the old session. Type it in the pylon's terminal (nexus attach th-9498b0f2ad97) if you mean to leave it.", draft "/clear"
+Herdr's session for the pane: ab60e737-a852-4c96-b4df-49fe766ed74d before, ab60e737-a852-4c96-b4df-49fe766ed74d after; the worker follows ab60e737-a852-4c96-b4df-49fe766ed74d
+screenshot 04-clear.png

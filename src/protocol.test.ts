@@ -130,6 +130,7 @@ const commands: PylonCommand[] = [
   { kind: "service", op: "ensure" },
   { kind: "link-port", port: 65_535 },
   { kind: "unlink-port", port: 1 },
+  { kind: "interrupt-claude", session: "0b1c-2d3e" },
 ];
 
 test("a probe takes a command of every kind as it was sent, with the fields it does not know", () => {
@@ -153,6 +154,7 @@ test("a probe refuses a command that fails any check of its fields", () => {
     { kind: "drop-failed-session" }, { kind: "drop-failed-session", id: "" },
     { ...send, session: "a/b" }, { ...send, session: "s".repeat(201) }, { ...send, session: 1 }, { ...send, text: "" }, { ...send, text: "t".repeat(16_385) }, { ...send, text: "a\tb" }, { ...send, text: "a\u001b[31mb" },
     { ...send, model: "m".repeat(201) }, { ...send, model: "" }, { ...send, requestId: "" }, { kind: "send-claude-outcome" },
+    { kind: "interrupt-claude" }, { kind: "interrupt-claude", session: "a/b" }, { kind: "interrupt-claude", session: "s".repeat(201) },
     { kind: "service", op: "start" }, { kind: "service", op: "logs", name: "" }, { kind: "service", op: "logs", lines: 0 }, { kind: "service", op: "logs", lines: 1.5 },
     { kind: "link-port", port: 0 }, { kind: "link-port", port: 65_536 }, { kind: "link-port", port: "80" }, { kind: "link-port", port: 22 }, { kind: "unlink-port", port: 22 },
   ];
@@ -268,6 +270,7 @@ test("a command result is read as the probe sent it, a close without an outcome 
     [commands[14]!, { kind: "link-port", service: "port-65535" }],
     [commands[15]!, { kind: "unlink-port", refused: null }],
     [commands[15]!, { kind: "unlink-port", refused: "web owns it" }],
+    ...(["interrupted", "idle", "blocked", "unknown", "not-running"] as const).map((outcome): [PylonCommand, unknown] => [commands[16]!, { kind: "interrupt-claude", outcome, ...unknown }]),
   ];
   for (const [command, result] of results) {
     answer(result);
@@ -282,6 +285,7 @@ test("a command result is read as the probe sent it, a close without an outcome 
     [commands[8]!, { kind: "drop-failed-session" }], [commands[9]!, { kind: "send-claude", ...send, outcome: "lost" }], [commands[9]!, { kind: "send-claude", ...send, herdrPane: "" }],
     [commands[9]!, { kind: "send-claude", ...send, resumed: "no" }], [commands[11]!, { kind: "send-claude-outcome", send: "pending" }], [commands[11]!, { kind: "send-claude-outcome" }],
     [commands[14]!, { kind: "link-port", service: "" }], [commands[15]!, { kind: "unlink-port" }], [commands[15]!, { kind: "unlink-port", refused: "" }],
+    [commands[16]!, { kind: "interrupt-claude" }], [commands[16]!, { kind: "interrupt-claude", outcome: "pressed" }],
   ];
   for (const [command, result] of bad) {
     answer(result);
