@@ -366,13 +366,13 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   return writes;
 }
 
-const readyPreviews = (f: Facts) => new Map(f.previews.filter((p) => p.ready).map(({ service, httpsPort }) => [`${service} ${httpsPort}`, { service, httpsPort }]));
+const readyPreviews = (f: Facts) => new Map(f.previews.map(({ service, httpsPort }) => [`${service} ${httpsPort}`, { service, httpsPort }]));
 
 function outputsOf(f: Facts): { kind: Extract<RegistryWrite, { record: "output" }>["kind"]; ref: string }[] {
   return [
     ...(f.git?.branches ?? []).flatMap((b) => b.pushedAs === null ? [] : [{ kind: "branch" as const, ref: b.pushedAs }]),
     ...(f.git?.dirty ? [{ kind: "diff" as const, ref: f.git.head }] : []),
-    ...f.previews.filter((p) => p.ready).map((p) => ({ kind: "preview" as const, ref: p.service })),
+    ...f.previews.map((p) => ({ kind: "preview" as const, ref: p.service })),
     ...f.declaredOutputs.map((d) => ({ kind: d.kind, ref: d.id })),
   ];
 }

@@ -17,7 +17,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
 | Session | `pylon`, `id`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title`, `state`, `message` | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
-| Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations report when it is ready |
+| Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations list it once its node has published it and warmed its URL |
 | Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
 | NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
 | Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, optional `proposal` and `ask`, `answer` | A failure judgment that leaves its failure to the person, one item a planning thread proposed, or a Claude worker's AskUserQuestion call while its dialog waits, and the person's answer. [Question records](#question-records) describes it |

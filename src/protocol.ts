@@ -226,7 +226,8 @@ export interface RunningFacts {
   services: readonly ServiceFact[] | null; // null when the supervisor could not be read
   /** TCP ports the guest listens on that a preview can reach, whether or not one does. Null when they could not be read. */
   listening: readonly ListeningFact[] | null;
-  previews: readonly { service: string; httpsPort: number; ready: boolean }[];
+  /** Listed once the probe has published the preview and warmed its URL. */
+  previews: readonly { service: string; httpsPort: number }[];
   sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
   declaredOutputs: readonly DeclaredOutput[];
@@ -818,7 +819,7 @@ const olderPylonSchema = z.discriminatedUnion("phase", [
   z.looseObject({
     pylonId: pylonIdField, phase: z.literal("running"), liveHash: unchecked<LiveHash | null>(), bootedAt: unchecked<string>(),
     bootedFrom: unchecked<RunningFacts["bootedFrom"]>(), services: unchecked<RunningFacts["services"]>(), listening: unchecked<RunningFacts["listening"]>(),
-    previews: unchecked<RunningFacts["previews"]>(), sessions: unchecked<readonly (SessionFact | OlderSession)[] | null>(), git: unchecked<GitFacts | null>(),
+    previews: unchecked<readonly OlderPreview[]>(), sessions: unchecked<readonly (SessionFact | OlderSession)[] | null>(), git: unchecked<GitFacts | null>(),
     declaredOutputs: unchecked<readonly DeclaredOutput[]>(), attachedClients: unchecked<number>(),
   }),
 ]) satisfies z.ZodType<OlderPylonObservation>;
@@ -989,10 +990,11 @@ export type OlderObservation = Omit<NodeObservation, "events" | "capacity" | "pr
 };
 type OlderPylonObservation =
   | Exclude<PylonObservation, { phase: "running" | "stopped" | "broken" }>
-  | (Omit<Extract<PylonObservation, { phase: "running" }>, "listening" | "sessions"> & { listening?: readonly ListeningFact[] | null; sessions: readonly (SessionFact | OlderSession)[] | null })
+  | (Omit<Extract<PylonObservation, { phase: "running" }>, "listening" | "previews" | "sessions"> & { listening?: readonly ListeningFact[] | null; previews: readonly OlderPreview[]; sessions: readonly (SessionFact | OlderSession)[] | null })
   | (Omit<Extract<PylonObservation, { phase: "stopped" }>, "sessions"> & { sessions?: readonly PausedSession[] | null })
   | (Omit<Extract<PylonObservation, { phase: "broken" }>, "cause" | "logTail"> & { cause?: string; logTail?: string });
 /** A session from a probe older than session states, which reported only sessions in panes. */
+type OlderPreview = RunningFacts["previews"][number] & { ready?: boolean };
 type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "state"> & { state?: undefined };
 
 /**
@@ -1006,6 +1008,7 @@ type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "sta
  * - No held secrets: it takes none from the control plane. It would look for one in its secret file and fail the
  *   spawn for good, so the planner holds a boot that needs one (reconcile.ts).
  * - A running pylon's listening ports unknown, and sessions from before session states as running in their panes.
+ * - A running pylon's previews without the `ready` an older probe sent, which was always true.
  * - A stopped pylon's sessions null, as from a pause that recorded nothing.
  * - A broken pylon's cause unknown, as is one this control plane does not know, and its log tail empty.
  * An observation it returned comes back unchanged.
@@ -1026,6 +1029,7 @@ function upgradePylon(p: OlderPylonObservation): PylonObservation {
   switch (p.phase) {
     case "running": return {
       ...p, listening: p.listening ?? null,
+      previews: p.previews.map(({ service, httpsPort }) => ({ service, httpsPort })),
       sessions: p.sessions?.map((s): SessionFact => s.state === undefined ? { ...s, state: "running", id: s.herdrPane } : s) ?? null,
     };
     case "stopped": return { ...p, sessions: p.sessions ?? null };

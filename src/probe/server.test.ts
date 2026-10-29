@@ -1259,7 +1259,7 @@ test("spawn publishes its previews, a hit arrives on observe, pause keeps them a
   assert.ok(snapshot?.type === "snapshot");
   const observed = snapshot.observation.pylons.find((p) => p.pylonId === pylonId);
   assert.ok(observed?.phase === "running");
-  assert.deepEqual(observed.previews, [{ service: "web", httpsPort: 10000, ready: true }], "observations report the published previews");
+  assert.deepEqual(observed.previews, [{ service: "web", httpsPort: 10000 }], "observations report the published previews");
   assert.deepEqual(snapshot.observation.previewRoutes, [{ httpsPort: 10000, pylonId, service: "web" }], "and the node's routes");
   assert.equal((await visit(10000, { "tailscale-user-login": "someone@example.com" })).status, 502, "the fake guest origin is not listening");
   const hit = (await events.next()).value;
@@ -1477,9 +1477,9 @@ test("observations report the previews of the pylon's last successful spawn, not
   tailscale.failOnce(`serve --bg --https=10001 http://127.0.0.1:${gatewayPort}`);
   const both: Job = { ...spawnJob, live: { previews: [{ service: "web", httpsPort: 10000 }, { service: "api", httpsPort: 10001 }], overlay: [] }, liveHash: "hash-2" as LiveHash };
   await run(client, both, "failed");
-  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }]);
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000 }]);
   await run(client, both);
-  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000, ready: true }, { service: "api", httpsPort: 10001, ready: true }]);
+  assert.deepEqual(await observedPreviews(), [{ service: "web", httpsPort: 10000 }, { service: "api", httpsPort: 10001 }]);
 });
 
 test("an unlinked port's route is withdrawn at once, and the pylon counts as unapplied until a spawn that started after it", async (t) => {

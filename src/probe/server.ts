@@ -340,7 +340,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return {
           pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          services: serviceFacts, listening: ports, previews: (published.get(pylonId) ?? []).map((preview) => ({ ...preview, ready: true })), sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
+          services: serviceFacts, listening: ports, previews: published.get(pylonId) ?? [], sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
           attachedClients,
         };
       }

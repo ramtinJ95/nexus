@@ -209,6 +209,16 @@ test("a probe event keeps the fields the control plane does not know inside its 
   ]) assert.deepEqual(parseProbeEvent(JSON.stringify(event)), event);
 });
 
+test("a running pylon's previews from an older probe, which marked each ready, parse without the mark", () => {
+  const pylon = {
+    pylonId, phase: "running", liveHash: "hash-1", bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image, checkpoint: null }, services: [], listening: [],
+    previews: [{ service: "web", httpsPort: 10000 }], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+  };
+  const older = { ...pylon, previews: [{ service: "web", httpsPort: 10000, ready: true }] };
+  assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "pylon", pylon: older })), { type: "pylon", pylon });
+  assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "pylon", pylon })), { type: "pylon", pylon });
+});
+
 test("the control plane refuses a probe event that fails any check of its fields", () => {
   const snapshot = (o: object) => ({ type: "snapshot", observation: { ...observation, ...o } });
   const bad: unknown[] = [

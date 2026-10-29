@@ -370,7 +370,7 @@ test("ingest: a new running pylon writes its sessions, derived outputs and activ
     sessions: [working, idleShell],
     attachedClients: 1,
     git: { head: "h1", branch: "feature", dirty: true, branches: [{ name: "feature", head: "h1", pushedAs: "origin/feature" }, { name: "local", head: "h0", pushedAs: null }] },
-    previews: [{ service: "web", httpsPort: 8443, ready: true }, { service: "api", httpsPort: 8444, ready: false }],
+    previews: [{ service: "web", httpsPort: 8443 }],
     declaredOutputs: [{ id: "o1", kind: "file", path: "shot.png", title: "Shot", sha256: "s" }, { id: "o2", kind: "diff", base: "h0", sha256: "d", title: null }],
   });
   assert.deepEqual(ingest({ type: "pylon", pylon: observed }, node, knows(), now), [
@@ -425,7 +425,7 @@ test("ingest: sessions the probe could not read write nothing", () => {
 });
 
 test("ingest: a pausing pylon keeps its sessions, makes its previews not ready, and retracts no output", () => {
-  const before = runningWith({ sessions: [idleShell], previews: [{ service: "web", httpsPort: 8443, ready: true }] });
+  const before = runningWith({ sessions: [idleShell], previews: [{ service: "web", httpsPort: 8443 }] });
   assert.deepEqual(ingest({ type: "pylon", pylon: phase("stopping") }, node, knows(before), now), [
     { record: "preview", pylonId, service: "web", httpsPort: 8443, ready: false },
   ] satisfies RegistryWrite[]);
@@ -482,11 +482,11 @@ test("ingest: a deleted pylon drops its sessions", () => {
   } }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
 });
 
-test("ingest: a preview is ready while the running pylon reports it ready on its port", () => {
+test("ingest: a preview is ready while the running pylon lists it on its port", () => {
   const web = { service: "web", httpsPort: 8443 };
-  const before = runningWith({ previews: [{ ...web, ready: true }, { service: "api", httpsPort: 8444, ready: false }] });
+  const before = runningWith({ previews: [web] });
   assert.deepEqual(ingest({ type: "pylon", pylon: before }, node, knows(before), now), [], "an unchanged report writes nothing");
-  assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ previews: [{ service: "api", httpsPort: 8444, ready: true }] }) }, node, knows(before), now), [
+  assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ previews: [{ service: "api", httpsPort: 8444 }] }) }, node, knows(before), now), [
     { record: "output", pylonId, kind: "preview", ref: "api" },
     { record: "preview", pylonId, service: "api", httpsPort: 8444, ready: true },
     { record: "preview", pylonId, ...web, ready: false },
