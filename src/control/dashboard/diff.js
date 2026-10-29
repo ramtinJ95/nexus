@@ -98,6 +98,38 @@ const slotName = (entry, side, line) => `note-${entry}-${side}-${line}`;
 const cursorSheet = `[data-line][data-cursor] { box-shadow: inset 2px 0 0 light-dark(var(--diffs-modified-light), var(--diffs-modified-dark)); }
 [data-column-number] { user-select: none; }`;
 
+const imageFile = /\.(?:png|jpe?g|gif|webp)$/i;
+/**
+ * A changed image file's before, at the base, and after, in the working tree, each as the image route's query that
+ * serves it, or why it has none. Null for any other file.
+ */
+export function imageSides(file, base) {
+  if (file === undefined || !imageFile.test(file.path)) return null;
+  return [
+    file.status === "added" ? { label: "Before", none: "none, the file is new" } : { label: "Before", query: { source: "file", path: file.oldPath ?? file.path, base } },
+    file.status === "deleted" ? { label: "After", none: "none, the file was deleted" } : { label: "After", query: { source: "file", path: file.path } },
+  ];
+}
+
+/** A changed image file's before and after, each linked to its full size, or null for any other file. */
+export function imagePair(file, base, thread) {
+  const sides = imageSides(file, base);
+  if (sides === null) return null;
+  const make = (tag, props) => Object.assign(document.createElement(tag), props);
+  const node = make("div", { className: "shots fv-shots" });
+  for (const side of sides) {
+    if (side.query === undefined) {
+      node.append(make("p", { className: "shot-gone", textContent: `${side.label}: ${side.none}` }));
+      continue;
+    }
+    const src = `/v1/threads/${thread}/image?${new URLSearchParams(side.query)}`;
+    const link = make("a", { className: "shot", href: src, target: "_blank", rel: "noopener" });
+    link.append(make("img", { src, alt: side.label, loading: "lazy" }), make("span", { className: "shot-cap", textContent: side.label }));
+    node.append(link);
+  }
+  return node;
+}
+
 /**
  * The lines of a diff's files in the given layout, "unified" or "split", with long lines wrapped, in a view that draws
  * a slot under each row a note ends on, marks rows as selected, and says which row a pointer is over.

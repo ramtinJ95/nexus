@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffOf, maxDiffRows } from "./diff.js";
+import { diffOf, imageSides, maxDiffRows } from "./diff.js";
 
 const edit = `diff --git a/src/a.ts b/src/a.ts
 index 1111111..2222222 100644
@@ -196,4 +196,17 @@ index 1111111..2222222 100644
 +one
 \\ No newline at end of file
 `).meta, []);
+});
+
+test("a changed image shows its before at the base and its after in the working tree, each where it has one", () => {
+  const file = (status, path, oldPath = null) => ({ path, oldPath, status, additions: null, deletions: null });
+  assert.deepEqual(imageSides(file("modified", "shots/home.png"), "head"), [
+    { label: "Before", query: { source: "file", path: "shots/home.png", base: "head" } },
+    { label: "After", query: { source: "file", path: "shots/home.png" } },
+  ]);
+  assert.deepEqual(imageSides(file("renamed", "new.JPG", "old.jpg"), "start")?.[0], { label: "Before", query: { source: "file", path: "old.jpg", base: "start" } });
+  assert.deepEqual(imageSides(file("added", "a.webp"), "turn"), [{ label: "Before", none: "none, the file is new" }, { label: "After", query: { source: "file", path: "a.webp" } }]);
+  assert.deepEqual(imageSides(file("deleted", "b.gif"), "start")?.[1], { label: "After", none: "none, the file was deleted" });
+  assert.equal(imageSides(file("modified", "font.woff2"), "start"), null);
+  assert.equal(imageSides(undefined, "start"), null);
 });
