@@ -1,8 +1,20 @@
-$ nexus show th-2ed7edefad50
-review rv-00000190 of PR #190: deploying 190c000000000000000000000000000000000000, round 1 of 5, reviewer th-a555ed81c902 on gpt-6-astra, landing when approved
+$ nexus show th-cb91022eb616
+review rv-00000190 of PR #190: merging, round 1 of 5, reviewer th-cf0f033bb8c3 on gpt-6-astra, landing when approved, waiting while rv-00000199 deploys
 exit 0
 
-$ nexus show th-2ed7edefad50
-review rv-00000190 of PR #190: landed as 190c000000000000000000000000000000000000, round 1 of 5, reviewer th-a555ed81c902 on gpt-6-astra, landing when approved
+$ nexus show th-cb91022eb616
+review rv-00000190 of PR #190: merging, round 1 of 5, reviewer th-cf0f033bb8c3 on gpt-6-astra, landing when approved, waiting while rv-00000199 deploys
+exit 0
+
+$ nexus show th-cb91022eb616
+review rv-00000190 of PR #190: merging, round 1 of 5, reviewer th-cf0f033bb8c3 on gpt-6-astra, landing when approved, waiting while rv-00000189 deploys
+exit 0
+
+$ nexus show th-cb91022eb616
+review rv-00000190 of PR #190: deploying 190c000000000000000000000000000000000000, round 1 of 5, reviewer th-cf0f033bb8c3 on gpt-6-astra, landing when approved
+exit 0
+
+$ nexus show th-cb91022eb616
+review rv-00000190 of PR #190: landed as 190c000000000000000000000000000000000000, round 1 of 5, reviewer th-cf0f033bb8c3 on gpt-6-astra, landing when approved
 exit 0
 

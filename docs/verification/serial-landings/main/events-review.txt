@@ -1,16 +1,16 @@
-$ nexus events --thread th-5cbb19c763ae --kind review.changed
-4 2026-10-29T15:51:27.148Z th-5cbb19c763ae review.changed {"review":"rv-00000189","reviewer":"th-b4d45176bc33","phase":{"kind":"merging","authorized":null},"round":1}
-9 2026-10-29T15:51:28.185Z th-5cbb19c763ae review.changed {"review":"rv-00000189","reviewer":"th-b4d45176bc33","phase":{"kind":"deploying","commit":"189c000000000000000000000000000000000000","previous":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requested":false,"deadline":1793290888184},"round":1}
-15 2026-10-29T15:51:29.182Z th-5cbb19c763ae review.changed {"review":"rv-00000189","reviewer":"th-b4d45176bc33","phase":{"kind":"needs-person","reasons":["Another release, 190c000000000000000000000000000000000000, replaced 189c000000000000000000000000000000000000 before every service reported healthy."]},"round":1}
+$ nexus events --thread th-a8bc5b8e3666 --kind review.changed
+4 2026-10-29T16:06:32.024Z th-a8bc5b8e3666 review.changed {"review":"rv-00000189","reviewer":"th-1e83c6d17dc1","phase":{"kind":"merging","authorized":null},"round":1}
+11 2026-10-29T16:06:33.133Z th-a8bc5b8e3666 review.changed {"review":"rv-00000189","reviewer":"th-1e83c6d17dc1","phase":{"kind":"deploying","commit":"189c000000000000000000000000000000000000","previous":"190c000000000000000000000000000000000000","requested":false,"deadline":1793291793133},"round":1}
+19 2026-10-29T16:06:38.086Z th-a8bc5b8e3666 review.changed {"review":"rv-00000189","reviewer":"th-1e83c6d17dc1","phase":{"kind":"landed","commit":"189c000000000000000000000000000000000000"},"round":1}
 exit 0
 
-$ nexus events --thread th-9ded26f9401a --kind review.changed
-5 2026-10-29T15:51:27.158Z th-9ded26f9401a review.changed {"review":"rv-00000190","reviewer":"th-6b1c13642335","phase":{"kind":"merging","authorized":null},"round":1}
-11 2026-10-29T15:51:28.195Z th-9ded26f9401a review.changed {"review":"rv-00000190","reviewer":"th-6b1c13642335","phase":{"kind":"deploying","commit":"190c000000000000000000000000000000000000","previous":"189c000000000000000000000000000000000000","requested":false,"deadline":1793290888195},"round":1}
-19 2026-10-29T15:51:33.205Z th-9ded26f9401a review.changed {"review":"rv-00000190","reviewer":"th-6b1c13642335","phase":{"kind":"landed","commit":"190c000000000000000000000000000000000000"},"round":1}
+$ nexus events --thread th-0942d40edaab --kind review.changed
+5 2026-10-29T16:06:32.045Z th-0942d40edaab review.changed {"review":"rv-00000190","reviewer":"th-d73c5fd267b4","phase":{"kind":"merging","authorized":null},"round":1}
+7 2026-10-29T16:06:33.104Z th-0942d40edaab review.changed {"review":"rv-00000190","reviewer":"th-d73c5fd267b4","phase":{"kind":"deploying","commit":"190c000000000000000000000000000000000000","previous":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requested":false,"deadline":1793291793103},"round":1}
+15 2026-10-29T16:06:34.079Z th-0942d40edaab review.changed {"review":"rv-00000190","reviewer":"th-d73c5fd267b4","phase":{"kind":"needs-person","reasons":["Another release, 189c000000000000000000000000000000000000, replaced 190c000000000000000000000000000000000000 before every service reported healthy."]},"round":1}
 exit 0
 
-$ nexus events --thread th-0b8774a5d7ca --kind review.changed
-6 2026-10-29T15:51:27.167Z th-0b8774a5d7ca review.changed {"review":"rv-00000199","reviewer":"th-5bb3a0ee13ee","phase":{"kind":"merging","authorized":null},"round":1}
-7 2026-10-29T15:51:28.178Z th-0b8774a5d7ca review.changed {"review":"rv-00000199","reviewer":"th-5bb3a0ee13ee","phase":{"kind":"needs-person","reasons":["Always needs the person: changes to the tailnets, as it changes docs/verification/fresh-install/standin/tailscale, docs/verification/fresh-install/tailnet.ts."]},"round":1}
+$ nexus events --thread th-0e0f16a984fb --kind review.changed
+6 2026-10-29T16:06:32.068Z th-0e0f16a984fb review.changed {"review":"rv-00000199","reviewer":"th-20af9b71ef4b","phase":{"kind":"merging","authorized":null},"round":1}
+9 2026-10-29T16:06:33.120Z th-0e0f16a984fb review.changed {"review":"rv-00000199","reviewer":"th-20af9b71ef4b","phase":{"kind":"needs-person","reasons":["Always needs the person: changes to the tailnets, as it changes docs/verification/fresh-install/standin/tailscale, docs/verification/fresh-install/tailnet.ts."]},"round":1}
 exit 0

@@ -1,12 +1,8 @@
-$ nexus show th-4d6ed4b913f5
-review rv-00000199 of PR #199: merging, round 1 of 5, reviewer th-c17ca6d4b62f on gpt-6-astra, landing when approved, waiting while rv-00000190 deploys
+$ nexus show th-6823c9d4b126
+review rv-00000199 of PR #199: deploying 199c000000000000000000000000000000000000, round 1 of 5, reviewer th-777ce3002a58 on gpt-6-astra, landing when approved
 exit 0
 
-$ nexus show th-4d6ed4b913f5
-review rv-00000199 of PR #199: deploying 199c000000000000000000000000000000000000, round 1 of 5, reviewer th-c17ca6d4b62f on gpt-6-astra, landing when approved
-exit 0
-
-$ nexus show th-4d6ed4b913f5
-review rv-00000199 of PR #199: landed as 199c000000000000000000000000000000000000, round 1 of 5, reviewer th-c17ca6d4b62f on gpt-6-astra, landing when approved
+$ nexus show th-6823c9d4b126
+review rv-00000199 of PR #199: landed as 199c000000000000000000000000000000000000, round 1 of 5, reviewer th-777ce3002a58 on gpt-6-astra, landing when approved
 exit 0
 

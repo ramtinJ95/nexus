@@ -22,6 +22,6 @@ docs/verification/serial-landings/run.sh origin/main HEAD
 | Step | main | branch |
 |---|---|---|
 | #199, docs and test stand-ins only | `needs-person`: held for the tailnets, as it changes `docs/verification/fresh-install/standin/tailscale` and `tailnet.ts`. | Lands. |
-| Two landings at once | The first review the pass reaches merges and deploys from `aaaa…`. A second merges in the same pass and deploys with the first's merge commit as `previous`, which was never healthy. | One deploys at a time. `nexus show` says what each waits for, such as `waiting while rv-00000190 deploys`. |
+| Two landings at once | The first review the pass reaches merges and deploys from `aaaa…`. A second merges in the same pass and deploys with the first's merge commit as `previous`, which was never healthy. | One deploys at a time. `nexus show` says what each waits for, such as `waiting while rv-00000199 deploys`. |
 | How they end | The first ends `needs-person`: "Another release, …, replaced … before every service reported healthy." The second lands. | All three land. Each records the release before it as `previous`, every one reported healthy in `release.log`. |
-| Review tests | `tests.txt`: the two landing tests and the `docs/` path test fail. | `tests.txt`: all pass. |
+| Review tests | `tests.txt`: the three landing tests and the `docs/` path test fail. | `tests.txt`: all pass. |
