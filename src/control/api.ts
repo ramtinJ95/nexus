@@ -55,7 +55,7 @@ import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDo
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
 import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "./questions.ts";
-import { answerDelivered, answerExits } from "../../images/pylon/nexus-ask.ts";
+import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { startKey, type StartRequest } from "./threads.ts";
@@ -821,7 +821,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       throw answeredOtherwise(question);
     }
     const t = registry.thread(question.thread)!;
-    const delivery = { kind: "exec", argv: [askHook, "answer", JSON.stringify(askAnswer(question.ask, choices))], cwd: "/", timeoutMs: 15_000 } as const;
+    const delivery = { kind: "exec", argv: [claudeHook, "answer", JSON.stringify(askAnswer(question.ask, choices))], cwd: "/", timeoutMs: 15_000 } as const;
     const { exitCode, output } = await pylonCommand(t, delivery);
     void claude.refresh(t);
     if (exitCode === answerExits.nobodyWaits) {
@@ -839,7 +839,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       throw new HttpError(502, exitCode === null ? `the answer was not handed to Claude: nexus-claude-hook answer did not finish within 15 s in pylon ${t.pylonId}`
         : `the answer was not handed to Claude: nexus-claude-hook answer exited ${exitCode} in pylon ${t.pylonId}: ${output.trim().slice(0, 500)}`);
     }
-    // A read of Claude's result since the delivery may have withdrawn the unanswered question, and the answer is still its.
+    // A pull since the delivery, which finds the hook that took the answer gone, may have withdrawn the unanswered
+    // question, and the answer is still its.
     const { answer: _, ...asked } = question;
     registry.askQuestion(asked);
     const answered = registry.answerQuestion(question.id, { option: choicesSummary(question.ask, choices), by: caller, at: Date.now(), choices });
@@ -1479,7 +1480,6 @@ const landSchema = z.strictObject({ head: commitSchema.optional(), waive: holdsS
 
 /** An ask is answered with a choice per question it asks, and any other question with one of its options. */
 const answerSchema = z.union([z.strictObject({ option: z.string() }), z.strictObject({ choices: z.array(z.unknown()) })]);
-const askHook = "/usr/local/bin/nexus-claude-hook";
 const answerRefusals: Record<AnswerRefusal, string> = {
   "not a person": "only a person's device may, never infrastructure nodes or pylons",
   "not a deployer": "its answer may deploy, so only deployers may",

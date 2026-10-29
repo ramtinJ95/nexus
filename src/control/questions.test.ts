@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
-import { askAnswer, askedIn, askRecord, choicesSchema, choicesSummary, type ClaudeAsk } from "./questions.ts";
+import { askAnswer, askedIn, askRecord, choicesSchema, choicesSummary, reportedAsks, type ClaudeAsk } from "./questions.ts";
 import type { ThreadId } from "./registry.ts";
 
 const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };
@@ -25,6 +25,15 @@ test("an AskUserQuestion call in the transcript gives its questions, and any oth
     "a label the transcript cut": { questions: [{ ...drink, options: [{ label: cut, description: "" }] }] },
   })) assert.equal(askedIn(call(input)), null, why);
   assert.deepEqual(askedIn(call({ questions: [{ ...drink, options: [{ ...drink.options[0], preview: cut }] }] }))?.[0]?.options[0]?.preview, cut, "a cut preview still shows");
+});
+
+test("the asks a pylon reports waiting are each one Claude's answer can key, none from an image that prints nothing, and output that is not a list fails", () => {
+  const reported = { session: "s1", toolUseId: "toolu_1", at: 5, input: { questions: [drink, extras] } };
+  assert.deepEqual(reportedAsks(`${JSON.stringify([reported])}\n`), [{ ask, at: 5 }]);
+  assert.deepEqual(reportedAsks(""), [], "an image from before the subcommand");
+  const others = [{ ...reported, input: { questions: [drink, drink] } }, { ...reported, toolUseId: "" }, { ...reported, session: 7 }, { ...reported, at: -1 }, "toolu_1"];
+  assert.deepEqual(reportedAsks(JSON.stringify([...others, reported])), [{ ask, at: 5 }], "an input Claude's answer cannot key, and what is not an ask, ask nothing");
+  for (const output of ["{", JSON.stringify({ asks: [reported] })]) assert.throws(() => reportedAsks(output), output);
 });
 
 test("an ask's question is named by its call, with a line per asked question, and is answered through choices", () => {

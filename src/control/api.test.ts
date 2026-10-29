@@ -10,7 +10,8 @@ import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { claudeProjects, transcriptStart, type ClaudeConversation } from "../claude-transcript.ts";
+import { claudeProjects, type ClaudeConversation } from "../claude-transcript.ts";
+import { claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { dirname, join } from "node:path";
@@ -2657,10 +2658,14 @@ async function withClaude(t: import("node:test").TestContext) {
   const projects = await mkdtemp(join(tmpdir(), "nexus-claude-projects-"));
   t.after(() => rm(projects, { recursive: true }));
   await mkdir(join(projects, "-home-user-workspace-repo"));
-  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
+  // The asks the pylon's hook reports waiting, which a test sets.
+  const pylon = { asks: [] as unknown[] };
+  s.probePipes(async (argv) => argv[0] === claudeHook
+    ? processStream("sh", ["-c", 'printf "%s\n" "$0"', JSON.stringify(pylon.asks)], () => {})
+    : processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
   const c = { ...s, thread };
   observeRunning(c, {});
-  return { ...c, transcript: join(projects, "-home-user-workspace-repo", `${claudeSession}.jsonl`) };
+  return { ...c, pylon, transcript: join(projects, "-home-user-workspace-repo", `${claudeSession}.jsonl`) };
 }
 
 test("a Claude worker thread's latest turn is the one its newest turn-started names, and a turn without a snapshot is refused", async (t) => {
@@ -3553,18 +3558,22 @@ test("without deployment options the control node is unknown, so no one answers 
 const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };
 const extras = { question: "What goes in it?", header: "Extras", multiSelect: true, options: [{ label: "Milk", description: "" }, { label: "Sugar", description: "" }] };
 
-/** A Claude worker thread whose running turn's transcript, as last read, ends in an AskUserQuestion call that waits. */
+/**
+ * A Claude worker thread in a running turn whose pylon's hook reports an AskUserQuestion dialog waiting, which a read
+ * of its conversation found, though Claude has written no transcript yet.
+ */
 async function claudeAsking(t: import("node:test").TestContext) {
   const s = await withClaude(t);
   const at = Date.now();
   s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: at, event: { kind: "session.turn-started", session: claudeSession, at } });
-  const call = { kind: "tool" as const, at: at + 1, id: "toolu_1", name: "AskUserQuestion", input: { questions: [drink, extras] } };
-  assert.ok(s.registry.appendClaudeRead(s.thread.id, { session: claudeSession, from: transcriptStart, entries: [call], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: at }));
+  s.pylon.asks = [{ session: claudeSession, toolUseId: "toolu_1", at: at + 1, input: { questions: [drink, extras] } }];
+  const read = () => s.call("GET", `/v1/threads/${s.thread.id}/conversation`);
+  assert.equal((await read()).status, 200);
   const delivered = () => s.commands.filter(([, c]) => c.kind === "exec");
   const answer = (body: unknown) => s.call("POST", "/v1/questions/ask-toolu_1/answer", body);
   const detail = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail;
   const exec = (exitCode: number | null, output: string) => s.probeAnswers(async (c) => c.kind === "exec" ? { kind: "exec", exitCode, output, truncated: false } : assert.fail(`unexpected ${c.kind}`));
-  return { ...s, delivered, answer, detail, exec };
+  return { ...s, read, delivered, answer, detail, exec };
 }
 
 test("a person answers a Claude worker's AskUserQuestion with a choice per question, which the hook in its pylon hands to Claude before it is recorded", async (t) => {
@@ -3621,10 +3630,15 @@ test("an answer to an AskUserQuestion nobody waits for any more withdraws it, an
   assert.equal((await s.answer({ choices })).status, 502);
   assert.deepEqual(await open(), [["ask-toolu_1", null]], "an answer Claude did not get is not recorded");
 
+  // Each answer above started a read, whose report from before the hook stopped would ask the question again.
+  await s.read();
+  s.pylon.asks = [];
   s.exec(20, "");
   assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: "Claude no longer waits for this answer: it was answered in the terminal, its turn ended, or its pylon paused since. Send it to Claude as a message instead" } });
   assert.deepEqual(await open(), []);
   assert.notEqual((await s.detail()).attention, "decision");
+  await s.read();
+  assert.deepEqual(await open(), [], "the pylon's next report agrees");
 });
 
 test("a harness, a Claude worker and a bare thread each answer every agent route as their kind does", async (t) => {

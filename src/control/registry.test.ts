@@ -18,6 +18,7 @@ import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, ServiceFact, 
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { ImageManifest, TemplateRecord } from "../images.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import type { WaitingAsk } from "./questions.ts";
 
 const node = "rj-firebat" as NodeName;
 const threadId = "th-1" as ThreadId;
@@ -1308,72 +1309,83 @@ test("a read that ends on a usage limit ends the turn that ran into it, though C
   assert.equal(attention(), "working");
 });
 
-/** A Claude worker on session s1 whose session events and transcript reads the test reports, as the probe and the reader would. */
+/** A Claude worker on session s1 whose transcript reads and pylon reports of waiting asks the test makes, as the reader would. */
 function claudeAsking(registry: ReturnType<typeof seeded>) {
   registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
-  let sequence = 0;
   let offset = 0;
   return {
-    report: (kind: "session.turn-started" | "session.turn-ended" | "session.waiting", at: number, session = "s1") => registry.reportSession(node, { sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind, session, at } }),
+    waiting: (...asks: WaitingAsk[]) => registry.setWaitingAsks(threadId, asks),
     append: (...entries: ClaudeEntry[]) => assert.equal(registry.appendClaudeRead(threadId, { session: "s1", from: cursorAt(offset), entries, cursor: cursorAt(offset += 10), reset: false, readAt: offset }), true),
     asks: () => registry.questions(threadId).map((q) => [q.id, q.answer?.option ?? null]),
   };
 }
 const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot" }, { label: "Coffee", description: "Strong" }] };
+const waitingAsk = (toolUseId: string, at: number, session = "s1"): WaitingAsk => ({ ask: { session, toolUseId, questions: [drink] }, at });
 const askCall = (id: string, at: number): ClaudeEntry => ({ kind: "tool", at, id, name: "AskUserQuestion", input: { questions: [drink] } });
 const answered = (id: string, at: number): ClaudeEntry => ({ kind: "result", at, toolUseId: id, output: 'User has answered your questions: "Which drink?"="Tea".', isError: false });
 
-test("a Claude worker's AskUserQuestion call is a question while its dialog waits, withdrawn once a result answers it or its turn ends, and never asked again for an earlier turn", (t) => {
+test("a Claude worker's AskUserQuestion is a question while its pylon reports the dialog waiting, though the transcript holds no call yet, and is withdrawn once a report leaves it out or the transcript holds its result", (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
-  const { report, append, asks } = claudeAsking(registry);
-  report("session.turn-started", 40);
-  append({ kind: "prompt", at: 40, text: "Make me a drink", from: "person" }, askCall("t1", 50));
+  const { waiting, append, asks } = claudeAsking(registry);
+  append({ kind: "prompt", at: 40, text: "Make me a drink", from: "person" });
+  assert.equal(waiting(waitingAsk("t1", 50)), true);
   assert.deepEqual(registry.questions(threadId), [{
     id: "ask-t1", thread: threadId, text: "Drink: Which drink?", options: [], reserved: null, answerer: "person", askedAt: 50,
     ask: { session: "s1", toolUseId: "t1", questions: [drink] }, answer: null,
   }]);
   assert.equal(registry.attention(threadId), "decision");
-  report("session.waiting", 51);
-  assert.deepEqual(asks(), [["ask-t1", null]], "the dialog's notification keeps it waiting");
-  append(answered("t1", 60));
-  assert.deepEqual(asks(), [], "the terminal answered it");
+  assert.equal(waiting(waitingAsk("t1", 50)), false, "the same report again asks nothing new");
+  assert.equal(waiting(), true);
+  assert.deepEqual(asks(), [], "a report without it, as after the terminal answered it");
   assert.notEqual(registry.attention(threadId), "decision");
 
-  append(askCall("t2", 70));
-  report("session.turn-started", 75, "person-session");
-  assert.deepEqual(asks(), [["ask-t2", null]], "a turn of another Claude in the pylon leaves it waiting");
-  report("session.turn-ended", 80);
-  assert.deepEqual(asks(), [], "its turn ended");
-  report("session.turn-started", 90);
-  append({ kind: "reply", at: 91, text: "Where were we?" });
-  assert.deepEqual(asks(), [], "a call of an earlier turn, which a pause or crash killed without a result, is not asked again");
-  append(askCall("t3", 95));
-  assert.deepEqual(asks(), [["ask-t3", null]]);
+  waiting(waitingAsk("t2", 70));
+  append(askCall("t2", 69), answered("t2", 75));
+  assert.deepEqual(asks(), [], "the transcript holds its result");
+  waiting(waitingAsk("t2", 70));
+  assert.deepEqual(asks(), [], "a report taken before the hook stopped still names it");
+
+  waiting(waitingAsk("t3", 80), waitingAsk("t4", 81, "person-session"));
+  assert.deepEqual(asks(), [["ask-t3", null]], "another Claude's ask in the pylon, such as the person's own, asks nothing");
+  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s2");
+  assert.deepEqual(asks(), [], "the worker started again on another session");
 });
 
-test("an answered ask stays answered whatever follows, and a withdrawn one stops needing a decision and is not asked again", (t) => {
+test("an answered ask stays answered whatever the pylon reports, and a withdrawn one is not asked again before the next report", (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());
-  const { report, append, asks } = claudeAsking(registry);
-  report("session.turn-started", 40);
-  append(askCall("t1", 50));
+  const { waiting, append, asks } = claudeAsking(registry);
+  waiting(waitingAsk("t1", 50));
   registry.answerQuestion("ask-t1", { option: "Drink: Tea", by: "nLAPTOP" as TailnetNodeId, at: 55, choices: [{ picked: ["Tea"] }] });
-  append(answered("t1", 60));
-  report("session.turn-ended", 70);
+  waiting();
   registry.withdrawAsk("ask-t1");
   assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]]);
   assert.deepEqual(registry.question("ask-t1")!.answer!.choices, [{ picked: ["Tea"] }]);
 
-  report("session.turn-started", 80);
-  append(askCall("t2", 90));
+  waiting(waitingAsk("t2", 90));
   assert.equal(registry.attention(threadId), "decision");
   registry.withdrawAsk("ask-t2");
   assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]]);
   assert.notEqual(registry.attention(threadId), "decision");
   append();
-  report("session.waiting", 95);
-  assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]], "though the transcript still shows no result for it");
+  registry.reportSession(node, { sequence: 1, pylon: pylonId, time: 1000, event: { kind: "session.waiting", session: "s1", at: 95 } });
+  assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]], "a read and a session event before the pylon's next report");
+});
+
+test("archiving or deleting a Claude worker's thread withdraws its asks, and a report that lands after asks nothing", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const { waiting, asks } = claudeAsking(registry);
+  for (const status of ["archived", "deleted"] as const) {
+    waiting(waitingAsk("t1", 50));
+    assert.deepEqual(asks(), [["ask-t1", null]]);
+    registry.setThreadStatus(threadId, status);
+    assert.deepEqual(asks(), [], status);
+    assert.equal(waiting(waitingAsk("t1", 50)), false);
+    assert.deepEqual(asks(), [], `a pull that was under way when the thread was ${status}`);
+    if (status === "archived") registry.setThreadStatus(threadId, "active");
+  }
 });
 
 test("a write waits while another process, such as a second open of the registry, holds its write lock", async (t) => {

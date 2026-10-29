@@ -351,14 +351,20 @@ test("an open question is a card with a button per option, disabled with the rea
 const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };
 const extras = { question: "What goes in it?", header: "Extras", multiSelect: true, options: [{ label: "Milk", description: "" }, { label: "Sugar", description: "" }] };
 const askCall = (id: string, at: number): ClaudeEntry => ({ kind: "tool", at, id, name: "AskUserQuestion", input: { questions: [drink, extras] } });
+const waitingAsk = (toolUseId: string, at: number) => ({ ask: { session: "s1", toolUseId, questions: [drink, extras] }, at });
 /** Each AskUserQuestion card of the conversation as a reader sees it, by its call. */
 const askCardsOf = (page: string) => Object.fromEntries([...page.split('id="convo"')[1]!.matchAll(/<section class="ask-card" id="ask-([^"]+)"[\s\S]*?<\/section>/g)].map((m) => [m[1], textOf(m[0])]));
 
-test("a Claude worker's open AskUserQuestion is a form in the dock with each question's options and previews, an answer of one's own and notes, disabled with the reason for a device that may not answer", async (t) => {
+test("a Claude worker's open AskUserQuestion is a form in the dock from the pylon's report alone, with each question's options and previews, an answer of one's own and notes, disabled with the reason for a device that may not answer", async (t) => {
   const s = await seeded(t, { ...landingOptions(), allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId]) });
   const at = Date.now();
-  const thread = await claudeThread(s, [askCall("toolu_1", at + 1)]);
-  s.registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: at, event: { kind: "session.turn-started", session: "s1", at } });
+  const thread = await claudeThread(s, [{ kind: "prompt", at, text: "Make me a drink", from: "person" }]);
+  s.registry.setWaitingAsks(thread.id, [waitingAsk("toolu_1", at + 1)]);
+
+  const asked = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.match(questionsOf(asked), /<form class="ask" data-thread="[^"]+" data-question="ask-toolu_1">/, "the pylon's report alone, before Claude writes the call");
+  assert.deepEqual(askCardsOf(asked), {});
+  assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: { ...transcriptStart, offset: 1 }, readAt: Date.now(), reset: false, cursor: { ...transcriptStart, offset: 2 }, entries: [askCall("toolu_1", at + 1)] }));
 
   const page = (await s.call("GET", `/threads/${thread.id}`)).text;
   const card = questionsOf(page);
@@ -384,7 +390,7 @@ test("a Claude worker's open AskUserQuestion is a form in the dock with each que
 test("an answered AskUserQuestion leaves the dock and shows in the conversation with what was picked, one's own answer, notes and the device, or with what Claude got from the terminal", async (t) => {
   const s = await seeded(t);
   const thread = await claudeThread(s, [askCall("toolu_1", 2)]);
-  s.registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: 1 } });
+  s.registry.setWaitingAsks(thread.id, [waitingAsk("toolu_1", 2)]);
   s.registry.answerQuestion("ask-toolu_1", { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.now(), choices: [{ picked: ["Tea"], notes: "no rush" }, { picked: ["Milk"], own: "Oat cream" }] });
   const terminal = 'User has answered your questions: "Which drink?"="Coffee", "What goes in it?"="Sugar".';
   assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: { ...transcriptStart, offset: 1 }, readAt: Date.now(), reset: false, cursor: { ...transcriptStart, offset: 2 }, entries: [

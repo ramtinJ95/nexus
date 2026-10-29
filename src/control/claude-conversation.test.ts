@@ -10,6 +10,7 @@ import { openRegistry, type Registry, type Thread, type ThreadId } from "./regis
 import { newPylonRecord } from "../tick.ts";
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
+import { claudeHook } from "../../images/pylon/nexus-ask.ts";
 import type { ByteStream, LiveHash, NodeName, ProbeClient, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
@@ -200,4 +201,52 @@ test("a watched thread's view, which reads on from the last one, holds what the 
   await watch.stop();
   await appendFile(file("another-session"), lines("F"));
   assert.deepEqual(await shown(), stored(), "an unwatched thread's view");
+});
+
+test("a read asks the pylon's hook which dialogs wait while a turn runs or waits or an ask is open, and its report opens the worker's question though the transcript holds no call yet", async (t) => {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const thread = claudeThread(registry);
+  const projects = await mkdtemp(join(dir, "projects-"));
+  await mkdir(join(projects, "-home-user-workspace-repo"));
+  const reply = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n")[40]!;
+  await writeFile(join(projects, "-home-user-workspace-repo", `${session}.jsonl`), `${reply}\n`);
+  let report: unknown[] = [];
+  let exit = 0;
+  let pulls = 0;
+  const probe: Pick<ProbeClient, "stream"> = {
+    async stream(_, argv) {
+      if (argv[0] !== claudeHook) return processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {});
+      pulls++;
+      return processStream("sh", ["-c", 'printf "%s\n" "$0"; exit "$1"', JSON.stringify(report), String(exit)], () => {});
+    },
+  };
+  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 3_600_000 });
+  t.after(() => conversations.close());
+  let sequence = 0;
+  const event = (kind: "session.turn-started" | "session.waiting" | "session.turn-ended") => registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session, at: Date.now() + sequence } });
+  const asks = () => registry.questions(thread.id).map((q) => q.id);
+  const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot" }, { label: "Coffee", description: "Strong" }] };
+
+  await conversations.refresh(thread);
+  assert.equal(pulls, 0, "no turn runs or waits and no ask is open");
+  event("session.turn-started");
+  event("session.waiting");
+  report = [{ session, toolUseId: "toolu_1", at: 5, input: { questions: [drink] } }];
+  await conversations.refresh(thread);
+  assert.deepEqual(registry.claudeEntries(thread.id).map((e) => e.kind), ["reply"], "Claude has not written the call yet");
+  assert.deepEqual(asks(), ["ask-toolu_1"]);
+  assert.equal(registry.attention(thread.id), "decision");
+
+  report = [];
+  exit = 1;
+  await conversations.refresh(thread);
+  assert.deepEqual(asks(), ["ask-toolu_1"], "a pull that failed keeps the last report");
+  exit = 0;
+  event("session.turn-ended");
+  await conversations.refresh(thread);
+  assert.deepEqual(asks(), [], "the open ask makes the read after the turn's end ask, and the hook reports none");
+  const before = pulls;
+  await conversations.refresh(thread);
+  assert.equal(pulls, before, "an idle thread with no open ask is not asked");
 });

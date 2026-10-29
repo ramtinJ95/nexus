@@ -1,7 +1,7 @@
 /**
  * A question a thread asks the person, answered on its card on the dashboard. Its thread's attention is `decision`
  * while it is open. The planning pass asks one per item a planning thread proposes (planning.ts), and a Claude
- * worker's AskUserQuestion call is one while its dialog waits (the registry's asks).
+ * worker's AskUserQuestion call is one while its pylon's hook reports that its dialog waits (the registry's asks).
  */
 import { z } from "zod";
 import type { AskAnswer } from "../../images/pylon/nexus-ask.ts";
@@ -37,6 +37,8 @@ export interface Proposal { block: string; index: number; key: string; title: st
 export interface AskedQuestion { question: string; header: string; multiSelect: boolean; options: readonly { label: string; description: string; preview?: string }[] }
 /** A Claude worker's AskUserQuestion call, which the pylon's PermissionRequest hook holds open until it is answered. */
 export interface ClaudeAsk { session: string; toolUseId: string; questions: readonly AskedQuestion[] }
+/** An ask whose dialog the pylon's hook reported waiting, and when the hook started waiting. */
+export interface WaitingAsk { ask: ClaudeAsk; at: number }
 /** The person's answer to one asked question: the options they picked, an answer of their own, and notes. */
 export interface Choice { picked: readonly string[]; own?: string; notes?: string }
 
@@ -65,6 +67,23 @@ export function askedIn(entry: ClaudeEntry): AskedQuestion[] | null {
   if (entry.kind !== "tool" || entry.name !== "AskUserQuestion") return null;
   const parsed = askInput.safeParse(entry.input);
   return parsed.success ? parsed.data.questions as AskedQuestion[] : null;
+}
+
+const reportedAsk = z.object({ session: z.string().min(1).max(200), toolUseId: z.string().min(1).max(200), at: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER), input: askInput });
+
+/**
+ * The asks in what `nexus-claude-hook asks` printed, a list of the pylon's ReportedAsk. One whose input Claude's
+ * answer cannot key is left out, as is any item that is not an ask. An image from before the subcommand prints
+ * nothing, which reports none. Throws for output that is not a list.
+ */
+export function reportedAsks(output: string): WaitingAsk[] {
+  const reported = z.array(z.unknown()).parse(output.trim() === "" ? [] : JSON.parse(output));
+  return reported.flatMap((item) => {
+    const parsed = reportedAsk.safeParse(item);
+    if (!parsed.success) return [];
+    const { session, toolUseId, at, input } = parsed.data;
+    return [{ ask: { session, toolUseId, questions: input.questions as AskedQuestion[] }, at }];
+  });
 }
 
 /** The ID of the question an AskUserQuestion call is, so reading the call again asks nothing new. */

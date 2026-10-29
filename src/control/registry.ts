@@ -13,7 +13,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  */
 import type { PrWatchState } from "./pr-watch.ts";
 import type { PlanningRecord } from "./planning.ts";
-import { askedIn, askRecord, type Question } from "./questions.ts";
+import { askQuestionId, askRecord, type Question, type WaitingAsk } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
 import type { Judgment } from "./judgment.ts";
 import type { ItemId, ItemRecord } from "./pipeline.ts";
@@ -367,10 +367,9 @@ const migrations: readonly string[] = [
   // Each planning thread's token and what the control plane read from it and told it. It touches nothing an earlier
   // migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS planning_threads (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
-  // The questions of Claude workers' AskUserQuestion calls that an answer found no hook waiting for, which the
-  // transcript cannot tell, so they are never asked again. It touches nothing an earlier migration made, so a registry
-  // rewound past it applies it again unchanged.
-  `CREATE TABLE IF NOT EXISTS withdrawn_asks (id TEXT PRIMARY KEY) STRICT;`,
+  // The asks whose AskUserQuestion dialogs each thread's pylon last reported waiting, which open its Claude worker's
+  // questions. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS waiting_asks (thread TEXT PRIMARY KEY REFERENCES threads (id), report TEXT NOT NULL) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -623,29 +622,27 @@ export function openRegistry(path: string, clock = Date.now) {
     return jsonOrNull<Question>(sql("SELECT record FROM questions WHERE id = ?").get(id)?.record ?? null);
   }
 
+  function waitingAsks(thread: ThreadId): WaitingAsk[] {
+    return jsonOrNull<WaitingAsk[]>(sql("SELECT report FROM waiting_asks WHERE thread = ?").get(thread)?.report ?? null) ?? [];
+  }
+
   /**
-   * Asks a question for each of the Claude worker's AskUserQuestion calls that waits for an answer, and withdraws each
-   * unanswered one that no longer does. A call waits while it has no result, a turn of the worker's session is live or
-   * waiting, and no later turn of that session started, so the call of a turn a pause killed never opens again. Other
-   * sessions' turns, such as the person's own Claude in the pylon, leave it be. One withdrawAsk withdrew stays withdrawn.
+   * Asks a question for each ask the thread's pylon last reported waiting for its Claude worker's current session, and
+   * withdraws each unanswered ask that is not one. The transcript only closes one, once it holds the call's result,
+   * since Claude may write the call itself only once the dialog is answered. Other sessions' asks, such as the
+   * person's own Claude's in the pylon, ask nothing. Answers whether it asked or withdrew any.
    */
-  function reconcileAsks(thread: ThreadId) {
-    const worker = sql(`SELECT w.session, CASE WHEN w.turn_session = w.session THEN w.turn_at END AS turn_at FROM claude_workers w
-      JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
-      WHERE w.thread = ? AND EXISTS (SELECT 1 FROM session_activity a WHERE a.thread = w.thread AND a.session = w.session)`).get(thread);
-    const entries = worker === undefined ? [] : sql("SELECT entry FROM claude_entries WHERE thread = ? ORDER BY seq DESC LIMIT 64").all(thread).map((r) => json<ClaudeEntry>(r.entry));
-    const results = new Set(entries.flatMap((e) => e.kind === "result" ? [e.toolUseId] : []));
-    const open = entries.flatMap((entry) => {
-      if (entry.kind !== "tool" || results.has(entry.id) || entry.at < Number(worker!.turn_at ?? 0)) return [];
-      const questions = askedIn(entry);
-      return questions === null ? [] : [askRecord(thread, { session: worker!.session as string, toolUseId: entry.id, questions }, entry.at)];
-    });
+  function reconcileAsks(thread: ThreadId): boolean {
+    const session = sql("SELECT session FROM claude_workers WHERE thread = ?").get(thread)?.session;
+    const answered = sql("SELECT 1 FROM claude_entries WHERE thread = ? AND json_extract(entry, '$.kind') = 'result' AND json_extract(entry, '$.toolUseId') = ?");
+    const open = waitingAsks(thread).filter(({ ask }) => ask.session === session && answered.get(thread, ask.toolUseId) === undefined).map(({ ask, at }) => askRecord(thread, ask, at));
+    let changes = 0;
     for (const question of open) {
-      sql("INSERT OR IGNORE INTO questions (id, thread, record) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM withdrawn_asks WHERE id = ?)")
-        .run(question.id, thread, JSON.stringify({ ...question, answer: null }), question.id);
+      changes += Number(sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, thread, JSON.stringify({ ...question, answer: null })).changes);
     }
-    sql(`DELETE FROM questions WHERE thread = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL
-      AND id NOT IN (SELECT value FROM json_each(?))`).run(thread, JSON.stringify(open.map((q) => q.id)));
+    changes += Number(sql(`DELETE FROM questions WHERE thread = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL
+      AND id NOT IN (SELECT value FROM json_each(?))`).run(thread, JSON.stringify(open.map((q) => q.id))).changes);
+    return changes > 0;
   }
 
   function updateAttention(id: ThreadId) {
@@ -667,7 +664,10 @@ export function openRegistry(path: string, clock = Date.now) {
   function setThreadStatus(id: ThreadId, status: ThreadStatus) {
     transaction(() => {
       q.threadStatus.run(status, id);
-      if (status === "archived" || status === "deleted") sql("DELETE FROM session_activity WHERE thread = ?").run(id);
+      if (status === "archived" || status === "deleted") {
+        // The thread's pylon pauses, so no turn of it runs and no dialog waits.
+        for (const table of ["session_activity", "waiting_asks"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
+      }
       if (status === "deleted") {
         // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
         sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
@@ -961,6 +961,7 @@ export function openRegistry(path: string, clock = Date.now) {
     setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
       transaction(() => {
         sql("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null, defaultClaudeModel);
+        reconcileAsks(thread);
         updateAttention(thread);
       });
     },
@@ -1023,7 +1024,6 @@ export function openRegistry(path: string, clock = Date.now) {
         if (event.kind !== "session.waiting") q.agentActivity.run(clock(), thread);
         if (event.kind === "session.turn-ended") q.recordReply.run(clock(), thread);
         appendEvent(event.kind, thread, { at, ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
-        reconcileAsks(thread);
         updateAttention(thread);
       });
     },
@@ -1070,13 +1070,33 @@ export function openRegistry(path: string, clock = Date.now) {
       });
     },
     question: (id: string): Question | null => questionRecord(id),
-    /** Withdraws for good an ask whose dialog no hook waits on any more, such as one its terminal answered. An answered one stays. */
+    /**
+     * Stores the asks the thread's pylon reports waiting, in place of its last report, and asks or withdraws its Claude
+     * worker's questions to match. An archived or deleted thread's pylon is paused, so its report is dropped. Answers
+     * whether a question was asked or withdrawn.
+     */
+    setWaitingAsks(thread: ThreadId, asks: readonly WaitingAsk[]): boolean {
+      return transaction(() => {
+        const status = q.thread.get(thread)?.status;
+        if (status === undefined || status === "archived" || status === "deleted") return false;
+        sql("INSERT INTO waiting_asks (thread, report) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET report = excluded.report").run(thread, JSON.stringify(asks));
+        const changed = reconcileAsks(thread);
+        updateAttention(thread);
+        return changed;
+      });
+    },
+    /**
+     * Withdraws an ask whose dialog no hook waits on any more, such as one its terminal answered, and drops it from the
+     * stored report, so nothing before the pylon's next report asks it again. An answered one stays.
+     */
     withdrawAsk(id: string) {
       transaction(() => {
-        const thread = sql("DELETE FROM questions WHERE id = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL RETURNING thread").get(id)?.thread;
+        const thread = sql("SELECT thread FROM questions WHERE id = ?").get(id)?.thread as ThreadId | undefined;
         if (thread === undefined) return;
-        sql("INSERT OR IGNORE INTO withdrawn_asks (id) VALUES (?)").run(id);
-        updateAttention(thread as ThreadId);
+        const report = waitingAsks(thread).filter(({ ask }) => askQuestionId(ask.toolUseId) !== id);
+        sql("UPDATE waiting_asks SET report = ? WHERE thread = ?").run(JSON.stringify(report), thread);
+        reconcileAsks(thread);
+        updateAttention(thread);
       });
     },
     questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), id").all(thread).map((r) => json<Question>(r.record)),
