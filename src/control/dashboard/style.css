@@ -192,12 +192,14 @@ a.link { color: var(--accent); }
 .bar-end { margin-left: auto; display: flex; gap: 6px; }
 
 /* the tabs over a thread's views: the conversation, then each file the reader opened */
-.tabs { display: flex; gap: 2px; margin: 0 14px 0; padding: 3px; border-radius: 999px; background: var(--raised); flex: none; overflow-x: auto; scrollbar-width: none; }
+.tabs { --convo-tab: 96px; display: flex; gap: 2px; margin: 0 14px 0; padding: 3px; border-radius: 999px; background: var(--raised); flex: none; overflow-x: auto; scrollbar-width: none; scroll-padding-left: calc(var(--convo-tab) + 2px); }
 .tab, .tab-pick { font: 500 12.5px/1 var(--sans); color: var(--text-2); background: none; border: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; }
 .tabs > .tab { flex: 1 1 0; height: 30px; padding: 0 12px; border-radius: 999px; }
 .tabs > .tab:hover { color: var(--text); }
 .tabs > .tab.active { background: var(--bg); color: var(--text); box-shadow: var(--shadow); }
-.tab-file { padding: 0 4px 0 12px !important; }
+.tab-file { padding: 0 4px 0 12px !important; min-width: 120px; }
+.tabs > .tab[data-tab="convo"] { position: sticky; left: 0; z-index: 1; min-width: var(--convo-tab); background: var(--raised); box-shadow: -3px 0 0 var(--raised); }
+.tabs > .tab[data-tab="convo"].active { background: var(--bg); box-shadow: -3px 0 0 var(--raised), var(--shadow); }
 .tab-pick { flex: 1; min-width: 0; height: 100%; }
 .tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .tab-close { flex: none; width: 22px; height: 22px; border: 0; border-radius: 50%; background: none; color: var(--text-3); cursor: pointer; font-size: 15px; line-height: 1; }
@@ -360,7 +362,11 @@ h4.md-h { font-size: 1.07em; }
 /* a file's diff, opened as a tab */
 .file-view { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .fv-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 9px; padding: 10px 20px; background: var(--bg); border-bottom: 1px solid var(--line-soft); font-size: 13px; }
-.fv-path { font-family: var(--mono); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fv-path { display: flex; font-family: var(--mono); font-size: 12.5px; min-width: 0; }
+/* The folders give way first, and a name too long for the header wraps rather than lose its end. */
+.fv-dir { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.fv-name { min-width: 0; overflow-wrap: anywhere; }
+.fv-head > .dim { flex: none; white-space: nowrap; }
 .fv-head .lines { margin-left: auto; }
 .fv-note { margin: 16px 20px; }
 .fv-meta { padding: 8px 20px; font-family: var(--mono); border-bottom: 1px solid var(--line-soft); }
@@ -577,6 +583,7 @@ h4.md-h { font-size: 1.07em; }
   .comp-box textarea { font-size: 16px; }
   .comp-foot .keys { display: none; }
   .fv-head { padding: 10px 12px; }
+  .fv-head .fv-layout { display: none; }
 
   .page { padding: 14px 12px 24px; }
   .ov .wide { display: none; }

@@ -3,7 +3,7 @@
 import { DiffHunksRenderer, parsePatchFiles, wrapCoreCSS, wrapThemeCSS } from "@pierre/diffs";
 
 /** A diff this long is shown up to here, so a huge one does not stall the page. */
-export const maxDiffRows = 20_000;
+export const maxDiffRows = 2_000;
 /** What a diff says of a file beyond its lines, such as a rename or a new mode. */
 const metaLine = /^(old mode|new mode|new file mode|deleted file mode|similarity index|rename from|rename to|copy from|copy to) /;
 
@@ -21,12 +21,32 @@ function cutPatch(patch) {
       const kept = lines.slice(header + 1, i).filter((line) => /^[ +-]/.test(line));
       const old = kept.filter((line) => line[0] !== "+").length;
       const added = kept.filter((line) => line[0] !== "-").length;
-      const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(lines[header]);
-      lines[header] = `@@ -${at[1]},${old} +${at[2]},${added} @@${at[3]}`;
+      const at = /^@@ -(\d+)(,\d+)? \+(\d+)(,\d+)? @@(.*)$/.exec(lines[header]);
+      // A side with no lines names the line before it, so a side the cut emptied starts a line earlier.
+      const start = (from, count, kept) => kept === 0 && count !== ",0" ? Number(from) - 1 : from;
+      lines[header] = `@@ -${start(at[1], at[2], old)},${old} +${start(at[3], at[4], added)},${added} @@${at[5]}`;
       return { patch: lines.slice(0, i).join("\n") + "\n", cut: true };
     } else if (/^diff --git /.test(lines[i])) header = -1;
   }
   return { patch, cut: false };
+}
+
+/** A line's ending, or none for a last line with no newline. */
+const ending = (line) => line.endsWith("\r\n") ? "CRLF" : line.endsWith("\n") ? "LF" : null;
+
+/**
+ * The meta line that says a file's changed lines went from LF to CRLF endings or back, which the diff draws as every
+ * line removed and added again with the same text, or none.
+ */
+function endingsChange(file) {
+  const parts = file.hunks.flatMap((hunk) => hunk.hunkContent).filter((part) => part.type === "change");
+  const endings = (lines, at, count) => parts.flatMap((part) => lines.slice(part[at], part[at] + part[count]).map(ending)).filter((e) => e !== null);
+  const removed = new Set(endings(file.deletionLines, "deletionLineIndex", "deletions"));
+  const added = new Set(endings(file.additionLines, "additionLineIndex", "additions"));
+  if (removed.size !== 1 || added.size !== 1) return [];
+  const [from] = removed;
+  const [to] = added;
+  return from === to ? [] : [`line endings changed from ${from} to ${to}`];
 }
 
 /**
@@ -38,7 +58,7 @@ export function diffOf(text) {
   const meta = text.split("\n").filter((line) => metaLine.test(line));
   const { patch, cut } = cutPatch(text);
   const files = parsePatchFiles(patch).flatMap((p) => p.files).filter((file) => file.hunks.length > 0);
-  if (files.length > 0) return { kind: "lines", files, meta, cut };
+  if (files.length > 0) return { kind: "lines", files, meta: [...meta, ...files.flatMap(endingsChange)], cut };
   if (/^Binary files /m.test(text)) return { kind: "binary", meta };
   return meta.length > 0 ? { kind: "meta", meta } : { kind: "none" };
 }
@@ -78,8 +98,8 @@ const cursorSheet = `[data-line][data-cursor] { box-shadow: inset 2px 0 0 light-
 [data-column-number] { user-select: none; }`;
 
 /**
- * The lines of a diff's files in the given layout, "unified" or "split", in a view that draws a slot under each row a
- * note ends on, marks rows as selected, and says which row a pointer is over.
+ * The lines of a diff's files in the given layout, "unified" or "split", with long lines wrapped, in a view that draws
+ * a slot under each row a note ends on, marks rows as selected, and says which row a pointer is over.
  */
 export async function diffView(files, layout) {
   const node = document.createElement("div");
@@ -88,24 +108,41 @@ export async function diffView(files, layout) {
   const entries = [];
   let selected = null;
   let cursor = null;
-  for (const [entry, file] of files.entries()) {
-    const renderer = new DiffHunksRenderer({ diffStyle: layout, disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber));
-    const result = await renderer.asyncRender(file);
-    if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system")), sheet(cursorSheet)];
-    const pre = drawn(renderer.renderFullAST(result), entry);
-    root.append(pre);
-    entries.push({ file, renderer, pre, rows: rowElements(pre), slotKey: "[]" });
-  }
-
-  const observer = new ResizeObserver(() => fit(root));
-  observer.observe(node);
-
   const paint = (attr, at) => {
     for (const el of root.querySelectorAll(`[${attr}]`)) el.removeAttribute(attr);
     if (at === null) return;
     const { rows } = entries[at.entry];
     for (let i = at.from; i <= at.to; i++) for (const el of rows.get(i) ?? []) el.setAttribute(attr, "");
   };
+  const redraw = (drawnFile) => {
+    const pre = drawn(drawnFile.renderer.renderFullAST(drawnFile.renderer.renderDiff(drawnFile.file)), drawnFile.entry);
+    drawnFile.pre.replaceWith(pre);
+    Object.assign(drawnFile, { pre, rows: rowElements(pre) });
+    paint("data-selected-line", selected);
+    paint("data-cursor", cursor);
+  };
+
+  for (const [entry, file] of files.entries()) {
+    let update = () => {};
+    const renderer = new DiffHunksRenderer({ diffStyle: layout, overflow: "wrap", disableFileHeader: true }, (a) => slotName(entry, a.side, a.lineNumber), () => update());
+    // renderDiff keeps what it highlighted for the redraws a note's slot needs, which asyncRender does not. Until the
+    // file's grammar has loaded, it draws nothing or the plain text, and says when the highlighted lines are ready or
+    // that they failed.
+    let result = renderer.renderDiff(file);
+    if (result === undefined) {
+      await new Promise((resolve, reject) => {
+        update = resolve;
+        renderer.onHighlightError = reject;
+      });
+      result = renderer.renderDiff(file);
+    }
+    if (root.adoptedStyleSheets.length === 0) root.adoptedStyleSheets = [sheet(wrapCoreCSS(result.css)), sheet(wrapThemeCSS(result.themeStyles, "system")), sheet(cursorSheet)];
+    const pre = drawn(renderer.renderFullAST(result), entry);
+    root.append(pre);
+    const drawnFile = { entry, file, renderer, pre, rows: rowElements(pre), slotKey: "[]" };
+    entries.push(drawnFile);
+    update = () => redraw(drawnFile);
+  }
 
   return {
     node,
@@ -117,12 +154,7 @@ export async function diffView(files, layout) {
       if (key === drawnFile.slotKey) return names;
       drawnFile.slotKey = key;
       drawnFile.renderer.setLineAnnotations(anchors.map((a) => ({ side: a.side, lineNumber: a.line })));
-      const pre = drawn(drawnFile.renderer.renderFullAST(drawnFile.renderer.renderDiff(drawnFile.file)), entry);
-      drawnFile.pre.replaceWith(pre);
-      Object.assign(drawnFile, { pre, rows: rowElements(pre) });
-      fit(root);
-      paint("data-selected-line", selected);
-      paint("data-cursor", cursor);
+      redraw(drawnFile);
       return names;
     },
     /** Marks rows `from` to `to` of file `entry` by their unified index as selected, or none when given null. */
@@ -148,19 +180,6 @@ export async function diffView(files, layout) {
       return entries[entry]?.rows.get(index)?.find((el) => el.hasAttribute("data-line")) ?? null;
     },
   };
-}
-
-/**
- * Sizes each column's note rows to the part of it on show, beside its line numbers, as the library's own component
- * measures them, so a note stays in view while the code beside it scrolls sideways.
- */
-function fit(root) {
-  for (const code of root.querySelectorAll("[data-code]")) {
-    if (code.clientWidth === 0) continue;
-    const numbers = code.querySelector("[data-gutter]")?.offsetWidth ?? 0;
-    code.style.setProperty("--diffs-column-number-width", `${numbers}px`);
-    code.style.setProperty("--diffs-column-content-width", `${code.clientWidth - numbers}px`);
-  }
 }
 
 function drawn(ast, entry) {

@@ -932,6 +932,7 @@ function renderTabs() {
     return el("div", { className: `tab tab-file${active ? " active" : ""}` }, pick, close);
   });
   tabsBar.replaceChildren(convoTab, ...fileTabs);
+  tabsBar.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   for (const button of document.querySelectorAll(".tree-file")) button.classList.toggle("active", button.dataset.path === activeTab);
   if (focused === undefined) return;
   const controls = [...tabsBar.querySelectorAll("[data-key]")];
@@ -969,6 +970,8 @@ tabsBar?.querySelector('[data-tab="convo"]').addEventListener("click", () => sho
 // The layout the reader picked for diffs, on every thread page.
 const layoutKey = "nexus.diff-layout";
 let diffLayout = localStorage.getItem(layoutKey) === "split" ? "split" : "unified";
+/** A window as narrow as a phone's, which draws unified, as split leaves each side too few characters to read. */
+const narrow = matchMedia("(max-width: 760px)");
 /** The open diff as last read, so a change of layout draws it again without reading the pylon. */
 let openDiff = null;
 
@@ -988,24 +991,29 @@ function pickLayout(layout) {
   diffLayout = layout;
   localStorage.setItem(layoutKey, layout);
   for (const button of fileView.querySelectorAll(".fv-layout button")) button.setAttribute("aria-pressed", String(button.value === layout));
-  // While a read is under way, it draws in the new layout once it is done.
+  redrawDiff();
+}
+
+/** Draws the open diff again without reading the pylon. While a read is under way, it draws in the new layout when done. */
+function redrawDiff() {
   if (openDiff === null || openDiff.read !== diffRead) return;
   openDiff = { ...openDiff, read: ++diffRead };
   void drawDiff(openDiff);
 }
+narrow.addEventListener("change", redrawDiff);
 
 /** Shows a diff read from the pylon, once its lines are drawn. */
 async function drawDiff({ read, head, shown, truncated }) {
   try {
     const { diffView } = await import("./diff.js");
-    const view = shown.kind === "lines" ? await diffView(shown.files, diffLayout) : null;
+    const view = shown.kind === "lines" ? await diffView(shown.files, narrow.matches ? "unified" : diffLayout) : null;
     if (read !== diffRead) return;
     const typing = document.activeElement?.matches?.(".note-text") ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     head.querySelector(".fv-layout").hidden = view === null;
     fileView.replaceChildren(...present([head, reviewBox,
       shown.kind !== "none" && shown.meta.length > 0 && el("div", { className: "fv-meta dim small" }, ...shown.meta.map((line) => el("div", { textContent: line }))),
-      view?.node ?? el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." }),
-      (truncated || (shown.kind === "lines" && shown.cut)) && el("p", { className: "dim small fv-note", textContent: "The diff is cut short here, because the whole of it is too long to show." })]));
+      (truncated || (shown.kind === "lines" && shown.cut)) && el("p", { className: "dim small fv-note", textContent: "Only the start of the diff shows, because the whole of it is too long to show." }),
+      view?.node ?? el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." })]));
     if (view === null) {
       annotated = null;
       decorate();
@@ -1026,7 +1034,9 @@ async function readDiff(path) {
   const file = openTabs.find((f) => f.path === path);
   if (file === undefined || fileView === null) return;
   const read = ++diffRead;
-  const head = el("header", { className: "fv-head" }, badge(file.status), el("span", { className: "fv-path", textContent: file.path }),
+  const dir = file.path.slice(0, file.path.lastIndexOf("/") + 1);
+  const head = el("header", { className: "fv-head" }, badge(file.status),
+    el("span", { className: "fv-path", title: file.path }, dir !== "" && el("span", { className: "fv-dir", textContent: dir }), el("span", { className: "fv-name", textContent: file.path.slice(dir.length) })),
     el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions), layoutPicker());
   // A diff reaches into the pylon as the changes do, so a paused one is woken only when the reader says to, and
   // the read of the changes that wakes it reads the open diff again.

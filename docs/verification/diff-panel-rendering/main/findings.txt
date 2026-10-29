@@ -1,0 +1,66 @@
+desktop long-lines: drawn in: 769 ms, longest task 564 ms, page wider than the window false -> ok
+desktop wide-file: drawn in: 216 ms, longest task 71 ms, page wider than the window false -> ok
+desktop rename-with-edits: drawn in: 243 ms, longest task 130 ms, page wider than the window false -> ok
+desktop pure-rename: drawn in: 208 ms, longest task 0 ms, page wider than the window false -> ok
+desktop binary: drawn in: 197 ms, longest task 0 ms, page wider than the window false -> ok
+desktop binary-added: drawn in: 180 ms, longest task 0 ms, page wider than the window false -> ok
+desktop added: drawn in: 215 ms, longest task 0 ms, page wider than the window false -> ok
+desktop deleted: drawn in: 88 ms, longest task 0 ms, page wider than the window false -> ok
+desktop mode-change: drawn in: 123 ms, longest task 0 ms, page wider than the window false -> ok
+desktop type-change: drawn in: 199 ms, longest task 0 ms, page wider than the window false -> ok
+desktop no-newline-at-end: drawn in: 199 ms, longest task 0 ms, page wider than the window false -> ok
+desktop very-long-file: drawn in: 5964 ms, longest task 6393 ms, page wider than the window false -> BUG
+desktop crlf: drawn in: 386 ms, longest task 301 ms, page wider than the window false -> ok
+desktop crlf-endings-only: drawn in: 177 ms, longest task 0 ms, page wider than the window false -> ok
+desktop tabs-make: drawn in: 163 ms, longest task 0 ms, page wider than the window false -> ok
+desktop tabs-go: drawn in: 387 ms, longest task 223 ms, page wider than the window false -> ok
+desktop unicode: drawn in: 322 ms, longest task 131 ms, page wider than the window false -> ok
+desktop deep-path: drawn in: 198 ms, longest task 0 ms, page wider than the window false -> ok
+desktop long lines: text hidden to the side, and the sideways scrollbar below the panel's bottom by: 2072px, 249px -> BUG
+desktop long lines: the whole of line 2 is drawn within the panel's width: false -> BUG
+desktop wide file: the changed cell R6C37 is in the panel: false -> BUG
+desktop very long file, whose first line changed: the band above its first row: 1 unmodified line -> BUG
+desktop very long file: rows drawn, and says above them that it is cut short: 20000, false -> BUG
+desktop only the line endings changed: the panel says so: false -> BUG
+desktop deep path: the file's name shows in the panel's header: false -> BUG
+desktop deep path: the height of the header's base label, as "vs boot": 35px -> BUG
+desktop split picked: layout drawn, and characters a line shows before it wraps or scrolls: split, 41 -> ok
+desktop eight files open: the narrowest file tab's name is: 0px wide -> BUG
+desktop eight files open: the conversation's tab is in the bar's view: true -> ok
+desktop eight files open, the first opened again: its tab shows beside the conversation's, not under it: true -> ok
+desktop long lines: a note on line 3 is saved, drawn and inside the panel: true, true, true -> ok
+desktop CRLF: a note on line 6 quotes it without its CR: ["+Line 5 changed, still with CRLF."] -> ok
+desktop very long file: a note written and saved in: 25721 ms, longest task 11413 ms -> BUG
+phone long-lines: drawn in: 732 ms, longest task 531 ms, page wider than the window false -> ok
+phone wide-file: drawn in: 228 ms, longest task 68 ms, page wider than the window false -> ok
+phone rename-with-edits: drawn in: 467 ms, longest task 241 ms, page wider than the window false -> ok
+phone pure-rename: drawn in: 202 ms, longest task 0 ms, page wider than the window false -> ok
+phone binary: drawn in: 205 ms, longest task 0 ms, page wider than the window false -> ok
+phone binary-added: drawn in: 205 ms, longest task 0 ms, page wider than the window false -> ok
+phone added: drawn in: 216 ms, longest task 0 ms, page wider than the window false -> ok
+phone deleted: drawn in: 216 ms, longest task 0 ms, page wider than the window false -> ok
+phone mode-change: drawn in: 202 ms, longest task 0 ms, page wider than the window false -> ok
+phone type-change: drawn in: 194 ms, longest task 0 ms, page wider than the window false -> ok
+phone no-newline-at-end: drawn in: 105 ms, longest task 0 ms, page wider than the window false -> ok
+phone very-long-file: drawn in: 5798 ms, longest task 6174 ms, page wider than the window false -> BUG
+phone crlf: drawn in: 292 ms, longest task 213 ms, page wider than the window false -> ok
+phone crlf-endings-only: drawn in: 162 ms, longest task 0 ms, page wider than the window false -> ok
+phone tabs-make: drawn in: 219 ms, longest task 0 ms, page wider than the window false -> ok
+phone tabs-go: drawn in: 457 ms, longest task 242 ms, page wider than the window false -> ok
+phone unicode: drawn in: 338 ms, longest task 131 ms, page wider than the window false -> ok
+phone deep-path: drawn in: 269 ms, longest task 0 ms, page wider than the window false -> ok
+phone long lines: text hidden to the side, and the sideways scrollbar below the panel's bottom by: 2382px, 351px -> BUG
+phone long lines: the whole of line 2 is drawn within the panel's width: false -> BUG
+phone wide file: the changed cell R6C37 is in the panel: false -> BUG
+phone very long file, whose first line changed: the band above its first row: 1 unmodified line -> BUG
+phone very long file: rows drawn, and says above them that it is cut short: 20000, false -> BUG
+phone only the line endings changed: the panel says so: false -> BUG
+phone deep path: the file's name shows in the panel's header: false -> BUG
+phone deep path: the height of the header's base label, as "vs boot": 35px -> BUG
+phone split picked: layout drawn, and characters a line shows before it wraps or scrolls: split, 20 -> BUG
+phone eight files open: the narrowest file tab's name is: 0px wide -> BUG
+phone eight files open: the conversation's tab is in the bar's view: true -> ok
+phone eight files open, the first opened again: its tab shows beside the conversation's, not under it: true -> ok
+phone long lines: a note on line 3 is saved, drawn and inside the panel: true, true, true -> ok
+phone CRLF: a note on line 6 quotes it without its CR: ["+Line 5 changed, still with CRLF."] -> ok
+phone very long file: a note written and saved in: 31218 ms, longest task 11279 ms -> BUG
