@@ -1,0 +1,8 @@
+$ nexus show th-5cbb19c763ae
+review rv-00000189 of PR #189: deploying 189c000000000000000000000000000000000000, round 1 of 5, reviewer th-b4d45176bc33 on gpt-6-astra, landing when approved
+exit 0
+
+$ nexus show th-5cbb19c763ae
+review rv-00000189 of PR #189: needs-person, round 1 of 5, reviewer th-b4d45176bc33 on gpt-6-astra, landing when approved
+exit 0
+

@@ -1,0 +1,1 @@
+main: 87d7e0d feat(dashboard): images in the conversation, and an image file's before and after in the diff (#203)
