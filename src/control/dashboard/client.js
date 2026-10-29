@@ -687,7 +687,7 @@ function el(tag, props = {}, ...children) {
 /** The children that are there, so a child given as `cond && el(...)` is left out rather than written as "false". */
 const present = (children) => children.filter((c) => c !== null && c !== false && c !== undefined);
 /**
- * An image of the conversation or a diff that does not load becomes a note naming it. It stays, hidden, and loads again
+ * An image of the conversation or a diff that does not load becomes a note naming it. It stays, hidden, to load again
  * once the pylon runs, since a visit that wakes the pylon asks for its images before it runs.
  */
 function shotGone(img) {
@@ -696,8 +696,17 @@ function shotGone(img) {
   shot.hidden = true;
   shot.after(el("p", { className: "shot-gone", textContent: `${img.alt} can't be shown now: its pylon is paused, or the file is gone` }));
 }
-function retryShots() {
-  for (const shot of document.querySelectorAll(".shot[hidden]")) {
+/**
+ * Each image that failed loads again once while the pylon runs, even one whose failure came after the poll that saw
+ * the pylon start. A pause lets it try once more after the next start.
+ */
+function retryShots(running) {
+  if (!running) {
+    for (const shot of document.querySelectorAll(".shot[data-retried]")) delete shot.dataset.retried;
+    return;
+  }
+  for (const shot of document.querySelectorAll(".shot[hidden]:not([data-retried])")) {
+    shot.dataset.retried = "";
     if (shot.nextElementSibling?.matches(".shot-gone")) shot.nextElementSibling.remove();
     shot.hidden = false;
     const img = shot.querySelector("img");
@@ -890,9 +899,9 @@ function noticeFacts() {
   const before = checkout.facts;
   const now = factsNow();
   checkout.facts = now;
+  if (now !== null) retryShots(now.pylon === "running");
   if (now === null || before === null) return;
   const started = now.pylon === "running" && before.pylon !== "running";
-  if (started) retryShots();
   const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
   // An unarchive can land before the pylon pauses, so no start follows to read again.
   const reopened = threadClosed(before) && !threadClosed(now);
