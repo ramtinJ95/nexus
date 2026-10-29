@@ -11,19 +11,12 @@ import { threadQueue } from "./queue.ts";
 import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
 import type { Phase, Review } from "./review.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
-import type { ImageManifest } from "../images.ts";
 import type { NodeName, TailnetNodeId } from "../protocol.ts";
 import type { PipelineSetting, ProjectId } from "../project.ts";
+import { testImage } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
-const image: ImageManifest = {
-  id: "img-000000000000", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "0".repeat(64),
-  pins: {
-    debianDigest: "d", node: "24", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s",
-    gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-    neovim: "0.12.6", neovimSha256: "b".repeat(64),
-  },
-};
+const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
 const laptop = "nLAPTOP";
 
 function fixture(t: import("node:test").TestContext, setting: PipelineSetting | null = { autoStart: true }, path = ":memory:") {

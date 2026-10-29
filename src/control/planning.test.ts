@@ -11,19 +11,12 @@ import { threadQueue } from "./queue.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { agentReplies } from "./review.ts";
 import { threadStarter } from "./threads.ts";
-import type { ImageManifest } from "../images.ts";
 import type { NodeName, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
+import { testImage } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
-const image: ImageManifest = {
-  id: "img-000000000000", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "0".repeat(64),
-  pins: {
-    debianDigest: "d", node: "24", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s",
-    gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-    neovim: "0.12.6", neovimSha256: "b".repeat(64),
-  },
-};
+const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
 const laptop = "nLAPTOP" as TailnetNodeId;
 const block = (token: string, items: unknown[]) => `\`\`\`nexus-plan\n${JSON.stringify({ token, items })}\n\`\`\``;
 const a = { key: "a", title: "A", brief: "Build A." };

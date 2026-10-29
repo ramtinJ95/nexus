@@ -16,8 +16,9 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
 import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
-import type { ImageManifest, TemplateRecord } from "../images.ts";
+import type { TemplateRecord } from "../images.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { testImage } from "../test-kit.ts";
 import type { WaitingAsk } from "./questions.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -44,14 +45,7 @@ const { desired: _, ...pylon } = newPylonRecord({
   live: { previews: [], overlay: [] },
   liveHash: "hash-1" as LiveHash,
 });
-const image: ImageManifest = {
-  id: "img-000000000000", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "0".repeat(64),
-  pins: {
-    debianDigest: "d", node: "24", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s",
-    gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-    neovim: "0.12.6", neovimSha256: "b".repeat(64),
-  },
-};
+const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
 
 // One directory for the file, so each test's registry is closed before it is removed.
 const dir = await mkdtemp(join(tmpdir(), "nexus-registry-"));

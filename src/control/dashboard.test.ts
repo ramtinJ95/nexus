@@ -22,6 +22,7 @@ import type { ImageId } from "../images.ts";
 import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
+import { testImage } from "../test-kit.ts";
 import { imagePaths, liveFrames } from "./dashboard.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -30,14 +31,7 @@ const project = (id: string) => ({
   id, repoUrl: `git@example.com:${id}.git`, defaultBranch: "main", defaultNode: node,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 });
-const image = {
-  id: "img-0123456789ab", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "a".repeat(64),
-  pins: {
-    debianDigest: `sha256:${"d".repeat(64)}`, node: "24.22.1", nodeSha256: "e".repeat(64), claudeCode: "c", pi: "p", herdr: "h", piEnv: "e",
-    piEnvSha256: "f".repeat(64), gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-    neovim: "0.12.6", neovimSha256: "b".repeat(64),
-  },
-};
+const image = testImage();
 const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
 
 const dir = await mkdtemp(join(tmpdir(), "nexus-dashboard-"));

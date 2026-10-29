@@ -8,18 +8,14 @@ import { startImageRollout, type ImageOperation, type ImageRollout } from "./ima
 import { openRegistry, type Registry } from "./registry.ts";
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
 import type { JobEnvelope, JobErrorCode, JobId, JobStatus, NodeName, ProbeClient, TailnetNodeId } from "../protocol.ts";
-import { watch } from "../test-kit.ts";
+import { testImage, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const testbench = "infra-testbench" as NodeName;
 const nuc = "rj-nuc" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
 const release = "c".repeat(40);
-const pins: ImageRecipe["pins"] = {
-  debianDigest: `sha256:${"d".repeat(64)}`, node: "24.22.1", nodeSha256: "e".repeat(64), claudeCode: "c", pi: "p", herdr: "h", piEnv: "e",
-  piEnvSha256: "f".repeat(64), gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-  neovim: "0.12.6", neovimSha256: "b".repeat(64),
-};
+const { pins } = testImage();
 const recipe: ImageRecipe = { files: [{ path: "Dockerfile", mode: 0o644, content: "FROM debian\n" }], pins };
 const old = "img-000000000001" as ImageId;
 const next = "img-000000000002" as ImageId;
