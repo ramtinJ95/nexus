@@ -132,12 +132,28 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       return { entered: entered.promise, release() { held = null; released.resolve(); } };
     },
     tick(ms: number) { clock += ms; },
+    get now() { return clock; },
     review: () => registry.review(builder)!,
     watched(state: "open" | "merged" | "closed") { registry.savePrWatch(builder, { links: [{ pr: { ...pr, state }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null }); },
     attention: () => registry.events("0", { kinds: ["attention.changed"], thread: builder }).map((e) => e.payload.attention),
     /** The statuses of the builder and of the review's reviewer. */
     statuses: () => [builder, registry.review(builder)!.reviewer].map((id) => registry.thread(id)!.status),
   };
+}
+
+/**
+ * A Claude builder's turn that ends in its transcript while a background shell keeps it working, as the pylon's Stop
+ * hook reports it with heartbeats and no turn end.
+ */
+function heldTurn(f: ReturnType<typeof fixture>, text: string) {
+  f.replies.set(f.builder, [...f.replies.get(f.builder) ?? [], text]);
+  const at = f.now + 1_000;
+  const from = f.registry.claudeTranscript(f.builder)?.cursor ?? transcriptStart;
+  f.registry.appendClaudeRead(f.builder, { session: "s1", from, entries: [{ kind: "reply", at, text }, { kind: "turn", at, durationMs: 60_000 }], cursor: { ...from, offset: from.offset + 1 }, reset: false, readAt: at });
+  for (const kind of ["session.turn-started", "session.heartbeat"] as const) {
+    f.registry.reportSession(node, { sequence: (f.registry.eventReceipt(node) ?? 0) + 1, time: at, pylon: "pylon-th-builder" as PylonId, event: { kind, session: "s1", at } });
+  }
+  f.tick(2_000);
 }
 
 const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.setThreadStatus(id, "archived");
@@ -220,6 +236,48 @@ test("rounds that run out, and agents that never answer in the block, end with t
   assert.equal(g.sent.length, 3, "a reply in the old turn's shape is not answered twice");
   assert.equal((g.review().phase as { label?: unknown }).label, undefined, "only rounds that ran out label the PR");
   assert.deepEqual(g.labelCalls, []);
+});
+
+test("a Claude builder whose turn ends with a background shell running is read from its transcript, though it stays working", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  heldTurn(f, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
+  assert.equal(f.registry.thread(f.builder)!.working, true, "heartbeats keep the builder working");
+  assert.equal(f.registry.thread(f.builder)!.lastReplyAt, null, "no turn end was reported");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds[0]!.answers, [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]);
+  assert.match(f.sent.at(-1)!.message.text, /F1: fixed\. Added a 5-minute TTL\./);
+});
+
+test("a Claude builder whose turn ends with a background shell running and no answer gets a reminder after the grace", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const sent = f.sent.length;
+  heldTurn(f, "Started the tests in the background.");
+  await loop.poll();
+  assert.equal(f.sent.length, sent, "no reminder within the grace a transcript may lag the turn's end by");
+  f.tick(60_000);
+  await loop.poll();
+  assert.equal(f.sent.length, sent + 1);
+  assert.equal(f.sent.at(-1)!.to, f.builder);
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-review-answers block/);
+  assert.equal(f.review().nudges, 1);
+  assert.equal(f.registry.thread(f.builder)!.working, true);
+
+  f.tick(3 * 60 * 60_000 + 1);
+  await loop.poll();
+  assert.deepEqual((f.review().phase as { reasons: string[] }).reasons, ["The builder gave no answer Nexus could read within 3 hours in round 1."]);
 });
 
 test("a message the inbox cannot deliver yet is sent again under the same request ID, never twice", async (t) => {
@@ -1180,7 +1238,7 @@ test("a review that lands still sees a merge made outside it through, and a real
   await silent.poll();
   g.tick(4 * 60 * 60_000);
   await silent.poll();
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["The reviewer gave no answer within 3 hours in round 1."] });
+  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["The reviewer gave no answer Nexus could read within 3 hours in round 1."] });
   assert.equal(g.attention().at(-1), "decision");
 });
 
