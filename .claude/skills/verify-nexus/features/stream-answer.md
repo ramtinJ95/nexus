@@ -1,6 +1,6 @@
 # Stream an answer
 
-The agent's answer shows up while it is written. `nexus watch --json` prints it as `live` events several times a second, and the thread page grows it in place. A reader who scrolled up keeps their place while it grows, and a hidden tab lets go of its stream until it is shown again.
+The agent's answer shows up while it is written. `nexus watch --json` prints it as `live` events several times a second, and the thread page grows it in place. A reader who scrolled up keeps their place while it grows. A reader at the end stays there while it grows, while the conversation's pane shrinks under them, as when a card joins the dock or a phone's keyboard opens, and when they come back from a diff tab. A hidden tab lets go of its stream until it is shown again.
 
 ## Sub-features
 

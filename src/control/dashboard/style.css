@@ -204,7 +204,8 @@ a.link { color: var(--accent); }
 .tab-close:hover { background: var(--hover); color: var(--text); }
 .tab .i { width: 14px; height: 14px; color: var(--text-3); }
 
-.scroll { flex: 1; overflow: auto; min-height: 0; }
+/* A visually hidden label in the conversation is placed against its scroller, or it would stretch the page past the window. */
+.scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
 .convo { max-width: 780px; margin: 0 auto; padding: 22px 32px 28px; display: flex; flex-direction: column; gap: 16px; }
 .convo-meta { margin: 0; font-size: 11.5px; color: var(--text-3); text-align: center; }
 .convo-meta code { font-size: 11px; }
@@ -312,7 +313,8 @@ h4.md-h { font-size: 1.07em; }
 .land-top a { color: var(--accent); overflow-wrap: anywhere; }
 .land-meta, .land-note { margin: 0; color: var(--text-2); font-size: 12.5px; }
 .land-act { display: grid; gap: 6px; justify-items: start; }
-#questions, #judgments { display: grid; gap: 6px; max-height: 40vh; overflow-y: auto; }
+/* Each card keeps its whole height, options included, and the stack scrolls instead. */
+#questions, #judgments { display: grid; grid-auto-rows: max-content; gap: 6px; max-height: 40vh; overflow-y: auto; }
 #questions:empty, #judgments:empty { display: none; }
 .question-text { display: grid; gap: 6px; }
 .question-text > * { margin: 0; }
@@ -374,6 +376,7 @@ h4.md-h { font-size: 1.07em; }
 /* inspector: a segmented switch over the changes, the previews and the pylon, as Jetline's Changes / PR / Run */
 .inspect { background: var(--inspect); overflow: auto; padding: 12px 12px 20px; display: flex; flex-direction: column; gap: 10px; }
 .seg-bar { display: flex; padding: 3px; border-radius: 10px; background: var(--raised-2); flex: none; }
+.inspect .seg-bar { position: sticky; top: 0; z-index: 1; box-shadow: 0 -9px 0 3px var(--inspect); }
 .seg-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; border-radius: 8px; color: var(--text-2); font-size: 12px; cursor: pointer; position: relative; }
 .seg-tab input { position: absolute; opacity: 0; pointer-events: none; }
 .seg-tab:has(input:checked) { background: var(--bg); color: var(--text); box-shadow: var(--shadow); }
@@ -574,4 +577,9 @@ h4.md-h { font-size: 1.07em; }
 .ov-items th:nth-child(2) { width: 34%; }
 .ov-items .ov-act { width: 150px; }
 .ov-why { display: block; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+.ov-items td { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .ov-items th:first-child { width: auto; }
+  .ov-items .ov-act { width: 84px; }
+}
 .queued section h2 { margin: 0 0 10px; font: 600 13px/1.4 var(--sans); color: var(--text); }

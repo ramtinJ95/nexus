@@ -5,11 +5,13 @@
 // each changed file's diff as a tab beside the conversation.
 import { coordinator, notificationChannel, badgeCount, badgeText, noticeText, owedSeen } from "./notifications.js";
 import { agoText } from "./ago.js";
+import { atEnd, endFollower } from "./scroll.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
 const scroller = document.getElementById("scroll");
+const end = scroller === null ? null : endFollower(scroller, (resized) => new ResizeObserver(resized).observe(scroller));
 const dialog = document.getElementById("start-dialog");
 const projectDialog = document.getElementById("project-dialog");
 const filter = document.getElementById("filter");
@@ -74,14 +76,13 @@ document.addEventListener("click", (event) => {
   localStorage.setItem(foldedKey, JSON.stringify([...folded]));
 });
 
-const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
 /**
  * The conversation only grows, so its n-th block is the same block after a swap. Keeping the first visible
  * block where it was holds the reader's place while a fold above it opens or closes.
  */
 function anchor() {
-  if (scroller === null) return () => {};
-  if (atBottom(scroller)) return () => { scroller.scrollTop = scroller.scrollHeight; };
+  if (end === null) return () => {};
+  if (end.following) return end.settle;
   const convo = document.getElementById("convo");
   const top = scroller.getBoundingClientRect().top;
   const blocks = [...(convo?.children ?? [])];
@@ -158,7 +159,7 @@ function follow(url) {
         const slot = slots[i];
         if (slot === undefined) continue;
         // A running tool's output scrolls by itself. A reader at its end follows it, as at the conversation's end.
-        const stick = atBottom(slot);
+        const stick = atEnd(slot);
         slot.innerHTML = inside;
         if (stick) slot.scrollTop = slot.scrollHeight;
       }
@@ -318,7 +319,7 @@ document.addEventListener("submit", async (event) => {
     if (prompt?.value === text) prompt.value = "";
     showError("action-error", null);
     await refreshAfter();
-    if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
+    end?.toEnd();
   } catch (err) {
     showStatus(null);
     outgoing.inFlight = false;
@@ -337,6 +338,8 @@ document.addEventListener("submit", async (event) => {
 function setOpen(panel) {
   if (panel === null) delete document.body.dataset.open;
   else document.body.dataset.open = panel;
+  // The phone's thread list is hidden until it opens, so the open thread's row is brought into view then.
+  if (panel === "side") document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
@@ -877,6 +880,7 @@ function showTab(path) {
   main.dataset.view = path === null ? "convo" : "file";
   scroller.hidden = path !== null;
   fileView.hidden = path === null;
+  if (path === null) end.settle();
   renderTabs();
   if (path !== null) void readDiff(path);
 }
@@ -1337,8 +1341,7 @@ if (changesPane !== null) {
   if (canRead(checkout.facts)) void readChanges();
   else changesUnreadable(checkout.facts);
 }
-if (scroller !== null) scroller.scrollTop = scroller.scrollHeight;
-document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+end?.toEnd();
 follow(document.getElementById("convo")?.dataset.stream);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
@@ -1381,7 +1384,7 @@ const notifications = coordinator((row) => {
     setTimeout(() => toast.remove(), 15000);
   }
 });
-const permission = el("button", { type: "button", className: "btn", textContent: "Enable system notifications" });
+const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
 if (window.isSecureContext && "Notification" in window) {
   permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };
 } else {
@@ -1389,6 +1392,8 @@ if (window.isSecureContext && "Notification" in window) {
   permission.textContent = "System notifications need HTTPS";
 }
 document.querySelector("aside")?.append(permission);
+// After the button, which shortens the list it joins.
+document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 // The events that change a row's attention, its reply or whether it works.
 const rowEvents = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"];
 // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
