@@ -208,6 +208,9 @@ const iconPaths = {
   chart: "M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6",
   list: "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01",
   terminal: "M2.5 3.5h11v9h-11zM5 6.5l2 1.5-2 1.5M8.5 10h2.5",
+  check: "M3.5 8.5l3 3 6-7",
+  cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
+  dash: "M5 8h6",
 } as const;
 type IconName = keyof typeof iconPaths;
 const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
@@ -1707,10 +1710,10 @@ const exitCode = (output: string) => /exited with code (\d+)|^Exit code (\d+)/.e
 
 /** How a row's mark says how its call went, to the eye and to a screen reader. */
 const toolMarks = {
-  ok: { mark: html`✓`, said: "succeeded" },
-  bad: { mark: html`✕`, said: "failed" },
+  ok: { mark: icon("check"), said: "succeeded" },
+  bad: { mark: icon("cross"), said: "failed" },
   run: { mark: html`<span class="spin"></span>`, said: "running" },
-  none: { mark: html`–`, said: "no result" },
+  none: { mark: icon("dash"), said: "no result" },
 } as const;
 /** A finished call's output of more than clipOver lines shows its first clipTo, with the rest one click away. */
 const clipOver = 30;

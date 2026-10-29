@@ -165,6 +165,9 @@ const result = (toolCallId: string, text: string, isError = false, toolName = "b
   role: "toolResult", toolCallId, toolName, content: [{ type: "text", text }], isError, timestamp: 0,
 });
 
+/** A tool row's mark, drawn as an icon, as a character, so a row reads as one line of text. */
+const marks = { ok: "✓", bad: "✕", none: "–" };
+
 /**
  * A thread page's conversation as a reader sees it: one row per message, notice, tool call and fold, which
  * tool calls, folds and clipped outputs start open, and the dock under it with the run bar and the prompt box.
@@ -173,7 +176,8 @@ function conversationOf(html: string) {
   const convo = html.split('id="convo"')[1]!.split('<section class="file-view"')[0]!;
   const dock = html.split('<div class="dock">')[1]!.split("</main>")[0]!;
   return {
-    rows: convo.split(/(?=<div class="msg |<p class="notice|<p class="note"|<details class="tool|<details class="steps)/).slice(1).map((row) => textOf(`<x ${row}`).replace(/^<x /, "")),
+    rows: convo.replace(/<span class="t-mark (ok|bad|none)"[^>]*>/g, (mark, state: keyof typeof marks) => `${mark}${marks[state]}`)
+      .split(/(?=<div class="msg |<p class="notice|<p class="note"|<details class="tool|<details class="steps)/).slice(1).map((row) => textOf(`<x ${row}`).replace(/^<x /, "")),
     open: [...convo.matchAll(/<details class="(?:tool|steps|t-more)[^"]*" id="([^"]*)"( open)?>/g)].map((m) => [m[1], m[2] !== undefined]),
     text: textOf(convo.replace(/^[^>]*>/, "")),
     dock: textOf(dock),
