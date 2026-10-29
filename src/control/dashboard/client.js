@@ -686,8 +686,24 @@ function el(tag, props = {}, ...children) {
 }
 /** The children that are there, so a child given as `cond && el(...)` is left out rather than written as "false". */
 const present = (children) => children.filter((c) => c !== null && c !== false && c !== undefined);
-/** An image of the conversation or a diff that does not load becomes a note naming it. */
-const shotGone = (img) => img.closest(".shot").replaceWith(el("p", { className: "shot-gone", textContent: `${img.alt} can't be shown now: its pylon is paused, or the file is gone` }));
+/**
+ * An image of the conversation or a diff that does not load becomes a note naming it. It stays, hidden, and loads again
+ * once the pylon runs, since a visit that wakes the pylon asks for its images before it runs.
+ */
+function shotGone(img) {
+  const shot = img.closest(".shot");
+  if (shot.hidden) return;
+  shot.hidden = true;
+  shot.after(el("p", { className: "shot-gone", textContent: `${img.alt} can't be shown now: its pylon is paused, or the file is gone` }));
+}
+function retryShots() {
+  for (const shot of document.querySelectorAll(".shot[hidden]")) {
+    if (shot.nextElementSibling?.matches(".shot-gone")) shot.nextElementSibling.remove();
+    shot.hidden = false;
+    const img = shot.querySelector("img");
+    img.src = img.getAttribute("src");
+  }
+}
 document.addEventListener("error", (event) => {
   if (event.target instanceof HTMLImageElement && event.target.matches(".shot img")) shotGone(event.target);
 }, true);
@@ -876,6 +892,7 @@ function noticeFacts() {
   checkout.facts = now;
   if (now === null || before === null) return;
   const started = now.pylon === "running" && before.pylon !== "running";
+  if (started) retryShots();
   const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
   // An unarchive can land before the pylon pauses, so no start follows to read again.
   const reopened = threadClosed(before) && !threadClosed(now);
