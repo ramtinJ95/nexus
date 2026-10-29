@@ -1,0 +1,26 @@
+{
+  "phase": {
+    "kind": "reviewing",
+    "failing": {
+      "count": 1,
+      "last": "Request timed out.",
+      "ended": 1793295353406,
+      "retryAt": 1793295534963
+    }
+  },
+  "nudges": 0,
+  "sent": 1,
+  "rounds": [
+    {
+      "head": "2221000000000000000000000000000000000000",
+      "verdict": null,
+      "answers": null
+    }
+  ]
+}
+
+$ nexus show th-27185aea7e3f | grep -E "^review|needs you"
+review rv-2ef0981f of PR #222: reviewing, round 1 of 5, reviewer th-37435f62e5eb on gpt-6-astra, the reviewer's model is failing (1 in a row, last: Request timed out.), retrying at 17:38 UTC
+
+The dashboard's review line on /threads/th-27185aea7e3f:
+Nexus review rv-2ef0981f: reviewing, round 1 of 5, by th-37435f62e5eb on gpt-6-astra, the reviewer's model is failing (1 in a row, last: Request timed out.), retrying at 17:38 UTC

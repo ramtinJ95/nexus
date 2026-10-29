@@ -1,0 +1,20 @@
+{
+  "phase": {
+    "kind": "approved"
+  },
+  "nudges": 0,
+  "sent": 4,
+  "rounds": [
+    {
+      "head": "2211000000000000000000000000000000000000",
+      "verdict": "approve",
+      "answers": null
+    }
+  ]
+}
+
+$ nexus show th-9b4f44b76f65 | grep -E "^review|needs you"
+review rv-177fd82c of PR #221: approved, round 1 of 5, reviewer th-614e2e4c3254 on gpt-6-astra
+
+The dashboard's review line on /threads/th-9b4f44b76f65:
+Nexus review rv-177fd82c: approved, round 1 of 5, by th-614e2e4c3254 on gpt-6-astra

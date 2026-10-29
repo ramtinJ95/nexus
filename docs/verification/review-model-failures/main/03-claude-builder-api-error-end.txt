@@ -1,0 +1,31 @@
+{
+  "phase": {
+    "kind": "approved"
+  },
+  "nudges": 0,
+  "sent": 4,
+  "rounds": [
+    {
+      "head": "2231000000000000000000000000000000000000",
+      "verdict": "changes",
+      "answers": [
+        {
+          "id": "F1",
+          "action": "fixed",
+          "reason": "Added a 5-minute TTL."
+        }
+      ]
+    },
+    {
+      "head": "2232000000000000000000000000000000000000",
+      "verdict": "approve",
+      "answers": null
+    }
+  ]
+}
+
+$ nexus show th-b2b8c04ed11d | grep -E "^review|needs you"
+review rv-cb06cae7 of PR #223: approved, round 2 of 5, reviewer th-3f4e24ffb123 on gpt-6-astra
+
+The dashboard's review line on /threads/th-b2b8c04ed11d:
+Nexus review rv-cb06cae7: approved, round 2 of 5, by th-3f4e24ffb123 on gpt-6-astra

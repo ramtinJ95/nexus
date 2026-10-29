@@ -1,0 +1,24 @@
+{
+  "phase": {
+    "kind": "needs-person",
+    "reasons": [
+      "The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."
+    ]
+  },
+  "nudges": 2,
+  "sent": 3,
+  "rounds": [
+    {
+      "head": "2221000000000000000000000000000000000000",
+      "verdict": null,
+      "answers": null
+    }
+  ]
+}
+
+$ nexus show th-fa0c2571085c | grep -E "^review|needs you"
+review rv-95faf646 of PR #222: needs-person, round 1 of 5, reviewer th-c62e4a6e427f on gpt-6-astra
+needs you: The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1.
+
+The dashboard's review line on /threads/th-fa0c2571085c:
+Nexus review rv-95faf646: needs-person, round 1 of 5, by th-c62e4a6e427f on gpt-6-astra

@@ -1,0 +1,9 @@
+2026-10-29T17:24:53.114Z th-43ce246fab25 {"review":"rv-a2f78db6","reviewer":"th-aca56fd549d4","phase":{"kind":"reviewing"},"round":1}
+2026-10-29T17:24:53.114Z th-43ce246fab25 {"review":"rv-a2f78db6","reviewer":"th-aca56fd549d4","phase":{"kind":"needs-person","reasons":["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."]},"round":1}
+2026-10-29T17:24:53.114Z th-fa0c2571085c {"review":"rv-95faf646","reviewer":"th-c62e4a6e427f","phase":{"kind":"reviewing"},"round":1}
+2026-10-29T17:24:53.114Z th-fa0c2571085c {"review":"rv-95faf646","reviewer":"th-c62e4a6e427f","phase":{"kind":"needs-person","reasons":["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."]},"round":1}
+2026-10-29T17:24:53.114Z th-b2b8c04ed11d {"review":"rv-cb06cae7","reviewer":"th-3f4e24ffb123","phase":{"kind":"reviewing"},"round":1}
+2026-10-29T17:24:53.114Z th-b2b8c04ed11d {"review":"rv-cb06cae7","reviewer":"th-3f4e24ffb123","phase":{"kind":"fixing"},"round":1}
+2026-10-29T17:24:53.114Z th-b2b8c04ed11d {"review":"rv-cb06cae7","reviewer":"th-3f4e24ffb123","phase":{"kind":"reviewing"},"round":2}
+2026-10-29T17:24:53.114Z th-b2b8c04ed11d {"review":"rv-cb06cae7","reviewer":"th-3f4e24ffb123","phase":{"kind":"checking","startedAt":1793294629240,"thread":null},"round":2}
+2026-10-29T17:24:53.114Z th-b2b8c04ed11d {"review":"rv-cb06cae7","reviewer":"th-3f4e24ffb123","phase":{"kind":"approved"},"round":2}
