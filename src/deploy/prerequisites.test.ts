@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -230,4 +232,53 @@ main --node firebat`);
   assert.ok(ran(run.stderr).includes("systemctl try-restart nexus-probe.service"), run.stderr);
   assert.match(run.stderr, /the credentials step failed/);
   assert.doesNotMatch(run.stderr, /setup\.ts left/);
+});
+
+test("a join runs after the role installers and before the credentials, and a refused one stops the run", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
+main --join tok3n --node firebat`);
+  assert.equal(run.code, 0, run.stderr);
+  assert.deepEqual(ran(run.stderr), [
+    "flock -x <prefix>/deployer/lock",
+    "node ./src/deploy/setup.ts write --join tok3n --node firebat",
+    "bash ./deploy/install-probe.sh",
+    "bash ./deploy/install-deployer.sh probe",
+    "node ./src/deploy/setup.ts join --join tok3n --node firebat",
+    "node ./src/deploy/setup.ts credentials --join tok3n --node firebat",
+    "node ./src/deploy/setup.ts left --join tok3n --node firebat",
+  ]);
+  const refused = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
+node() { echo "node \${*//$repo/.}" >&2; [ "$2" != join ]; }
+main --join tok3n --node firebat`);
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /the control plane did not take the join/);
+  assert.doesNotMatch(refused.stderr, /setup\.ts credentials/);
+  const alone = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
+main --join tok3n`);
+  assert.notEqual(alone.code, 0);
+  assert.match(alone.stderr, /--join needs --node/);
+  assert.doesNotMatch(alone.stderr, /setup\.ts/);
+});
+
+test("only root on a machine with a control plane mints a join token, from the control plane's release", async (t) => {
+  const prefix = await mkdtemp(join(tmpdir(), "nexus-mint-"));
+  t.after(() => rm(prefix, { recursive: true, force: true }));
+  const mint = (m: Machine, more = "") => bash(`. "$1/deploy/install.sh"; ${stubs(m)} prefix=${prefix}
+node() { echo "node \${*//"$prefix"/<prefix>}" >&2; }
+main --join-token ${more}`);
+  const older = await mint({ ...complete, controlConfig: true });
+  assert.notEqual(older.code, 0);
+  assert.match(older.stderr, /the control plane here is older than join tokens/);
+  await mkdir(join(prefix, "control-current/src/control"), { recursive: true });
+  await writeFile(join(prefix, "control-current/src/control/join-token.ts"), "");
+  const minted = await mint({ ...complete, controlConfig: true });
+  assert.equal(minted.code, 0, minted.stderr);
+  assert.equal(minted.stderr.trim(), "node <prefix>/control-current/src/control/join-token.ts /etc/nexus/control.json");
+  for (const [m, refusal] of [[{ ...complete, controlConfig: true, uid: 1000 }, /only root on the control plane's machine mints a join token/], [complete, /this machine runs no control plane/]] as const) {
+    const refused = await mint(m);
+    assert.notEqual(refused.code, 0);
+    assert.match(refused.stderr, refusal);
+    assert.doesNotMatch(refused.stderr, /^node /m);
+  }
+  assert.match((await mint({ ...complete, controlConfig: true }, "--node firebat")).stderr, /--join-token takes no other argument/);
 });

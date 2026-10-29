@@ -2,7 +2,8 @@
 # Installs or upgrades Nexus on this machine from the checkout this script is in: the control plane, a probe and the
 # deployer, or with --node only a probe and the deployer. Run as root:
 #   sudo deploy/install.sh --admit <your Mac's tailnet name> --dotfiles <git URL>
-#   sudo deploy/install.sh --node <the control plane's tailnet name>
+#   sudo deploy/install.sh --join-token                                  on the control plane's machine, which prints:
+#   sudo deploy/install.sh --join <token> --node <the control plane's tailnet name>     on the new node
 #
 # It checks every prerequisite first, and stops before changing anything when one is missing. It writes
 # /etc/nexus/control.json, probe.json and deployer.json from `tailscale status --json` (src/deploy/setup.ts), runs
@@ -16,7 +17,8 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
 
-usage="usage: sudo deploy/install.sh [--node <control plane device>] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive]"
+usage="usage: sudo deploy/install.sh [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive]
+       sudo deploy/install.sh --join-token"
 
 # The machine's facts, one function each, so the tests can fake a machine.
 uid() { id -u; }
@@ -41,6 +43,15 @@ tailscaled_environment() {
   fi
 }
 control_config_exists() { [ -e /etc/nexus/control.json ]; }
+
+# Mints a join token from the control plane's release, which holds the registry code and its dependencies.
+mint_join_token() {
+  [ "$(uid)" = 0 ] || fail "only root on the control plane's machine mints a join token: sudo deploy/install.sh --join-token"
+  control_config_exists || fail "this machine runs no control plane. Run --join-token on the control plane's machine"
+  [ -f "$prefix/control-current/src/control/join-token.ts" ] \
+    || fail "the control plane here is older than join tokens. Upgrade it with sudo deploy/install.sh, then mint the token"
+  PATH=$service_path node "$prefix/control-current/src/control/join-token.ts" "$etc/control.json"
+}
 
 misses=()
 # $1 says what is missing, and each further argument is one line of its fix.
@@ -111,11 +122,17 @@ check_prerequisites() {
 }
 
 main() {
-  local role=control dotfiles="" roles next failed=0
+  local role=control dotfiles="" join="" roles next failed=0
   local args=("$@")
+  if [ "${1:-}" = --join-token ]; then
+    [ $# = 1 ] || fail "--join-token takes no other argument. $usage"
+    mint_join_token
+    return
+  fi
   while [ $# -gt 0 ]; do
     case $1 in
       --node) role=node; shift 2 || fail "--node needs the control plane's tailnet name. $usage" ;;
+      --join) join=${2:-}; shift 2 || fail "--join needs the token --join-token printed. $usage" ;;
       --dotfiles) dotfiles=${2:-}; shift 2 || fail "--dotfiles needs a git URL. $usage" ;;
       --admit|--add-node|--peer) shift 2 || fail "$1 needs a value. $usage" ;;
       --non-interactive) shift ;;
@@ -123,6 +140,7 @@ main() {
       *) fail "unknown argument $1. $usage" ;;
     esac
   done
+  [ -z "$join" ] || [ "$role" = node ] || fail "--join needs --node <the control plane's tailnet name>, as --join-token printed it"
 
   check_prerequisites "$role" "$dotfiles" "sudo deploy/install.sh${args[*]:+ ${args[*]}}"
   if [ ${#misses[@]} -gt 0 ]; then
@@ -143,6 +161,11 @@ main() {
   bash "$repo/deploy/install-probe.sh"
   # shellcheck disable=SC2086
   bash "$repo/deploy/install-deployer.sh" $roles
+  # Before the credentials' prompts, so a refused token stops the run before the person answers them.
+  if [ -n "$join" ]; then
+    PATH=$service_path node "$repo/src/deploy/setup.ts" join "${args[@]}" \
+      || fail "the configs are written and the probe runs, but the control plane did not take the join. Mint a new token if it said so, then rerun with it"
+  fi
 
   echo
   # It runs runuser and chown, which live in the sbin directories the units' PATH lacks.

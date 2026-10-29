@@ -1,14 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import type { NodeName, ProbeClient, TailnetNodeId } from "../protocol.ts";
+import { joinControlPlane } from "../deploy/setup.ts";
 import { mintJoinToken } from "./join.ts";
 import { parseConfig, startControlPlane } from "./main.ts";
 import { openRegistry } from "./registry.ts";
@@ -147,7 +150,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
       }).on("error", reject).end(payload);
     });
   }
-  return { db, followed, peers, hosts, call };
+  return { db, followed, peers, hosts, call, port: plane.port, as(id: string) { caller = id; } };
 }
 
 async function eventually(what: string, done: () => boolean) {
@@ -233,4 +236,30 @@ test("a node that joined is followed again after a restart, beside control.json'
   assert.deepEqual(plane.followed.map(([name]) => name), ["rj-firebat", "infra-testbench", "infra-2"]);
   await eventually("every probe has its peers", () => plane.peers.size === 3);
   assert.deepEqual(plane.peers.get("infra-testbench"), ["nControlPlaneCNTRL", "nJoinerCNTRL"]);
+});
+
+test("the installer's join reaches only the control plane deployer.json names, and says why one is refused", async (t) => {
+  const plane = await controlPlaneOf(t, today);
+  const registry = openRegistry(plane.db);
+  t.after(() => registry.close());
+  const { token } = mintJoinToken(registry);
+  plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
+  plane.as("nJoinerCNTRL");
+  const deployer = { controlUrl: `http://127.0.0.1:${plane.port}/`, controlNodeId: "nControlPlaneCNTRL", token: "joiner-token" };
+  await assert.rejects(joinControlPlane(deployer, token, async () => "nImpostorCNTRL" as TailnetNodeId), /did not take the join: deployment endpoint has the wrong tailnet identity/);
+  assert.deepEqual(registry.joinedNodes(), [], "the impostor got nothing");
+  assert.equal(await joinControlPlane(deployer, token, async () => "nControlPlaneCNTRL" as TailnetNodeId), "infra-2");
+  assert.equal(registry.joinedNodes()[0]?.deployKey, keyOf("joiner-token"));
+  await assert.rejects(joinControlPlane(deployer, token, async () => "nControlPlaneCNTRL" as TailnetNodeId), new RegExp(`^Error: the control plane at http://127\\.0\\.0\\.1:${plane.port}/ did not take the join: this join token was used at `));
+});
+
+test("the host command mints a join token only as root", { skip: process.getuid?.() === 0 && "this test runs as root" }, async () => {
+  const run = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./join-token.ts", import.meta.url)), "/etc/nexus/control.json"], { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk; });
+    child.on("close", (code) => resolve({ code, stderr }));
+  });
+  assert.equal(run.code, 77);
+  assert.match(run.stderr, /run this as root on the control plane's machine\. A join token adds a node, so only root may mint one/);
 });
