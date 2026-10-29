@@ -1537,7 +1537,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.47.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.48.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1593,7 +1593,7 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.equal((await s.nexus(["review", thread.id, "--rounds", "6"])).code, 64, "a review runs at most 5 rounds");
   const review: Review = {
     id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "claude",
-    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }],
     phase: { kind: "needs-person", reasons: ["The reviewer still requests changes after 5 rounds, the most this review allows.", "Nexus could not add the label \"needs human review\" to pull request #7 (GitHub answered 403: Forbidden)."], label: { state: "failed", why: "GitHub answered 403: Forbidden" } },
   };
@@ -1645,7 +1645,7 @@ test("review --cancel ends the thread's running review through its route, and pr
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
   review = {
     id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" },
   };
   assert.equal((await s.nexus(["review", "--cancel", thread.id])).stdout, `Cancelled review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on gpt-6-astra, cancelled by ${laptop}\n`);

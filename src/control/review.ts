@@ -14,7 +14,8 @@
  * The agents answer in fenced JSON blocks that echo the token of the request they answer, which this module parses
  * from their replies. Each request gets a fresh random token that only its recipient is told, so an old answer, or
  * the other agent, cannot answer it.
- * A reply that lacks the block gets a reminder, at most twice in a row, before the loop asks the person.
+ * A reply that lacks the block gets a reminder, at most twice in a row, before the loop asks the person. A turn that
+ * ended because the agent's model failed gets the same request again, after a wait that grows with each failure in a row.
  */
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
@@ -23,6 +24,7 @@ import { singleFlight } from "../single-flight.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { SecretGrant } from "../project.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
+import { errorStop } from "../claude-transcript.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
@@ -45,6 +47,8 @@ const replyGraceMs = 60_000;
 const answerMs = 3 * 60 * 60_000;
 const pushGraceMs = 10 * 60_000;
 const maxNudges = 2;
+/** How long the loop waits before it sends a request again after each model failure in a row. The next failure goes to the person. */
+const retryMs = [2, 5, 10, 20].map((minutes) => minutes * 60_000);
 const checkMs = 60 * 60_000;
 /** As long as `nexus deploy --wait` waits. */
 const deployMs = 30 * 60_000;
@@ -93,11 +97,17 @@ export interface Round { head: string; verdict: Verdict | null; check: { passed:
  */
 export type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: boolean; output: string };
 
+/**
+ * The agent's last `count` turns in a row ended because its model failed, the latest with the error `last`. The loop
+ * sends its request again at `retryAt`.
+ */
+export interface ModelFailure { count: number; last: string; retryAt: number }
+
 export type Phase =
   /** The reviewer has the round's request and owes its verdict. */
-  | { kind: "reviewing" }
+  | { kind: "reviewing"; failing?: ModelFailure }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
-  | { kind: "fixing" }
+  | { kind: "fixing"; failing?: ModelFailure }
   /** The repository's checks run at the approved head, in `thread`, a check thread thrown away afterwards. */
   | { kind: "checking"; startedAt: number; thread: ThreadId | null }
   /**
@@ -173,6 +183,8 @@ export interface Review {
    * that went through before a crash still dates the wait from then, and a reply that came meanwhile is read.
    */
   outbox: { to: "builder" | "reviewer"; id: string; text: string; attempted: number | null } | null;
+  /** The text of the last message sent, which a turn that ended on a model failure gets again. */
+  asked: string;
   /** When the agent the loop waits on was last sent something, and how many reminders in a row it has had. */
   since: number;
   nudges: number;
@@ -198,6 +210,7 @@ export const cancellable = (r: Review) => (!ended.has(r.phase.kind) || needsPers
 export function storedReview(record: Review): Review {
   return {
     ...record, maxRounds: Math.min(record.maxRounds, maxRounds), auto: record.auto ?? false, waiver: record.waiver ?? null,
+    asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
     rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } }),
   };
 }
@@ -208,6 +221,8 @@ export interface ReviewDeps {
   inbox: Inbox;
   /** The agent's replies, oldest first: a Claude worker's transcript as last read, or the harness conversation. */
   replies(t: Thread): Promise<string[]>;
+  /** The error the agent's latest turn ended on because its model failed, or null when it did not. */
+  modelFailure(t: Thread): Promise<string | null>;
   checks: CheckRuns;
   /** The live check's runs, in verify pylons. */
   live: CheckRuns;
@@ -286,7 +301,8 @@ const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, la
 /** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
 export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.who === "person" ? `, cancelled by ${r.phase.by}` : `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
   : r.phase.kind === "merging" && r.phase.waiting !== undefined ? `, waiting while ${r.phase.waiting}`
-  : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state] : "";
+  : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state]
+  : (r.phase.kind === "reviewing" || r.phase.kind === "fixing") && r.phase.failing ? `, the ${r.phase.kind === "reviewing" ? "reviewer" : "builder"}'s model is failing (${r.phase.failing.count} in a row, last: ${r.phase.failing.last}), retrying at ${new Date(r.phase.failing.retryAt).toISOString().slice(11, 16)} UTC` : "";
 /** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
 export function liveNote(r: Review): string | null {
   const round = r.rounds.at(-1)!;
@@ -404,6 +420,25 @@ export function agentReplies(registry: Registry, harness: Pick<HarnessHost, "wat
   };
 }
 
+/** The error an agent's latest turn ended on because its model failed: a Claude worker's API error, or a harness model call's. */
+export function agentModelFailure(registry: Registry, harness: Pick<HarnessHost, "watch">): (t: Thread) => Promise<string | null> {
+  return async (t) => {
+    switch (registry.agent(t).kind) {
+      case "claude": return errorStop(registry.claudeEntries(t.id))?.text ?? null;
+      case "none": throw new Error(`thread ${t.id} has no agent, so it has no model`);
+      case "harness": {
+        const watch = await harness.watch(t.id);
+        try {
+          const last = watch.value.entries.flatMap((entry) => entry.model ?? []).findLast((m) => m.role === "assistant");
+          return last?.stopReason === "error" ? last.errorMessage ?? "no reason given" : null;
+        } finally {
+          await watch.stop();
+        }
+      }
+    }
+  };
+}
+
 export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } {
   if (builder.claude) return { claude: false, model: harnessModel };
   // A Claude worker logs in from a granted token. Interactive /login needs a person, so it cannot serve a reviewer.
@@ -412,7 +447,7 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
 }
 
 export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
-  const { registry, github, inbox, replies, checks, live, release, log } = deps;
+  const { registry, github, inbox, replies, modelFailure, checks, live, release, log } = deps;
   const now = deps.now ?? Date.now;
   const passes = singleFlight(pass);
   const poll = passes.join;
@@ -467,8 +502,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
     const expect = nudges === 0 ? mint(r.id) : r.expect;
-    return { ...r, phase, nudges, expect, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: text(expect), attempted: null } };
+    return resend({ ...r, phase, nudges, expect, asked: text(expect) }, to);
   };
+  /** The last message again, under a new request ID, so it keeps its token. */
+  const resend = (r: Review, to: "builder" | "reviewer"): Review => ({ ...r, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: r.asked, attempted: null } });
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
   /** The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. */
   const newHead = (r: Review, head: string, base: string, why: string): Review => {
@@ -497,21 +534,33 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   /**
    * Waits on `t`. Once a turn of it ended after the loop's last message without the answer the loop needs, it gets a
-   * reminder saying what is `missing`, and after the last reminder, or hours of silence, the loop asks the person.
+   * reminder saying what is `missing`, and after the last reminder, or hours of silence, the loop asks the person. A
+   * turn that ended because its model failed is no reminder: the same message goes again once the failure's wait is
+   * over, and after the last wait the loop asks the person.
    */
-  function waitOn(r: Review, t: Thread, who: "builder" | "reviewer", missing: string | null = null): Review {
+  async function waitOn(r: Review, phase: Extract<Phase, { kind: "reviewing" | "fixing" }>, t: Thread, missing: string | null = null): Promise<Review> {
+    const who = phase.kind === "reviewing" ? "reviewer" : "builder";
     if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
+    // Until the request goes again, `since` is before `retryAt`, and the turn that ended is the failure already counted,
+    // whose end a Claude worker's transcript and its hook may each report at another time.
+    if (phase.failing !== undefined && r.since < phase.failing.retryAt) return now() < phase.failing.retryAt ? r : resend(r, who);
     const { ended, running } = heard(t, r.since);
     if (ended === null || running || now() - ended <= replyGraceMs) return r;
+    const failed = await modelFailure(t);
+    if (failed !== null) {
+      const count = (phase.failing?.count ?? 0) + 1;
+      if (count > retryMs.length) return toPerson(r, `The ${who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
+      return { ...r, phase: { kind: phase.kind, failing: { count, last: failed, retryAt: now() + retryMs[count - 1]! } } };
+    }
     if (r.nudges >= maxNudges) return toPerson(r, `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
-    return send(r, who, (token) => reminder(who, missing, token), r.phase, r.nudges + 1);
+    return send(r, who, (token) => reminder(who, missing, token), { kind: phase.kind }, r.nudges + 1);
   }
 
 
   const steps: { [K in Exclude<PhaseKind, typeof endedKinds[number]>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
-    async reviewing(r, _, __, reviewer) {
+    async reviewing(r, phase, __, reviewer) {
       const verdict = answeredSince(r, reviewer) ? latest(await replies(reviewer), "nexus-review", verdictSchema, r.expect) : null;
-      if (verdict === null) return waitOn(r, reviewer, "reviewer");
+      if (verdict === null) return waitOn(r, phase, reviewer);
       const next = withRound(r, { verdict });
       const round = next.rounds.at(-1)!;
       const n = roundsSpent(next);
@@ -519,13 +568,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (n >= r.maxRounds) return ranOut(next, `The reviewer still requests changes after ${n} rounds, the most this review allows.`);
       return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
     },
-    async fixing(r, _, builder) {
+    async fixing(r, phase, builder) {
       const n = roundsSpent(r);
       const round = r.rounds.at(-1)!;
       const found = answeredSince(r, builder) ? latest(await replies(builder), "nexus-review-answers", answersSchema, r.expect) : null;
-      if (found === null) return waitOn(r, builder, "builder");
+      if (found === null) return waitOn(r, phase, builder);
+      // A turn after the request went again that did not fail ends the model's failures in a row, though the loop may
+      // still wait for the push its answer promises. An answer from before, or from the failed turn itself, does not.
+      if (phase.failing !== undefined && r.since >= phase.failing.retryAt && heard(builder, r.since).ended !== null && await modelFailure(builder) === null) return { ...r, phase: { kind: "fixing" } };
       const unanswered = findingsOf(round).filter(blocks).filter((f) => !found.answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== "")));
-      if (unanswered.length) return waitOn(r, builder, "builder", `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
+      if (unanswered.length) return waitOn(r, phase, builder, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
       const answered = withRound(r, { answers: found.answers });
       const fixed = found.answers.some((a) => a.action === "fixed");
       const snapshot = await github.poll(r.pr.repo, r.pr.number);
@@ -533,9 +585,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
         const { ended, running } = heard(builder, r.since);
-        if (ended === null || running) return waitOn(r, builder, "builder");
+        if (ended === null || running) return waitOn(r, phase, builder);
         if (now() - ended < pushGraceMs) return r;
-        if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
+        if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, phase, builder, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a check's result, so a failed check at an unmoved head is the person's.
       if (round.check?.passed === false && snapshot.detail.head === round.head) {
@@ -829,14 +881,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
       maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto,
       rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
-      since: now(), nudges: 0, startedAt: now(),
+      since: now(), nudges: 0, startedAt: now(), asked: "",
     };
     const prompt = reviewerRequest(draft, snapshot.detail, draft.expect);
     const reviewer = await deps.startThread({
       project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), node: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
       ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
     }, reviewerCaller);
-    const review: Review = { ...draft, reviewer: reviewer.id, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
+    const review: Review = { ...draft, reviewer: reviewer.id, asked: prompt, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
     registry.saveReview(review);
     void poll();
     return review;

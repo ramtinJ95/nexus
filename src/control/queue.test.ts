@@ -74,7 +74,7 @@ function fixture(t: import("node:test").TestContext, path = ":memory:") {
   function review(id: ThreadId, phase: Phase, merged: string | null = null) {
     const r: Review = {
       id: `r-${id}`, expect: "", sent: 0, builder: id, reviewer: `${id}-reviewer` as ThreadId, pr: { repo: "acme/acme", number: 9, url: "", title: "", branch: "feature" },
-      models: { builder: "a", reviewer: "b" }, reviewerKind: "harness", maxRounds: 5, land: null, auto: false, waiver: null, rounds: [], merged, phase, outbox: null, since: 0, nudges: 0, startedAt: 0,
+      models: { builder: "a", reviewer: "b" }, reviewerKind: "harness", maxRounds: 5, land: null, auto: false, waiver: null, rounds: [], merged, phase, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
     };
     registry.saveReview(r);
   }

@@ -52,7 +52,7 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
       const r: Review = {
         id: `r-${id}`, expect: "", sent: 0, builder: id, reviewer: `${id}-reviewer` as ThreadId, pr: { repo: "acme/acme", number: 9, url: "", title: "", branch: "feature" },
         models: { builder: "a", reviewer: "b" }, reviewerKind: "harness", maxRounds: 5, land: land === null ? null : { requestedBy: land, fromProject: true }, auto: true, waiver: null,
-        rounds: [{ head: "h", verdict: null, check: null, answers: null }], merged: phase.kind === "landed" ? phase.commit : null, phase, outbox: null, since: 0, nudges: 0, startedAt: 0,
+        rounds: [{ head: "h", verdict: null, check: null, answers: null }], merged: phase.kind === "landed" ? phase.commit : null, phase, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
       };
       registry.saveReview(r);
     },
