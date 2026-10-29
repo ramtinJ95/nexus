@@ -1,0 +1,32 @@
+silent at 1280: {"chip":"needs your decision","cards":[{"heading":"Review needs you","actions":["Review again","Cancel review"]}]}
+screenshot 01-silent-reviewer.png
+mergedByHand at 1280: {"chip":"needs your decision","cards":[{"heading":"Merged outside its review","actions":["Cancel review"]}]}
+screenshot 02-merged-by-hand.png
+rolledBack at 1280: {"chip":"needs your decision","cards":[{"heading":"Merged, not deployed","actions":["Cancel review"]}]}
+screenshot 03-merged-not-deployed.png
+held at 1280: {"chip":"needs your decision","cards":[{"heading":"Held for you","actions":["Land #54"]}]}
+screenshot 04-held-landable.png
+nudged at 1280: {"chip":"needs your decision","cards":[{"heading":"Stopped short of a pull request","actions":["Write to it"]}]}
+screenshot 05-nudged.png
+question at 1280: {"chip":"needs your decision","cards":[{"heading":"Needs your decision","actions":["Rebuild","Not now"]}]}
+screenshot 06-question.png
+planning at 1280: {"chip":"needs your decision","cards":[{"heading":"Needs your decision","actions":["Accept","Reject"]}]}
+screenshot 07-proposal.png
+silent at 390: {"chip":"needs your decision","cards":[{"heading":"Review needs you","actions":["Review again","Cancel review"]}]}
+screenshot 01-silent-reviewer-phone.png
+mergedByHand at 390: {"chip":"needs your decision","cards":[{"heading":"Merged outside its review","actions":["Cancel review"]}]}
+screenshot 02-merged-by-hand-phone.png
+Needs you at 390: {"count":"7","cards":["Stopped short: nexus / Draft the install guide [Write to it]","Question: nexus / Rebuild the pylon image [Rebuild, Not now]","Proposed item: nexus / Plan the install wave [Accept, Reject]","Review needs you: nexus / Read the reviewer's answer [Review again, Cancel review]","Review needs you: nexus / Install with one command [Cancel review]","Review needs you: nexus / Rename the deploy flag [Cancel review]","Held review: nexus / Cache the thread list [Land #54]"]}
+screenshot 08-needs-you-phone.png
+Needs you at 1280: {"count":"7","cards":["Stopped short: nexus / Draft the install guide [Write to it]","Question: nexus / Rebuild the pylon image [Rebuild, Not now]","Proposed item: nexus / Plan the install wave [Accept, Reject]","Review needs you: nexus / Read the reviewer's answer [Review again, Cancel review]","Review needs you: nexus / Install with one command [Cancel review]","Review needs you: nexus / Rename the deploy flag [Cancel review]","Held review: nexus / Cache the thread list [Land #54]"]}
+screenshot 09-needs-you.png
+the page asked: "Review pull request #51, \"Read the reviewer's answer from its last turn\", again? A new reviewer thread starts at round 1, and Nexus lands the pull request once it approves, as this project lands its reviews.", and the driver pressed OK
+after Review again: {"chip":"running","cards":[]}
+the review is now rv-4a3d6ec2, reviewing, round 1, reviewer th-b0bbf6f99739, land {"requestedBy":"nLAPTOP"}
+screenshot 10-after-review-again.png
+the page asked: "Cancel review rv-52000000 of pull request #52? It stops waiting on you. Its reviewer thread is archived, and this thread stays as it is.", and the driver pressed OK
+after Cancel review: {"count":"5","cards":["Stopped short: nexus / Draft the install guide [Write to it]","Question: nexus / Rebuild the pylon image [Rebuild, Not now]","Proposed item: nexus / Plan the install wave [Accept, Reject]","Review needs you: nexus / Rename the deploy flag [Cancel review]","Held review: nexus / Cache the thread list [Land #54]"]}
+screenshot 11-after-cancel.png
+its page after Cancel review: {"chip":"running","cards":[]}
+Write to it opened /threads/th-8b502627fef6#write, with the focus on #prompt-text
+screenshot 12-write-to-it.png

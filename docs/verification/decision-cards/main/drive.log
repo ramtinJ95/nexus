@@ -1,0 +1,25 @@
+silent at 1280: {"chip":"needs your decision","cards":[]}
+screenshot 01-silent-reviewer.png
+mergedByHand at 1280: {"chip":"needs your decision","cards":[]}
+screenshot 02-merged-by-hand.png
+rolledBack at 1280: {"chip":"needs your decision","cards":[{"heading":"Merged, not deployed","actions":[]}]}
+screenshot 03-merged-not-deployed.png
+held at 1280: {"chip":"needs your decision","cards":[{"heading":"Held for you","actions":["Land #54"]}]}
+screenshot 04-held-landable.png
+nudged at 1280: {"chip":"needs your decision","cards":[]}
+screenshot 05-nudged.png
+question at 1280: {"chip":"needs your decision","cards":[{"heading":"Needs your decision","actions":["Rebuild","Not now"]}]}
+screenshot 06-question.png
+planning at 1280: {"chip":"needs your decision","cards":[{"heading":"Needs your decision","actions":["Accept","Reject"]}]}
+screenshot 07-proposal.png
+silent at 390: {"chip":"needs your decision","cards":[]}
+screenshot 01-silent-reviewer-phone.png
+mergedByHand at 390: {"chip":"needs your decision","cards":[]}
+screenshot 02-merged-by-hand-phone.png
+Needs you at 390: {"count":"7","cards":["Question: nexus / Rebuild the pylon image [Rebuild, Not now]","Proposed item: nexus / Plan the install wave [Accept, Reject]","Needs your decision: nexus / Read the reviewer's answer [Open thread]","Needs your decision: nexus / Install with one command [Open thread]","Needs your decision: nexus / Rename the deploy flag [Open thread]","Held review: nexus / Cache the thread list [Land #54]","Needs your decision: nexus / Draft the install guide [Open thread]"]}
+screenshot 08-needs-you-phone.png
+Needs you at 1280: {"count":"7","cards":["Question: nexus / Rebuild the pylon image [Rebuild, Not now]","Proposed item: nexus / Plan the install wave [Accept, Reject]","Needs your decision: nexus / Read the reviewer's answer [Open thread]","Needs your decision: nexus / Install with one command [Open thread]","Needs your decision: nexus / Rename the deploy flag [Open thread]","Held review: nexus / Cache the thread list [Land #54]","Needs your decision: nexus / Draft the install guide [Open thread]"]}
+screenshot 09-needs-you.png
+the silent reviewer's page has no Review again
+the hand-merged PR's Needs you card has no Cancel review
+the nudged builder's Needs you card has no Write to it
