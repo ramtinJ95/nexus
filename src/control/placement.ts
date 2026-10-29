@@ -61,9 +61,10 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
  */
 export function roomLeft(registry: Registry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
   const now = Date.now();
-  const pending = [...registry.pylonsOn(node)
-    .filter((p) => p.failed === null && ["running", "reading"].includes(desiredPhase(registry.thread(p.thread)!, now)))
-    .map((p) => uncounted(p, o.pylons.find((seen) => seen.pylonId === p.pylonId))), ...registry.reserved(node)]
+  const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
+  const pending = [...registry.pylonsWithThreadsOn(node)
+    .filter(({ pylon, thread }) => pylon.failed === null && ["running", "reading"].includes(desiredPhase(thread, now)))
+    .map(({ pylon }) => uncounted(pylon, seen.get(pylon.pylonId))), ...registry.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
   const left: Room = {
     cpus: c.cpus - c.committedCpus - pending.cpus - need.cpus,
@@ -108,13 +109,14 @@ export function nodePylons(registry: Registry, node: NodeRecord): NodePylons | n
   const zero = (): Tally => ({ pylons: 0, cpus: 0, memoryGiB: 0 });
   const tallies = { up: zero(), paused: zero(), archived: zero(), crashed: zero() };
   const orphaned: PylonId[] = [];
+  const placed = new Map(registry.pylonsWithStatusOn(node.name).map((p) => [p.pylon.pylonId, p]));
   for (const seen of node.observation.pylons) {
-    const p = registry.pylon(seen.pylonId);
-    if (p === undefined || p.node !== node.name) {
+    const found = placed.get(seen.pylonId);
+    if (found === undefined) {
       orphaned.push(seen.pylonId);
       continue;
     }
-    const { status } = registry.thread(p.thread)!;
+    const { pylon: p, status } = found;
     const crashed = seen.phase === "broken" && seen.cause === "controller";
     const tally = tallies[(crashed || seen.phase === "stopped") && (status === "archived" || status === "deleted") ? "archived"
       : crashed ? "crashed" : seen.phase !== "stopped" ? "up" : "paused"];

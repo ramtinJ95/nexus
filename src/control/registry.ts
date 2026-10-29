@@ -517,6 +517,8 @@ export function openRegistry(path: string, clock = Date.now) {
     return row && json<Project>(row.record);
   }
 
+  const pylonsOn = (node: NodeName) => sql("SELECT * FROM pylons WHERE node = ? ORDER BY id").all(node).map(pylonRow);
+
   const sessions = (pylon: PylonId) => sql("SELECT * FROM sessions WHERE pylon = ? ORDER BY id").all(pylon).map(sessionRow);
 
   function image(id: ImageId): RecordedImage | undefined {
@@ -1320,7 +1322,16 @@ export function openRegistry(path: string, clock = Date.now) {
     },
 
     pylon,
-    pylonsOn: (node: NodeName) => (sql("SELECT * FROM pylons WHERE node = ? ORDER BY id").all(node) as Row[]).map(pylonRow),
+    pylonsOn,
+    /** The node's pylons, each with its thread's status, in one read. */
+    pylonsWithStatusOn: (node: NodeName): { pylon: StoredPylon; status: ThreadStatus }[] =>
+      sql("SELECT p.*, t.status AS thread_status FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = ? ORDER BY p.id").all(node)
+        .map((r) => ({ pylon: pylonRow(r), status: r.thread_status as ThreadStatus })),
+    /** The node's pylons, each with its thread as thread() reads it, in a few reads however many there are. */
+    pylonsWithThreadsOn(node: NodeName): { pylon: StoredPylon; thread: Thread }[] {
+      const threads = new Map(withSessions(sql("SELECT t.* FROM threads t JOIN pylons p ON p.thread = t.id WHERE p.node = ?").all(node)).map((t) => [t.id, t]));
+      return pylonsOn(node).map((pylon) => ({ pylon, thread: threads.get(pylon.thread)! }));
+    },
     /**
      * The node's pylons less those of deleted threads with nothing left to tear down: the node neither has nor routes
      * them, as `present` says, and no job, preview, retry or Claude launch is left to settle, so a tick would change nothing.

@@ -1683,3 +1683,44 @@ test("a deploy drain set to null reads back as null, as does one never set", (t)
   registry.setDrain(null);
   assert.equal(registry.drain(), null);
 });
+
+test("a node's tallies and room count each of its pylons by what it holds, and a pylon placed elsewhere as an orphan", async (t) => {
+  const { nodePylons, roomLeft } = await import("./placement.ts");
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const other = "rj-other" as NodeName;
+  registry.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
+  const placed = (id: string, active: boolean, on = node) => {
+    const p = addPylon(registry, id, on);
+    if (active) registry.recordActivity(id as ThreadId, { human: Date.now() });
+    return p;
+  };
+  const [up, paused, waking] = [placed("th-up", true), placed("th-paused", false), placed("th-waking", true)];
+  placed("th-unseen", true);
+  const [archived, reading, crashed] = [placed("th-archived", false), placed("th-reading", false), placed("th-crashed", true)];
+  const failed = placed("th-failed", true);
+  registry.savePylon({ ...registry.pylon(failed)!, failed: "gave up" });
+  const elsewhere = placed("th-elsewhere", true, other);
+  for (const id of ["th-archived", "th-reading"]) registry.setThreadStatus(id as ThreadId, "archived");
+  registry.startUsageBackfill(["th-reading" as ThreadId], Date.now());
+  registry.holdUsageBackfill("th-reading" as ThreadId, Date.now());
+  const release = registry.reserve("pylon-th-starting" as PylonId, node, { cpus: 1, memoryGiB: 1, diskGiB: 1 });
+  t.after(release);
+  const stopped = (pylonId: PylonId) => ({ pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
+  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
+  registry.ingested({
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
+    pylons: [{ pylonId: up, phase: "booting" }, stopped(paused), stopped(waking), stopped(archived), stopped(reading),
+      { pylonId: crashed, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" },
+      { pylonId: "pylon-gone" as PylonId, phase: "booting" }, { pylonId: elsewhere, phase: "booting" }],
+  }, []);
+  const record = registry.node(node)!;
+  assert.deepEqual(nodePylons(registry, record), {
+    up: { pylons: 1, cpus: 2, memoryGiB: 4 }, paused: { pylons: 2, cpus: 4, memoryGiB: 8 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
+    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone", elsewhere],
+  });
+  assert.deepEqual(roomLeft(registry, node, record.observation!, capacity, { cpus: 1, memoryGiB: 1, diskGiB: 1 }), {
+    pending: { cpus: 7, memoryGiB: 13, diskGiB: 11 },
+    left: { cpus: 8, memoryGiB: 42, diskGiB: 388 },
+  }, "a stopped pylon about to wake or be read holds its CPUs and memory again, an unreported one all it asked for, and a start placed here what it reserved");
+});
