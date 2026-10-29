@@ -247,8 +247,11 @@ export async function locations(host: Pick<Host, "read">): Promise<Locations> {
   };
 }
 
-/** What the installer does after: rewrite the configs for a new git key, restart the probe, or install the control plane again. */
-export type FollowUp = "config" | "probe" | "control";
+/**
+ * What the installer does after: rewrite the configs for a new git key, or with github.tokenFile under the deployer's
+ * lock, restart the probe, or install the control plane again.
+ */
+export type FollowUp = "config" | "watch" | "probe" | "control";
 
 /** Fills `next` as it goes, so a run that fails partway still says what its writes need. */
 export async function provision(role: "control" | "node", host: Host, answers: Answers, say: (line: string) => void, next = new Set<FollowUp>()): Promise<Set<FollowUp>> {
@@ -313,36 +316,40 @@ export async function provision(role: "control" | "node", host: Host, answers: A
     if (value !== undefined) await addSecret(value.startsWith("sk-ant-api") ? "ANTHROPIC_API_KEY" : "CLAUDE_CODE_OAUTH_TOKEN", value);
   }
 
-  if (names.includes("GH_TOKEN")) say(`Left GH_TOKEN in ${at.secrets} alone.`);
+  const existing = /^GH_TOKEN=(.*)$/m.exec(await host.read(at.secrets) ?? "")?.[1];
+  let github = existing;
+  if (existing !== undefined) say(`Left GH_TOKEN in ${at.secrets} alone.`);
   else {
-    const value = await answers.secret({
+    github = await answers.secret({
       key: "NEXUS_GH_TOKEN",
       say: "Pylons use a GitHub token for gh and git over HTTPS: a fine-grained token for all repositories with Administration and Contents read and write. Paste it, or press Enter to skip:",
       check: githubToken,
     });
-    if (value !== undefined) {
-      await addSecret("GH_TOKEN", value);
-      if (here(stores.githubWatch)) await githubWatch(value);
-    }
+    if (github !== undefined) await addSecret("GH_TOKEN", github);
   }
 
-  async function githubWatch(value: string) {
+  if (here(stores.githubWatch)) {
     const { file } = stores.githubWatch;
-    if (at.githubWatch !== undefined) return say(`Left github.tokenFile ${at.githubWatch} in ${controlConfig} alone.`);
-    if (await host.exists(file)) return say(`Left ${file} alone. ${controlConfig} does not name it, so the pull request watch stays off.`);
-    const watch = await answers.choose({
-      key: "NEXUS_GITHUB_WATCH",
-      say: "Give the control plane the same token, for the pull request watch and the review loop? They also read pull requests, checks and commit statuses, and a landing merges, so the token needs those permissions too.",
-      choices: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }],
-      unattended: "yes",
-    });
-    if (watch !== "yes") return;
-    const control = JSON.parse(await host.read(controlConfig) ?? "{}") as Record<string, unknown>;
-    if (control.github !== undefined) return say(`Left github in ${controlConfig} alone, which another run set meanwhile.`);
-    await host.write(file, `${value}\n`, stores.githubWatch);
-    await host.write(controlConfig, `${JSON.stringify({ ...control, github: { tokenFile: file } }, null, 2)}\n`, { mode: 0o644, owner: "root:root" });
-    say(`Wrote the token to ${file} and named it as github.tokenFile in ${controlConfig}.`);
-    next.add("control");
+    if (at.githubWatch !== undefined) say(`Left github.tokenFile ${at.githubWatch} in ${controlConfig} alone.`);
+    else if (github !== undefined && githubToken(github) === undefined) {
+      const kept = await host.exists(file);
+      const watch = await answers.choose({
+        key: "NEXUS_GITHUB_WATCH",
+        say: kept
+          ? `${file} exists, and ${controlConfig} names no github.tokenFile. Name it, for the pull request watch and the review loop?`
+          : "Give the control plane the same GitHub token, for the pull request watch and the review loop? They also read pull requests, checks and commit statuses, and a landing merges, so the token needs those permissions too.",
+        choices: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }],
+        // Without a terminal, a run turns the watch on only for a token it was given, never on an install that had one.
+        unattended: existing === undefined ? "yes" : "no",
+      });
+      if (watch === "yes") {
+        if (kept) say(`Left ${file} alone.`);
+        else await host.write(file, `${github}\n`, stores.githubWatch);
+        say(`The installer names ${file} as github.tokenFile in ${controlConfig} next.`);
+        next.add("watch");
+        next.add("control");
+      }
+    }
   }
 
   const key = at.gitKey;

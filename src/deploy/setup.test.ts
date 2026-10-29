@@ -218,6 +218,18 @@ test("--admit takes the tailnet node ID that nexus connect prints, as well as a 
   assert.deepEqual(parseConfig(JSON.stringify(value(written, paths.control))).callers, ["nMac1CNTRL"]);
 });
 
+test("--github-watch names the control plane's token file in the control.json on disk, keeps whatever else is there, and never replaces one it names", () => {
+  const first = onDisk(files(run(["--dotfiles", dotfiles])));
+  const admitted = { ...first, control: { ...(first.control as Record<string, Json>), callers: ["nMac1CNTRL"] } };
+  const written = files(run(["--github-watch"], admitted));
+  const control = parseConfig(JSON.stringify(value(written, paths.control)));
+  assert.deepEqual(control.github, { tokenFile: "/etc/nexus/github-token" });
+  assert.deepEqual(control.callers, ["nMac1CNTRL"], "a caller another run admitted meanwhile stays");
+  const named = { ...first, control: { ...(first.control as Record<string, Json>), github: { tokenFile: "/srv/token" } } };
+  assert.deepEqual(value(files(run(["--github-watch"], named)), paths.control).github, { tokenFile: "/srv/token" });
+  assert.match(errors(run(["--node", "rj-firebat", "--github-watch"])).join("\n"), /--github-watch is for the control machine/);
+});
+
 test("a name two devices share is ambiguous, and the full MagicDNS name picks one", () => {
   const shared = parseTailnet(JSON.stringify({
     ...JSON.parse(status),

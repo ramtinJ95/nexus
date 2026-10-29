@@ -147,8 +147,12 @@ main() {
   echo
   # It runs runuser and chown, which live in the sbin directories the units' PATH lacks.
   next=$(PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" credentials "${args[@]}") || failed=$?
-  if grep -qx config <<<"$next"; then
+  if grep -qx watch <<<"$next"; then
+    PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}" --github-watch
+  elif grep -qx config <<<"$next"; then
     PATH=$service_path flock -x "$prefix/deployer/lock" node "$repo/src/deploy/setup.ts" write "${args[@]}"
+  fi
+  if grep -qx config <<<"$next"; then
     bash "$repo/deploy/install-probe.sh"
   elif grep -qx probe <<<"$next"; then
     systemctl try-restart nexus-probe.service

@@ -2,7 +2,7 @@
  * Writes /etc/nexus/{control,probe,deployer}.json for `deploy/install.sh`, gives the agents their credentials
  * (src/deploy/credentials.ts) and says what is left for the person: `node src/deploy/setup.ts write|credentials|left
  * [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]...
- * [--dotfiles <git url>] [--non-interactive]`. It runs as root from a checkout before `npm ci`, so it imports only
+ * [--dotfiles <git url>] [--non-interactive] [--github-watch]`. It runs as root from a checkout before `npm ci`, so it imports only
  * Node's builtins.
  */
 import { execFile } from "node:child_process";
@@ -56,6 +56,8 @@ export interface Flags {
   peer: readonly string[];
   dotfiles?: string;
   nonInteractive: boolean;
+  /** Names the control plane's GitHub token file as github.tokenFile, which the credentials step wrote. */
+  githubWatch: boolean;
 }
 
 export function parseFlags(args: readonly string[]): { command: string | undefined; flags: Flags } {
@@ -69,10 +71,11 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
       peer: { type: "string", multiple: true, default: [] },
       dotfiles: { type: "string" },
       "non-interactive": { type: "boolean", default: false },
+      "github-watch": { type: "boolean", default: false },
     },
   });
   const flags: Flags = {
-    admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"],
+    admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"],
     ...values.node === undefined ? {} : { node: values.node },
     ...values.dotfiles === undefined ? {} : { dotfiles: values.dotfiles },
   };
@@ -176,6 +179,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     if (flags.admit.length > 0) errors.push("--admit is for the control machine. Run it there, without --node");
     if (flags.addNode.length > 0) errors.push("--add-node is for the control machine. Run it there, without --node");
     if (flags.dotfiles !== undefined) errors.push("--dotfiles is for the control machine. Run it there, without --node");
+    if (flags.githubWatch) errors.push("--github-watch is for the control machine. Run it there, without --node");
   }
 
   const addNodes = flags.addNode.flatMap((raw) => {
@@ -229,6 +233,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       deployers: admitted.map((d) => d.id),
       deployKeys: Object.fromEntries([[self.id, tokenDigest(token)], ...addNodes.map((a) => [a.node.id, a.digest])]),
       ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: "main" } },
+      ...flags.githubWatch ? { github: { tokenFile: stores.githubWatch.file } } : {},
       harness: {
         storage: "/var/lib/nexus-control/harness.sqlite",
         credentials: stores.harness.file,
@@ -487,7 +492,7 @@ async function main(args: readonly string[]): Promise<number> {
     console.log(formatLeft(left(await gather(flags))));
     return 0;
   }
-  console.error("usage: node src/deploy/setup.ts write|credentials|left [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive]");
+  console.error("usage: node src/deploy/setup.ts write|credentials|left [--node <control device>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
   return 1;
 }
 

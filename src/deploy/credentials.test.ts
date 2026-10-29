@@ -115,7 +115,7 @@ test("a first install asks for each credential, keeps each where Nexus keeps it,
   const next = await provision("control", m.host, answers, (line) => said.push(line));
 
   assert.deepEqual(asked, ["NEXUS_HARNESS_LOGIN", "NEXUS_CLAUDE_TOKEN", "NEXUS_GH_TOKEN", "NEXUS_GITHUB_WATCH", "NEXUS_GIT_KEY"]);
-  assert.deepEqual([...next].sort(), ["config", "control", "probe"]);
+  assert.deepEqual([...next].sort(), ["config", "control", "probe", "watch"]);
   assert.deepEqual(m.runs[0], ["runuser", "-u", "nexus-control", "--", "env", "PATH=/usr/local/bin:/usr/bin", "node", "/opt/nexus/control-current/src/control/login.ts", "/etc/nexus/control.json"]);
 
   const secrets = await readFile(m.at(stores.claude.file), "utf8");
@@ -125,16 +125,14 @@ test("a first install asks for each credential, keeps each where Nexus keeps it,
 
   assert.equal(await readFile(m.at(stores.githubWatch.file), "utf8"), `${ghToken}\n`);
   assert.equal((await stat(m.at(stores.githubWatch.file))).mode & 0o777, 0o640);
-  const control = parseConfig(await readFile(m.at("/etc/nexus/control.json"), "utf8"));
-  assert.deepEqual(control.github, { tokenFile: "/etc/nexus/github-token" });
-  assert.equal(control.harness.credentials, harnessFile, "control.json keeps everything else");
+  assert.equal(parseConfig(await readFile(m.at("/etc/nexus/control.json"), "utf8")).github, undefined, "the installer names the file under the deployer's lock, after this step");
 
   assert.equal(await readFile(m.at("/etc/nexus/git_known_hosts"), "utf8"), githubScan.split("\n").filter((l) => l.startsWith("github.com")).map((l) => `${l}\n`).join(""));
   assert.equal((await stat(m.at(stores.gitKey.file))).mode & 0o777, 0o400);
   const publicKey = (await readFile(m.at(`${stores.gitKey.file}.pub`), "utf8")).trim();
   assert.match(publicKey, /^ssh-ed25519 \S+ nexus@rj-firebat$/);
   assert.deepEqual(m.owners, [
-    "root:nexus-control /etc/nexus/github-token", "root:root /etc/nexus/control.json", "root:root /etc/nexus/git_known_hosts", "nexus:nexus /etc/nexus/git_ed25519",
+    "root:nexus-control /etc/nexus/github-token", "root:root /etc/nexus/git_known_hosts", "nexus:nexus /etc/nexus/git_ed25519",
   ]);
   assert.ok(said.includes(publicKey), "the public key is printed");
   assert.ok(said.some((line) => line.includes("https://github.com/settings/ssh/new")));
@@ -179,6 +177,8 @@ test("a rerun over credentials already in place asks nothing, runs nothing and c
     await m.put(harnessFile, `${JSON.stringify({ deviceId: "8c1c3a51-7d5e-4a8e-9a43-2b1f4c1e0d9a", credentials: { openai: { type: "oauth" } } })}\n`, 0o600);
     await m.put(stores.claude.file, `# by hand\n${claude}=x\nGH_TOKEN=y`, 0o640);
     await m.put(stores.gitKey.file, "a key made by hand\n", 0o400);
+    const control = JSON.parse(await readFile(m.at("/etc/nexus/control.json"), "utf8")) as object;
+    await m.put("/etc/nexus/control.json", `${JSON.stringify({ ...control, github: { tokenFile: "/etc/nexus/github-token" } })}\n`, 0o644);
     const before = await snapshot(m.root);
     const said: string[] = [];
     const next = await provision("control", m.host, answering({}).answers, (line) => said.push(line));
@@ -189,9 +189,39 @@ test("a rerun over credentials already in place asks nothing, runs nothing and c
       `Left the harness's login in ${harnessFile} alone.`,
       `Left ${claude} in /etc/nexus/secrets.env alone.`,
       "Left GH_TOKEN in /etc/nexus/secrets.env alone.",
+      "Left github.tokenFile /etc/nexus/github-token in /etc/nexus/control.json alone.",
       "Left the git SSH key /etc/nexus/git_ed25519 alone.",
     ]);
   }
+});
+
+test("a declined or unfinished PR watch is offered again on a rerun, with the GitHub token already in place and nothing rewritten", async (t) => {
+  const m = await machine(t, "control");
+  const rest = { NEXUS_HARNESS_LOGIN: "skip", NEXUS_CLAUDE_TOKEN: undefined, NEXUS_GIT_KEY: "no" };
+  assert.deepEqual([...await provision("control", m.host, answering({ ...rest, NEXUS_GH_TOKEN: ghToken, NEXUS_GITHUB_WATCH: "no" }).answers, silent)], ["probe"]);
+  assert.equal(await m.host.exists(stores.githubWatch.file), false);
+
+  const secrets = await readFile(m.at(stores.claude.file), "utf8");
+  const declined = answering({ ...rest, NEXUS_GITHUB_WATCH: "yes" });
+  assert.deepEqual([...await provision("control", m.host, declined.answers, silent)].sort(), ["control", "watch"]);
+  assert.deepEqual(declined.asked, ["NEXUS_HARNESS_LOGIN", "NEXUS_CLAUDE_TOKEN", "NEXUS_GITHUB_WATCH", "NEXUS_GIT_KEY"], "the token is not asked for again");
+  assert.equal(await readFile(m.at(stores.githubWatch.file), "utf8"), `${ghToken}\n`, "the token in secrets.env is reused");
+  assert.equal(await readFile(m.at(stores.claude.file), "utf8"), secrets);
+
+  const before = await snapshot(m.root);
+  const said: string[] = [];
+  const unfinished = await provision("control", m.host, answering({ ...rest, NEXUS_GITHUB_WATCH: "yes" }).answers, (line) => said.push(line));
+  assert.deepEqual([...unfinished].sort(), ["control", "watch"], "a token file control.json does not name yet is named on the next run");
+  assert.ok(said.includes(`Left ${stores.githubWatch.file} alone.`));
+  assert.deepEqual(await snapshot(m.root), before);
+});
+
+test("without a terminal, the PR watch is turned on for a GitHub token the run was given, never for one an install already had", async (t) => {
+  const m = await machine(t, "control");
+  await m.put(stores.claude.file, `GH_TOKEN=${ghToken}\n`, 0o640);
+  const before = await snapshot(m.root);
+  assert.deepEqual([...await provision("control", m.host, scripted({ NEXUS_GIT_KEY: "no" }), silent)], []);
+  assert.deepEqual(await snapshot(m.root), before);
 });
 
 test("a probe.json that names its own secrets file and git key is read where it points, and the defaults are left alone", async (t) => {
@@ -261,7 +291,7 @@ test("without a terminal the answers come from NEXUS_* variables or the files th
   await m.put("/root/gh-token", `${ghToken}\n`, 0o600);
   const env = { NEXUS_CLAUDE_TOKEN: "sk-ant-api03-abcdef", NEXUS_GH_TOKEN_FILE: tokenFile };
   const next = await provision("control", m.host, scripted(env), silent);
-  assert.deepEqual([...next].sort(), ["config", "control", "probe"]);
+  assert.deepEqual([...next].sort(), ["config", "control", "probe", "watch"]);
   assert.match(await readFile(m.at(stores.claude.file), "utf8"), /\nANTHROPIC_API_KEY=sk-ant-api03-abcdef\nGH_TOKEN=github_pat_\w+\n$/);
   assert.equal(await m.host.exists(harnessFile), false, "the harness needs a person or an API key");
   assert.equal(await m.host.exists(stores.gitKey.file), true, "the git key is made unless NEXUS_GIT_KEY=no");

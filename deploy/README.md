@@ -54,7 +54,7 @@ Next the installer asks for each credential the machine lacks, over SSH, and kee
 | The harness's login, on the control plane's machine | Sign in with ChatGPT, an OpenAI API key, or skip. ChatGPT runs `src/control/login.ts` as `nexus-control`, as [Sign the harness in](#sign-the-harness-in) describes | `harness.credentials` in `control.json`, `/var/lib/nexus-control/harness-credentials.json` by default, `nexus-control`, mode 0600 |
 | A Claude token, from `claude setup-token`, or an Anthropic API key | Pasted with the input hidden | `CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_API_KEY` for a key that starts `sk-ant-api`, in `/etc/nexus/secrets.env` |
 | A GitHub token, as [GitHub access](#github-access-for-a-projects-agents) describes | Pasted with the input hidden | `GH_TOKEN` in `/etc/nexus/secrets.env` |
-| The control plane's GitHub token, on its machine | Whether to give it the same GitHub token, for the [PR watch](#control-plane-github-pr-watch) and the review loop | `/etc/nexus/github-token`, `root:nexus-control`, mode 0640, named as `github.tokenFile` in `control.json` |
+| The control plane's GitHub token, on its machine | Whether to give it the GitHub token in `secrets.env`, for the [PR watch](#control-plane-github-pr-watch) and the review loop, on every run while `control.json` names no `github.tokenFile` | `/etc/nexus/github-token`, `root:nexus-control`, mode 0640, then named as `github.tokenFile` in `control.json` under the deployer's lock |
 | A git SSH key | Whether to make one | `/etc/nexus/git_ed25519`, made on the machine, as [Clone over SSH](#clone-over-ssh) describes |
 
 Each further machine, installed with `--node`, asks for its own Claude token, GitHub token and git key, and copies nothing from the control plane's machine. A credential that is already in place is left as it is: the installer never asks for it, never rewrites or moves it, and never changes its mode or owner, and it says what it left alone. Where `control.json` names its own `harness.credentials` or `github.tokenFile`, or `probe.json` its own `secretsFile` or `gitSsh` key, the installer looks there rather than at the paths above. A failed ChatGPT login offers the choice again. Then it restarts the probe if it runs and `secrets.env` changed, installs the probe again with `gitSsh` once it made a git key, and installs the control plane again once the harness is signed in, which starts it.
@@ -67,7 +67,7 @@ Without a terminal, or with `--non-interactive`, the installer never prompts. It
 | `NEXUS_OPENAI_API_KEY` | The harness's OpenAI API key |
 | `NEXUS_CLAUDE_TOKEN` | The Claude token or Anthropic API key |
 | `NEXUS_GH_TOKEN` | The GitHub token |
-| `NEXUS_GITHUB_WATCH` | `yes`, the default, or `no` |
+| `NEXUS_GITHUB_WATCH` | `yes` or `no`. The default is `yes` for a GitHub token the run was given, and `no` for one already in `secrets.env` |
 | `NEXUS_GIT_KEY` | `yes`, the default, or `no` |
 
 ```sh

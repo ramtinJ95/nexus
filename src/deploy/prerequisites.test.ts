@@ -212,6 +212,12 @@ main --dotfiles https://github.com/example/dotfiles.git`);
   assert.deepEqual(await after(["config", "probe", "control"]), [
     "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args}`, "bash ./deploy/install-probe.sh", "bash ./deploy/install-control.sh",
   ]);
+  assert.deepEqual(await after(["watch", "probe", "control"]), [
+    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args} --github-watch`, "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
+  ], "control.json gains github.tokenFile under the deployer's lock, from the file as it is then");
+  assert.deepEqual(await after(["config", "watch"]), [
+    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args} --github-watch`, "bash ./deploy/install-probe.sh",
+  ], "one config write does both");
   assert.deepEqual(await after(["probe"]), ["systemctl try-restart nexus-probe.service"]);
   assert.deepEqual(await after([]), [], "a run that changed no credential restarts nothing");
 });
