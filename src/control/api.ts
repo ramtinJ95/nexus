@@ -34,7 +34,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, withHttpsHosts, type BootInputs, type Project, type ProjectId } from "../project.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, secretHostPattern, secretNamePattern, withHttpsHosts, type BootInputs, type Project, type ProjectId } from "../project.ts";
 import { isImageId, type CommandResult, type NodeHealth, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
@@ -55,7 +55,7 @@ import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
-import { HttpError } from "./http-error.ts";
+import { HttpError, type ApiErrorCode } from "./http-error.ts";
 import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "./questions.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
@@ -240,7 +240,7 @@ const projectSchema = z.strictObject({
   defaultNode: z.string().min(1).transform((node) => node as NodeName | "auto"),
   resources: z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() }),
   allowedHosts: z.array(host),
-  secrets: z.array(z.strictObject({ name: z.string().regex(/^[A-Z_][A-Z0-9_]*$/), hosts: z.array(z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/)).min(1) }))
+  secrets: z.array(z.strictObject({ name: z.string().regex(secretNamePattern), hosts: z.array(z.string().regex(secretHostPattern)).min(1) }))
     .refine((grants) => new Set(grants.map((grant) => grant.name)).size === grants.length, "duplicate secret names: list all of a secret's hosts in one grant")
     .refine((grants) => !grants.some((grant) => grant.name === chatgptTokenGrant.name), `${chatgptTokenGrant.name} comes with the chatgpt login: add the login instead`),
   logins: z.array(z.enum(["claude", "chatgpt"])),
@@ -770,7 +770,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const text = message.text.replace(/\r\n?/g, "\n").trim();
     const problem = claudeTextProblem(text);
     if (problem !== null) throw new HttpError(400, `Claude cannot take this message as typed: ${problem}`);
-    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`);
+    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`, "not-ready");
     const stored = registry.claudeMessage(t.id, message.requestId);
     if (stored?.state === "sent") return { claude: stored.result };
     const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)).catch((err: Partial<ProbeError>) => {
@@ -779,11 +779,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }));
     if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, or its pylon no longer knows how far it got, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
     if (typed.kind === "nothing") {
-      throw new HttpError(409, {
-        blocked: `Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`,
-        starting: `Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`,
-        moved: `Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`,
-      }[typed.outcome]);
+      const [message, code] = ({
+        blocked: [`Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`, "blocked"],
+        starting: [`Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`, "not-ready"],
+        moved: [`Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`, "moved"],
+      } as const)[typed.outcome];
+      throw new HttpError(409, message, code);
     }
     void claude.refresh(t);
     return { claude: typed.sent };
@@ -802,7 +803,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       idle: `Claude is not working, so there is no turn to interrupt, and nothing was pressed`,
       unknown: `Herdr cannot tell yet whether Claude works or waits at a prompt, so nothing was pressed. Ask again in a moment`,
       "not-running": `no pane runs Claude session ${session}, so there is no turn to interrupt`,
-    }[outcome]);
+    }[outcome], outcome === "blocked" ? "blocked" : undefined);
   }
 
   /**
@@ -818,7 +819,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (wakes) {
       registry.recordActivity(t.id, { human: Date.now() });
       wake(pylon.node);
-    } else if (!running(pylon.pylonId)) throw new HttpError(409, notRunning(pylon.pylonId, false));
+    } else if (!running(pylon.pylonId)) throw new HttpError(409, notRunning(pylon.pylonId, false), "not-running");
     let result: T;
     try {
       result = await act(probe, pylon.pylonId);
@@ -826,7 +827,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
       refuseClosed(registry.thread(t.id)!);
       const code = (err as Partial<ProbeError>).code;
-      if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes));
+      if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
       if (code === "unreachable") throw new HttpError(503, (err as Error).message);
       if (err instanceof CheckoutRefused) throw new HttpError(refusalStatus[err.kind], err.message);
       throw err;
@@ -881,6 +882,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
   }
 
+  /** Runs `argv` in the thread's pylon as a command whose answer the API waits for, at most 15 s. */
+  async function execInPylon(t: Thread, argv: readonly string[]): Promise<{ exitCode: number | null; output: string }> {
+    const { exitCode, output } = await pylonCommand(t, { kind: "exec", argv: [...argv], cwd: "/", timeoutMs: 15_000 });
+    return { exitCode, output };
+  }
+
   async function pylonCommand<K extends "exec" | "link-port" | "unlink-port" | "open-session" | "close-session" | "drop-failed-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
     // The client checks that the result is the command's kind.
     return await inPylon(t, (probe, pylonId) => probe.command(pylonId, command)) as Extract<CommandResult, { kind: K }>;
@@ -894,14 +901,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function answerAsk(question: Question & { ask: ClaudeAsk }, choices: Choice[], caller: TailnetNodeId): Promise<Question> {
     const same = (q: Question) => JSON.stringify(q.answer?.choices) === JSON.stringify(choices);
-    const answeredOtherwise = (q: Question) => new HttpError(409, `question ${q.id} was answered ${JSON.stringify(q.answer!.option)} by ${q.answer!.by}`);
     if (question.answer !== null) {
       if (same(question)) return question;
-      throw answeredOtherwise(question);
+      throw answeredConflict(question);
     }
     const t = registry.thread(question.thread)!;
-    const delivery = { kind: "exec", argv: [claudeHook, "answer", JSON.stringify(askAnswer(question.ask, choices))], cwd: "/", timeoutMs: 15_000 } as const;
-    const { exitCode, output } = await pylonCommand(t, delivery);
+    const { exitCode, output } = await execInPylon(t, [claudeHook, "answer", JSON.stringify(askAnswer(question.ask, choices))]);
     void claude.refresh(t);
     if (exitCode === answerExits.nobodyWaits) {
       registry.withdrawAsk(question.id);
@@ -909,7 +914,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
     if (exitCode === answerExits.answeredOtherwise) {
       const now = registry.question(question.id);
-      throw now?.answer != null ? answeredOtherwise(now) : new HttpError(409, `another answer to question ${question.id} reached Claude first`);
+      throw now?.answer != null ? answeredConflict(now) : new HttpError(409, `another answer to question ${question.id} reached Claude first`);
     }
     if (exitCode === 127 || (exitCode === answerExits.delivered && !new RegExp(`^${answerDelivered}$`, "m").test(output))) {
       throw new HttpError(409, `pylon ${t.pylonId} runs an image from before AskUserQuestion could be answered from the dashboard, so answer it in the pylon's terminal (\`nexus attach ${t.id}\`)`);
@@ -923,7 +928,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const { answer: _, ...asked } = question;
     registry.askQuestion(asked);
     const answered = registry.answerQuestion(question.id, { option: choicesSummary(question.ask, choices), by: caller, at: Date.now(), choices });
-    if (!same(answered)) throw answeredOtherwise(answered);
+    if (!same(answered)) throw answeredConflict(answered);
     return answered;
   }
 
@@ -1010,7 +1015,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function focusSession(t: Thread, pane: string): Promise<void> {
     if (!herdrPanePattern.test(pane)) throw new HttpError(400, `pane must be a Herdr pane ID such as w1:p1, got ${JSON.stringify(pane.slice(0, 80))}`);
-    const { exitCode, output } = await pylonCommand(t, { kind: "exec", argv: ["sh", "-c", focusScript, "focus", pane], cwd: "/", timeoutMs: 15_000 });
+    const { exitCode, output } = await execInPylon(t, ["sh", "-c", focusScript, "focus", pane]);
     if (exitCode === 1) throw new HttpError(404, `no pane ${pane} is open in pylon ${t.pylonId}`);
     if (exitCode !== 0) throw new Error(`focusing pane ${pane} exited ${exitCode}: ${output.trim().slice(-200)}`);
   }
@@ -1054,6 +1059,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     | { status: number; file: Buffer; type: string; cache?: string; stream?: never }
     | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
   type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
+  /**
+   * Who may call a route that changes state: only a person, as `personOnly` checks before the route runs, or any
+   * allowed caller, for the reason given, which names the check the route makes itself if it makes one. A route that
+   * starts a turn waits out a deploy's drain.
+   */
+  type Policy = ({ person: string } | { open: string }) & { startsTurn?: true };
+  type RouteEntry = readonly ["GET", RegExp, Route] | readonly ["POST" | "PUT" | "PATCH" | "DELETE", RegExp, Policy, Route];
   const ok = (body: unknown): Reply => ({ status: 200, body });
   const created = (body: unknown): Reply => ({ status: 201, body });
   const noContent: Reply = { status: 204 };
@@ -1072,10 +1084,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return turnRequests.busy() || (options.turnsStarting?.() ?? false);
   }
 
-  const routes: readonly [string, RegExp, Route][] = [
+  const routes: readonly RouteEntry[] = [
     ["GET", /^\/v1\/health$/, () => ok(health())],
     ["GET", /^\/v1\/release$/, () => ok(releaseView(registry, options.deployment?.self))],
-    ["PUT", /^\/v1\/release$/, async (_, r) => {
+    ["PUT", /^\/v1\/release$/, { open: "deployers only, which the route checks with its own refusal" }, async (_, r) => {
       if (!canDeploy(registry, options.deployment, r.caller)) throw new HttpError(403, "caller may not deploy; infrastructure nodes and pylons cannot deploy");
       const input = parse(z.strictObject({ commit: z.union([z.literal("main"), commitSchema]) }), await r.body());
       const commit = input.commit === "main" ? await (options.deployment?.resolveMain ?? resolveMain)() : input.commit;
@@ -1085,14 +1097,14 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     // admit lets only a node with its deployer key reach these.
     ["GET", /^\/v1\/deployer\/release$/, () => ok(releaseView(registry, options.deployment?.self))],
-    ["POST", /^\/v1\/deployer\/report$/, async (_, r) => {
+    ["POST", /^\/v1\/deployer\/report$/, { open: "admit lets only a reporter reach a deployer route" }, async (_, r) => {
       const node = registry.nodes().find((n) => n.tailnetNodeId === r.caller)!;
       const report = parse(reportSchema, await r.body());
       if (report.role === "control" && r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node reports control health");
       registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
       return ok({ ok: true });
     }],
-    ["POST", /^\/v1\/deployer\/drain$/, async (_, r) => {
+    ["POST", /^\/v1\/deployer\/drain$/, { open: "admit lets only a reporter reach a deployer route, and the route only the control node" }, async (_, r) => {
       if (r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node drains");
       const body = parse(z.strictObject({ commit: commitSchema, release: z.boolean().optional(), hold: z.boolean().optional() }), await r.body());
       if (body.commit !== registry.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
@@ -1135,8 +1147,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         },
       };
     }],
-    ["PATCH", /^\/v1\/projects\/([^/]+)$/, async ([, id], r) => {
-      personOnly(r.caller, "edit a project");
+    ["PATCH", /^\/v1\/projects\/([^/]+)$/, { person: "edit a project" }, async ([, id], r) => {
       const { autoReview, pipeline, ...patch } = parse(projectEditSchema, await r.body());
       if (autoReview?.land) mayLand(r.caller);
       const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, ...previous }) => {
@@ -1153,10 +1164,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/usage$/, (_, r) => ok(registry.usageReport(usageFilter(r.query, Date.now())))],
     ["GET", /^\/v1\/usage\/backfill$/, () => ok({ backfill: usageBackfill().status(), plan: usageBackfill().plan() })],
-    ["POST", /^\/v1\/usage\/backfill$/, (_, r) => ok(steerUsageBackfill(r.caller).start())],
-    ["DELETE", /^\/v1\/usage\/backfill$/, (_, r) => ok(steerUsageBackfill(r.caller).stop())],
+    ["POST", /^\/v1\/usage\/backfill$/, { open: "deployers only, which steerUsageBackfill checks" }, (_, r) => ok(steerUsageBackfill(r.caller).start())],
+    ["DELETE", /^\/v1\/usage\/backfill$/, { open: "deployers only, which steerUsageBackfill checks" }, (_, r) => ok(steerUsageBackfill(r.caller).stop())],
     ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
-    ["POST", /^\/v1\/projects$/, async (_, r) => created(createProject(await r.body()))],
+    ["POST", /^\/v1\/projects$/, { open: "adding a project changes no thread, pylon or project there is" }, async (_, r) => created(createProject(await r.body()))],
     ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map((record): NodeSummary => {
       const { observation, ...n } = record;
       return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
@@ -1166,8 +1177,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
       return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
     }],
-    ["POST", /^\/v1\/threads$/, async (_, r) => {
-      personOnly(r.caller, "start a thread");
+    ["POST", /^\/v1\/threads$/, { person: "start a thread", startsTurn: true }, async (_, r) => {
       return created(await start(await r.body(), r.caller));
     }],
     ["GET", /^\/v1\/queued$/, (_, r) => {
@@ -1183,8 +1193,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const project = r.query.get("project");
       return ok(registry.items().filter((i) => project === null || i.project === project).map((i) => itemView(registry, i)));
     }],
-    ["POST", /^\/v1\/items$/, async (_, r) => {
-      personOnly(r.caller, "add an item");
+    ["POST", /^\/v1\/items$/, { person: "add an item" }, async (_, r) => {
       const { after, message, ...request } = parse(itemSchema, await r.body());
       const pipeline = pipelineOrRefuse();
       const added = pipeline.add(request, message ?? null, after ?? [], r.caller);
@@ -1192,44 +1201,37 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return created(itemView(registry, added));
     }],
     ["GET", /^\/v1\/items\/([^/]+)$/, ([, id]) => ok(item(id!))],
-    ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, ([, id], r) => {
-      personOnly(r.caller, "cancel an item");
+    ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, { person: "cancel an item" }, ([, id], r) => {
       return ok(itemView(registry, pipelineOrRefuse().cancel(id!, r.caller)));
     }],
-    ["POST", /^\/v1\/items\/([^/]+)\/approve$/, async ([, id], r) => {
-      personOnly(r.caller, "approve an item");
+    ["POST", /^\/v1\/items\/([^/]+)\/approve$/, { person: "approve an item" }, async ([, id], r) => {
       const pipeline = pipelineOrRefuse();
       const approved = pipeline.approve(id!, r.caller);
       await pipeline.poll();
       return ok(itemView(registry, approved));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, async (m, r) => {
-      personOnly(r.caller, "start a queued thread");
+    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, { person: "start a queued thread", startsTurn: true }, async (m, r) => {
       return created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller));
     }],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
-    ["DELETE", /^\/v1\/threads\/([^/]+)$/, async (m, r) => {
-      personOnly(r.caller, "delete a thread");
+    ["DELETE", /^\/v1\/threads\/([^/]+)$/, { person: "delete a thread" }, async (m) => {
       return ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "deleted") : queuedStatus(m[1]!, "deleted"));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, { open: "what the person has read changes no thread or pylon" }, async (m, r) => {
       const t = thread(m[1]!);
       const body = parse(seenSchema, await r.body({}));
       registry.markSeen(t.id, m[2] === "unseen", Date.now(), body.lastReplyAt);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, async (m, r) => {
-      personOnly(r.caller, "archive a thread");
+    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, { person: "archive a thread" }, async (m) => {
       return ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "archived") : queuedStatus(m[1]!, "archived"));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, (m, r) => {
-      personOnly(r.caller, "unarchive a thread");
+    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, { person: "unarchive a thread" }, (m) => {
       return ok(queuedRecord(m[1]!) === undefined ? unarchive(thread(m[1]!)) : queuedStatus(m[1]!, "queued"));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, { open: "a page open on the thread only keeps its pylon awake" }, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
     // The body first, so the thread's status is read after the last await before the message is submitted.
-    ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, async (m, r) => {
-      personOnly(r.caller, "message a thread");
+    ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, { person: "message a thread", startsTurn: true }, async (m, r) => {
       const body = await r.body();
       const t = thread(m[1]!);
       const agent = registry.agent(t);
@@ -1237,24 +1239,22 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
       return { status: 202, body: await sendClaude(refuseDeleted(t), agent.worker.session, agent.worker.model, body) };
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/review$/, async (m, r) => {
-      personOnly(r.caller, "start a review");
+    ["POST", /^\/v1\/threads\/([^/]+)\/review$/, { person: "start a review" }, async (m, r) => {
       const body = parse(reviewSchema, await r.body({}));
       const t = thread(m[1]!);
       if (body.land) mayLand(r.caller);
       return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/review\/cancel$/, (m, r) => {
-      personOnly(r.caller, "cancel a review");
+    ["POST", /^\/v1\/threads\/([^/]+)\/review\/cancel$/, { person: "cancel a review" }, (m, r) => {
       return ok(reviewsOrRefuse().cancel(thread(m[1]!).id, r.caller));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/land$/, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/land$/, { open: "deployers only, which mayLand checks" }, async (m, r) => {
       const body = parse(landSchema, await r.body({}));
       const t = thread(m[1]!);
       mayLand(r.caller);
       return ok(reviewsOrRefuse().land(t.id, r.caller, body.head, body.waive));
     }],
-    ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, async ([, id], r) => {
+    ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, { open: "each question says who may answer it, which refusalOf checks" }, async ([, id], r) => {
       const body = parse(answerSchema, await r.body());
       const question = registry.question(id!);
       if (question === null) throw new HttpError(404, `no question ${id}`);
@@ -1268,51 +1268,43 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const { option } = body;
       if (!question.options.includes(option)) throw new HttpError(400, `${JSON.stringify(option)} is not an option of question ${question.id}, which are ${question.options.map((o) => JSON.stringify(o)).join(", ")}`);
       const answered = registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() }, options.planning?.answered);
-      if (answered.answer!.option !== option) throw new HttpError(409, `question ${question.id} was answered ${JSON.stringify(answered.answer!.option)} by ${answered.answer!.by}`);
+      if (answered.answer!.option !== option) throw answeredConflict(answered);
       if (answered.proposal !== undefined) await options.pipeline?.poll();
       return ok(answered);
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, async (m, r) => {
-      personOnly(r.caller, "abort a thread's turn");
+    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, { person: "abort a thread's turn" }, async (m, r) => {
       const t = thread(m[1]!);
       const agent = registry.agent(t);
       if (agent.kind === "claude") await interruptClaude(refuseDeleted(t), agent.worker.session);
       else await harness.abort(conversing(t).id);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, async (m, r) => {
-      personOnly(r.caller, "retry a thread's turn");
+    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, { person: "retry a thread's turn", startsTurn: true }, async (m) => {
       await harness.retry(runnable(thread(m[1]!)).id);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, (m, r) => {
-      personOnly(r.caller, "retry a thread's pylon");
+    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, { person: "retry a thread's pylon" }, (m) => {
       retryPylon(thread(m[1]!));
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, async (m, r) => {
-      personOnly(r.caller, "publish a preview");
+    ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, { person: "publish a preview" }, async (m, r) => {
       const body = await r.body();
       return ok(await linkPort(thread(m[1]!), body));
     }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, async (m, r) => {
-      personOnly(r.caller, "unpublish a preview");
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, { person: "unpublish a preview" }, async (m) => {
       const { port } = parse(previewSchema, { port: /^\d+$/.test(m[2]!) ? Number(m[2]) : m[2] });
       await unlinkPort(thread(m[1]!), port);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, async (m, r) => {
-      personOnly(r.caller, "open a session in a thread's pylon");
+    ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, { person: "open a session in a thread's pylon" }, async (m, r) => {
       const body = await r.body();
       return created(await openSession(thread(m[1]!), body));
     }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, async (m, r) => {
-      personOnly(r.caller, "close a session in a thread's pylon");
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, { person: "close a session in a thread's pylon" }, async (m) => {
       await closeSession(thread(m[1]!), m[2]!);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)\/focus$/, async (m, r) => {
-      personOnly(r.caller, "focus a session in a thread's pylon");
+    ["POST", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)\/focus$/, { person: "focus a session in a thread's pylon" }, async (m) => {
       await focusSession(thread(m[1]!), m[2]!);
       return noContent;
     }],
@@ -1339,22 +1331,22 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(claude.view(t));
     }],
     ["GET", /^\/v1\/images$/, () => ok(imagesView(registry))],
-    ["POST", /^\/v1\/images$/, async (_, r) => created(recordImage(await r.body()))],
+    ["POST", /^\/v1\/images$/, { open: "recording an image boots nothing until a deployer rolls it out" }, async (_, r) => created(recordImage(await r.body()))],
     ["GET", /^\/v1\/images\/current$/, () => {
       const view = imagesView(registry);
       const entry = (id: ImageId | null) => view.images.find((image) => image.id === id) ?? null;
       return ok({ current: entry(view.current), previous: entry(view.previous) });
     }],
-    ["POST", /^\/v1\/images\/build$/, async (_, r) => {
+    ["POST", /^\/v1\/images\/build$/, { open: "deployers only, which imageRollout checks" }, async (_, r) => {
       const images = imageRollout(r.caller);
       parse(noFields, await r.body({}));
       return started(await images.build(r.caller));
     }],
-    ["POST", /^\/v1\/images\/rollout$/, async (_, r) => {
+    ["POST", /^\/v1\/images\/rollout$/, { open: "deployers only, which imageRollout checks" }, async (_, r) => {
       const images = imageRollout(r.caller);
       return started(images.rollout(parse(rolloutSchema, await r.body()).image, r.caller));
     }],
-    ["POST", /^\/v1\/images\/rollback$/, async (_, r) => {
+    ["POST", /^\/v1\/images\/rollback$/, { open: "deployers only, which imageRollout checks" }, async (_, r) => {
       const images = imageRollout(r.caller);
       parse(noFields, await r.body({}));
       return started(images.rollback(r.caller));
@@ -1366,9 +1358,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   };
   const health = () => ({ commit: runningCommit, https: { ...httpsState } });
 
-  const callerOf = (req: IncomingMessage) => {
+  const callerOf = <T>(req: IncomingMessage, who: (address: string, port: number) => Promise<T | null>) => {
     const { remoteAddress, remotePort } = req.socket;
-    return remoteAddress === undefined || remotePort === undefined ? Promise.resolve(null) : whois(remoteAddress, remotePort);
+    return remoteAddress === undefined || remotePort === undefined ? Promise.resolve(null) : who(remoteAddress, remotePort);
   };
   /**
    * whois names the machine, not the program, so a web page open on an allowed laptop is that laptop too. It can
@@ -1377,14 +1369,19 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   function checkHost(req: IncomingMessage) {
     const host = req.headers.host;
-    const hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
+    let hostname: string | undefined;
+    try {
+      hostname = typeof host === "string" ? new URL(`http://${host}`).hostname : undefined;
+    } catch {
+      hostname = undefined;
+    }
     if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
   }
 
   /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
   async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
-    const caller = await callerOf(req);
-    const workerRoute = decodeURIComponent(new URL(req.url ?? "/", "http://nexus").pathname).startsWith("/v1/deployer/");
+    const caller = await callerOf(req, whois);
+    const workerRoute = pathOf(req.url)?.startsWith("/v1/deployer/") ?? false;
     if (caller === null || (workerRoute
       ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
       : !allowed.has(caller))) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
@@ -1397,7 +1394,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * own ID and its own access, which `tailscale status` and a refused request already tell it.
    */
   async function whoami(req: IncomingMessage): Promise<Whoami> {
-    const node = await callerOf(req);
+    const node = await callerOf(req, whois);
     if (node === null) throw new HttpError(403, "caller is not a tailnet node");
     checkHost(req);
     const person = allowed.has(node) && isPerson(registry, options.deployment, node);
@@ -1406,11 +1403,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** A token only root on the control plane's machine mints is what lets a machine that is not yet admitted call this. */
   async function join(req: IncomingMessage, joins: NonNullable<ApiOptions["joins"]>) {
-    const { remoteAddress, remotePort } = req.socket;
-    const caller = remoteAddress === undefined || remotePort === undefined ? null : await joins.whois(remoteAddress, remotePort);
+    const caller = await callerOf(req, joins.whois);
     if (caller === null) throw new HttpError(403, "caller is not a tailnet node");
     checkHost(req);
-    if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new HttpError(415, "requests that change state must have content-type application/json");
+    requireJson(req);
     const node = joinNode(registry, allowed, joins.configured, caller, parse(joinRequestSchema, await readJson(req)));
     joins.joined(node);
     return { node: node.name, tailnetNodeId: node.tailnetNodeId };
@@ -1424,24 +1420,24 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (req.method === "GET" && req.url === "/v1/whoami") return void send(res, 200, await whoami(req));
     if (req.method === "POST" && req.url === "/v1/join" && options.joins !== undefined) return void send(res, 200, await join(req, options.joins));
     const caller = await admit(req);
-    if (req.method !== "GET" && req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
-      throw new HttpError(415, "requests that change state must have content-type application/json");
-    }
+    if (req.method !== "GET") requireJson(req);
 
+    const path = pathOf(req.url);
+    if (path === null) throw new HttpError(400, `the request path ${JSON.stringify(req.url)} is not a valid URL path`);
     const url = new URL(req.url ?? "/", "http://nexus");
-    const path = decodeURIComponent(url.pathname);
     const view = req.method === "GET" ? await page(path, url.searchParams, caller) : undefined;
     if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
-    const matches = routes.flatMap(([method, pattern, route]) => {
-      const m = pattern.exec(path);
-      return m === null ? [] : [{ method, m, route }];
+    const matches = routes.flatMap((entry): { method: string; m: RegExpExecArray; policy?: Policy; route: Route }[] => {
+      const m = entry[1].exec(path);
+      if (m === null) return [];
+      return entry[0] === "GET" ? [{ method: entry[0], m, route: entry[2] }] : [{ method: entry[0], m, policy: entry[2], route: entry[3] }];
     });
-    if (matches.length === 0) throw new HttpError(404, path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`);
+    if (matches.length === 0) throw new HttpError(404, path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`, "no-route");
     const match = matches.find((r) => r.method === req.method);
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
-    const startsTurn = req.method === "POST" && (path === "/v1/threads" || /^\/v1\/threads\/[^/]+\/(messages|retry|start)$/.test(path));
+    if (match.policy !== undefined && "person" in match.policy) personOnly(caller, match.policy.person);
     const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
-    const reply = startsTurn ? await turnRequests.run(async () => route()) : await route();
+    const reply = match.policy?.startsTurn ? await turnRequests.run(async () => route()) : await route();
     if (reply.stream !== undefined) return reply.stream(res);
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
@@ -1497,7 +1493,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
     const origin = req.headers.origin;
     if (origin !== undefined && origin !== `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
-    const t = thread(attachRoute.exec(pathOf(req.url))![1]!);
+    const t = thread(attachRoute.exec(pathOf(req.url)!)![1]!);
     let request: ReturnType<typeof parseAttachQuery>;
     try {
       request = parseAttachQuery(new URL(req.url ?? "/", "http://nexus").searchParams);
@@ -1532,13 +1528,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   function makeServer(certificate?: Certificate) {
     const serverOptions = {
       // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
-      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url)),
+      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url) ?? ""),
     };
     const server = certificate ? createHttpsServer({ ...serverOptions, ...certificate }) : createServer(serverOptions);
     server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
-        send(res, errorStatus(err), { error: (err as Error).message });
+        send(res, errorStatus(err), errorBody(err));
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -1546,7 +1542,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       socket.on("error", () => undefined);
       upgraded.add(socket);
       socket.once("close", () => upgraded.delete(socket));
-      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), (err as Error).message));
+      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), errorBody(err)));
     });
     return server;
   }
@@ -1629,6 +1625,7 @@ const landSchema = z.strictObject({ head: commitSchema.optional(), waive: holdsS
 
 /** An ask is answered with a choice per question it asks, and any other question with one of its options. */
 const answerSchema = z.union([z.strictObject({ option: z.string() }), z.strictObject({ choices: z.array(z.unknown()) })]);
+const answeredConflict = (q: Question) => new HttpError(409, `question ${q.id} was answered ${JSON.stringify(q.answer!.option)} by ${q.answer!.by}`);
 const answerRefusals: Record<AnswerRefusal, string> = {
   "not a person": "only a person's device may, never infrastructure nodes or pylons",
   "not a deployer": "its answer may deploy, so only deployers may",
@@ -1638,6 +1635,10 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
   if (!result.success) throw new HttpError(400, z.prettifyError(result.error));
   return result.data;
+}
+
+function requireJson(req: IncomingMessage) {
+  if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new HttpError(415, "requests that change state must have content-type application/json");
 }
 
 async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown> {
@@ -1668,21 +1669,23 @@ function imageType(bytes: Buffer): string | null {
   return null;
 }
 
-/** The path a request's URL names, decoded as `handle` matches it, or "" for one that cannot be decoded. */
-function pathOf(url: string | undefined): string {
+/** The path a request's URL names, decoded as `handle` matches it, or null for one that cannot be decoded. */
+function pathOf(url: string | undefined): string | null {
   try {
     return decodeURIComponent(new URL(url ?? "/", "http://nexus").pathname);
   } catch {
-    return "";
+    return null;
   }
 }
 
+const errorBody = (err: unknown): { error: string; code?: ApiErrorCode } =>
+  err instanceof HttpError && err.code !== undefined ? { error: err.message, code: err.code } : { error: (err as Error).message };
 const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : err instanceof BodyTooLarge ? 413 : 500;
 
 /** An API error reply written on a socket that never upgraded. */
-function refuseUpgrade(socket: Duplex, status: number, message: string) {
+function refuseUpgrade(socket: Duplex, status: number, error: ReturnType<typeof errorBody>) {
   if (socket.destroyed) return;
-  const body = JSON.stringify({ error: message });
+  const body = JSON.stringify(error);
   socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncache-control: no-store\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
 }
 

@@ -226,6 +226,10 @@ export type RemoteProject = Project & { repoUrl: string };
 export const hasRemote = (project: Project): project is RemoteProject => project.repoUrl !== null;
 /** A secret is a name plus the hosts it may be sent to. The value lives in each node's secret file. */
 export interface SecretGrant { name: string; hosts: readonly string[] }
+/** A grant's name, as an environment variable is named. */
+export const secretNamePattern = /^[A-Z_][A-Z0-9_]*$/;
+/** A host a grant sends its secret to: a lower-case hostname of two labels or more. */
+export const secretHostPattern = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 /** The grant `gh`, and git through gh's credential helper, need to create GitHub repositories and push to them. */
 export const githubTokenGrant: SecretGrant = { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] };
 /**

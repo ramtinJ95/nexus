@@ -7,7 +7,7 @@ import { fullCommit, releaseOutcome, type ReleaseView } from "../deploy/model.ts
  * the watch stream. --json prints the API's reply as it is, except where docs/cli.md says otherwise.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -31,15 +31,17 @@ import { liveNote, phaseNote, roundNote, roundsSpent } from "../control/review.t
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../control/usage.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
-import type { Project, SecretGrant } from "../project.ts";
+import { secretHostPattern, secretNamePattern, type Project, type SecretGrant } from "../project.ts";
+import { readJson, saveJson } from "../json-file.ts";
+import { parse } from "../parse.ts";
 import type { ActualState } from "../reconcile.ts";
 import type { NodeCapacity, NodeHealth } from "../protocol.ts";
 import { sessionHarnessSchema } from "../sessions.ts";
 import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
-import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
+import { call, CliError, exitCodes, follow, isMissingRoute, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.50.0";
+const version = "0.51.0";
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
@@ -137,18 +139,18 @@ const str = (v: Values, key: string) => v[key] as string | undefined;
 const strs = (v: Values, key: string) => (v[key] as string[] | undefined) ?? [];
 const thread = (id: string) => `/v1/threads/${encodeURIComponent(id)}`;
 
-const hostname = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 /**
  * `NAME:HOST[,HOST...]`, such as GH_TOKEN:api.github.com,github.com. A value pasted by mistake, as in NAME=value,
  * fails the name or host check, so it never reaches the API, and the error does not repeat it.
  */
 function secretGrantOf(flag: string): SecretGrant {
-  const m = /^([A-Z_][A-Z0-9_]*):(.+)$/.exec(flag);
-  const hosts = m === null ? [] : m[2]!.split(",");
-  if (m === null || !hosts.every((host) => hostname.test(host))) {
+  const colon = flag.indexOf(":");
+  const name = flag.slice(0, colon);
+  const hosts = flag.slice(colon + 1).split(",");
+  if (colon === -1 || !secretNamePattern.test(name) || !hosts.every((host) => secretHostPattern.test(host))) {
     throw new CliError("invalid", "--secret takes NAME:HOST[,HOST...], an upper-case name and lower-case hostnames, such as GH_TOKEN:api.github.com,github.com. The value stays in each node's secret file");
   }
-  return { name: m[1]!, hosts };
+  return { name, hosts };
 }
 
 function int(value: string | undefined, flag: string, fallback: number): number {
@@ -480,6 +482,8 @@ function changesText(c: Changes): string {
 }
 
 const waitMs = 120_000;
+/** The 409 codes that a wait fixes: the pylon not running yet, Claude not ready yet, or Claude's pane moved before it typed. */
+const waitedOut = new Set(["not-running", "not-ready", "moved"]);
 /** Longer than the probe takes to answer a command, at most 90 s. */
 const pylonCommandMs = 120_000;
 const waitPollMs = 1_000;
@@ -501,8 +505,10 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
 
 /**
  * Sends a request that needs the pylon running, such as an unlink or a session open. Each try is human activity, so
- * the first wakes a paused pylon, and a 409 is tried again once a second until the pylon runs, unless the thread is
- * archived or deleted. `undone` says what the failure after the wait leaves undone.
+ * the first wakes a paused pylon, and a 409 that waiting fixes is tried again once a second until the pylon runs,
+ * unless the thread is archived or deleted. Any other 409, such as Claude waiting at a prompt, fails at once. A
+ * control plane older than error codes sends none, so a 409 without one is tried again too. `undone` says what the
+ * failure after the wait leaves undone.
  */
 async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undone: string): Promise<T> {
   const deadline = Date.now() + waitMs;
@@ -510,7 +516,7 @@ async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undo
     try {
       return await send();
     } catch (err) {
-      if (!(err instanceof CliError) || err.kind !== "conflict") throw err;
+      if (!(err instanceof CliError) || err.kind !== "conflict" || (err.code !== null && !waitedOut.has(err.code))) throw err;
       const { status } = (await api("GET", thread(id)) as ThreadDetail).thread;
       if (status === "archived" || status === "deleted") throw err;
       if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so ${undone}. ${err.message}`);
@@ -572,7 +578,7 @@ async function queuedThreads(api: Api, query: string): Promise<QueuedThread[]> {
   try {
     return await api("GET", `/v1/queued${query}`) as QueuedThread[];
   } catch (err) {
-    if (err instanceof CliError && err.status === 404 && err.message.startsWith("no route ")) return [];
+    if (isMissingRoute(err)) return [];
     throw err;
   }
 }
@@ -857,7 +863,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
           if (claude) transcript = "none";
           return;
         }
-        if (claude && err instanceof CliError && err.status === 404 && err.message.startsWith("no route ")) {
+        if (claude && isMissingRoute(err)) {
           transcript = "none";
           emit({ type: "error", thread: id, kind: "failed", message: `The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${id}` }, `-- The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${id}`);
           print();
@@ -1005,7 +1011,7 @@ const commands: Readonly<Record<string, Command>> = {
         }
         const saved = { ...config, url: url.origin, ...str(v, "socks") === undefined ? {} : { socks: str(v, "socks") } };
         await mkdir(dirname(file), { recursive: true });
-        await writeFile(file, `${JSON.stringify(saved, null, 2)}\n`);
+        await saveJson(file, saved);
         return { json: { url: url.origin, socks: saved.socks ?? null, config: file, caller }, text: connectText(url.origin, file, caller) };
       }
       throw new CliError("unreachable", [`no Nexus control plane answers at ${host}${socks === null ? "" : ` through the SOCKS proxy at ${socks.host}:${socks.port}`}:`,
@@ -1483,22 +1489,17 @@ const commands: Readonly<Record<string, Command>> = {
 const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });
 
 async function readConfig(file: string): Promise<Config> {
-  let text: string;
+  let value: unknown;
   try {
-    text = await readFile(file, "utf8");
+    value = await readJson(file, {});
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw new CliError("invalid", `cannot read ${file}: ${(err as Error).message}`);
+    throw new CliError("invalid", err instanceof SyntaxError ? `${file} is not JSON: ${err.message}` : `cannot read ${file}: ${(err as Error).message}`);
   }
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    return parse(configSchema, value, "config");
   } catch (err) {
-    throw new CliError("invalid", `${file} is not JSON: ${(err as Error).message}`);
+    throw new CliError("invalid", `${file} is not a CLI config: ${(err as Error).message}`);
   }
-  const result = configSchema.safeParse(parsed);
-  if (!result.success) throw new CliError("invalid", `${file} is not a CLI config: ${z.prettifyError(result.error)}`);
-  return result.data;
 }
 
 type Config = z.infer<typeof configSchema>;
@@ -1592,7 +1593,7 @@ async function main(argv: readonly string[]): Promise<number> {
   } catch (err) {
     if (!(err instanceof CliError)) throw err;
     const json = argv.includes("--json");
-    process.stderr.write(json ? `${JSON.stringify({ error: err.message, kind: err.kind, status: err.status })}\n`
+    process.stderr.write(json ? `${JSON.stringify({ error: err.message, kind: err.kind, status: err.status, code: err.code })}\n`
       : argv.length === 0 ? usage : `nexus: ${err.message}${err.kind === "invalid" && err.status === null ? ". Run nexus --help for usage" : ""}\n`);
     return exitCodes[err.kind];
   }
