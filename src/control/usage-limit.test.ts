@@ -7,6 +7,7 @@ import { usageLimitPrefix, usageLimitResumer } from "./usage-limit.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import type { CommandResult, LiveHash, NodeName, PylonCommand, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
+import { watch } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
@@ -106,13 +107,6 @@ test("a thread archived or continued while an earlier thread's message is being 
   assert.deepEqual(f.continued().map((e) => e.thread), ["th-1"], "only the thread that was still stopped when its turn came was told to continue");
   assert.equal(f.typed.length, 1);
 });
-
-/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
-function watch(promise: Promise<unknown>) {
-  let settled = false;
-  void promise.then(() => { settled = true; });
-  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
-}
 
 test("a poll while a pass runs joins it and settles after it, and a poll after it settles runs a new pass", async (t) => {
   const f = fixture(t);

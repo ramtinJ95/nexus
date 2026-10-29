@@ -1,9 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,7 +10,8 @@ import { fileURLToPath } from "node:url";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import type { NodeName, ProbeClient, TailnetNodeId } from "../protocol.ts";
-import { joinControlPlane } from "../deploy/setup.ts";
+import { joinControlPlane, tokenDigest } from "../deploy/setup.ts";
+import { call as callJson, until } from "../test-kit.ts";
 import { mintJoinToken } from "./join.ts";
 import { parseConfig, startControlPlane } from "./main.ts";
 import { openRegistry } from "./registry.ts";
@@ -140,33 +140,16 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
   t.after(() => plane.close());
   function call(as: string, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
     caller = as;
-    const payload = body === undefined ? undefined : JSON.stringify(body);
-    return new Promise((resolve, reject) => {
-      request({ host: "127.0.0.1", port: plane.port, method, path, headers: { host: "127.0.0.1", ...payload === undefined ? {} : { "content-type": "application/json" }, ...headers } }, (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => { text += chunk; });
-        res.on("end", () => resolve({ status: res.statusCode!, body: text === "" ? null : JSON.parse(text) }));
-      }).on("error", reject).end(payload);
-    });
+    return callJson({ host: "127.0.0.1", port: plane.port, method, path, body, headers });
   }
   return { db, followed, peers, hosts, call, port: plane.port, as(id: string) { caller = id; } };
 }
 
-async function eventually(what: string, done: () => boolean) {
-  const deadline = Date.now() + 30_000;
-  while (!done()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-const keyOf = (token: string) => createHash("sha256").update(token).digest("hex");
 /** The person's control.json as install.sh wrote it before join tokens: two nodes, the Mac as caller and deployer, and both deploy keys. */
 const today = {
   ...JSON.parse(example),
   deployers: ["nLaptopCNTRL"],
-  deployKeys: { nControlPlaneCNTRL: keyOf("firebat-token"), nPeerProbeCNTRL: keyOf("bench-token") },
+  deployKeys: { nControlPlaneCNTRL: tokenDigest("firebat-token"), nPeerProbeCNTRL: tokenDigest("bench-token") },
 };
 delete today.https;
 
@@ -185,7 +168,7 @@ test("a registry and control.json from before join tokens come up with the same 
     ["rj-firebat", "rj-firebat.example.ts.net", "nControlPlaneCNTRL"],
     ["infra-testbench", "infra-testbench.example.ts.net", "nPeerProbeCNTRL"],
   ]);
-  await eventually("both probes have their peers", () => plane.peers.size === 2);
+  await until("both probes have their peers", () => plane.peers.size === 2);
   assert.deepEqual(Object.fromEntries(plane.peers), { "rj-firebat": ["nPeerProbeCNTRL"], "infra-testbench": ["nControlPlaneCNTRL"] }, "what --add-node and --node wrote to each probe.json's auth.peers");
 
   const whoami = [];
@@ -207,20 +190,20 @@ test("a registry and control.json from before join tokens come up with the same 
 
 test("a machine that joins is followed without a restart, every probe learns it as a peer, and a probe that cannot learn peers keeps working", async (t) => {
   const plane = await controlPlaneOf(t, today, { unaware: ["infra-testbench"] });
-  await eventually("rj-firebat has its peers", () => plane.peers.has("rj-firebat"));
+  await until("rj-firebat has its peers", () => plane.peers.has("rj-firebat"));
   const registry = openRegistry(plane.db);
   t.after(() => registry.close());
   const { token } = mintJoinToken(registry);
   plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
-  const joined = await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: keyOf("joiner-token"), name: "rj-firebat" });
+  const joined = await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("joiner-token"), name: "rj-firebat" });
   assert.deepEqual(joined, { status: 200, body: { node: "infra-2", tailnetNodeId: "nJoinerCNTRL" } });
   assert.deepEqual(plane.followed.at(-1), ["infra-2", "infra-2.example.ts.net", "nJoinerCNTRL"]);
-  await eventually("the new probe has its peers", () => plane.peers.has("infra-2"));
+  await until("the new probe has its peers", () => plane.peers.has("infra-2"));
   assert.deepEqual(Object.fromEntries(plane.peers), {
     "rj-firebat": ["nPeerProbeCNTRL", "nJoinerCNTRL"],
     "infra-2": ["nControlPlaneCNTRL", "nPeerProbeCNTRL"],
   }, "infra-testbench's probe answered 404, so it keeps probe.json's peers");
-  await eventually("the new node is online", () => registry.node("infra-2" as NodeName)?.state === "online");
+  await until("the new node is online", () => registry.node("infra-2" as NodeName)?.state === "online");
   assert.equal(registry.node("infra-testbench" as NodeName)?.state, "online");
   const report = { role: "probe", commit: null, target: null, state: "pending", reason: null };
   assert.equal((await plane.call("nJoinerCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer joiner-token" })).status, 200);
@@ -230,11 +213,11 @@ test("a node that joined is followed again after a restart, beside control.json'
   const plane = await controlPlaneOf(t, today, { before: (db) => {
     const registry = openRegistry(db);
     const { token } = mintJoinToken(registry);
-    registry.joinNode(createHash("sha256").update(token).digest("hex"), { name: "infra-2" as NodeName, tailnetHost: "infra-2.example.ts.net", tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: keyOf("joiner-token") }, Date.now());
+    registry.joinNode(tokenDigest(token), { name: "infra-2" as NodeName, tailnetHost: "infra-2.example.ts.net", tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: tokenDigest("joiner-token") }, Date.now());
     registry.close();
   } });
   assert.deepEqual(plane.followed.map(([name]) => name), ["rj-firebat", "infra-testbench", "infra-2"]);
-  await eventually("every probe has its peers", () => plane.peers.size === 3);
+  await until("every probe has its peers", () => plane.peers.size === 3);
   assert.deepEqual(plane.peers.get("infra-testbench"), ["nControlPlaneCNTRL", "nJoinerCNTRL"]);
 });
 
@@ -249,7 +232,7 @@ test("the installer's join reaches only the control plane deployer.json names, a
   await assert.rejects(joinControlPlane(deployer, token, async () => "nImpostorCNTRL" as TailnetNodeId), /did not take the join: deployment endpoint has the wrong tailnet identity/);
   assert.deepEqual(registry.joinedNodes(), [], "the impostor got nothing");
   assert.equal(await joinControlPlane(deployer, token, async () => "nControlPlaneCNTRL" as TailnetNodeId), "infra-2");
-  assert.equal(registry.joinedNodes()[0]?.deployKey, keyOf("joiner-token"));
+  assert.equal(registry.joinedNodes()[0]?.deployKey, tokenDigest("joiner-token"));
   await assert.rejects(joinControlPlane(deployer, token, async () => "nControlPlaneCNTRL" as TailnetNodeId), new RegExp(`^Error: the control plane at http://127\\.0\\.0\\.1:${plane.port}/ did not take the join: this join token was used at `));
 });
 
@@ -266,17 +249,17 @@ test("the host command mints a join token only as root", { skip: process.getuid?
 
 test("a node that joined and was then added to control.json never joins again, and the token it sends stays unused", async (t) => {
   const infra2 = { name: "infra-2", tailnetHost: "infra-2.example.ts.net", tailnetNodeId: "nJoinerCNTRL" };
-  const plane = await controlPlaneOf(t, { ...today, nodes: [...today.nodes, infra2], deployKeys: { ...today.deployKeys, nJoinerCNTRL: keyOf("config-token") } }, { before: (db) => {
+  const plane = await controlPlaneOf(t, { ...today, nodes: [...today.nodes, infra2], deployKeys: { ...today.deployKeys, nJoinerCNTRL: tokenDigest("config-token") } }, { before: (db) => {
     const registry = openRegistry(db);
     const { token } = mintJoinToken(registry);
-    registry.joinNode(createHash("sha256").update(token).digest("hex"), { ...infra2, name: "infra-2" as NodeName, tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: keyOf("joiner-token") }, Date.now());
+    registry.joinNode(tokenDigest(token), { ...infra2, name: "infra-2" as NodeName, tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: tokenDigest("joiner-token") }, Date.now());
     registry.close();
   } });
   const registry = openRegistry(plane.db);
   t.after(() => registry.close());
   const { token } = mintJoinToken(registry);
   plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
-  assert.deepEqual(await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: keyOf("another-token") }), { status: 409, body: { error: "infra-2.example.ts.net is a node in control.json, which sets its deploy key" } });
-  assert.equal(registry.joinToken(createHash("sha256").update(token).digest("hex"))?.usedAt, null);
-  assert.equal(registry.joinedNodes()[0]?.deployKey, keyOf("joiner-token"), "the refused join replaced nothing");
+  assert.deepEqual(await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("another-token") }), { status: 409, body: { error: "infra-2.example.ts.net is a node in control.json, which sets its deploy key" } });
+  assert.equal(registry.joinToken(tokenDigest(token))?.usedAt, null);
+  assert.equal(registry.joinedNodes()[0]?.deployKey, tokenDigest("joiner-token"), "the refused join replaced nothing");
 });

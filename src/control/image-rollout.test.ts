@@ -8,6 +8,7 @@ import { startImageRollout, type ImageOperation, type ImageRollout } from "./ima
 import { openRegistry, type Registry } from "./registry.ts";
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
 import type { JobEnvelope, JobErrorCode, JobId, JobStatus, NodeName, ProbeClient, TailnetNodeId } from "../protocol.ts";
+import { watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const testbench = "infra-testbench" as NodeName;
@@ -326,13 +327,6 @@ async function heldRollout(t: TestContext) {
     release: (i: number) => nth(i).released.resolve(),
     free() { holding = false; for (const lookup of lookups) lookup.released.resolve(); },
   };
-}
-
-/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
-function watch(promise: Promise<unknown>) {
-  let settled = false;
-  void promise.then(() => { settled = true; });
-  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
 }
 
 test("wakes during a pass give exactly one more pass after it, and resolve once that pass has finished", async (t) => {

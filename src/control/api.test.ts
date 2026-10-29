@@ -45,6 +45,8 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { attachScript, checkoutDir, focusScript } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
+import { tokenDigest } from "../deploy/setup.ts";
+import { call as callJson, testImage, until } from "../test-kit.ts";
 import type { ByteStream, CommandResult, InterruptClaudeOutcome, JobId, NodeHealth, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -56,14 +58,7 @@ const project = {
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: ["registry.npmjs.org"],
   secrets: [{ name: "STRIPE_KEY", hosts: ["api.stripe.com"] }], logins: ["chatgpt"], preSetup: null,
 };
-const image = {
-  id: "img-0123456789ab", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00Z", sha256: "a".repeat(64),
-  pins: {
-    debianDigest: `sha256:${"d".repeat(64)}`, node: "24.22.1", nodeSha256: "e".repeat(64), claudeCode: "c", pi: "p", herdr: "h", piEnv: "e",
-    piEnvSha256: "f".repeat(64), gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
-    neovim: "0.12.6", neovimSha256: "b".repeat(64),
-  },
-};
+const image = testImage();
 
 const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 
@@ -159,21 +154,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   });
   /** Sends JSON as the dashboard and CLI do. `headers` overrides any header, so tests can pose as a browser page. */
   function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
-    const payload = body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body);
-    return new Promise((resolve, reject) => {
-      const req = request({
-        host: "127.0.0.1", port: api.port, method, path,
-        // As fetch and the CLI do. Node frames a DELETE's body only with an explicit length.
-        headers: { host: `127.0.0.1:${api.port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }), ...(payload === undefined ? {} : { "content-length": String(Buffer.byteLength(payload)) }), ...headers },
-      }, (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => { text += chunk; });
-        res.on("end", () => resolve({ status: res.statusCode!, body: text === "" ? null : JSON.parse(text) }));
-      });
-      req.on("error", reject);
-      req.end(payload);
-    });
+    return callJson({ host: "127.0.0.1", port: api.port, method, path, body, headers });
   }
   /** A GET whose body is kept as bytes, with the reply's headers. */
   function raw(path: string): Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: Buffer }> {
@@ -333,7 +314,7 @@ test("a caller, the control plane's machine and a node of control.json never joi
     "409 this machine is already the node retired, and tailscale now names it renamed",
     "409 tailscale names this machine Upper.tail.ts.net, whose first label is not a node name: must be a lowercase tailnet machine name of at most 63 characters",
   ]);
-  assert.equal(s.registry.joinToken(createHash("sha256").update(token).digest("hex"))?.usedAt, null);
+  assert.equal(s.registry.joinToken(tokenDigest(token))?.usedAt, null);
   s.callAs(joiner);
   s.hosts.set(joiner, "infra-2.tail.ts.net");
   assert.equal((await s.call("POST", "/v1/join", { token, deployKey: joinerKey })).status, 200, "the token still joins a new machine");
@@ -344,10 +325,9 @@ test("a joined node joins again with a new token, which replaces its deploy key,
   s.callAs(joiner);
   s.hosts.set(joiner, "infra-2.tail.ts.net");
   const report = { role: "probe", commit: deployCommit, target: deployCommit, state: "healthy", reason: null };
-  const keyOf = (token: string) => createHash("sha256").update(token).digest("hex");
-  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: keyOf("first") })).status, 200);
+  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: tokenDigest("first") })).status, 200);
   assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer first" })).status, 200);
-  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: keyOf("second") })).status, 200);
+  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: tokenDigest("second") })).status, 200);
   assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer first" })).status, 403);
   assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer second" })).status, 200);
   assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: joiner, allowed: false, person: false, deployer: false });
@@ -387,7 +367,7 @@ test("a machine neither admitted nor joined reaches only whoami and join, and a 
   const refused = [...requests.map(([method, path]) => `${method} ${path} 403`), "attach 403"];
   assert.deepEqual(await sweep(), refused, "before it joins");
   assert.equal((await s.call("GET", "/v1/whoami")).status, 200);
-  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: createHash("sha256").update("joiner").digest("hex") })).status, 200);
+  assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: tokenDigest("joiner") })).status, 200);
   assert.deepEqual(await sweep(), [...refused.slice(0, -3), "GET /v1/deployer/release 200", "POST /v1/deployer/report 200", "attach 403"], "once it joined");
 });
 
@@ -1613,15 +1593,6 @@ test("a message goes to the thread's conversation and counts as human activity",
   ]);
 });
 
-/** Polls until `done` holds, for up to 5 s. */
-/** Waits for `done`. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
-async function until(done: () => boolean, what: string) {
-  for (const deadline = Date.now() + 60_000; !done();) {
-    assert.ok(Date.now() < deadline, what);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
-
 test("a thread's event stream sends the whole view, then each part a commit changed, and stops its watch when the client leaves", async (t) => {
   const s = await withThread(t);
   const { thread, fake } = s;
@@ -1650,7 +1621,7 @@ test("a thread's event stream sends the whole view, then each part a commit chan
 
   assert.equal(fake.watching(thread.id), 1);
   stream.close();
-  await until(() => fake.watching(thread.id) === 0, "the stream's watch stopped when its client left");
+  await until("the stream's watch stopped when its client left", () => fake.watching(thread.id) === 0);
   assert.deepEqual(s.calls.filter(([call]) => call === "watch" || call === "unwatch"), [["watch", thread.id], ["unwatch", thread.id]]);
 });
 
@@ -1689,14 +1660,14 @@ test("a thread's streams end when it is deleted, and a deleted thread, a strange
   const extra = await s.events(`/v1/threads/${thread.id}/events`).response;
   assert.equal(extra.statusCode, 503, "past the most streams the control plane serves");
   open.pop()!.close();
-  await until(() => fake.watching(thread.id) === maxStreams - 1, "a closed stream frees its place");
+  await until("a closed stream frees its place", () => fake.watching(thread.id) === maxStreams - 1);
   const page = s.events(`/threads/${thread.id}/stream`);
   assert.ok((await page.next()).convo !== undefined, "the dashboard's stream counts against the same limit");
   open.push(page);
 
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   await Promise.all(open.map((stream) => stream.ended));
-  await until(() => fake.watching(thread.id) === 0, "every stream of the deleted thread stopped its watch");
+  await until("every stream of the deleted thread stopped its watch", () => fake.watching(thread.id) === 0);
   assert.equal((await s.events(`/v1/threads/${thread.id}/events`).response).statusCode, 409);
   assert.equal((await s.events("/v1/threads/th-missing/events").response).statusCode, 404);
 });
@@ -1720,7 +1691,7 @@ test("a client that stops reading is dropped after the stall limit, with its wat
   stream.pause();
   await backUp(s);
   assert.equal(fake.watching(thread.id), 1, "a slow client is not dropped at once");
-  await until(() => fake.watching(thread.id) === 0, "the dropped stream stopped its watch");
+  await until("the dropped stream stopped its watch", () => fake.watching(thread.id) === 0);
   stream.resume();
   assert.equal(await stream.ended, "dropped");
   const again = s.events(`/v1/threads/${thread.id}/events`);
@@ -1752,11 +1723,11 @@ test("a stream whose thread is deleted while its watch opens stops that watch", 
   const { thread, fake } = s;
   const release = fake.holdWatches();
   const stream = s.events(`/v1/threads/${thread.id}/events`);
-  await until(() => s.calls.some(([call]) => call === "watch"), "the stream asked for its watch");
+  await until("the stream asked for its watch", () => s.calls.some(([call]) => call === "watch"));
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   release();
   await stream.ended;
-  await until(() => fake.watching(thread.id) === 0, "the watch that opened after the delete was stopped");
+  await until("the watch that opened after the delete was stopped", () => fake.watching(thread.id) === 0);
   assert.deepEqual(s.calls.filter(([call]) => call === "watch" || call === "unwatch"), [["watch", thread.id], ["unwatch", thread.id]]);
 });
 
@@ -1900,30 +1871,30 @@ test("an attach wakes the pylon, waits for it, and carries keys, resizes and out
   const before = Date.now();
   const a = await attachTo(s.port, attachPathOf(s.thread.id, "cols=100&rows=30&term=xterm-ghostty"));
   assert.ok("ws" in a);
-  await until(() => a.received.length === 1, "a waiting message");
+  await until("a waiting message", () => a.received.length === 1);
   assert.deepEqual(a.received, [{ type: "waiting", pylon: "unknown" }]);
   assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
   assert.ok(s.woken.includes(node), "and wakes the node");
   observeRunning(s, {});
   running = true;
-  await until(() => a.received.length === 2, "the attached message");
+  await until("the attached message", () => a.received.length === 2);
   assert.deepEqual(a.received[1], { type: "attached" });
 
   const [pylonId, argv] = s.streams.at(-1)!;
   assert.equal(pylonId, s.thread.pylonId);
   assert.deepEqual([argv[0], argv[1], ...argv.slice(4)], ["python3", "-c", "100", "30", "xterm-ghostty", "sh", "-c", attachScript, "attach", ""]);
   const relayBytes = Number(argv[3]);
-  await until(() => pipe.stdin().length >= relayBytes, "the relay's source");
+  await until("the relay's source", () => pipe.stdin().length >= relayBytes);
   assert.match(pipe.stdin().subarray(0, relayBytes).toString(), /^# A program on a pty in a pylon/);
 
   a.ws.send(Buffer.from("ls\r"));
   a.ws.send(encodeMessage({ type: "resize", size: terminalSize(140, 40) }));
   const frames = Buffer.from([0, 0, 0, 0, 3, ...Buffer.from("ls\r"), 1, 0, 0, 0, 4, 0, 140, 0, 40]);
-  await until(() => pipe.stdin().length >= relayBytes + frames.length, "the key and resize frames");
+  await until("the key and resize frames", () => pipe.stdin().length >= relayBytes + frames.length);
   assert.deepEqual(pipe.stdin().subarray(relayBytes), frames);
 
   pipe.print("herdr screen");
-  await until(() => a.received.length === 3, "the output");
+  await until("the output", () => a.received.length === 3);
   pipe.exit(0);
   assert.equal(await a.closed, 1000);
   assert.deepEqual(a.received.slice(2), ["herdr screen", { type: "exit", code: 0 }]);
@@ -1941,7 +1912,7 @@ test("a Claude worker's attach lands in the pane of its Claude session, one that
   const landsIn = async (thread: string, query?: string) => {
     const a = await attachTo(s.port, attachPathOf(thread, query));
     assert.ok("ws" in a);
-    await until(() => a.received.length === 1, "attached");
+    await until("attached", () => a.received.length === 1);
     a.ws.close();
     await a.closed;
     return s.streams.findLast(([, argv]) => argv[0] === "python3")![1].slice(7);
@@ -1963,7 +1934,7 @@ test("deleting a thread ends its attach as a conflict, and a closing API ends on
 
   const deleted = await attachTo(s.port, attachPathOf(s.thread.id));
   assert.ok("ws" in deleted);
-  await until(() => deleted.received.length === 1, "attached");
+  await until("attached", () => deleted.received.length === 1);
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
   assert.equal(await deleted.closed, 1000);
   assert.deepEqual(deleted.received.at(-1), { type: "error", kind: "conflict", message: `thread ${s.thread.id} is deleted` });
@@ -1973,7 +1944,7 @@ test("deleting a thread ends its attach as a conflict, and a closing API ends on
   other.probePipes(async () => fakePipe().stream);
   const stopping = await attachTo(other.port, attachPathOf(other.thread.id));
   assert.ok("ws" in stopping);
-  await until(() => stopping.received.length === 1, "attached");
+  await until("attached", () => stopping.received.length === 1);
   await other.close();
   assert.equal(await stopping.closed, 1001);
   assert.equal((stopping.received.at(-1) as { kind: string }).kind, "unreachable");
@@ -1990,7 +1961,7 @@ test("a closing API gives up on a terminal whose node stopped answering after it
   });
   const stuck = await attachTo(s.port, attachPathOf(s.thread.id));
   assert.ok("ws" in stuck);
-  await until(() => stuck.received.length === 1, "attached");
+  await until("attached", () => stuck.received.length === 1);
 
   const whois = s.holdWhois();
   const admitting = attachTo(s.port, attachPathOf(s.thread.id));
@@ -2149,7 +2120,7 @@ const deployToken = "test-root-token";
 const deployment: DeploymentOptions = {
   self: "nFIREBAT" as TailnetNodeId,
   deployers: new Set([laptop, "nFIREBAT" as TailnetNodeId]),
-  keys: { nFIREBAT: createHash("sha256").update(deployToken).digest("hex") },
+  keys: { nFIREBAT: tokenDigest(deployToken) },
   resolveMain: async () => deployCommit,
 };
 const reporterHeaders = { authorization: `Bearer ${deployToken}` };
@@ -2375,7 +2346,7 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
       req.on("error", reject).end();
     });
   }
-  await until(() => api.httpsPort !== undefined, "HTTPS started");
+  await until("HTTPS started", () => api.httpsPort !== undefined);
   assert.equal((await tls()).status, 200);
   assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
@@ -2393,7 +2364,7 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
   assert.equal((await tls(attachPathOf("missing"), { ...upgrade, origin: "https://127.0.0.1:10200" })).status, 403);
   fail = true;
   const before = reads;
-  await until(() => reads !== before, "the renewal read the certificate");
+  await until("the renewal read the certificate", () => reads !== before);
   assert.equal((await tls()).fingerprint, new X509Certificate(first.cert).fingerprint256);
   assert.equal((await api.call("GET", "/v1/health")).body.https.status, "degraded");
   fail = false;
@@ -2417,14 +2388,14 @@ test("HTTP starts while certificate issuance is pending, survives failure, and H
   assert.equal(api.httpsPort, undefined);
   assert.deepEqual((await api.call("GET", "/v1/health")).body.https, { status: "waiting", error: null, nextAttemptAt: null });
   first.reject(new Error("tailscaled certificate: HTTP 403"));
-  await until(() => attempts >= 2, "issuance retried");
+  await until("issuance retried", () => attempts >= 2);
   const failed = await api.call("GET", "/v1/health");
   assert.equal(failed.status, 200);
   assert.equal(failed.body.https.status, "waiting");
   assert.equal(failed.body.https.error, "tailscaled certificate: HTTP 403");
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
   retry.resolve(certificate);
-  await until(() => api.httpsPort !== undefined, "HTTPS started after retry");
+  await until("HTTPS started after retry", () => api.httpsPort !== undefined);
   const ready = (await api.call("GET", "/v1/health")).body.https;
   assert.equal(ready.status, "ready");
   assert.equal(ready.error, null);
@@ -2577,7 +2548,7 @@ test("the health, release, deployer and event routes answer each caller and meth
   const report = { role: "probe", commit: deployCommit, target: deployCommit, state: "healthy", reason: null };
   const off = await setup(t);
   const otherToken = "other-node-token";
-  const on = await setup(t, { deployment: { ...deployment, keys: { ...deployment.keys, nOTHER: createHash("sha256").update(otherToken).digest("hex") } } });
+  const on = await setup(t, { deployment: { ...deployment, keys: { ...deployment.keys, nOTHER: tokenDigest(otherToken) } } });
   on.registry.upsertNode({ name: "rj-other" as NodeName, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
   const notDeployer = await setup(t, { deployment: { ...deployment, deployers: new Set(["nFIREBAT" as TailnetNodeId]) } });
   const callers: [string, Awaited<ReturnType<typeof setup>>, string, Record<string, string>][] = [
@@ -2773,12 +2744,12 @@ test("an event follower gets each event as an id and its data, then the watermar
   assert.deepEqual([res.headers["content-type"], res.headers["cache-control"]], ["text/event-stream", "no-store"]);
   const frame = (event: { id: string }) => `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;
   const ping = (id: string) => `id: ${id}\n: ping\n\n`;
-  await until(() => chunks.join("").length >= (frame(first) + ping(unrelated.id)).length, "the first batch arrived");
+  await until("the first batch arrived", () => chunks.join("").length >= (frame(first) + ping(unrelated.id)).length);
   assert.equal(chunks.join(""), frame(first) + ping(unrelated.id), "the watermark passes the unrelated event the filter left out");
-  await until(() => chunks.join("").length > (frame(first) + ping(unrelated.id)).length, "a second passed");
+  await until("a second passed", () => chunks.join("").length > (frame(first) + ping(unrelated.id)).length);
   const second = s.registry.appendEvent("release.changed", null, { state: "installing" });
   const expected = frame(first) + ping(unrelated.id) + ping(unrelated.id) + frame(second) + ping(second.id);
-  await until(() => chunks.join("").length >= expected.length, "the next event arrived");
+  await until("the next event arrived", () => chunks.join("").length >= expected.length);
   assert.equal(chunks.join("").slice(0, expected.length), expected);
 });
 
@@ -2916,7 +2887,7 @@ test("a quiet filtered stream scans past unrelated events and survives retention
       last = s.registry.appendEvent("release.changed", null, {}).id;
       if (i % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
     }
-    await until(() => cursor === last, "the stream sent its scanned watermark");
+    await until("the stream sent its scanned watermark", () => cursor === last);
   }
   stop.abort();
   await reading;
@@ -3214,7 +3185,7 @@ test("a Claude worker thread's conversation is its transcript, read from the run
   const reads = s.streams.length;
   await appendFile(s.transcript, fixture.slice(30, 43).join(""));
   s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
-  await until(() => s.registry.claudeTranscript(s.thread.id)!.readAt > first.readAt!, "a session event is followed by a read, with no one watching");
+  await until("a session event is followed by a read, with no one watching", () => s.registry.claudeTranscript(s.thread.id)!.readAt > first.readAt!);
   assert.equal(s.streams.length, reads + 1);
 
   observePaused(s);
@@ -3295,7 +3266,7 @@ test("a poll of a Claude worker's streaming page names the view its stream shows
   s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
   const replyAt = String(s.registry.thread(s.thread.id)!.lastReplyAt);
   t.mock.timers.tick(1_000);
-  await until(() => s.registry.claudeEntries(s.thread.id).some((e) => e.kind === "reply" && e.text.startsWith("The subagent reported 1 line")), "the read after the turn's end stores the reply");
+  await until("the read after the turn's end stores the reply", () => s.registry.claudeEntries(s.thread.id).some((e) => e.kind === "reply" && e.text.startsWith("The subagent reported 1 line")));
   const read = await convoRegion(s, "?streaming=1");
   assert.equal(read.replyAt, replyAt);
   assert.notEqual(read.named, shows, "the page has not shown the reply yet, so the poll names another view than it shows");

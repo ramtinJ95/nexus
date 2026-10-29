@@ -14,6 +14,7 @@ import { claudeHook } from "../../images/pylon/nexus-ask.ts";
 import type { ByteStream, LiveHash, NodeName, ProbeClient, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
+import { until } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";
@@ -78,14 +79,6 @@ function readersBesides(active: Thread): number {
   const maps = (queryObjects(Map, { format: "summary" }) as string[]).filter((m) => m.includes(`'${active.id}'`));
   assert.equal(maps.length, 1, "one Map holds the active thread's reader");
   return Number(/^Map\((\d+)\)/.exec(maps[0]!)![1]) - 1;
-}
-
-async function until(what: string, predicate: () => boolean) {
-  const deadline = Date.now() + 60_000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
-    await new Promise((r) => setTimeout(r, 5));
-  }
 }
 
 test("a transcript read that ends after the service and its registry closed settles without touching the registry", async () => {

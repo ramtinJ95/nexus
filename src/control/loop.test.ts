@@ -16,6 +16,7 @@ import { upgradeObservation } from "../protocol.ts";
 import { chatgptTokenGrant, liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
 import type { ReportedEvent } from "../events.ts";
+import { until, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;
@@ -252,15 +253,6 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
 const ingest: Ingest = (event, eventNode) => event.type === "snapshot"
   ? [{ record: "node", node: eventNode, state: "online", capacity: event.observation.capacity }]
   : [];
-
-/** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
-async function until(what: string, predicate: () => boolean) {
-  const deadline = Date.now() + 60_000;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 /** Waits until the loop has ingested every event the node sent and run a pass after them. */
 async function settled(fake: ReturnType<typeof fakeNode>, loop: Loop) {
@@ -1103,13 +1095,6 @@ async function heldLoop(t: import("node:test").TestContext) {
     release: (i: number) => nth(i).released.resolve(),
     free() { holding = false; for (const lookup of lookups) lookup.released.resolve(); },
   };
-}
-
-/** Reads whether the promise has settled, after the turns of the event loop it would need to. */
-function watch(promise: Promise<unknown>) {
-  let settled = false;
-  void promise.then(() => { settled = true; });
-  return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
 }
 
 test("wakes of a node during its pass give exactly one more pass after it, and resolve once that pass has finished", async (t) => {
