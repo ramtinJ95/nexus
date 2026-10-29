@@ -687,7 +687,7 @@ a human's request. It runs only while the node reports the pylon running, never
 records activity, and a pylon the probe finds not running keeps what was stored. The
 registry keeps the parsed entries, so a paused pylon, or a control plane that
 restarted, shows the transcript as of its last read. Only complete lines are taken,
-and a record over 512 KiB is skipped with a visible marker, so one huge tool output
+and a record over 4 MiB is skipped with a visible marker, so one huge tool output
 cannot stall the reader.
 
 The parser in `src/claude-transcript.ts` was written against real Claude Code 2.1.308

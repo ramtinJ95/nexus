@@ -457,27 +457,27 @@ record never changes an earlier entry:
 
 | Kind | Fields | From |
 |---|---|---|
-| `prompt` | `text`, `from`: `person`, `command` or `other` | A prompt the person typed, a prompt Claude took from its queue mid-turn (`queued_command`), a slash command, or a prompt from a plugin |
+| `prompt` | `text`, `from`: `person`, `command` or `other`, optional `images` | A prompt the person typed, a prompt Claude took from its queue mid-turn (`queued_command`), a slash command, or a prompt from a plugin |
 | `reply` | `text` | An assistant text block |
 | `tool` | `id`, `name`, `input` | An assistant `tool_use` block, or a `!` shell command (`shell`) |
-| `result` | `toolUseId`, `output`, `isError` | A `tool_result`, or a `!` command's output. A background launch's metadata reads "Started in the background" |
+| `result` | `toolUseId`, `output`, `isError`, optional `images` | A `tool_result`, or a `!` command's output. A background launch's metadata reads "Started in the background" |
 | `task` | `toolUseId`, `status`, `summary`, `result` | A `<task-notification>`: a background subagent or shell finished. `result` is a subagent's answer |
 | `queue` | `op`, `text` | A `queue-operation`: a message typed during a turn joined or left Claude's queue |
 | `notice` | `tone`, `text`, optional `usageLimit` | An interruption, a compaction, a model error, a local command's output, or Claude Code's own `system/informational` message. `usageLimit` (`resetsAt`, Unix ms or null) marks the error an assistant record with `apiError: "usage_limit_reached"` gives, with `apiErrorParams.rate_limit_info.resetsAt` |
 | `turn` | `durationMs` | `system/turn_duration` |
 | `pull-request` | `number`, `url`, `repository` | A `pr-link`: Claude opened a pull request. Claude Code writes it again each time it saves the session's metadata, so clients show the first entry for each `url`. `url` is always an https URL |
-| `record` | `type`, `summary` | Any record shape the parser does not know, a malformed line, or a record over 512 KiB, which is skipped |
+| `record` | `type`, `summary` | Any record shape the parser does not know, a malformed line, or a record over 4 MiB, which is skipped |
 
 Every entry has `at`, the record's time in Unix milliseconds. Records Claude Code keeps
 for itself, such as API request copies, context attachments, file-history
 snapshots and the session metadata it writes again on each save (its title, tag, mode,
 agent, worktree and the like), give no entry. They are named in tables in the parser, so a new record type
 shows as a `record` rather than disappearing. Prompts are cut at 32 KiB, replies at
-64 KiB, tool inputs at 4 KiB per string and outputs at 8 KiB.
+64 KiB, tool inputs at 4 KiB per string and outputs at 8 KiB. A prompt's or result's `images` (`offset`, `bytes`, `sha256`, `index`) name each image block by the transcript line that holds it and its place among that line's image blocks: each top-level `image` item, then each `image` part of a `tool_result`'s list content, in order. The image route reads that line again and checks its hash, so it never serves another line's bytes. A Read of an image holds its base64 twice, so its record is about 2.7 times the image, which is why a read takes up to 4 MiB.
 
 The registry keeps what was read. `claude_transcripts` holds per thread the session it
 read, the cursor (`byte_offset` past the last complete line, `skipping` while a
-record over 512 KiB is passed over, and `before_hash`, the SHA-256 of the up to 4 KiB
+record over 4 MiB is passed over, and `before_hash`, the SHA-256 of the up to 4 KiB
 just before the offset), how many entries were `dropped`, and `read_at`, when the
 last read that reached the transcript's end started.
 `claude_entries` holds the newest 3,000 entries in order. A read appends only its new
@@ -503,7 +503,7 @@ lease, as `session.turn-ended` would, when the session's last turn start or hear
 no later than the stop, both by the pylon's clock. Such an end records no reply.
 
 The control plane reads a transcript only while the node's last observation reports
-the pylon running. The read is one raw pipe through the probe, taking at most 512 KiB
+the pylon running. The read is one raw pipe through the probe, taking at most 4 MiB
 and 20 seconds, and a refresh takes at most 16 reads. It never wakes the pylon and is
 not activity. A failed read keeps what is stored. Each retained `session.*` event for a
 Claude worker thread triggers a read. While a turn runs and a dashboard watches the
