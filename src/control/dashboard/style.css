@@ -1,8 +1,18 @@
 /*
  * After Jetline's look: a grey sidebar and inspector around a white page, pill buttons and tabs, and quiet type.
- * Light by default, and dark in the same shapes when the system is.
+ * Light until the page's head script names a theme, and each theme in the same shapes. A theme is its colours, the
+ * Shiki theme of its diffs and its terminal's palette, and style.test.ts checks each one defines them all.
  */
 :root {
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font: 13.5px/1.5 var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+:root, :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #ffffff;
   --side: #ededed;
   --inspect: #f2f2f2;
@@ -15,10 +25,11 @@
   --line-soft: #ececec;
   --text: #1d1d1f;
   --text-2: #5f5f64;
-  --text-3: #98989d;
+  --text-3: #86868b;
   --accent: #2f6fdf;
+  --on-accent: #ffffff;
   --ok: #2f9e55;
-  --warn: #c98a0c;
+  --warn: #b07a0a;
   --bad: #d9443f;
   --work: #2f6fdf;
   --add-bg: #e7f6ea;
@@ -28,42 +39,179 @@
   --code-bg: #f4f4f5;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.03);
   --pop: 0 12px 40px rgba(0, 0, 0, 0.16);
-  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
-  color-scheme: light dark;
-  font: 13.5px/1.5 var(--sans);
-  color: var(--text);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
+  --syntax: pierre-light;
+  /* Herdr and Claude Code draw for a dark terminal, so the light theme keeps one, in xterm.js's own palette. */
+  --term-bg: #16181d;
+  --term-raised: #22252c;
+  --term-line: #2a2e36;
+  --term-text: #e3e5e8;
+  --term-text-2: #aab0ba;
+  --term-cursor: #e3e5e8;
+  --term-selection: #3b4252;
+  --term-selection-text: #e3e5e8;
+  --term-ansi: #2e3436 #cc0000 #4e9a06 #c4a000 #3465a4 #75507b #06989a #d3d7cf #555753 #ef2929 #8ae234 #fce94f #729fcf #ad7fa8 #34e2e2 #eeeeec;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1e;
-    --side: #252527;
-    --inspect: #222224;
-    --card: #2a2a2d;
-    --raised: #2c2c2f;
-    --raised-2: #353538;
-    --hover: rgba(255, 255, 255, 0.05);
-    --selected: rgba(255, 255, 255, 0.09);
-    --line: #39393c;
-    --line-soft: #2f2f32;
-    --text: #ececef;
-    --text-2: #aeaeb3;
-    --text-3: #77777d;
-    --accent: #6aa2ff;
-    --ok: #4cc072;
-    --warn: #e6a92a;
-    --bad: #f0645f;
-    --work: #6aa2ff;
-    --add-bg: rgba(76, 192, 114, 0.13);
-    --add-text: #8fe0a8;
-    --del-bg: rgba(240, 100, 95, 0.13);
-    --del-text: #ffaaa6;
-    --code-bg: #2a2a2d;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --pop: 0 16px 50px rgba(0, 0, 0, 0.55);
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1c1c1e;
+  --side: #252527;
+  --inspect: #222224;
+  --card: #2a2a2d;
+  --raised: #2c2c2f;
+  --raised-2: #353538;
+  --hover: rgba(255, 255, 255, 0.05);
+  --selected: rgba(255, 255, 255, 0.09);
+  --line: #39393c;
+  --line-soft: #2f2f32;
+  --text: #ececef;
+  --text-2: #aeaeb3;
+  --text-3: #77777d;
+  --accent: #6aa2ff;
+  --on-accent: #1c1c1e;
+  --ok: #4cc072;
+  --warn: #e6a92a;
+  --bad: #f0645f;
+  --work: #6aa2ff;
+  --add-bg: rgba(76, 192, 114, 0.13);
+  --add-text: #8fe0a8;
+  --del-bg: rgba(240, 100, 95, 0.13);
+  --del-text: #ffaaa6;
+  --code-bg: #2a2a2d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --pop: 0 16px 50px rgba(0, 0, 0, 0.55);
+  --syntax: pierre-dark;
+  --term-bg: #16181d;
+  --term-raised: #22252c;
+  --term-line: #2a2e36;
+  --term-text: #e3e5e8;
+  --term-text-2: #aab0ba;
+  --term-cursor: #e3e5e8;
+  --term-selection: #3b4252;
+  --term-selection-text: #e3e5e8;
+  --term-ansi: #2e3436 #cc0000 #4e9a06 #c4a000 #3465a4 #75507b #06989a #d3d7cf #555753 #ef2929 #8ae234 #fce94f #729fcf #ad7fa8 #34e2e2 #eeeeec;
+}
+/*
+ * The named themes are macarchy's (github.com/ramtinJ95/macarchy, Themes/<id>/theme.toml at 5246510), which takes
+ * them from Omarchy's. Its semantic colours map onto these by name, and its terminal block is the terminal's. The
+ * sidebar and code are its background and surface mixed half and half, a hover its surface and overlay, the second
+ * text level 70% text and 30% muted text, and a diff line's tint 15% of its status colour over the background.
+ */
+:root[data-theme="tokyo-night"] {
+  color-scheme: dark;
+  --bg: #1a1b26;
+  --side: #1f2231;
+  --inspect: #1f2231;
+  --card: #24283b;
+  --raised: #24283b;
+  --raised-2: #292e42;
+  --hover: #272b3f;
+  --selected: #292e42;
+  --line: #414868;
+  --line-soft: #292e42;
+  --text: #a9b1d6;
+  --text-2: #9098bf;
+  --text-3: #565f89;
+  --accent: #7aa2f7;
+  --on-accent: #1a1b26;
+  --ok: #9ece6a;
+  --warn: #e0af68;
+  --bad: #f7768e;
+  --work: #449dab;
+  --add-bg: #2e3630;
+  --add-text: #9ece6a;
+  --del-bg: #3b2936;
+  --del-text: #f7768e;
+  --code-bg: #1f2231;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --pop: 0 16px 50px rgba(0, 0, 0, 0.55);
+  --syntax: tokyo-night;
+  --term-bg: #1a1b26;
+  --term-raised: #24283b;
+  --term-line: #414868;
+  --term-text: #a9b1d6;
+  --term-text-2: #9098bf;
+  --term-cursor: #c0caf5;
+  --term-selection: #292e42;
+  --term-selection-text: #c0caf5;
+  --term-ansi: #1a1b26 #f7768e #9ece6a #e0af68 #7aa2f7 #ad8ee6 #449dab #a9b1d6 #414868 #ff7a93 #b9f27c #ff9e64 #7da6ff #bb9af7 #0db9d7 #c0caf5;
+}
+:root[data-theme="catppuccin-mocha"] {
+  color-scheme: dark;
+  --bg: #1e1e2e;
+  --side: #282839;
+  --inspect: #282839;
+  --card: #313244;
+  --raised: #313244;
+  --raised-2: #45475a;
+  --hover: #3b3d4f;
+  --selected: #45475a;
+  --line: #585b70;
+  --line-soft: #45475a;
+  --text: #cdd6f4;
+  --text-2: #c1cae7;
+  --text-3: #a6adc8;
+  --accent: #cba6f7;
+  --on-accent: #1e1e2e;
+  --ok: #a6e3a1;
+  --warn: #f9e2af;
+  --bad: #f38ba8;
+  --work: #74c7ec;
+  --add-bg: #323c3f;
+  --add-text: #a6e3a1;
+  --del-bg: #3e2e40;
+  --del-text: #f38ba8;
+  --code-bg: #282839;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --pop: 0 16px 50px rgba(0, 0, 0, 0.55);
+  --syntax: catppuccin-mocha;
+  --term-bg: #1e1e2e;
+  --term-raised: #313244;
+  --term-line: #585b70;
+  --term-text: #cdd6f4;
+  --term-text-2: #c1cae7;
+  --term-cursor: #f5e0dc;
+  --term-selection: #f5e0dc;
+  --term-selection-text: #1e1e2e;
+  --term-ansi: #45475a #f38ba8 #a6e3a1 #f9e2af #89b4fa #f5c2e7 #94e2d5 #bac2de #585b70 #f38ba8 #a6e3a1 #f9e2af #89b4fa #f5c2e7 #94e2d5 #a6adc8;
+}
+:root[data-theme="kanagawa-wave"] {
+  color-scheme: dark;
+  --bg: #1f1f28;
+  --side: #212939;
+  --inspect: #212939;
+  --card: #223249;
+  --raised: #223249;
+  --raised-2: #363646;
+  --hover: #2c3448;
+  --selected: #363646;
+  --line: #54546d;
+  --line-soft: #363646;
+  --text: #dcd7ba;
+  --text-2: #bcb8a2;
+  --text-3: #727169;
+  --accent: #dcd7ba;
+  --on-accent: #1f1f28;
+  --ok: #76946a;
+  --warn: #c0a36e;
+  --bad: #c34043;
+  --work: #6a9589;
+  --add-bg: #2c3132;
+  --add-text: #76946a;
+  --del-bg: #38242c;
+  --del-text: #c34043;
+  --code-bg: #212939;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --pop: 0 16px 50px rgba(0, 0, 0, 0.55);
+  --syntax: kanagawa-wave;
+  --term-bg: #1f1f28;
+  --term-raised: #223249;
+  --term-line: #54546d;
+  --term-text: #dcd7ba;
+  --term-text-2: #bcb8a2;
+  --term-cursor: #dcd7ba;
+  --term-selection: #363646;
+  --term-selection-text: #dcd7ba;
+  --term-ansi: #1f1f28 #c34043 #76946a #c0a36e #7e9cd8 #957fb8 #6a9589 #dcd7ba #54546d #e82424 #98bb6c #e6c384 #7fb4ca #938aa9 #7aa89f #dcd7ba;
 }
 * { box-sizing: border-box; }
 body { margin: 0; }
@@ -102,9 +250,9 @@ a.link { color: var(--accent); }
 .btn:disabled { opacity: 0.55; cursor: progress; }
 .btn kbd { font-size: 10.5px; color: var(--text-3); }
 .btn .i { width: 13px; height: 13px; }
-.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .btn-primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
-.btn-primary kbd { color: rgba(255, 255, 255, 0.7); }
+.btn-primary kbd { color: color-mix(in srgb, var(--on-accent) 70%, transparent); }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-2); box-shadow: none; }
 .btn-ghost:hover { background: var(--hover); }
 .btn-ghost.danger { color: var(--bad); }
@@ -171,6 +319,13 @@ a.link { color: var(--accent); }
 .nodes .i { color: var(--text-3); }
 .nodes em { font-style: normal; margin-left: auto; color: var(--text-3); }
 .side-add { margin: 2px 12px 14px; justify-content: center; }
+/* the theme needs the page's script, which names one on <html> before the first paint */
+.side-theme { margin: 0 12px 6px; display: flex; align-items: center; gap: 4px; }
+:root:not([data-theme]) .side-theme { display: none; }
+.theme-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 10px; height: 30px; border-radius: 8px; color: var(--text-3); background: var(--hover); }
+.theme-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.theme-pick select { all: unset; flex: 1; min-width: 0; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.theme-pick option { color: var(--text); background: var(--bg); }
 .side-nav { padding: 0 8px 4px; }
 .side-link { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--text-2); font-size: 14px; }
 .side-link:hover { background: var(--hover); }
@@ -386,12 +541,12 @@ h4.md-h { font-size: 1.07em; }
 
 /* a file's diff, opened as a tab */
 .file-view { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.term-view { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 8px 14px 14px; border-radius: 10px; overflow: hidden; background: #16181d; }
+.term-view { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 8px 14px 14px; border-radius: 10px; overflow: hidden; background: var(--term-bg); }
 .term-view[hidden] { display: none; }
-.tv-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 6px 8px 6px 12px; font-size: 12px; color: #aab0ba; border-bottom: 1px solid #2a2e36; }
-.tv-where { color: #e3e5e8; font-weight: 500; }
+.tv-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 6px 8px 6px 12px; font-size: 12px; color: var(--term-text-2); border-bottom: 1px solid var(--term-line); }
+.tv-where { color: var(--term-text); font-weight: 500; }
 .tv-status { flex: 1 1 10em; min-width: 0; }
-.tv-head .btn { background: #22252c; color: #e3e5e8; border-color: #343944; box-shadow: none; }
+.tv-head .btn { background: var(--term-raised); color: var(--term-text); border-color: var(--term-line); box-shadow: none; }
 .tv-head .btn-ghost { background: transparent; border-color: transparent; }
 .tv-host { flex: 1; min-height: 0; font-family: var(--mono); }
 .tv-host .xterm { height: 100%; padding: 6px 0 0 8px; }
@@ -428,8 +583,8 @@ h4.md-h { font-size: 1.07em; }
 .note-text { width: 100%; min-height: 64px; resize: vertical; font: 13px/1.5 var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 .note-text:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .note-actions { display: flex; justify-content: flex-end; gap: 6px; }
-.note-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: #fff; font-size: 10.5px; line-height: 16px; text-align: center; }
-.badge { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; flex: none; border-radius: 3px; font: 700 9.5px/1 var(--mono); color: #fff; background: var(--text-3); }
+.note-count { flex: none; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: var(--on-accent); font-size: 10.5px; line-height: 16px; text-align: center; }
+.badge { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; flex: none; border-radius: 3px; font: 700 9.5px/1 var(--mono); color: var(--on-accent); background: var(--text-3); }
 .badge-added, .badge-copied { background: var(--ok); }
 .badge-modified, .badge-renamed, .badge-typechange { background: var(--accent); }
 .badge-deleted { background: var(--bad); }

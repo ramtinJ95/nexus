@@ -1,6 +1,6 @@
 import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
@@ -1773,10 +1773,13 @@ test("pages link their assets by hash, and a hashed asset is cached for good", a
   for (const name of ["secret.txt", "notifications.js", "chunk-NOSUCH.js", "..%2Fpackage.json"]) assert.equal((await s.call("GET", `/assets/${name}`)).status, 404, name);
 });
 
-test("pages are served under a content security policy that allows only the dashboard's own origin", async (t) => {
+test("pages are served under a content security policy that allows only the dashboard's own origin and the page's one inline script", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.call("GET", "/")).headers["content-security-policy"],
-    "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  const page = await s.call("GET", "/");
+  const inline = [...page.text.matchAll(/<script>([^<]*)<\/script>/g)].map(([, script]) => script!);
+  assert.equal(inline.length, 1, "the head script that applies the theme is the page's one inline script");
+  assert.equal(page.headers["content-security-policy"],
+    `default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(inline[0]!).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
 });
 
 test("dashboard pages answer only allowed callers under the API's own names", async (t) => {

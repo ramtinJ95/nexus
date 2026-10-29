@@ -1058,6 +1058,8 @@ function redrawDiff() {
   void drawDiff(openDiff);
 }
 narrow.addEventListener("change", redrawDiff);
+// The head script has painted the theme, so the picker's module loads after the page's own.
+void import("./theme.js").then(({ startThemes }) => startThemes());
 
 /** Shows a diff read from the pylon, once its lines are drawn. */
 async function drawDiff({ read, head, shown, truncated }) {
