@@ -1,0 +1,84 @@
+branch: 31e58af refactor(cli): read and save the config with the shared JSON helpers, and check grants with the API's patterns
+
+$ curl -s -w \nHTTP %{http_code} http://127.0.0.1:7470/v1/%zz
+{"error":"the request path \"/v1/%zz\" is not a valid URL path"}
+HTTP 400 (exit 0)
+
+$ curl -s -w \nHTTP %{http_code} http://127.0.0.1:7470/v1/%zz
+{"error":"caller is not a tailnet node this control plane allows"}
+HTTP 403 (exit 0)
+
+$ curl -s -w \nHTTP %{http_code} -H Host: [zz http://127.0.0.1:7470/v1/projects
+{"error":"the API does not answer to host [zz"}
+HTTP 403 (exit 0)
+
+$ curl -s -w \nHTTP %{http_code} -H Host: [zz http://127.0.0.1:7470/v1/whoami
+{"error":"the API does not answer to host [zz"}
+HTTP 403 (exit 0)
+
+$ curl -s -w \nHTTP %{http_code} http://127.0.0.1:7470/v1/no-such-route
+{"error":"no route /v1/no-such-route","code":"no-route"}
+HTTP 404 (exit 0)
+
+$ curl -s -w \nHTTP %{http_code} -X POST -H content-type: text/plain -d {} http://127.0.0.1:7470/v1/threads
+{"error":"requests that change state must have content-type application/json"}
+HTTP 415 (exit 0)
+
+$ nexus connect http://127.0.0.1:7470
+Connected to http://127.0.0.1:7470, saved in $WORK/home/.config/nexus/cli.json.
+This device is tailnet node nLAPTOP. It
+  may read threads, projects and nodes
+  may start and message threads
+  may deploy, land reviews and build images
+ (exit 0)
+
+$ stat -c %a %n $WORK/home/.config/nexus/cli.json
+600 $WORK/home/.config/nexus/cli.json
+ (exit 0)
+
+$ nexus --version
+nexus 0.51.0
+ (exit 0)
+
+$ nexus show th-0123456789ab --json
+{"error":"no thread th-0123456789ab","kind":"not-found","status":404,"code":null}
+ (exit 4)
+
+$ nexus project add drinks --scratch --node verify-node --secret gh_token:api.github.com
+nexus: --secret takes NAME:HOST[,HOST...], an upper-case name and lower-case hostnames, such as GH_TOKEN:api.github.com,github.com. The value stays in each node's secret file. Run nexus --help for usage
+ (exit 64)
+
+$ nexus project add drinks --scratch --node verify-node --secret GH_TOKEN:localhost
+nexus: --secret takes NAME:HOST[,HOST...], an upper-case name and lower-case hostnames, such as GH_TOKEN:api.github.com,github.com. The value stays in each node's secret file. Run nexus --help for usage
+ (exit 64)
+
+$ nexus project add drinks --scratch --node verify-node --secret GH_TOKEN:api.github.com,github.com --json
+{
+  "id": "drinks",
+  "repoUrl": null,
+  "defaultBranch": "main",
+  "defaultNode": "verify-node",
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 6,
+    "diskGiB": 10
+  },
+  "allowedHosts": [],
+  "secrets": [
+    {
+      "name": "GH_TOKEN",
+      "hosts": [
+        "api.github.com",
+        "github.com"
+      ]
+    }
+  ],
+  "logins": [],
+  "preSetup": null
+}
+ (exit 0)
+
+$ nexus projects
+nexus: $WORK/home/.config/nexus/cli.json is not a CLI config: config: Unrecognized key: "ssh". Run nexus --help for usage
+ (exit 64)
+
