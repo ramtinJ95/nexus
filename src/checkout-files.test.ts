@@ -89,6 +89,26 @@ test("reading gives a file's bytes, and refuses a missing path, a directory, or 
   await assert.rejects(c.reader.read("big.bin"), refused("large", /big.bin is over the 10485760-byte limit/));
 });
 
+test("a blob is a file's bytes at a base, and is refused where the base has no such file, where it is a directory, or over the limit", async (t) => {
+  const c = await checkout(t);
+  const before = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 255]);
+  await writeFile(join(c.dir, "shot.png"), before);
+  await c.git("add", "shot.png");
+  await c.git("commit", "-q", "-m", "shot");
+  await writeFile(join(c.dir, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 9]));
+  await writeFile(join(c.dir, "new.png"), before);
+  assert.deepEqual(await c.reader.blob("head", "shot.png"), before);
+  assert.deepEqual(await c.reader.blob("head", "./shot.png"), before);
+  await assert.rejects(c.reader.blob("start", "shot.png"), refused("missing", /shot.png does not exist at the start base/));
+  await assert.rejects(c.reader.blob("head", "new.png"), refused("missing", /new.png does not exist at the head base/));
+  await assert.rejects(c.reader.blob("head", "src"), refused("kind", /src is not a file at the head base/));
+  await assert.rejects(c.reader.blob("head", "../secret"), refused("outside", /outside the checkout/));
+  await writeFile(join(c.dir, "big.bin"), Buffer.alloc(maxFileBytes + 1));
+  await c.git("add", "big.bin");
+  await c.git("commit", "-q", "-m", "big");
+  await assert.rejects(c.reader.blob("head", "big.bin"), refused("large", /big.bin is over the 10485760-byte limit/));
+});
+
 test("changes since the start include commits, staged, unstaged and untracked work, leave ignored files out, and leave the index alone", async (t) => {
   const c = await checkout(t);
   await writeFile(join(c.dir, "app.txt"), "one\n2\nthree\n");

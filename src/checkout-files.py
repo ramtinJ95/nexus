@@ -8,6 +8,7 @@
 #                           and update the ref only once stdin says `go`
 #   list <path>             the directory's entries, as JSON
 #   read <path> <max>       the file's bytes, at most <max> of them
+#   blob <base> <path> <max>  the file's bytes in <base>'s tree, at most <max> of them
 #   changes <base>          the files that differ from <base>, as JSON
 #   diff <base> [path...]   the unified diff from <base>, as JSON
 # <base> is `start`, what the pylon booted at (refs/nexus/base), or `head`, or `turn` (the latest reply's start). Internal `turn:<id>` reads also verify the run ID. A base that names no commit is the
@@ -50,6 +51,8 @@ def main(argv):
         answer(listing(root, args[0]))
     elif op == "read":
         sys.stdout.buffer.write(read(root, args[0], int(args[1])))
+    elif op == "blob":
+        sys.stdout.buffer.write(blob(root, args[0], args[1], int(args[2])))
     elif op == "snapshot":
         def expired(signum, frame):
             raise subprocess.TimeoutExpired("turn snapshot", 60)
@@ -119,6 +122,20 @@ def read(root, path, limit):
     if len(content) > limit:
         raise Refused("large", "%s is over the %d-byte limit" % (path, limit))
     return content
+
+
+def blob(root, base, path, limit):
+    inside(root, path)
+    tree = base_of(root, base)[0]
+    name = "%s:%s" % (tree, os.path.normpath(path))
+    found = subprocess.run(git_command(root, ["cat-file", "-t", name]), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=GIT_TIMEOUT_S)
+    if found.returncode != 0:
+        raise Refused("missing", "%s does not exist at the %s base" % (path, base.split(":", 1)[0]))
+    if found.stdout.decode().strip() != "blob":
+        raise Refused("kind", "%s is not a file at the %s base" % (path, base.split(":", 1)[0]))
+    if int(git(root, ["cat-file", "-s", name]).decode()) > limit:
+        raise Refused("large", "%s is over the %d-byte limit at the %s base" % (path, limit, base.split(":", 1)[0]))
+    return git(root, ["cat-file", "blob", name])
 
 
 def git_command(root, args):
