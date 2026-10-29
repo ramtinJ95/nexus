@@ -478,8 +478,8 @@ async function gather(flags: Flags): Promise<Facts> {
 }
 
 /**
- * Sends the join token and this node's deploy key digest to the control plane deployer.json names, which checks it is
- * that tailnet node before it sends anything. The control plane records this node as its whois of the caller says.
+ * Sends the join token and this node's deploy key digest to the control plane deployer.json names, once tailscaled says
+ * the endpoint is that tailnet node. The control plane records this node as its own whois of the caller says.
  */
 export async function joinControlPlane(deployer: { controlUrl: string; controlNodeId: string; token: string }, token: string, whois: Whois): Promise<string> {
   try {
