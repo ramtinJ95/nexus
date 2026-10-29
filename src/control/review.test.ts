@@ -1392,7 +1392,7 @@ test("the person cancels a review that is reviewing, fixing or checking, which a
   assert.deepEqual(h.merges, [], "a cancelled landing never merges");
 });
 
-test("a review that authorized its merge, is deploying or rolling back, or has ended is not cancelled, and says why", async (t) => {
+test("a review that authorized its merge, is deploying or rolling back, or has ended other than for the person is not cancelled, and says why", async (t) => {
   const f = fixture(t);
   f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
   const loop = await approved(f, "nLAPTOP");
@@ -1413,6 +1413,25 @@ test("a review that authorized its merge, is deploying or rolling back, or has e
   assert.equal(g.review().phase.kind, "approved");
   assert.throws(() => stopped.cancel(g.builder, "nPHONE"), (err: HttpError) => err.status === 409 && /already ended approved, so there is nothing to cancel/.test(err.message));
   assert.throws(() => stopped.cancel(g.add("th-other", true), "nPHONE"), (err: HttpError) => err.status === 409 && /has no review/.test(err.message));
+});
+
+test("the person cancels a review that ended for them, which ends its decision, archives its reviewer and leaves the builder", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.equal(f.registry.attention(f.builder), "decision");
+  const sent = f.sent.length;
+
+  assert.deepEqual(loop.cancel(f.builder, "nPHONE").phase, { kind: "cancelled", who: "person", by: "nPHONE" });
+  assert.notEqual(f.registry.attention(f.builder), "decision");
+  assert.deepEqual(f.statuses(), ["active", "archived"]);
+  await loop.poll();
+  assert.equal(f.sent.length, sent, "a cancelled review sends nothing more");
+  assert.equal(f.review().phase.kind, "cancelled");
 });
 
 test("a pass that was stepping a review when the person cancelled it does not save over the cancel", async (t) => {

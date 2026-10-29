@@ -258,6 +258,8 @@ const actions = {
   // As `nexus land`, for the commit the confirmation named, waiving the holds the card names the person may waive. The
   // page then shows the landing's steps as the review moves through them.
   land: (thread, { head, holds }) => api("POST", `/v1/threads/${thread}/land`, holds === undefined ? { head } : { head, waive: JSON.parse(holds) }),
+  // As `nexus review --pr <pr>`, with --land when the project lands its reviews.
+  "review-again": (thread, { pr, land }) => api("POST", `/v1/threads/${thread}/review`, { pr: Number(pr), land: land === "true" }),
   "approve-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/approve`, {}),
   "cancel-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/cancel`, {}),
   answer: (_, { question, option }) => api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option }),
@@ -1516,6 +1518,10 @@ if (changesPane !== null) {
 }
 end?.toEnd();
 follow(document.getElementById("convo")?.dataset.stream);
+// The nudge card's Write to it, from Needs you or from the thread's own page.
+const writeTo = () => { if (location.hash === "#write") document.getElementById("prompt-text")?.focus(); };
+writeTo();
+addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();

@@ -336,7 +336,7 @@ test("a held landing whose live check passed says so with its output, and the re
   assert.match(textOf(page), new RegExp(`live check passed at ${head.slice(0, 12)}`));
 });
 
-const questionsOf = (page: string) => /<div id="questions" data-live>([\s\S]*?)<\/div>\n<div id="landing"/.exec(page)![1]!;
+const questionsOf = (page: string) => /<div id="questions" data-live>([\s\S]*?)<\/div>\n<div id="nudge"/.exec(page)![1]!;
 
 test("an open question is a card with a button per option, disabled with the reason for a device that may not answer, and an answered question is one line", async (t) => {
   const s = await seeded(t, landingOptions());
@@ -558,7 +558,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
 
   const page = (await s.call("GET", "/")).text;
   const { cards } = needsOf(page);
-  assert.deepEqual(cards.slice(0, 3).map((c) => [c.kind, c.thread, c.attention]), [["land", held.id, "decision"], ["question", asked.id, "decision"], ["question", claude.id, "decision"]], "the oldest waits first");
+  assert.deepEqual(cards.slice(0, 3).map((c) => [c.kind, c.thread, c.attention]), [["review", held.id, "decision"], ["question", asked.id, "decision"], ["question", claude.id, "decision"]], "the oldest waits first");
   assert.deepEqual(new Set(cards.slice(3).map((c) => `${c.thread} ${c.attention}`)), new Set([`${dialog.id} waiting`, `${failed.id} failed`, `${limited.id} limited`]));
   assert.ok(!cards.some((c) => c.thread === replied.id), "a new reply waits on no one");
   assert.equal(needsCount(page), "6");
@@ -582,6 +582,74 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   assert.match(by(failed.id).text, /^Failed beta \/ Port the CLI .* The Claude worker failed: Claude launch did not complete: executable missing Archive$/);
   assert.match(by(failed.id).html, new RegExp(`data-action="archive" data-thread="${failed.id}"`));
   assert.match(by(limited.id).text, new RegExp(`^Usage limit acme / Write the docs .* It stopped on its usage limit until ${new Date(resetsAt).toISOString().slice(11, 16)} UTC\\. Nexus has it continue once the limit resets, or archive it to stop it\\. Archive$`));
+});
+
+const chipOf = (page: string) => /<span class="chip-label">([^<]*)<\/span>/.exec(page)![1];
+const dockOf = (page: string) => page.split('<div class="dock">')[1]!.split('<div id="run"')[0]!;
+const actionsOf = (html: string) => [...html.matchAll(/data-action="([^"]+)"|<a [^>]*href="([^"]+)"[^>]*data-write/g)].map((m) => m[1] ?? m[2]);
+
+test("every source of a thread's decision has a card on its page with the action that resolves it, and Needs you shows that card with the same actions", async (t) => {
+  const s = await seeded(t, landingOptions());
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).status, 200);
+  const link = (number: number, state: "open" | "merged" | "closed") => ({ links: [{ pr: { repo: "acme/nexus", number, title: "Cache", url: `https://github.com/acme/nexus/pull/${number}`, state, checks: "passing" as const, review: "none" as const, conflict: false }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const silent = await s.start("acme", "Silent reviewer");
+  const unread = "The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1.";
+  const first = approvedReview(silent.id, { kind: "needs-person", reasons: [unread] }, { land: { requestedBy: laptop, fromProject: true } });
+  s.registry.saveReview({ ...first, rounds: [{ head, verdict: null, check: null, answers: null }] });
+  s.registry.savePrWatch(silent.id, link(7, "open"));
+  const merged = await s.start("acme", "Merged by hand");
+  s.registry.saveReview(approvedReview(merged.id, { kind: "needs-person", reasons: ["Always needs the person: changes to login or auth, as it changes src/control/api.ts."] }, { reviewer: "th-reviewer2" as ThreadId }));
+  s.registry.savePrWatch(merged.id, link(7, "merged"));
+  const undeployed = await s.start("acme", "Rolled back");
+  s.registry.saveReview(approvedReview(undeployed.id, { kind: "needs-person", reasons: ["The deploy of 4444 failed.", "Rolled back to the previous release."] }, { merged: "4".repeat(40), land: { requestedBy: laptop }, reviewer: "th-reviewer3" as ThreadId }));
+  const held = await s.start("acme", "Held for checks");
+  s.registry.saveReview(approvedReview(held.id, { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] }, { land: { requestedBy: laptop }, reviewer: "th-reviewer4" as ThreadId }));
+  const nudged = await s.start("acme", "Stopped short");
+  s.registry.saveNudge(nudged.id, { state: "person", turn: Date.now() });
+  const asked = await s.start("acme", "Rebuild the image");
+  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
+
+  const sources = [silent, merged, undeployed, held, nudged, asked];
+  const inbox = (await s.call("GET", "/")).text;
+  assert.equal(needsCount(inbox), String(sources.length), "Needs you counts one card per source");
+  const docks = new Map<ThreadId, string>();
+  for (const th of sources) {
+    const page = (await s.call("GET", `/threads/${th.id}`)).text;
+    assert.equal(chipOf(page), "needs your decision", th.title);
+    const dock = dockOf(page);
+    docks.set(th.id, dock);
+    assert.ok(actionsOf(dock).length > 0, `${th.title}: the page has a card with an action`);
+    const card = needsOf(inbox).cards.filter((c) => c.thread === th.id);
+    assert.equal(card.length, 1, th.title);
+    assert.deepEqual(actionsOf(card[0]!.html), actionsOf(dock), `${th.title}: its Needs you card offers the page's actions`);
+  }
+
+  const silentCard = textOf(docks.get(silent.id)!);
+  assert.match(silentCard, new RegExp(`Review needs you #7 Cache ↗ Ended in round 1 of 5 · reviewer th-reviewer on gpt-6-astra \\(harness\\) ${unread} Review again Cancel review`));
+  assert.match(docks.get(silent.id)!, /<a href="\/threads\/th-reviewer">th-reviewer<\/a>/, "the reviewer thread is linked");
+  const again = /<button [^>]*data-action="review-again"[^>]*>/.exec(docks.get(silent.id)!)![0];
+  assert.match(again, new RegExp(`data-thread="${silent.id}" data-pr="7" data-land="true"`), "a project that lands its reviews lands this one too");
+  assert.equal(textOf(/data-confirm="([^"]*)"/.exec(again)![1]!), `Review pull request #7, "Cache", again? A new reviewer thread starts at round 1, and Nexus lands the pull request once it approves, as this project lands its reviews.`);
+  assert.deepEqual(actionsOf(docks.get(merged.id)!), ["cancel-review"], "a merged PR has nothing to review again");
+  assert.match(textOf(docks.get(merged.id)!), /^Merged outside its review #7 Cache ↗ .* Pull request #7 merged on GitHub outside this review, so nothing is left to review or land\. Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run\./);
+  assert.match(textOf(docks.get(undeployed.id)!), /^Merged, not deployed .* The merge commit 444444444444 is on the default branch, but not deployed\. Deploy it from a deployer with nexus deploy 4444444444444444444444444444444444444444, or leave the fleet where it is, and cancel the review once nothing more is needed\. Cancel review$/);
+  assert.deepEqual(actionsOf(docks.get(held.id)!), ["land"]);
+  assert.deepEqual(actionsOf(docks.get(nudged.id)!), [`/threads/${nudged.id}#write`]);
+  assert.match(textOf(docks.get(nudged.id)!), /^Stopped short of a pull request Its turn ended without a pull request after two nudges, so Nexus stopped nudging it\. Write to it/);
+  assert.deepEqual(actionsOf(docks.get(asked.id)!), ["answer", "answer"]);
+
+  s.callAs(phone);
+  const refused = dockOf((await s.call("GET", `/threads/${silent.id}`)).text);
+  assert.ok(!refused.includes('data-action="review-again"'), "a device that may not land cannot review again a review that lands");
+  assert.match(textOf(refused), /Review again Cancel review This device cannot land/);
+  s.callAs(laptop);
+
+  s.registry.saveReview({ ...s.registry.review(silent.id)!, phase: { kind: "cancelled", who: "person", by: laptop } });
+  const after = (await s.call("GET", `/threads/${silent.id}`)).text;
+  assert.notEqual(chipOf(after), "needs your decision");
+  assert.equal(actionsOf(dockOf(after)).length, 0, "a cancelled review has no card");
+  assert.match(textOf(after), /Nexus review rv-1: cancelled, round 1 of 5, .* cancelled by nLAPTOP/);
+  assert.equal(needsCount((await s.call("GET", "/")).text), String(sources.length - 1));
 });
 
 test("a held review waits from when it was held, not from when its review last messaged an agent, so a question asked before that comes first", async (t) => {
@@ -656,7 +724,7 @@ test("a landing shows its steps as the review moves through them, until it lands
   assert.deepEqual(await steps({ kind: "rolling-back", commit: merge, previous: "3".repeat(40), why: "The deploy of 4444 failed: rj-firebat control failed.", requested: true, deadline: 0 }, { merged: merge }), {
     states: "done skipped done failed todo", text: `Rolling back #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed The deploy of 4444 failed: rj-firebat control failed. Rolling back to ${"3".repeat(12)}.` });
   assert.deepEqual(await steps({ kind: "needs-person", reasons: ["The deploy of 4444 failed.", "Rolled back to the previous release, 3333, which every service reports healthy."] }, { merged: merge }), {
-    states: "done skipped done failed todo", text: "Merged, not deployed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed The deploy of 4444 failed. Rolled back to the previous release, 3333, which every service reports healthy." });
+    states: "done skipped done failed todo", text: "Merged, not deployed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed The deploy of 4444 failed. Rolled back to the previous release, 3333, which every service reports healthy. The merge commit 444444444444 is on the default branch, but not deployed. Deploy it from a deployer with nexus deploy 4444444444444444444444444444444444444444, or leave the fleet where it is, and cancel the review once nothing more is needed. Cancel review" });
   assert.deepEqual(await steps({ kind: "landed", commit: merge }, { merged: merge }), {
     states: "done skipped done done done", text: `Landed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Merged as ${merge.slice(0, 12)}, deployed, and every service reports it healthy.` });
   const other = await steps({ kind: "landed", commit: merge }, { merged: merge, pr: { repo: "acme/web", number: 7, url: "https://github.com/acme/web/pull/7", title: "Cache", branch: "cache" } });
