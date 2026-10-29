@@ -180,9 +180,13 @@ const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "c
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
-/** A landing that authorized its merge, or is deploying or rolling back, is seen through, so the person cannot cancel it. */
+/**
+ * A landing that authorized its merge, or is deploying or rolling back, is seen through, so the person cannot cancel it.
+ * A review that ended for the person can be, so it stops waiting on them, as nothing else ends it once its pull request
+ * merged outside it.
+ */
 const seenThrough = (r: Review) => r.phase.kind === "deploying" || r.phase.kind === "rolling-back" || (r.phase.kind === "merging" && r.phase.authorized !== null);
-export const cancellable = (r: Review) => !ended.has(r.phase.kind) && !seenThrough(r);
+export const cancellable = (r: Review) => (!ended.has(r.phase.kind) || needsPerson(r)) && !seenThrough(r);
 
 /**
  * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
@@ -876,11 +880,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return next;
     },
 
-    /** Ends a running review for the person, and archives its reviewer. The builder is the person's, and stays as it is. */
+    /**
+     * Ends a running review, or one that waits on the person, for the person, and archives its reviewer. The builder is
+     * the person's, and stays as it is.
+     */
     cancel(builderId: ThreadId, by: string): Review {
       const r = registry.review(builderId);
       if (r === null) throw new HttpError(409, `thread ${builderId} has no review`);
-      if (ended.has(r.phase.kind)) throw new HttpError(409, `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
+      if (ended.has(r.phase.kind) && !needsPerson(r)) throw new HttpError(409, `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
       if (!cancellable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}, and a merge or deploy that has begun is seen through, so it cannot be cancelled. It ends landed or with the person`);
       const next = end(r, { kind: "cancelled", who: "person", by });
       const archive = finished(r.reviewer);
