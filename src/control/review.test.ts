@@ -10,7 +10,7 @@ import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds } from "./policy.ts";
-import { agentReplies, humanLabel, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
@@ -52,8 +52,11 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const started: StartRequest[] = [];
   let snapshot: PrSnapshot = { pr: { ...pr }, detail: { head: head1, branch: "feature", base: "main", body: "Adds a cache.\n\nNot checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
   let files: ChangedFile[] = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
+  /** Other pull requests than #7, by number. */
+  const others = new Map<number, PrSnapshot>();
+  const read = (n: number) => n === pr.number ? snapshot : others.get(n)!;
   const merges: string[] = [];
-  let mergeAnswer: () => MergeResult = () => ({ kind: "merged", commit: merged });
+  let mergeAnswer: (sha: string) => MergeResult = () => ({ kind: "merged", commit: merged });
   const labels = new Set<string>();
   const labelCalls: string[] = [];
   let labelAnswer: (name: string) => LabelResult = (name) => { labels.add(name); return { kind: "labelled" }; };
@@ -75,11 +78,20 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     registry, harnessModel: "gpt-6-astra",
     github: {
       find: async () => [7],
-      async poll() { if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(snapshot); },
+      async poll(_, n) { if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
       files: async () => files,
       has: async (_, __, path) => path === ".nexus/verify" && verifies,
       async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
-      async merge(_, __, sha) { merges.push(sha); const answer = mergeAnswer(); if (answer.kind === "merged") snapshot = { ...snapshot, pr: { ...snapshot.pr, state: "merged" }, detail: { ...snapshot.detail, mergeCommit: answer.commit } }; return answer; },
+      async merge(_, n, sha) {
+        merges.push(sha);
+        const answer = mergeAnswer(sha);
+        if (answer.kind === "merged") {
+          const s = read(n);
+          const next = { ...s, pr: { ...s.pr, state: "merged" as const }, detail: { ...s.detail, mergeCommit: answer.commit } };
+          if (n === pr.number) snapshot = next; else others.set(n, next);
+        }
+        return answer;
+      },
     },
     inbox: async (target, message) => { delivering++; if (held !== null) { held.entered(); await held.released; } if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
     replies: async (target) => replies.get(target.id) ?? [],
@@ -110,10 +122,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     clock += 61_000;
   };
   return {
-    registry, builder, pr, loop, add, sent, started, merges, replies, reply, deployers, woken,
+    registry, builder, pr, loop, add, sent, started, merges, replies, reply, deployers, woken, others,
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
     set files(f: ChangedFile[]) { files = f; },
-    set mergeAnswer(a: () => MergeResult) { mergeAnswer = a; },
+    set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
     labels, labelCalls, set labelAnswer(a: (name: string) => LabelResult) { labelAnswer = a; },
     set check(c: CheckState) { check = c; },
     checkThreads, discarded,
@@ -485,6 +497,83 @@ test("another repository's PR merges without a deploy", async (t) => {
   assert.equal(f.registry.desiredRelease(), null);
 });
 
+/** A second builder in `f`'s project whose PR #8 at `head2` merges as `merged2`, and whose review `f`'s loop starts. */
+const merged2 = "n".repeat(40);
+async function secondBuilder(f: ReturnType<typeof fixture>, loop: ReturnType<ReturnType<typeof fixture>["loop"]>) {
+  const builder = f.add("th-builder-2", true);
+  const pr = { ...f.pr, number: 8, url: "https://github.com/ramtinJ95/nexus/pull/8" };
+  f.registry.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  f.others.set(8, { ...f.snapshot, pr: { ...pr }, detail: { ...f.snapshot.detail, head: head2, branch: "second" } });
+  f.mergeAnswer = (sha) => ({ kind: "merged", commit: sha === head1 ? merged : merged2 });
+  await loop.start(builder, { land: "nLAPTOP" });
+  return builder;
+}
+const healthy = (f: ReturnType<typeof fixture>, commit: string) => {
+  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt: Date.now() });
+};
+
+test("landings deploy one at a time: the second merges once the first is healthy, and rolls back to the first's commit", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  const second = await secondBuilder(f, loop);
+  await loop.poll();
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  f.reply(f.registry.review(second)!.reviewer, verdict(f.registry.review(second)!, {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "the second waits before it merges, so main gains one undeployed commit at a time");
+  assert.equal(f.registry.desiredRelease()?.commit, merged);
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.deepEqual(f.registry.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} deploys` });
+  assert.equal(phaseNote(f.registry.review(second)!), `, waiting while ${f.review().id} deploys`);
+
+  healthy(f, merged);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.merges, [head1, head2]);
+  assert.equal(f.registry.desiredRelease()?.commit, merged2);
+  assert.deepEqual(f.registry.review(second)!.phase, { kind: "deploying", commit: merged2, previous: merged, requested: true, deadline: (f.registry.review(second)!.phase as { deadline: number }).deadline });
+
+  f.registry.reportRelease({ node, role: "control", commit: merged, target: merged2, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.registry.desiredRelease()?.commit, merged, "the rollback goes to the first landing's commit, which was healthy");
+  healthy(f, merged);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual((f.registry.review(second)!.phase as { reasons: string[] }).reasons, [
+    `The deploy of ${merged2} failed: node control rolled-back (health check failed).`,
+    `Rolled back to the previous release, ${merged}, which every service reports healthy.`,
+    `${merged2} is still on the default branch, so revert it before the next deploy.`,
+  ]);
+});
+
+test("a landing waits to merge while the control plane drains for a deploy, and while another landing rolls back", async (t) => {
+  const f = fixture(t);
+  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  f.registry.setDrain({ commit: previous, expiresAt: Date.now() + 60_000 });
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, waiting: "a deploy drains the control plane" });
+  f.registry.setDrain(null);
+  const second = await secondBuilder(f, loop);
+  await loop.poll();
+  await loop.poll();
+  f.reply(f.registry.review(second)!.reviewer, verdict(f.registry.review(second)!, {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "the second waits for the first, which merged once the drain ended");
+  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "rolling-back");
+  assert.deepEqual(f.registry.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} rolls back` });
+  healthy(f, previous);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.deepEqual(f.merges, [head1, head2]);
+  assert.equal((f.registry.review(second)!.phase as { previous: string }).previous, previous);
+});
+
 test("a review that lands archives its builder and reviewer, once, whether its PR deploys or not", async (t) => {
   for (const repo of ["ramtinJ95/nexus", "acme/shop"]) {
     const f = fixture(t, { repo });
@@ -596,6 +685,23 @@ test("the policy names every condition that fails and every reserved case, and h
     "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.",
     "Always needs the person: anything irreversible, as it changes src/control/registry.ts.",
   ] });
+});
+
+test("paths under docs/ hold for no reserved case by their names, while deploy/ and shipped code still do", () => {
+  const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
+  const review: Review = {
+    id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 199, url: "", title: "", branch: "f" }, models: { builder: "a", reviewer: "b" }, reviewerKind: "harness",
+    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "merging", authorized: null }, outbox: null, since: 0, nudges: 0, startedAt: 0, rounds: [round],
+  };
+  const pr: PrSnapshot = { pr: { repo: "ramtinJ95/nexus", number: 199, title: "", url: "", state: "open", checks: "none", review: "none", conflict: false }, detail: { head: head1, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
+  const holds = (...paths: string[]) => landingHolds({ review, pr, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) });
+  const pr199 = ["README.md", "docs/explorations/install.md", "docs/roadmap.md", ...["README.md", "loopback.py", "run.ts", "standin/apt-get", "standin/github-host-keys", "standin/journalctl", "standin/qemu",
+    "standin/ssh-keyscan", "standin/systemctl", "standin/tailscale", "tailnet.ts", "transcript.txt", "tsconfig.json"].map((p) => `docs/verification/fresh-install/${p}`)];
+  assert.deepEqual(holds(...pr199), []);
+  assert.deepEqual(holds("deploy/README.md", "src/tailscale.ts", "src/control/credentials.ts"), [
+    "Always needs the person: changes to secrets, as it changes deploy/README.md, src/control/credentials.ts.",
+    "Always needs the person: changes to the tailnets, as it changes src/tailscale.ts.",
+  ]);
 });
 
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {
