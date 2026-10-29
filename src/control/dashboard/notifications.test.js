@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
-import { coordinator, notificationChannel, badgeCount, badgeText, owedSeen, seenBody } from "./notifications.js";
+import { coordinator, notificationChannel, owedSeen, seenBody } from "./notifications.js";
 
 const row = (attention, working = false, id = "t1") => ({ id, attention, working });
 test("initial states are silent; failures and parked notify immediately", () => {
@@ -15,15 +15,13 @@ test("initial states are silent; failures and parked notify immediately", () => 
   update([row("failed")], 9002);
   update([row("decision")], 9003);
   assert.deepEqual(events.map((r) => r.attention), ["parked", "failed", "decision"]);
-  assert.equal(badgeCount([row("decision"), row("working")]), 1);
 });
-test("a session waiting on the person counts in the badge and notifies at once, as its row stays bright", () => {
+test("a session waiting on the person notifies at once, as its row stays bright", () => {
   const events = [];
   const update = coordinator((r) => events.push(r));
   update([row("working")], 0);
   update([row("waiting")], 1);
   assert.deepEqual(events.map((r) => r.attention), ["waiting"]);
-  assert.equal(badgeCount([row("waiting"), row("working"), row(null)]), 1);
 });
 test("reply waits two seconds, and a follow-up cancels even when unread reply outranks working", () => {
   const events = [];
@@ -65,12 +63,6 @@ test("focused other thread gets only toast; background needs secure context and 
   assert.equal(notificationChannel(false, null, "t1", false, "granted"), null);
   assert.equal(notificationChannel(false, null, "t1", true, "default"), null);
   assert.equal(notificationChannel(true, null, "t1", false, "unavailable"), "toast");
-});
-test("badge counts only actionable threads and caps its label", () => {
-  assert.equal(badgeCount([row("failed"), row("parked"), row("reply"), row("working"), row(null)]), 3);
-  assert.equal(badgeText(0), "0");
-  assert.equal(badgeText(9), "9");
-  assert.equal(badgeText(10), "9+");
 });
 
 
@@ -131,9 +123,9 @@ const marking = slice("let marking = false;", "\nsetInterval(markSeen, 1000);");
 function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms) }) {
   const timers = [];
   const intervals = [];
-  const favicon = {};
+  const favicon = { href: "/assets/favicon.svg?v=0123456789ab" };
   const doc = {
-    title: "",
+    title: "Threads · Nexus",
     getElementById: (id) => id === "convo" ? conversation : null,
     querySelector: (selector) => selector === 'link[rel="icon"]' ? favicon : null,
   };
@@ -151,7 +143,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = 
     navigator: { locks: { request: (_, hold) => { if (!browser.locked) { browser.locked = true; hold(); } return new Promise(() => {}); } } },
     document: doc, fetch, Date: { now },
     AbortSignal: { timeout }, setTimeout: (f, ms) => timers.push({ f, at: now() + ms }), clearTimeout: () => timers.splice(0),
-    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), badgeCount, badgeText, owedSeen,
+    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), owedSeen,
     currentThread: () => "t1", focused: () => focused, activeTab: null,
   };
   const code = runInNewContext(`${api}\n${rows}\n${marking}\n({ readRows, markSeen })`, context);
@@ -191,10 +183,19 @@ test("stalled attention requests time out, release their lock and retry", async 
       stall = false;
       await call();
       assert.equal(sent(), 2, "the next call goes out once the stalled one gave up");
-      if (method === "GET") assert.ok(page.favicon.href.startsWith("data:image/svg+xml,"), "badges recover too");
       assert.ok(timeouts.every((ms) => ms === 10_000));
     });
   }
+});
+
+test("threads that need the person leave the tab's title and icon as the page set them", async () => {
+  let reads = 0;
+  const listed = ["failed", "decision", "parked", "limited", "reply", "waiting"].flatMap((attention) => [row(attention, false, `${attention}-1`), row(attention, false, `${attention}-2`)]);
+  const leader = tab(browser(), { fetch: async () => { reads += 1; return json(listed); } });
+  await settle();
+  assert.ok(reads > 0, "the tab read the threads");
+  assert.equal(leader.doc.title, "Threads · Nexus");
+  assert.equal(leader.favicon.href, "/assets/favicon.svg?v=0123456789ab");
 });
 
 test("a hidden tab notifies from the rows the tab that follows the events read, with no request of its own", async () => {
@@ -223,7 +224,7 @@ test("a hidden tab notifies from the rows the tab that follows the events read, 
   stream.onmessage({});
   await settle();
   assert.deepEqual(notified, { leader: ["waiting"], hidden: ["waiting"] }, "a change that needs the person notifies every tab at once");
-  assert.equal(hidden.doc.title, "(1) Nexus", "and counts in every tab's title");
+  assert.equal(hidden.doc.title, "Threads · Nexus", "and leaves every tab's title as the page set it");
 
   now = 1000;
   listed = [{ ...listed[0], attention: "reply", lastReplyAt: 1000 }];
@@ -262,14 +263,16 @@ test("the tab that follows the events reads every second while a turn runs over 
 
 test("the tab that follows the events reads again a second after a read failed", async () => {
   let fail = true;
+  let read = 0;
   const shared = browser();
-  const leader = tab(shared, { fetch: async () => { if (fail) throw new Error("connection reset"); return json([{ id: "t1", attention: "failed" }]); } });
+  const leader = tab(shared, { fetch: async () => { if (fail) throw new Error("connection reset"); read += 1; return json([{ id: "t1", attention: "failed" }]); } });
   await settle();
   assert.deepEqual(leader.timers.map((timer) => timer.at), [1000]);
   fail = false;
   leader.timers[0].f();
   await settle();
-  assert.equal(leader.doc.title, "(1) Nexus");
+  assert.equal(read, 1);
+  assert.deepEqual(leader.timers, [], "and stops retrying once it reads");
 });
 
 test("a page marks each reply it shows seen once, so one marked unseen elsewhere stays unseen", async () => {
@@ -298,5 +301,4 @@ test("a usage-limit stop notifies at once, where the reply that recorded it woul
   update([row("limited")], 100);
   update([row("limited")], 5000);
   assert.deepEqual(events.map((r) => r.attention), ["limited"]);
-  assert.equal(badgeCount([row("limited"), row("working")]), 1);
 });
