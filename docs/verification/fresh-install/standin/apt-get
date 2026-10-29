@@ -1,0 +1,34 @@
+#!/bin/bash
+# Stand-in for `apt-get install -y <package>...` into the machine at $1, run on the host as root: this host reaches no
+# Debian mirror, so it copies each package and every dependency the machine lacks from this host's own Debian 12
+# install, with its dpkg records, so dpkg in the machine lists them as installed. No maintainer script runs.
+set -euo pipefail
+root=$1
+shift
+
+installed() { dpkg-query --admindir="$root/var/lib/dpkg" -W -f='${db:Status-Status}' "$1" 2>/dev/null | grep -qx installed; }
+# A package's dependencies, the first of each set of alternatives, without versions or architectures.
+depends() {
+  dpkg-query -W -f='${Pre-Depends}, ${Depends}' "$1" | tr ',' '\n' | sed -E 's/\|.*//; s/\(.*\)//; s/:any//; s/[[:space:]]//g' | sed '/^$/d'
+}
+
+queue=("$@") seen=() wanted=()
+while [ ${#queue[@]} -gt 0 ]; do
+  pkg=${queue[0]}
+  queue=("${queue[@]:1}")
+  [[ " ${seen[*]} " == *" $pkg "* ]] && continue
+  seen+=("$pkg")
+  installed "$pkg" && continue
+  dpkg-query -W "$pkg" >/dev/null 2>&1 || { echo "apt-get: this host has no $pkg to copy" >&2; exit 1; }
+  wanted+=("$pkg")
+  mapfile -t more < <(depends "$pkg")
+  queue+=("${more[@]}")
+done
+
+for pkg in "${wanted[@]}"; do
+  dpkg-query -L "$pkg" | while read -r path; do if [ -e "$path" ] && [ ! -d "$path" ]; then echo "$path"; fi; done \
+    | tar -C / --no-recursion -cf - -T - 2>/dev/null | tar -C "$root" -xpf -
+  { dpkg-query -s "$pkg"; echo; } >> "$root/var/lib/dpkg/status"
+  for info in /var/lib/dpkg/info/"$pkg".* /var/lib/dpkg/info/"$pkg":*.*; do [ -e "$info" ] && cp -p "$info" "$root/var/lib/dpkg/info/"; done
+done
+echo "installed ${wanted[*]:-nothing new}"

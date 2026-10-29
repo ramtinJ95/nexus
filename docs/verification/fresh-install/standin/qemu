@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stand-in for qemu-system-x86_64 and qemu-img. This machine has no KVM, so no pylon boots.
+echo "$(basename "$0"): a stand-in. This test machine has no KVM, so it runs no pylon" >&2
+exit 1
