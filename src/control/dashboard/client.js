@@ -905,6 +905,8 @@ tabsBar?.querySelector('[data-tab="convo"]').addEventListener("click", () => sho
 // The layout the reader picked for diffs, on every thread page.
 const layoutKey = "nexus.diff-layout";
 let diffLayout = localStorage.getItem(layoutKey) === "split" ? "split" : "unified";
+/** A window as narrow as a phone's, which draws unified, as split leaves each side too few characters to read. */
+const narrow = matchMedia("(max-width: 760px)");
 /** The open diff as last read, so a change of layout draws it again without reading the pylon. */
 let openDiff = null;
 
@@ -924,17 +926,22 @@ function pickLayout(layout) {
   diffLayout = layout;
   localStorage.setItem(layoutKey, layout);
   for (const button of fileView.querySelectorAll(".fv-layout button")) button.setAttribute("aria-pressed", String(button.value === layout));
-  // While a read is under way, it draws in the new layout once it is done.
+  redrawDiff();
+}
+
+/** Draws the open diff again without reading the pylon. While a read is under way, it draws in the new layout when done. */
+function redrawDiff() {
   if (openDiff === null || openDiff.read !== diffRead) return;
   openDiff = { ...openDiff, read: ++diffRead };
   void drawDiff(openDiff);
 }
+narrow.addEventListener("change", redrawDiff);
 
 /** Shows a diff read from the pylon, once its lines are drawn. */
 async function drawDiff({ read, head, shown, truncated }) {
   try {
     const { diffView } = await import("./diff.js");
-    const view = shown.kind === "lines" ? await diffView(shown.files, diffLayout) : null;
+    const view = shown.kind === "lines" ? await diffView(shown.files, narrow.matches ? "unified" : diffLayout) : null;
     if (read !== diffRead) return;
     const typing = document.activeElement?.matches?.(".note-text") ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     head.querySelector(".fv-layout").hidden = view === null;

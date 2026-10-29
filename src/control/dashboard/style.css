@@ -556,6 +556,7 @@ h4.md-h { font-size: 1.07em; }
   .comp-box textarea { font-size: 16px; }
   .comp-foot .keys { display: none; }
   .fv-head { padding: 10px 12px; }
+  .fv-head .fv-layout { display: none; }
 
   .page { padding: 14px 12px 24px; }
   .ov .wide { display: none; }
