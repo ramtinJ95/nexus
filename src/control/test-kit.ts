@@ -54,7 +54,7 @@ export function testPylon(thread: Pick<Thread, "id" | "pylonId">, { node = testN
     live: { previews: [], overlay: [] },
     liveHash: liveHash as LiveHash,
   });
-  return pylon;
+  return { ...pylon, thread: thread.id };
 }
 
 /** Creates a thread and its pylon. `claudePrompt` makes it a Claude thread whose worker gets that prompt. */
