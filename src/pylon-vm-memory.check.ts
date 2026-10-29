@@ -11,14 +11,14 @@
  * The state root must be at most 39 bytes. It prints PYLON_VM_MEMORY_CHECK_PASS last.
  */
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
-import type { CheckpointId, ImageId } from "./images.ts";
+import { join, resolve } from "node:path";
+import { output } from "./exec.ts";
+import type { CheckpointId } from "./images.ts";
 import type { BootInputs } from "./project.ts";
 import type { PylonId } from "./protocol.ts";
-import { createPylonVmBackend } from "./pylon-vm-backend.ts";
+import { parseMeminfo } from "./probe/host.ts";
+import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 
 const [imageArg, stateArg, memoryArg, touchArg, diskArg] = process.argv.slice(2);
 if (imageArg === undefined || stateArg === undefined) throw new Error("usage: node src/pylon-vm-memory.check.ts <image directory> <state root> [memory GiB] [GiB to touch]");
@@ -31,30 +31,22 @@ assert.ok(Number.isInteger(memoryGiB) && Number.isInteger(touchGiB) && touchGiB 
 assert.ok(Number.isInteger(diskGiB) && diskGiB > 0 && diskGiB < 6, "the disk write is whole GiB, and fits the 8 GiB disk");
 
 const pylonId = `pylon-mem-${Date.now().toString(36)}` as PylonId;
-const image = basename(imageDir) as ImageId;
 const signal = () => AbortSignal.timeout(20 * 60_000);
-const backend = createPylonVmBackend({ stateRoot, artifacts: dirname(imageDir), secrets: { value: () => undefined, names: () => [] } });
-const boot = (source: BootInputs["source"]): BootInputs => ({
-  pylonId, image, source,
-  resources: { cpus: 2, memoryGiB, diskGiB: 8 },
-  network: { allowedHosts: ["github.com"], secrets: [] },
-  repo: { kind: "clone", url: "https://github.com/octocat/Hello-World.git", checkout: { branch: "master", commit: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d" } },
-  dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
-});
-const live = { previews: [], overlay: [] };
+const { backend, image } = checkBackend(imageDir, stateRoot);
+const boot = (source: BootInputs["source"]) => checkBoot(pylonId, image, source, { memoryGiB });
 const step = (name: string, value = "ok") => console.log(`${name}: ${value}`);
 const sh = (script: string, timeoutMs = 60_000) => backend.guest(pylonId).exec(["sh", "-c", script], { cwd: "/home/user", timeoutMs });
 
 const mib = (kib: number) => Math.round(kib / 1024);
 async function hostAvailableMiB(): Promise<number> {
-  return mib(Number(/MemAvailable:\s+(\d+) kB/.exec(await readFile("/proc/meminfo", "utf8"))![1]));
+  return Math.round(parseMeminfo(await readFile("/proc/meminfo", "utf8")).availableGiB * 1024);
 }
 /**
  * The VM's qemu processes. Their command lines name only Gondolin's temporary files, so they are found as
  * descendants of the controller, whose command line names the instance directory.
  */
 async function vmFamily(): Promise<{ pid: string; rssKiB: number; args: string }[]> {
-  const { stdout } = await promisify(execFile)("ps", ["-eo", "pid=,ppid=,rss=,args="]);
+  const stdout = await output("ps", ["-eo", "pid=,ppid=,rss=,args="]);
   const procs = stdout.trim().split("\n").map((line) => {
     const [pid, ppid, rss, ...args] = line.trim().split(/\s+/);
     return { pid: pid!, ppid: ppid!, rssKiB: Number(rss), args: args.join(" ") };
@@ -71,7 +63,7 @@ const vmQemu = async () => (await vmFamily()).filter((p) => p.args.startsWith("q
 const exists = (path: string) => stat(path).then(() => true, () => false);
 const vmRssMiB = async () => mib((await vmQemu()).reduce((sum, p) => sum + p.rssKiB, 0));
 async function fsType(path: string): Promise<string> {
-  return (await promisify(execFile)("findmnt", ["-n", "-o", "FSTYPE", "-T", path])).stdout.trim();
+  return (await output("findmnt", ["-n", "-o", "FSTYPE", "-T", path])).trim();
 }
 async function sample(label: string): Promise<void> {
   step(`HOST_${label}`, `MemAvailable=${await hostAvailableMiB()} MiB, VM RSS=${await vmRssMiB()} MiB`);
@@ -81,7 +73,7 @@ let failure: unknown = null;
 try {
   await sample("BEFORE_BOOT");
   const booted = performance.now();
-  await backend.ensureRunning(boot({ kind: "fresh", preSetup: null }), live, signal());
+  await backend.ensureRunning(boot({ kind: "fresh", preSetup: null }), emptyLive, signal());
   step("BOOT_SECONDS", ((performance.now() - booted) / 1000).toFixed(1));
   const meminfo = await sh("grep -E 'MemTotal|MemAvailable' /proc/meminfo");
   step("GUEST_MEMINFO", meminfo.output.trim().replace(/\s+/g, " "));
@@ -141,7 +133,7 @@ print('released', flush=True)
   step("PAUSE_SECONDS", ((performance.now() - paused) / 1000).toFixed(1));
   await sample("PAUSED");
   const woken = performance.now();
-  await backend.ensureRunning(boot({ kind: "resume", checkpoint }), live, signal());
+  await backend.ensureRunning(boot({ kind: "resume", checkpoint }), emptyLive, signal());
   step("WAKE_SECONDS", ((performance.now() - woken) / 1000).toFixed(1));
   const marker = await sh(`cat /home/user/workspace/memory-marker && stat -c %s /home/user/workspace/disk-load`);
   assert.equal(marker.output.trim(), `before-pause\n${diskGiB * 2 ** 30}`, "the wake kept the disk, the written file included");
@@ -159,7 +151,7 @@ print('released', flush=True)
   }
   step("CRASH_LEFTOVER", `${leftover} exists=${await exists(leftover)}`);
   assert.ok(await exists(leftover), "the kill left the running disk behind");
-  await backend.ensureRunning(boot({ kind: "resume", checkpoint }), live, signal());
+  await backend.ensureRunning(boot({ kind: "resume", checkpoint }), emptyLive, signal());
   const [restarted] = await vmQemu();
   const fresh = /-drive file=([^,]+)/.exec(restarted?.args ?? "")?.[1];
   step("AFTER_CRASH_RESTART", `old exists=${await exists(leftover)}, new ${fresh}`);
