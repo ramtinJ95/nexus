@@ -993,8 +993,8 @@ function terminalFollows() {
 }
 
 // The terminal tab attaches on its first show, as `nexus attach` does, and stays attached while the reader looks at
-// other tabs, so it holds the pylon awake as an attached terminal does until it is detached or the page closes. An
-// ended terminal keeps its last screen until the next attach replaces it.
+// other tabs, so it holds the pylon awake as an attached terminal does until it is detached or the page closes. A
+// terminal that ends on its own keeps its last screen until the next attach replaces it.
 let terminal = null;
 let lastTerminal = null;
 async function showTerminal() {
