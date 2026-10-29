@@ -1,9 +1,12 @@
+import type { ReleaseReport } from "./model.ts";
+
 export type Role = "control" | "probe";
 export interface DesiredRelease { commit: string; requestedBy: string; requestedAt: number }
 export interface ReleaseHealth { commit: string | null; healthy: boolean }
+/** An outcome the worker recorded at a commit: its journal's transaction, or the target of its last report. */
 export interface Attempt {
-  commit: string;
-  state: "installing" | "healthy" | "rolled-back" | "failed";
+  commit: string | null;
+  state: ReleaseReport["state"];
   reason: string | null;
 }
 export interface DeployInput {
@@ -11,7 +14,7 @@ export interface DeployInput {
   role: Role;
   current: ReleaseHealth;
   control: ReleaseHealth;
-  attempt: Attempt | null;
+  attempts: readonly Attempt[];
   turnRunning: boolean;
   drainStartedAt: number | null;
   drainTimeoutMs: number;
@@ -20,19 +23,21 @@ export interface DeployInput {
 export type DeployStep =
   | { kind: "idle" }
   | { kind: "healthy" }
-  | { kind: "recover" }
   | { kind: "wait"; reason: "control-first" | "idle" }
   | { kind: "stop"; reason: string }
   | { kind: "install"; commit: string };
 
+/** The first attempt that failed or rolled back at the desired commit, which holds that commit back until another is requested. */
+export function quarantined(desired: DesiredRelease | null, attempts: readonly Attempt[]): Attempt | null {
+  if (desired === null) return null;
+  return attempts.find((a) => a.commit === desired.commit && (a.state === "rolled-back" || a.state === "failed")) ?? null;
+}
+
 export function planDeploy(input: DeployInput): DeployStep {
-  const { desired, attempt, current } = input;
-  // Recover a previous link switch even when somebody has requested a different release since.
-  if (attempt?.state === "installing") return { kind: "recover" };
+  const { desired, current } = input;
   if (desired === null) return { kind: "idle" };
-  if (attempt?.commit === desired.commit && (attempt.state === "rolled-back" || attempt.state === "failed")) {
-    return { kind: "stop", reason: attempt.reason ?? attempt.state };
-  }
+  const held = quarantined(desired, input.attempts);
+  if (held !== null) return { kind: "stop", reason: held.reason ?? held.state };
   if (current.commit === desired.commit && current.healthy) return { kind: "healthy" };
   if (input.role === "probe" && (input.control.commit !== desired.commit || !input.control.healthy)) {
     return { kind: "wait", reason: "control-first" };

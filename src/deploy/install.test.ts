@@ -21,9 +21,9 @@ async function fixture(t: TestContext) {
   const calls: string[] = [];
   const boundary: InstallBoundary = {
     async prepare(hash) { calls.push(`prepare:${hash}`); return `releases/${hash}`; },
-    async restart(role) { calls.push(`restart:${role}`); },
-    async healthy(role) { calls.push(`healthy:${role}`); return true; },
-    async journal(role) { calls.push(`journal:${role}`); return "service failed to bind"; },
+    async restart() { calls.push("restart"); },
+    async healthy() { calls.push("healthy"); return true; },
+    async journal() { calls.push("journal"); return "service failed to bind"; },
   };
   return { prefix, calls, boundary, installer: new ReleaseInstaller(prefix, "control", boundary) };
 }
@@ -35,19 +35,19 @@ test("a healthy install switches only its role's link and records the full commi
   assert.equal(result.commit, commit);
   assert.equal(await readlink(join(prefix, "control-current")), `releases/${commit}`);
   assert.equal(await readlink(join(prefix, "current")), "releases/old");
-  assert.deepEqual(calls, [`prepare:${commit}`, "restart:control", "healthy:control"]);
+  assert.deepEqual(calls, [`prepare:${commit}`, "restart", "healthy"]);
   assert.deepEqual(await installer.observed(), result);
 });
 
-test("failed health rolls back, keeps journal tail, and does not retry the bad release", async (t) => {
+test("failed health rolls back, keeps journal tail, and leaves the attempt that quarantines the bad release", async (t) => {
   const { prefix, boundary, installer } = await fixture(t);
   boundary.healthy = async () => await readlink(join(prefix, "control-current")) === "releases/old";
   const result = await installer.install(commit);
   assert.equal(result.state, "rolled-back");
   assert.match(result.reason!, /health check failed\nservice failed to bind/);
   assert.equal(await readlink(join(prefix, "control-current")), "releases/old");
-  boundary.prepare = async () => { throw new Error("must not retry"); };
-  assert.deepEqual(await installer.install(commit), result);
+  assert.deepEqual(await installer.observed(), result);
+  assert.equal(await installer.recover(), null, "a finished install has nothing to recover");
 });
 
 test("restart failure also restores the previous release", async (t) => {
@@ -78,9 +78,19 @@ test("a process interrupted around the link swap recovers from its persistent tr
       await symlink(`releases/${commit}`, join(prefix, "control-current"));
     }
     const restarted = new ReleaseInstaller(prefix, "control", boundary);
-    assert.equal((await restarted.recover()).state, "rolled-back");
+    assert.equal((await restarted.recover())?.state, "rolled-back");
     assert.equal(await readlink(join(prefix, "control-current")), "releases/old");
   }
+});
+
+test("an install refuses to run over an unfinished one, which only recovery may settle", async (t) => {
+  const { prefix, calls, installer } = await fixture(t);
+  assert.equal(await installer.recover(), null, "no journal, nothing to recover");
+  const unfinished = { commit, previous: "releases/old", target: `releases/${commit}`, state: "installing", reason: null };
+  await writeFile(join(prefix, "control-deploy.json"), JSON.stringify(unfinished));
+  await assert.rejects(installer.install(commit), /unfinished install must be recovered first/);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(await installer.observed(), unfinished);
 });
 
 test("a preparation failure never touches the running release", async (t) => {

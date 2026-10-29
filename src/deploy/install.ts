@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
 import { fullCommit } from "./model.ts";
-import type { Attempt, Role } from "./plan.ts";
+import type { Role } from "./plan.ts";
 
 const exec = promisify(execFile);
 export const repository = "https://github.com/ramtinJ95/nexus.git";
@@ -36,26 +36,30 @@ export async function checkoutMerged(directory: string, commit: string, run: Com
   await run("git", ["clean", "-ffdqx"], directory);
 }
 
-export interface Transaction extends Attempt { previous: string; target: string }
+export interface Transaction {
+  commit: string;
+  previous: string;
+  target: string;
+  state: "installing" | "healthy" | "rolled-back" | "failed";
+  reason: string | null;
+}
 export interface InstallBoundary {
   /** Builds and performs upgrade steps without switching links or restarting services. */
   prepare(commit: string): Promise<string>;
   beforeSwitch?(): Promise<void>;
-  activate?(role: Role): Promise<void>;
-  restart(role: Role): Promise<void>;
+  activate?(): Promise<void>;
+  restart(): Promise<void>;
   /** Must bound both the active-service check and API request, including its response body. */
-  healthy(role: Role): Promise<boolean>;
-  journal(role: Role): Promise<string>;
+  healthy(): Promise<boolean>;
+  journal(): Promise<string>;
 }
 
 /** One serialized runner owns a role. Its journal and links must live in a root-owned directory. */
 export class ReleaseInstaller {
   private readonly link: string;
   private readonly journal: string;
-  private readonly role: Role;
   private readonly boundary: InstallBoundary;
   constructor(prefix: string, role: Role, boundary: InstallBoundary) {
-    this.role = role;
     this.boundary = boundary;
     this.link = join(prefix, role === "control" ? "control-current" : "current");
     this.journal = join(prefix, `${role}-deploy.json`);
@@ -80,9 +84,7 @@ export class ReleaseInstaller {
 
   async install(commit: string): Promise<Transaction> {
     if (!fullCommit.test(commit)) throw new Error("release must be a full lower-case commit hash");
-    const unfinished = await this.observed();
-    if (unfinished?.state === "installing") return this.recover();
-    if (unfinished?.commit === commit && (unfinished.state === "rolled-back" || unfinished.state === "failed")) return unfinished;
+    if ((await this.observed())?.state === "installing") throw new Error("an unfinished install must be recovered first");
     // Automatic deployment needs a bootstrapped, recoverable release.
     const previous = await readlink(this.link);
     const target = await this.boundary.prepare(commit);
@@ -90,29 +92,29 @@ export class ReleaseInstaller {
     const transaction = await this.record({ commit, previous, target, state: "installing", reason: null });
     try {
       await this.point(target);
-      await this.boundary.activate?.(this.role);
-      await this.boundary.restart(this.role);
-      if (!await this.boundary.healthy(this.role)) throw new Error("release health check failed");
+      await this.boundary.activate?.();
+      await this.boundary.restart();
+      if (!await this.boundary.healthy()) throw new Error("release health check failed");
       return await this.record({ ...transaction, state: "healthy" });
     } catch (error) {
       return this.rollback(transaction, error instanceof Error ? error.message : String(error));
     }
   }
 
-  async recover(): Promise<Transaction> {
+  /** Rolls back an install a process left unfinished, or resolves null when there is none. */
+  async recover(): Promise<Transaction | null> {
     const transaction = await this.observed();
-    if (transaction === null) throw new Error("no deployment to recover");
-    if (transaction.state !== "installing") return transaction;
+    if (transaction?.state !== "installing") return null;
     return this.rollback(transaction, "deployer interrupted before health was committed");
   }
 
   private async rollback(transaction: Transaction, reason: string): Promise<Transaction> {
-    try { reason += `\n${(await this.boundary.journal(this.role)).slice(-16_384)}`; }
+    try { reason += `\n${(await this.boundary.journal()).slice(-16_384)}`; }
     catch { reason += "\njournal unavailable"; }
     try {
       await this.point(transaction.previous);
-      await this.boundary.restart(this.role);
-      if (!await this.boundary.healthy(this.role)) throw new Error("previous release is not healthy");
+      await this.boundary.restart();
+      if (!await this.boundary.healthy()) throw new Error("previous release is not healthy");
     } catch (error) {
       return this.record({ ...transaction, state: "failed", reason: `${reason}\nrollback failed: ${String(error)}` });
     }

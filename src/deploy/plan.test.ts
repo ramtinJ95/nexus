@@ -6,7 +6,7 @@ const commit = "a".repeat(40);
 const input: DeployInput = {
   desired: { commit, requestedBy: "nMac", requestedAt: 1 }, role: "control",
   current: { commit: "b".repeat(40), healthy: true }, control: { commit, healthy: true },
-  attempt: null, turnRunning: false, drainStartedAt: null, drainTimeoutMs: 60_000, now: 100_000,
+  attempts: [], turnRunning: false, drainStartedAt: null, drainTimeoutMs: 60_000, now: 100_000,
 };
 
 test("release planning is idle without a desired release, and converges on healthy observations", () => {
@@ -30,10 +30,19 @@ test("control drain refuses a running turn at the deadline, but idle wins at the
   assert.deepEqual(planDeploy({ ...input, drainStartedAt: 40_000 }), { kind: "install", commit });
 });
 
-test("interrupted installs recover before any new desired release; failures do not loop", () => {
-  assert.deepEqual(planDeploy({ ...input, desired: null, attempt: { commit, state: "installing", reason: null } }), { kind: "recover" });
+test("a failure recorded at the desired commit stops it before health or drain, and the report's reason comes first", () => {
+  const healthy = { ...input, current: { commit, healthy: true } };
   for (const state of ["failed", "rolled-back"] as const) {
-    assert.deepEqual(planDeploy({ ...input, attempt: { commit, state, reason: "bad build" } }), { kind: "stop", reason: "bad build" });
-    assert.deepEqual(planDeploy({ ...input, attempt: { commit: "c".repeat(40), state, reason: "bad build" } }), { kind: "install", commit });
+    const journal = { commit, state, reason: "candidate API failed" };
+    const report = { commit, state, reason: "agent turn still running at drain timeout" };
+    assert.deepEqual(planDeploy({ ...healthy, attempts: [journal] }), { kind: "stop", reason: "candidate API failed" });
+    assert.deepEqual(planDeploy({ ...input, turnRunning: true, attempts: [report] }), { kind: "stop", reason: report.reason });
+    assert.deepEqual(planDeploy({ ...input, attempts: [report, journal] }), { kind: "stop", reason: report.reason });
+    assert.deepEqual(planDeploy({ ...input, attempts: [{ commit, state, reason: null }] }), { kind: "stop", reason: state });
+    assert.deepEqual(planDeploy({ ...input, attempts: [{ ...journal, commit: "c".repeat(40) }, { ...report, commit: null }] }), { kind: "install", commit });
+    assert.deepEqual(planDeploy({ ...input, desired: null, attempts: [journal] }), { kind: "idle" });
+  }
+  for (const state of ["healthy", "installing", "waiting-for-idle"] as const) {
+    assert.deepEqual(planDeploy({ ...input, attempts: [{ commit, state, reason: null }] }), { kind: "install", commit });
   }
 });

@@ -1,8 +1,8 @@
 import { copyFile, readFile, readlink, rename, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, ReleaseInstaller } from "./install.ts";
-import { planDeploy, type Role } from "./plan.ts";
+import { command, checkoutMerged, ReleaseInstaller, type Transaction } from "./install.ts";
+import { planDeploy, quarantined, type Attempt, type Role } from "./plan.ts";
 import { fullCommit, type ReleaseReport, type ReleaseView } from "./model.ts";
 import { jsonRequest } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
@@ -84,6 +84,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     const { observedAt: _, ...wire } = value;
     await api("report", wire).catch(() => { console.error(`could not report ${role} release; retained locally for the next poll`); });
   };
+  const settled = (result: Transaction) => report(result.state === "installing" ? "failed" : result.state, result.commit, result.reason);
   let desired: string | null = null;
   let renewal: NodeJS.Timeout | undefined;
   let drainLost = false;
@@ -131,23 +132,24 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     journal: () => run("journalctl", ["-u", service, "-n", "40", "--no-pager"], prefix, 5000),
   });
   // Recovery must not depend on the API whose failed upgrade may have stopped it.
-  const attempt = await installer.observed();
-  if (attempt?.state === "installing") {
-    const result = await installer.recover();
-    await report(result.state === "healthy" ? "healthy" : result.state === "rolled-back" ? "rolled-back" : "failed", result.commit, result.reason);
-  }
+  const recovered = await installer.recover();
+  if (recovered !== null) await settled(recovered);
   const view = await api("release") as ReleaseView;
   desired = view.desired?.commit ?? null;
   const prior = await readJson(reportPath, null) as ReleaseReport | null;
-  if (desired !== null && prior?.target === desired && (prior.state === "failed" || prior.state === "rolled-back")) {
-    await report(prior.state, desired, prior.reason);
+  const journal = await installer.observed();
+  // The report also holds failures that never reached the journal, such as a failed build or a drain refusal.
+  const attempts: Attempt[] = [...prior === null ? [] : [{ commit: prior.target, state: prior.state, reason: prior.reason }], ...journal === null ? [] : [journal]];
+  const held = quarantined(view.desired, attempts);
+  if (held !== null) {
+    await report(held.state, desired, held.reason);
     if (role === "control") await api("drain", { commit: desired, release: true }).catch(() => {});
     return;
   }
   const current = { commit: await commitAt(link), healthy: await healthy() };
   const control = view.nodes.find((r) => r.role === "control");
   const observedControl = { commit: control?.commit ?? null, healthy: control?.state === "healthy" && Date.now() - control.observedAt < 90_000 };
-  const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempt: null, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
+  const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");
     if (role === "control" && desired !== null) await api("drain", { commit: desired, release: true }).catch(() => {});
@@ -159,7 +161,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       const start = Date.now();
       while (true) {
         const status = await drain();
-        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempt: null, turnRunning: !status.idle, drainStartedAt: start, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
+        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: !status.idle, drainStartedAt: start, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
         if (next.kind === "install") break;
         if (next.kind === "stop") throw new Error(next.reason);
         await report("waiting-for-idle", desired);
@@ -169,7 +171,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     }
     await report("installing", desired);
     const result = await installer.install(step.commit);
-    await report(result.state === "healthy" ? "healthy" : result.state === "rolled-back" ? "rolled-back" : "failed", result.commit, result.reason);
+    await settled(result);
     if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run);
   } catch (error) {
     await report(error instanceof WaitingForControl ? "waiting-for-control" : "failed", desired, String(error).slice(-20_000));
