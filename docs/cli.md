@@ -345,6 +345,7 @@ pullRequests: {
   review: string;                     // currently none, approved, changes_requested
   conflict: boolean | null;          // null until GitHub knows
   head?: string;                     // the head commit at the PR watch's last read
+  summary?: string;                  // the description's first paragraph at that read, for the dashboard
 }[];
 ```
 
@@ -895,9 +896,9 @@ same, or null. `threads` shows `stopped on its usage limit until 05:00 UTC` in p
 of `working`, and `which reset at 05:00 UTC` once the time passed, `show` prints a
 `usage limit:` line, and `conversation` ends with a line saying to send "continue"
 after the reset. The dashboard shows the same text as the thread's state, keeps the
-row bright and notifies at once. `limited` outranks `reply`, because the turn end
-that recorded the reply is the stop itself, and seen does not clear it. The next
-turn of the session clears it, whoever starts it.
+row bright, gives it a card in Needs you and notifies at once. `limited` outranks `reply`,
+because the turn end that recorded the reply is the stop itself, and seen does not
+clear it. The next turn of the session clears it, whoever starts it.
 
 Claude Code continues a session it still runs on its own, about 90 seconds after the
 reset, with the prompt "Your claude.ai usage limit has reset. Continue the task…",
