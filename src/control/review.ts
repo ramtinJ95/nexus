@@ -398,8 +398,22 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const passes = singleFlight(pass);
   const poll = passes.join;
 
-  /** Whether a turn of `t` ended since its last message from the loop, the only time its replies can hold an answer. */
-  const answeredSince = (r: Review, t: Thread) => t.lastReplyAt !== null && t.lastReplyAt > r.since;
+  /**
+   * When the newest turn of `t` that ended after `since` ended, or null when none has, and whether a Claude worker
+   * replied since. A Claude turn that ends with a background shell or subagent running reports heartbeats rather than
+   * its end, for up to hours, and stays `working`, so a Claude worker's turn also ends where its transcript says.
+   */
+  const heard = (t: Thread, since: number) => {
+    const claude = registry.agent(t).kind === "claude";
+    const entries = claude ? registry.claudeEntries(t.id) : [];
+    const ended = Math.max(t.lastReplyAt ?? -Infinity, ...entries.flatMap((e) => e.kind === "turn" ? [e.at] : []));
+    return { claude, ended: ended > since ? ended : null, replied: entries.some((e) => e.kind === "reply" && e.at > since) };
+  };
+  /** Whether `t` replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
+  const answeredSince = (r: Review, t: Thread) => {
+    const { ended, replied } = heard(t, r.since);
+    return ended !== null || replied;
+  };
   const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
     if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
     if (r.phase.kind === "verifying" && r.phase.thread !== null) live.discard(r.phase.thread);
@@ -465,9 +479,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * reminder saying what is `missing`, and after the last reminder, or hours of silence, the loop asks the person.
    */
   function waitOn(r: Review, t: Thread, who: "builder" | "reviewer", missing: string | null = null): Review {
-    if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
-    const turnEnded = !t.working && t.lastReplyAt !== null && t.lastReplyAt > r.since && now() - t.lastReplyAt > replyGraceMs;
-    if (!turnEnded) return r;
+    if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
+    const { claude, ended } = heard(t, r.since);
+    if (ended === null || (!claude && t.working) || now() - ended <= replyGraceMs) return r;
     if (r.nudges >= maxNudges) return toPerson(r, `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
     return send(r, who, (token) => reminder(who, missing, token), r.phase, r.nudges + 1);
   }
@@ -497,7 +511,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (snapshot.pr.state !== "open") return outside(answered, snapshot.pr.state) ?? toPerson(answered, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
-        if (now() - (builder.lastReplyAt ?? 0) < pushGraceMs) return r;
+        if (now() - (heard(builder, r.since).ended ?? now()) < pushGraceMs) return r;
         if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, builder, "builder", `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a check's result, so a failed check at an unmoved head is the person's.
