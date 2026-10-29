@@ -1,0 +1,55 @@
++   0.2s set up /home/verify from <repo>/src/../images/pylon
++   2.8s the control plane answers after 0.1 s
++   3.4s nexus --version -> exit 0 (cli-01-version.txt)
++   4.0s nexus project add drinks --scratch --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (cli-02-project-add.txt)
++   4.5s nexus start --project drinks --title Claude thread --claude This thread only checks Nexus's dashboard. Do nothing els... --model claude-sonnet-5-5 --json -> exit 0 (cli-03-start-claude.txt)
++   5.2s nexus start --project drinks --title Agent thread --json -> exit 0 (cli-04-start-agent.txt)
++  12.9s Claude has answered its prompt after 7.7 s
++  13.5s the agent thread's pylon runs after 0.6 s
++  13.5s == a Nexus agent thread: send, then steer and queue while it works
++  18.9s dashboard /threads/th-7571cd50ea5e -> 01-agent-idle-desktop.png, 01-agent-idle-phone.png; dock: ⌘↵ to send Send
++  19.0s desktop page sent {"text":"hello","requestId":"msg:32036e6fe75e6da9e78c5a3db794570a"}
++  19.0s typed "hello" into the composer and pressed Ctrl+Enter
++  19.7s the agent replies after 0.7 s
++  25.7s dashboard /threads/th-7571cd50ea5e -> 02-agent-sent-desktop.png, 02-agent-sent-phone.png; dock: scripted ⌘↵ to send Send
++  25.8s desktop page sent {"text":"bash: sleep 12","requestId":"msg:72fa3a4211d9afbfc4cdde1305fdc742"}
++  25.8s typed "bash: sleep 12" into the composer and pressed Ctrl+Enter
++  26.7s the agent works after 1.0 s
++  31.0s dashboard /threads/th-7571cd50ea5e -> 03-agent-working-desktop.png, 03-agent-working-phone.png; dock: The agent is working. 4s · 1 tool this turn · new messages queue Abort scripted ⌘↵ to queue Queue
++  31.1s desktop page sent {"text":"steer: take this after the sleep","requestId":"msg:4a3d44692686d31cb4f7a2cb38d7cae0"}
++  31.1s typed "steer: take this after the sleep" into the composer and pressed Ctrl+Enter
++  33.0s -> 04-agent-steered-desktop.png; dock: The agent is working. 6s · 1 tool this turn · new messages queue Abort scripted ⌘↵ to queue Queue
++  33.2s typed "queued: after the run" into the composer and pressed Alt+Enter
++  35.1s -> 05-agent-queued-desktop.png; composer holds "queued: after the run"
++  39.6s the agent's run and what it took end after 4.5 s
++  43.2s nexus conversation th-7571cd50ea5e -> exit 0 (cli-05-conversation-agent.txt)
++  48.1s dashboard /threads/th-7571cd50ea5e -> 06-agent-after-desktop.png, 06-agent-after-phone.png; dock: scripted ⌘↵ to send Send
++  48.1s == a Claude worker: send, then steer while it works
++  52.9s dashboard /threads/th-6e88df42d00d -> 07-claude-idle-desktop.png, 07-claude-idle-phone.png; dock: claude-sonnet-5-5 ⌘↵ to send Send
++  53.4s desktop page sent {"text":"Run `sleep 30` in bash, then reply with the word DONE.","requestId":"msg:144fe9d1615f96078c99368e2bc242b6"}
++  53.4s typed "Run `sleep 30` in bash, then reply with the word DONE." into the composer and pressed Ctrl+Enter
++  57.4s Claude works after 4.0 s
++  66.6s dashboard /threads/th-6e88df42d00d -> 08-claude-working-desktop.png, 08-claude-working-phone.png; dock: Claude is working. 9s · 0 tools this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step. claude-sonnet-5-5 ⌘↵ to queue Queue
++  66.7s desktop page sent {"text":"Also put the word BANANA in that reply.","requestId":"msg:6fb2a405aee7d5b23ad50fafe0876d99"}
++  66.7s typed "Also put the word BANANA in that reply." into the composer and pressed Ctrl+Enter
++  69.3s -> 09-claude-steered-desktop.png; dock: Claude is working. 12s · 2 tools this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step. claude-sonnet-5-5 ⌘↵ to queue Queue
++  98.6s Claude's turn ends after 29.3 s
++ 102.4s nexus conversation th-6e88df42d00d -> exit 0 (cli-06-conversation-claude.txt)
++ 106.5s dashboard /threads/th-6e88df42d00d -> 10-claude-after-desktop.png, 10-claude-after-phone.png; dock: claude-sonnet-5-5 ⌘↵ to send Send
++ 106.5s == attaching: the person last left Herdr on a shell session, then attaches again
++ 107.3s nexus show th-7571cd50ea5e -> exit 0 (cli-07-show-agent.txt)
++ 108.0s nexus show th-6e88df42d00d -> exit 0 (cli-08-show-claude.txt)
++ 108.8s nexus session open th-6e88df42d00d --harness shell --title Shell -> exit 0 (cli-09-session-open.txt)
++ 108.8s focused Herdr workspace w2, "Shell", as the person's last attach left it
++ 108.8s herdr panes -> panes-before-attach.txt
++ 115.6s typed "Reply with the word PINEAPPLE." and Enter into `nexus attach`
++ 118.7s herdr panes -> panes-after-cli-attach.txt
++ 239.0s gave up after 120 s waiting until Claude answers what was typed into the attached terminal
++ 239.7s nexus conversation th-6e88df42d00d -> exit 0 (cli-10-conversation-after-cli-attach.txt)
++ 239.8s focused Herdr workspace w2, "Shell", as the person's last attach left it
++ 241.6s desktop: the thread page has no terminal tab
++ 242.8s -> 11-terminal-desktop.png
++ 244.4s phone: the thread page has no terminal tab
++ 245.9s -> 11-terminal-phone.png
++ 246.5s nexus delete th-7571cd50ea5e -> exit 0 (cli-11-delete-agent.txt)
++ 247.2s nexus delete th-6e88df42d00d -> exit 0 (cli-12-delete-claude.txt)

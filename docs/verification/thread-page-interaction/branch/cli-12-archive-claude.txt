@@ -1,0 +1,3 @@
+$ nexus archive th-0b983b741dea
+Archived th-0b983b741dea.
+[exit 0]

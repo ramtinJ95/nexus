@@ -170,7 +170,7 @@ const result = (toolCallId: string, text: string, isError = false, toolName = "b
  * tool calls and folds start open, and the dock under it with the run bar and the prompt box.
  */
 function conversationOf(html: string) {
-  const convo = html.split('id="convo"')[1]!.split('<div class="dock">')[0]!;
+  const convo = html.split('id="convo"')[1]!.split('<section class="file-view"')[0]!;
   const dock = html.split('<div class="dock">')[1]!.split("</main>")[0]!;
   return {
     rows: convo.split(/(?=<div class="msg |<p class="notice|<p class="note"|<details class="tool|<details class="steps)/).slice(1).map((row) => textOf(`<x ${row}`).replace(/^<x /, "")),
@@ -707,7 +707,7 @@ test("the inspector's tabs pick the changes, the previews or the pylon, and the 
   assert.match(page, /id="changes-turn"><span class="switch-label">Latest turn<\/span>/);
   assert.ok(!regions.includes('id="pane-changes"') && page.includes(`<section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${fix.id}">`), "no refresh replaces what the client read");
   assert.match(page, /<div id="facts" data-live hidden><span data-pylon="running" data-turn="false" data-agent-at="0" data-thread-status="(active|idle)"><\/span><\/div>/, "the client learns when the pylon runs and a turn ends");
-  assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><\/div>/, "the conversation is the first tab");
+  assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the conversation is the first tab, and the terminal is one click away beside it");
 });
 
 test("the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews", async (t) => {
@@ -887,7 +887,7 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
     tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\n" }],
     generation: { attempt: 2, message: assistant([{ type: "text", text: "Half an ans" }], "pending") as never, retry: { at: 0, error: "overloaded" } },
   };
-  transcript.docs["pi.inbox"] = { items: [{ id: 2, mode: "followUp", content: "then deploy" }, { id: 3, mode: "write", entry: {} }] };
+  transcript.docs["pi.inbox"] = { items: [{ id: 2, mode: "followUp", content: "then deploy" }, { id: 3, mode: "write", entry: {} }, { id: 4, mode: "steer", content: "skip the docs" }] };
 
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;
   const { rows, open, dock } = conversationOf(html);
@@ -898,10 +898,13 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
     "Half an ans",
     "! The model request failed and will be retried: overloaded",
     "You queued, sends after this run then deploy",
+    "You queued, joins after this tool round skip the docs",
   ]);
   assert.deepEqual(open, [["steps-c1", true], ["tool-c1", true]]);
-  assert.match(dock, /^The agent is working\. 1m 12s · 1 tool this turn · new messages queue Abort gpt-test ⌘↵ to queue Queue$/);
-  assert.match(html, /placeholder="Queue a follow-up…"/);
+  assert.match(dock, new RegExp(`^Working 1m 12s · 1 tool this turn Abort nexus attach ${fix.id} Copy gpt-test Steer joins the run after its current tool round\\. Queue ⌥↵ Steer ⌘↵$`));
+  assert.match(html, /placeholder="Steer the run…"/);
+  assert.match(html, /<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp"[^>]*>/, "⌥↵ queues a follow-up after the run");
+  assert.match(html, /<button type="submit" class="send send-steer" id="send" name="mode" value="steer"[^>]*>/, "⌘↵ steers the run that works");
 });
 
 test("a thread page's stream sends its conversation, then only the text that grew, and the conversation again when its shape changes", async (t) => {
@@ -953,7 +956,7 @@ test("each thread state offers only the actions and prompt box that apply", asyn
     return {
       actions: [...html.matchAll(/data-action="([a-z]+)"/g)].map((m) => m[1]).sort(),
       prompt: html.includes('<form id="prompt"'),
-      running: html.includes("The agent is working."),
+      running: html.includes('data-state="working"'),
       visit: html.includes("data-activity="),
       chip: textOf(html.split('<span class="chip chip-')[1]!.split("</span></span>")[0]!.replace(/^[^>]*>/, "")),
       ...conversationOf(html),
@@ -962,7 +965,8 @@ test("each thread state offers only the actions and prompt box that apply", asyn
 
   const fresh = await state();
   assert.deepEqual([fresh.actions, fresh.prompt, fresh.running, fresh.visit, fresh.text], [["archive", "delete"], true, false, true, `${fix.id} · started just now No messages yet.`]);
-  assert.equal(fresh.dock, "⌘↵ to send Send");
+  assert.equal(fresh.dock, `Idle nexus attach ${fix.id} Copy Send ⌘↵`);
+  assert.match(fresh.dock, /^Idle /, "an idle agent says so");
 
   s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
   s.registry.recordActivity(fix.id, { agent: Date.now(), agentTurnRunning: true });
@@ -977,14 +981,15 @@ test("each thread state offers only the actions and prompt box that apply", asyn
   const parked = await state();
   assert.deepEqual(parked.actions, ["abort", "archive", "delete", "retry"]);
   assert.ok(parked.prompt && !parked.running, "a parked run is not shown as working");
-  assert.match(parked.dock, /^2 tasks hit the restart limit and hold the run\. Retry runs them again\. Retry Abort /);
+  assert.match(parked.dock, /^Stuck 2 tasks hit the restart limit and hold the run\. Retry runs them again\. Retry Abort nexus attach /);
 
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
   const archived = await state();
   assert.deepEqual(archived.actions, ["abort", "delete", "unarchive"], "an archived thread can still abort, but not retry");
+  assert.match((await s.call("GET", `/threads/${fix.id}`)).text, /<button type="button" class="tab tab-term" hidden role="tab"/, "its terminal tab waits, hidden, for an unarchive");
   assert.ok(!archived.prompt && !archived.visit);
   assert.equal(archived.chip, "parked");
-  assert.equal(archived.dock, "2 tasks hit the restart limit and hold the run. Unarchive the thread to retry them. Abort An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.");
+  assert.equal(archived.dock, "Stuck 2 tasks hit the restart limit and hold the run. Unarchive the thread to retry them. Abort An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.", "nor attach, since its pylon stays paused");
 
   await s.call("POST", `/v1/threads/${fix.id}/unarchive`);
   assert.deepEqual((await state()).actions, ["abort", "archive", "delete", "retry"]);
@@ -997,12 +1002,41 @@ test("each thread state offers only the actions and prompt box that apply", asyn
   assert.deepEqual(s.fake.calls, [], "a deleted thread's conversation is not read");
 });
 
+test("the state bar says the agent waits for the person while a question is open or a dialog waits in its terminal, which it opens", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  s.observe(fix);
+  const bar = async () => {
+    const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+    return { state: /data-state="([a-z]+)"/.exec(html)?.[1], text: textOf(html.split('<div id="run" data-live>')[1]!.split('<div id="composer"')[0]!), send: /id="send" name="mode" value="([a-zA-Z]+)"/.exec(html)?.[1] };
+  };
+  assert.deepEqual(await bar(), { state: "idle", text: `Idle nexus attach ${fix.id} Copy`, send: "followUp" });
+
+  s.registry.askQuestion({ id: "qn-ship", thread: fix.id, text: "Ship it?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  assert.deepEqual(await bar(), { state: "waiting", text: `Waiting for you A question waits for your answer, above. nexus attach ${fix.id} Copy`, send: "followUp" });
+
+  // A question that does not stop the run, as a planning thread's, leaves a run that works working.
+  s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
+  assert.equal((await bar()).state, "working");
+  assert.equal((await bar()).send, "steer");
+  s.fake.transcript(fix.id).docs["pi.live"] = {};
+  s.registry.answerQuestion("qn-ship", { option: "Yes", by: laptop, at: Date.now() });
+
+  s.registry.reportSession(node, { sequence: 1, pylon: fix.pylonId, time: Date.now(), event: { kind: "session.waiting", session: "s1", at: Date.now(), message: "Claude needs your permission to use Bash" } });
+  const html = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.deepEqual(await bar(), { state: "waiting", text: `Waiting for you Claude needs your permission to use Bash, in the pylon's terminal. Open terminal nexus attach ${fix.id} Copy`, send: "followUp" });
+  assert.match(html, /<button type="button" class="btn btn-xs" data-terminal>/, "the dialog's terminal is one click away");
+  s.registry.recordReply(fix.id, Date.now());
+  assert.equal(JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text).attention, "reply");
+  assert.equal((await bar()).state, "waiting", "an unread reply outranks the wait in attention, but the dialog still waits");
+});
+
 test("a paused pylon's prompt box says a message wakes it", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
-  assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, "The pylon is paused. Sending a message wakes it. ⌘↵ to send Send");
+  assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, `Idle the pylon is paused, and a message wakes it nexus attach ${fix.id} Copy Send ⌘↵`);
 });
 
 test("a thread deleted while its conversation is read shows no conversation", async (t) => {
@@ -1107,7 +1141,7 @@ test("a failed pylon's thread offers no prompt box, but says why and offers a re
   s.fake.park(fix.id, 1);
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.ok(!html.includes('<form id="prompt"'), "a failed pylon cannot serve a message");
-  assert.equal(conversationOf(html).dock, `1 task hit the restart limit and hold the run. Retry runs them again. Retry The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. Fix the cause, such as the project's git access, and retry, or start again from the same project. A retry runs setup again on a new pylon whose setup failed, and resumes a broken pylon from its newest disk. ${reason.replace("\n", " ")} Retry Start again`);
+  assert.equal(conversationOf(html).dock, `Stuck 1 task hit the restart limit and hold the run. Retry runs them again. Retry nexus attach ${fix.id} Copy The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. Fix the cause, such as the project's git access, and retry, or start again from the same project. A retry runs setup again on a new pylon whose setup failed, and resumes a broken pylon from its newest disk. ${reason.replace("\n", " ")} Retry Start again`);
   assert.ok(html.includes(`<button type="button" class="btn" id="retry-pylon" data-action="retry-pylon" data-thread="${fix.id}">Retry</button>`), "the retry goes through the client's action handler, which disables it while it is sent");
   assert.match(html, /<button type="button" class="btn" data-start="acme" data-title="Fix checkout">Start again<\/button>/, "starting again opens the dialog on the same project and title");
 
@@ -1390,9 +1424,9 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   assert.deepEqual(open, [["steps-t1", true], ["tool-t1", true], ["tool-t2", true], ["tool-t3", false]], "a fold with a failure starts open, as do the failure and the write's diff");
   assert.ok(html.includes("and then &lt;deploy&gt;"), "transcript text is escaped");
   assert.match(textOf(html.split('<p class="convo-meta">')[1]!.split("</p>")[0]!), new RegExp(`^${thread.id} · started just now · Claude Code · claude-opus-5-5$`));
-  assert.match(html, /<form id="prompt" class="composer" data-thread="[^"]+" data-claude>/);
+  assert.match(html, /<form id="prompt" class="composer composer-send" data-thread="[^"]+" data-claude>/);
   assert.match(html, /placeholder="Message Claude…"/);
-  assert.equal(dock, "The pylon is not running, so the transcript is as of its last read, just now . Sending a message wakes it and resumes Claude. claude-opus-5-5 ⌘↵ to send Send");
+  assert.equal(dock, `Idle nexus attach ${thread.id} Copy The pylon is not running, so the transcript is as of its last read, just now . Sending a message wakes it and resumes Claude. claude-opus-5-5 Send ⌘↵`);
   assert.match(html, new RegExp(`data-stream="/threads/${thread.id}/stream"`));
 });
 
@@ -1438,12 +1472,13 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "Ran a command 1 running ›",
     "› Bash npm test running npm test No output yet.",
   ], "only a call of the running turn runs");
-  assert.match(dock, /^Claude is working\. 0s · 1 tool this turn · new messages go in at its next step Claude Code takes a message sent during a turn at its next step\. claude-opus-5-5 ⌘↵ to queue Queue$/,
+  assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
     "the turn is timed from when control heard it start, and Claude cannot be aborted");
   const since = s.registry.thread(thread.id)!.workingSince;
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
   assert.doesNotMatch(html, /data-action="abort"/);
-  assert.match(html, /placeholder="Queue for Claude…"/);
+  assert.match(html, /placeholder="Steer the run…"/);
+  assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
 });
 
 test("a Claude worker's folds say what their calls did by action, a changed file once, and count the tools past three actions", async (t) => {
@@ -1796,25 +1831,25 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
     const convo = html.split('id="convo"')[1]!;
     return {
       stream: /^[^>]*data-stream="([^"]*)"/.exec(convo)?.[1]?.replace(thread.id, "<id>") ?? null,
-      convo: textOf(convo.split('<div class="dock">')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
-      run: textOf(html.split('<div id="run" data-live>')[1]!.split('<div id="composer"')[0]!),
+      convo: textOf(convo.split('<section class="file-view"')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
+      run: textOf(html.split('<div id="run" data-live>')[1]!.split('<div id="composer"')[0]!).replace(thread.id, "<id>"),
       composer: /<div id="composer" data-live>\s*(<[^/>][^>]*>)?/.exec(html)?.[1] ?? null,
     };
   };
   assert.deepEqual(await agentParts(harness), {
-    stream: "/threads/<id>/stream", convo: "<id> · started just now No messages yet.", run: "",
-    composer: `<form id="prompt" class="composer" data-thread="${harness.id}">`,
+    stream: "/threads/<id>/stream", convo: "<id> · started just now No messages yet.", run: "Idle nexus attach <id> Copy",
+    composer: `<form id="prompt" class="composer composer-send" data-thread="${harness.id}">`,
   });
   assert.deepEqual(await agentParts(claude), {
-    stream: "/threads/<id>/stream", convo: "<id> · started just now · Claude Code · claude-opus-5-5 Done.", run: "",
-    composer: `<form id="prompt" class="composer" data-thread="${claude.id}" data-claude>`,
+    stream: "/threads/<id>/stream", convo: "<id> · started just now · Claude Code · claude-opus-5-5 Done.", run: "Idle nexus attach <id> Copy",
+    composer: `<form id="prompt" class="composer composer-send" data-thread="${claude.id}" data-claude>`,
   });
-  assert.deepEqual(await agentParts(bare), { stream: null, convo: "<id> · started just now This thread has no agent conversation.", run: "", composer: null });
+  assert.deepEqual(await agentParts(bare), { stream: null, convo: "<id> · started just now This thread has no agent conversation.", run: "Idle nexus attach <id> Copy", composer: null }, "a bare thread has no agent to message, but a terminal");
 
   s.fake.transcript(harness.id).docs["pi.live"] = { run: { taskId: 1, inputs: [] } };
   s.registry.reportSession(node, { sequence: 1, pylon: claude.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: Date.now() } });
-  assert.equal((await agentParts(harness)).run, "The agent is working. 0 tools this turn · new messages queue Abort");
-  assert.equal((await agentParts(claude)).run, "Claude is working. 0s · 0 tools this turn · new messages go in at its next step");
+  assert.equal((await agentParts(harness)).run, "Working 0 tools this turn Abort nexus attach <id> Copy");
+  assert.equal((await agentParts(claude)).run, "Claude is working 0s · 0 tools this turn nexus attach <id> Copy");
   for (const thread of [harness, claude, bare]) assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   for (const thread of [harness, claude, bare]) {
     // A Claude worker's model comes from its worker, which outlives the delete.

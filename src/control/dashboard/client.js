@@ -121,13 +121,13 @@ function swap(regions) {
   }
   restoreStart(start);
   for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
-  const send = document.getElementById("send");
-  if (send !== null) send.disabled = outgoing?.inFlight === true;
+  for (const send of document.querySelectorAll("#prompt button[type=submit]")) send.disabled = outgoing?.inFlight === true;
   if (focused !== null) document.querySelector(focused)?.focus({ preventScroll: true });
   restoreScroll();
   applyFilter();
   tick();
   noticeFacts();
+  terminalFollows();
 }
 
 // While the stream is open it alone writes the conversation, so a poll that started before a frame cannot put
@@ -300,12 +300,13 @@ document.addEventListener("submit", async (event) => {
   const text = form.elements.text.value;
   // The notes as they are now, so an edit saved while the send is out is not taken as sent.
   const composed = { composed: review.composed, notes: review.notes.filter((n) => review.composed?.ids.includes(n.id)) };
+  // The button pressed, or the one its shortcut stands for, says whether the message steers the run or follows it.
+  const mode = event.submitter?.value ?? "followUp";
   if (outgoing?.text !== text) outgoing = { text, requestId: newRequestId() };
   outgoing.inFlight = true;
-  form.querySelector("#send").disabled = true;
-  // A busy run queues the message as a follow-up, which is the API's default.
+  for (const send of form.querySelectorAll("button[type=submit]")) send.disabled = true;
   const { requestId } = outgoing;
-  const post = () => api("POST", `/v1/threads/${thread}/messages`, { text, requestId });
+  const post = () => api("POST", `/v1/threads/${thread}/messages`, { text, requestId, mode });
   try {
     // A Claude worker's message is typed in its pylon, so it waits for a paused pylon to wake, under the same request
     // ID, which the API types once however often it is asked.
@@ -331,8 +332,7 @@ document.addEventListener("submit", async (event) => {
     if (err.status === 422) outgoing = null;
     showError("action-error", err.status === 422 || err.status === 503 ? err : new Error(`The message was not sent: ${err.message}`));
   } finally {
-    const send = document.getElementById("send");
-    if (send !== null) send.disabled = false;
+    for (const send of document.querySelectorAll("#prompt button[type=submit]")) send.disabled = false;
   }
 });
 
@@ -618,7 +618,11 @@ document.addEventListener("keydown", (event) => {
     const form = event.target instanceof Element ? event.target.closest("#prompt, #start, #project") : null;
     if (form === null) return;
     event.preventDefault();
-    form.requestSubmit();
+    form.requestSubmit(form.querySelector("#send"));
+  } else if (event.key === "Enter" && event.altKey && event.target instanceof Element && event.target.closest("#prompt") !== null) {
+    event.preventDefault();
+    const queue = document.getElementById("queue");
+    if (queue !== null) queue.form.requestSubmit(queue);
   } else if (event.key === "Escape" && document.body.dataset.open !== undefined) {
     setOpen(null);
   } else if (event.key === "n" && !event.metaKey && !event.ctrlKey && !event.altKey && !typing(event.target) && dialog !== null && document.querySelector("dialog[open]") === null) {
@@ -761,7 +765,7 @@ async function readChanges(wake = false) {
       openTabs = openTabs.map((tab) => changes.files.find((f) => f.path === tab.path) ?? tab);
       renderChanges();
       renderTabs();
-      if (activeTab !== null) void readDiff(activeTab);
+      if (typeof activeTab === "string") void readDiff(activeTab);
     } catch (err) {
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the closing, not the failure it caused, is what to show.
@@ -896,10 +900,12 @@ if (changesPane !== null) {
   document.getElementById("changes-reload").addEventListener("click", () => { void readChanges(true); });
 }
 
-// The tabs beside the conversation: one per changed file the reader opened, kept for the tab's session.
-// `activeTab` is the open file's path, or null for the conversation.
+// The tabs beside the conversation: the terminal, and one per changed file the reader opened, kept for the tab's
+// session. `activeTab` is the open file's path, `terminalTab` for the terminal, or null for the conversation.
 const tabsBar = document.getElementById("tabs");
 const fileView = document.getElementById("file-view");
+const termView = document.getElementById("term-view");
+const terminalTab = Symbol("terminal");
 const tabsKey = `nexus.tabs.${thread}`;
 const maxTabs = 8;
 let openTabs = JSON.parse(sessionStorage.getItem(tabsKey) ?? "[]");
@@ -917,6 +923,10 @@ function renderTabs() {
   convoTab.classList.toggle("active", activeTab === null);
   convoTab.setAttribute("aria-selected", String(activeTab === null));
   convoTab.dataset.key = "convo";
+  const termTab = tabsBar.querySelector('[data-tab="term"]');
+  termTab?.classList.toggle("active", activeTab === terminalTab);
+  termTab?.setAttribute("aria-selected", String(activeTab === terminalTab));
+  if (termTab !== null) termTab.dataset.key = "term";
   const fileTabs = openTabs.map((file) => {
     const active = activeTab === file.path;
     const pick = el("button", { type: "button", className: "tab-pick", title: file.path }, badge(file.status), el("span", { className: "tab-name", textContent: file.path.split("/").at(-1) }));
@@ -931,23 +941,25 @@ function renderTabs() {
     close.addEventListener("click", () => closeTab(file.path));
     return el("div", { className: `tab tab-file${active ? " active" : ""}` }, pick, close);
   });
-  tabsBar.replaceChildren(convoTab, ...fileTabs);
+  tabsBar.replaceChildren(...[convoTab, termTab].filter((tab) => tab !== null), ...fileTabs);
   tabsBar.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   for (const button of document.querySelectorAll(".tree-file")) button.classList.toggle("active", button.dataset.path === activeTab);
   if (focused === undefined) return;
   const controls = [...tabsBar.querySelectorAll("[data-key]")];
-  const replacement = activeTab === null ? "convo" : `pick:${activeTab}`;
+  const replacement = activeTab === null ? "convo" : activeTab === terminalTab ? "term" : `pick:${activeTab}`;
   (controls.find((b) => b.dataset.key === focused) ?? controls.find((b) => b.dataset.key === replacement))?.focus();
 }
 
 function showTab(path) {
   activeTab = path;
-  main.dataset.view = path === null ? "convo" : "file";
+  main.dataset.view = path === null ? "convo" : path === terminalTab ? "term" : "file";
   scroller.hidden = path !== null;
-  fileView.hidden = path === null;
+  fileView.hidden = typeof path !== "string";
+  if (termView !== null) termView.hidden = path !== terminalTab;
   if (path === null) end.settle();
   renderTabs();
-  if (path !== null) void readDiff(path);
+  if (typeof path === "string") void readDiff(path);
+  if (path === terminalTab) void showTerminal();
 }
 
 function openFile(file) {
@@ -966,6 +978,51 @@ function closeTab(path) {
 }
 
 tabsBar?.querySelector('[data-tab="convo"]').addEventListener("click", () => showTab(null));
+tabsBar?.querySelector('[data-tab="term"]')?.addEventListener("click", () => showTab(terminalTab));
+document.addEventListener("click", (event) => {
+  if (termView !== null && event.target instanceof Element && event.target.closest("[data-terminal]") !== null) showTab(terminalTab);
+});
+
+/** The Terminal tab shows while the thread is open, so an archive hides it and an unarchive brings it back. */
+function terminalFollows() {
+  const tab = tabsBar?.querySelector('[data-tab="term"]');
+  const facts = factsNow();
+  if (tab == null || facts === null) return;
+  tab.hidden = threadClosed(facts);
+  if (tab.hidden && activeTab === terminalTab) showTab(null);
+}
+
+// The terminal tab attaches on its first show, as `nexus attach` does, and stays attached while the reader looks at
+// other tabs, so it holds the pylon awake as an attached terminal does until it is detached or the page closes. A
+// terminal that ends on its own keeps its last screen until the next attach replaces it.
+let terminal = null;
+let lastTerminal = null;
+async function showTerminal() {
+  if (terminal !== null) return terminal.then((t) => t?.focus());
+  const status = document.getElementById("term-status");
+  const again = document.getElementById("term-again");
+  const detach = document.getElementById("term-detach");
+  const shown = ({ text, over }) => {
+    status.textContent = text ?? "";
+    again.hidden = !over;
+    detach.hidden = over;
+    if (over) terminal = null;
+  };
+  shown({ text: "Attaching…", over: false });
+  terminal = import("./term-view.js").then(({ openTerminal }) => {
+    lastTerminal?.close();
+    document.getElementById("term-host").replaceChildren();
+    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown);
+    return lastTerminal;
+  }).catch((err) => {
+    shown({ text: `The terminal did not load: ${err.message}`, over: true });
+    return null;
+  });
+  const opened = await terminal;
+  detach.onclick = () => opened?.close();
+  again.onclick = () => { void showTerminal(); };
+  opened?.focus();
+}
 
 // The layout the reader picked for diffs, on every thread page.
 const layoutKey = "nexus.diff-layout";

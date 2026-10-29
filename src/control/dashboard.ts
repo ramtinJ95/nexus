@@ -207,6 +207,7 @@ const iconPaths = {
   up: "M8 13V3M4 7l4-4 4 4",
   chart: "M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6",
   list: "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01",
+  terminal: "M2.5 3.5h11v9h-11zM5 6.5l2 1.5-2 1.5M8.5 10h2.5",
 } as const;
 type IconName = keyof typeof iconPaths;
 const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
@@ -709,22 +710,35 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
 ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
 </header>
-<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button></div>
+<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
+${t.status !== "deleted" && termView(t, agent)}
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
 <div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
 <div id="landing" data-live>${landing(c, d)}</div>
-<div id="run" data-live>${runBar(t, run, c.now)}</div>
+<div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, agent, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
 </div>`,
     inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total),
   });
+}
+
+/**
+ * The terminal tab, which client.js attaches on its first show, as `nexus attach` does, and shows while the thread is
+ * open, so an unarchive brings it back without a reload. A Nexus agent runs on the control plane, so its thread's
+ * terminal is the pylon's Herdr session and its conversation stays in the composer.
+ */
+function termView(t: Thread, agent: ThreadAgent["kind"]): Html {
+  return html`<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
+<div class="tv-head"><span class="tv-where">${agent === "claude" ? "Claude Code's pane in the pylon's Herdr session" : "The pylon's Herdr session"}</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
+<div class="tv-host" id="term-host"></div>
+</section>`;
 }
 
 /** The steps of a landing, in order. */
@@ -1205,7 +1219,7 @@ function conversationItems(view: ConversationView): Item[] {
   if (generation?.message !== undefined) answer(generation.message as AssistantMessage, true);
   if (generation?.retry !== undefined) items.push({ kind: "notice", text: `The model request failed and will be retried: ${generation.retry.error}`, tone: "busy" });
   for (const queued of inbox?.items ?? []) {
-    if (queued.mode !== "write") items.push({ kind: "user", text: contentText(queued.content as UserMessage["content"]), queued: "sends after this run", at: 0, from: "person" });
+    if (queued.mode !== "write") items.push({ kind: "user", text: contentText(queued.content as UserMessage["content"]), queued: queued.mode === "steer" ? "joins after this tool round" : "sends after this run", at: 0, from: "person" });
   }
   return items;
 }
@@ -1282,19 +1296,31 @@ function modelOf(view: ConversationView): string | null {
 /**
  * What the agent's run is doing. Busy comes from the view rather than agentTurnRunning, which a parked run
  * reports as false, so a stuck run can still be aborted. A parked run is stuck, not working. A Claude worker works
- * while a turn of its session runs, and the harness cannot abort it.
+ * while a turn of its session runs, and the harness cannot abort it. An agent waits on the person while a question it
+ * asked is open, a Claude worker's dialog waits in its terminal, or a usage limit stopped it. A dialog stops the turn
+ * it is in, so it outranks working. A question that does not stop the run, as a planning thread's proposal, does not.
  */
 type Run =
-  | { kind: "idle" }
+  | { kind: "idle"; paused: boolean; repliedAt: number | null }
   | { kind: "working"; since: number | null; tools: number; claude: boolean }
+  | { kind: "waiting"; why: string; inTerminal: boolean }
   | { kind: "parked"; tasks: number; busy: boolean };
 function runOf(d: ThreadDetail, view: AgentView | null, items: readonly Item[]): Run {
-  if (view?.kind === "claude") return view.view.working ? working(d, items, (item) => item.from === "person", true) : { kind: "idle" };
-  const busy = (view?.view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
+  const claude = view?.kind === "claude";
+  const busy = claude ? view.view.working : (view?.view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { kind: "parked", tasks: parked, busy };
-  if (!busy) return { kind: "idle" };
-  return working(d, items, () => true, false);
+  const open = (d.questions ?? []).filter((q) => q.answer === null);
+  // Attention ranks a reply above a wait, so the session's own state says whether a dialog waits in the terminal.
+  const terminal = d.thread.sessionWaiting === true;
+  if (terminal || open.some((q) => q.ask !== undefined) || (!busy && (open.length > 0 || d.thread.usageLimit !== undefined))) {
+    const why = terminal ? `${d.thread.sessionWaitingMessage ?? "It waits for input"}, in the pylon's terminal.`
+      : open.length > 0 ? `${open.length === 1 ? "A question waits" : `${open.length} questions wait`} for your answer, above.`
+      : `${usageLimitText(d.thread.usageLimit ?? { resetsAt: null }, Date.now())}.`;
+    return { kind: "waiting", why, inTerminal: terminal };
+  }
+  if (!busy) return { kind: "idle", paused: d.pylon.actualState === "paused", repliedAt: d.lastReplyAt };
+  return working(d, items, claude ? (item) => item.from === "person" : () => true, claude);
 }
 
 /** A turn's calls are those after the message it answers. Its start is the registry's, so the bar and the rows agree. */
@@ -1303,19 +1329,44 @@ function working(d: ThreadDetail, items: readonly Item[], asks: (item: UserItem)
   return { kind: "working", since: d.thread.workingSince ?? null, tools: turn.filter((item) => item.kind === "tool").length, claude };
 }
 
-function runBar(t: Thread, run: Run, now: number): Html {
-  const abort = html`<button type="button" class="btn btn-abort" id="abort" data-action="abort" data-thread="${t.id}">Abort</button>`;
-  switch (run.kind) {
-    case "idle": return html``;
-    case "working": return html`<div class="run-bar working" role="status"><span class="spin" aria-hidden="true"></span><span class="run-label">${run.claude ? "Claude is working." : "The agent is working."}</span><span class="dim">${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn${t.status !== "archived" && (run.claude ? " · new messages go in at its next step" : " · new messages queue")}</span>${!run.claude && abort}</div>`;
-    case "parked": return html`<div class="run-bar parked" role="alert"><span>${run.tasks} ${run.tasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}</span>${t.status !== "archived" && html`<button type="button" class="btn" id="retry" data-action="retry" data-thread="${t.id}">Retry</button>`}${run.busy && abort}</div>`;
-  }
+/**
+ * The agent's state, always in view above the composer, beside the `nexus attach` line to copy. A thread that can
+ * attach has a terminal one click away, which a dialog waiting in the terminal offers too.
+ */
+function stateBar(t: Thread, run: Run, now: number): Html {
+  const open = t.status === "active" || t.status === "idle";
+  const abort = html`<button type="button" class="btn btn-xs btn-abort" id="abort" data-action="abort" data-thread="${t.id}">Abort</button>`;
+  const terminal = html`<button type="button" class="btn btn-xs" data-terminal>${icon("terminal")}Open terminal</button>`;
+  const attach = open && html`<span class="attach-line"><code id="attach-line">nexus attach ${t.id}</code><button type="button" class="btn btn-xs btn-ghost" data-copy="attach-line" aria-label="Copy nexus attach ${t.id}">Copy</button></span>`;
+  const [label, detail, end] = (() => {
+    switch (run.kind) {
+      case "idle": return [html`Idle`, html`${run.repliedAt !== null && html`replied ${ago(run.repliedAt, now)}`}${run.paused && html`${run.repliedAt !== null && " · "}the pylon is paused, and a message wakes it`}`, html``];
+      case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, !run.claude && abort];
+      case "waiting": return [html`Waiting for you`, html`${run.why}`, open && run.inTerminal && terminal];
+      case "parked": return [html`Stuck`, html`${run.tasks} ${run.tasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry" data-action="retry" data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
+    }
+  })();
+  return html`<div class="state-bar state-${run.kind}" id="agent-state" data-state="${run.kind}" role="status">${run.kind === "working" ? html`<span class="spin" aria-hidden="true"></span>` : dot(runTone[run.kind])}<span class="state-label">${label}</span><span class="state-detail">${detail}</span>${end}${attach}</div>`;
 }
+const runTone: Record<Run["kind"], Tone> = { idle: "idle", working: "work", waiting: "busy", parked: "bad" };
 
 /**
- * Why a thread takes no messages, or the prompt box. A busy run queues what is sent, so the button says so. A Claude
- * worker's box is marked for client.js, which tries a send again while the pylon wakes, and says how old the
- * transcript is while the pylon does not run.
+ * What the composer's buttons send in each state of the run, the same for both agents: ⌘↵ sends, or steers a run
+ * that works, and ⌥↵ queues a message after the run. A Claude worker takes a message at its next step whatever the
+ * mode, so only a Nexus agent's run can be queued after.
+ */
+function sends(run: Run, claude: boolean): { primary: "send" | "steer"; queue: boolean } {
+  const steers = run.kind === "working";
+  return { primary: steers ? "steer" : "send", queue: steers && !claude };
+}
+const sendLooks = {
+  send: { mode: "followUp", label: "Send", placeholder: "Message the agent…", hint: null },
+  steer: { mode: "steer", label: "Steer", placeholder: "Steer the run…", hint: "Steer joins the run after its current tool round." },
+} as const;
+
+/**
+ * Why a thread takes no messages, or the prompt box. A Claude worker's box is marked for client.js, which tries a
+ * send again while the pylon wakes, and says how old the transcript is while the pylon does not run.
  */
 function composer(d: ThreadDetail, agent: ThreadAgent["kind"], run: Run, model: string | null, claude: ClaudeConversation | null, now: number): Html {
   const { thread: t } = d;
@@ -1333,14 +1384,15 @@ function composer(d: ThreadDetail, agent: ThreadAgent["kind"], run: Run, model: 
 <div class="failed-actions">${!refused && html`<button type="button" class="btn" id="retry-pylon" data-action="retry-pylon" data-thread="${t.id}">Retry</button>`}<button type="button" class="btn" data-start="${t.project}" data-title="${t.title}">Start again</button></div></div>`;
   }
   if (t.status === "archived") return html`<p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.${asOf !== null && html` ${asOf}`}</p>`;
-  const queue = run.kind !== "idle";
-  const placeholder = claude === null ? (queue ? "Queue a follow-up…" : "Message the agent…") : queue ? "Queue for Claude…" : "Message Claude…";
-  return html`<form id="prompt" class="composer${queue && " busy"}" data-thread="${t.id}"${claude !== null && " data-claude"}>
-${claude === null ? d.pylon.actualState === "paused" && html`<p class="comp-note">The pylon is paused. Sending a message wakes it.</p>`
-  : html`${asOf !== null && html`<p class="comp-note">${asOf} Sending a message wakes it and resumes Claude.</p>`}${queue && html`<p class="comp-note">Claude Code takes a message sent during a turn at its next step.</p>`}`}
+  const { primary, queue } = sends(run, claude !== null);
+  const look = sendLooks[primary];
+  const placeholder = claude !== null && primary === "send" ? "Message Claude…" : look.placeholder;
+  const hint = claude !== null && primary === "steer" ? "Claude takes it at its next step." : look.hint;
+  return html`<form id="prompt" class="composer composer-${primary}" data-thread="${t.id}"${claude !== null && " data-claude"}>
+${asOf !== null && html`<p class="comp-note">${asOf} Sending a message wakes it and resumes Claude.</p>`}
 <div class="comp-box">
 <textarea id="prompt-text" name="text" rows="2" required aria-label="${claude === null ? "Message the agent" : "Message Claude"}" placeholder="${placeholder}"></textarea>
-<div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}<span class="dim small keys">⌘↵ to ${queue ? "queue" : "send"}</span><button type="submit" class="send" id="send" title="${queue ? "Queue" : "Send"}">${icon("up")}${unseen(queue ? "Queue" : "Send")}</button></div>
+<div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}${hint !== null && html`<span class="dim small comp-hint">${hint}</span>`}<span class="comp-sends">${queue && html`<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp" title="Queue after this run (⌥↵)">Queue <kbd>⌥↵</kbd></button>`}<button type="submit" class="send send-${primary}" id="send" name="mode" value="${look.mode}" title="${look.label} (⌘↵)">${icon("up")}<span class="send-label">${look.label}</span> <kbd>⌘↵</kbd></button></span></div>
 </div>
 </form>`;
 }

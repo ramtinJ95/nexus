@@ -1322,6 +1322,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     else send(res, reply.status, reply.body);
   }
 
+  /** The pane a terminal attached to the thread lands in: its Claude worker's, while the node reports it. */
+  function agentPane(t: Thread): string | null {
+    const agent = registry.agent(t);
+    if (agent.kind !== "claude" || agent.worker.session === null) return null;
+    return registry.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === agent.worker.session)?.herdrPane ?? null;
+  }
+
   /** The pylon of a thread, as serveAttach asks for it. */
   function door(t: Thread, probe: Pick<ProbeClient, "stream">): PylonDoor {
     const { pylonId, node } = registry.pylon(t.pylonId)!;
@@ -1337,7 +1344,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       open({ size, term }) {
         registry.recordActivity(t.id, { human: Date.now() });
         wake(node);
-        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript]);
+        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", agentPane(registry.thread(t.id)!) ?? ""]);
       },
     };
   }

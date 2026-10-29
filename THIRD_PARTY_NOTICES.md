@@ -52,6 +52,8 @@ SOFTWARE.
 | `@shikijs/themes` | 4.5.0 | MIT |
 | `@shikijs/types` | 4.5.0 | MIT |
 | `@shikijs/vscode-textmate` | 10.1.0 | MIT |
+| `@xterm/addon-fit` | 0.11.0 | MIT |
+| `@xterm/xterm` | 6.0.0 | MIT |
 | `ccount` | 2.0.1 | MIT |
 | `character-entities-html4` | 2.1.0 | MIT |
 | `character-entities-legacy` | 3.0.0 | MIT |
@@ -454,6 +456,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - Copyright (c) 2021 Pine Wu (`@shikijs/core`, `@shikijs/engine-javascript`, `@shikijs/engine-oniguruma`, `@shikijs/langs`, `@shikijs/primitive`, `@shikijs/themes`, `@shikijs/types`, `shiki`)
 - Copyright (c) 2023 Anthony Fu <https://github.com/antfu> (`@shikijs/core`, `@shikijs/engine-javascript`, `@shikijs/engine-oniguruma`, `@shikijs/langs`, `@shikijs/primitive`, `@shikijs/themes`, `@shikijs/types`, `shiki`)
 - Copyright (c) Microsoft Corporation (`@shikijs/vscode-textmate`)
+- Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js), Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com), and Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/) (`@xterm/xterm`)
+- Copyright (c) 2019, The xterm.js authors (https://github.com/xtermjs/xterm.js) (`@xterm/addon-fit`)
 - Copyright (c) 2015 Titus Wormer <tituswormer@gmail.com> (`ccount`, `character-entities-html4`, `character-entities-legacy`)
 - Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com> (`comma-separated-tokens`, `hast-util-whitespace`, `html-void-elements`, `space-separated-tokens`, `zwitch`)
 - Copyright (c) Titus Wormer <tituswormer@gmail.com> (`hast-util-to-html`)

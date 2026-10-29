@@ -1,0 +1,26 @@
+$ nexus start --project drinks --title "Agent thread" --json
+{
+  "id": "th-b8770588e426",
+  "title": "Agent thread",
+  "project": "drinks",
+  "pylonId": "pylon-th-b8770588e426",
+  "status": "active",
+  "conversationId": "2",
+  "startedBy": "nVERIFYLAPTOP",
+  "createdAt": 1793261217612,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1793261217612,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "node-a"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the project is scratch, so it has no template"
+  }
+}
+[exit 0]

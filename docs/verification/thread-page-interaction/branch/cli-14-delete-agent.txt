@@ -1,0 +1,3 @@
+$ nexus delete th-b8770588e426
+Deleted th-b8770588e426.
+[exit 0]

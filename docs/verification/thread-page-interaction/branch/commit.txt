@@ -1,0 +1,1 @@
+branch: 31c7ca3 fix(dashboard): a terminal that follows unarchives, resizes while it connects and replaces its last instance
