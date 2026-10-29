@@ -1,1 +1,1 @@
-branch: 57bb4e1 chore(cli): 0.50.0 for the attach route's pane and the focus route
+branch: 34af3f6 fix(dashboard): wait for the terminal's current connection to land before focusing a session

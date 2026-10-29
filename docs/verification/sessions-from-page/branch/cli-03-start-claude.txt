@@ -1,17 +1,17 @@
 $ nexus start --project drinks --title "Claude thread" --claude "This thread only checks Nexus's dashboard. Do nothing else: read no files, write none, start no subagents, ask no reviewer, open no pull request. Reply with the single word READY and end your turn." --model claude-sonnet-5-5 --json
 {
-  "id": "th-5c8a8b00157d",
+  "id": "th-0911b21363f3",
   "title": "Claude thread",
   "project": "drinks",
-  "pylonId": "pylon-th-5c8a8b00157d",
+  "pylonId": "pylon-th-0911b21363f3",
   "status": "active",
   "conversationId": null,
   "startedBy": "nVERIFYLAPTOP",
-  "createdAt": 1793303983559,
+  "createdAt": 1793304590743,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793303983559,
+  "lastHumanActivityAt": 1793304590743,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
