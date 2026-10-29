@@ -11,7 +11,8 @@ docs/verification/registry-reads/run.sh origin/main HEAD 300
 
 `run.sh` checks out both commits into two worktrees, copies `measure.ts` and the branch's `registry.test.ts`,
 `activity.test.ts` and `host.test.ts` into each, and runs them there, so the two runs differ only by the code under
-test. It writes `main.txt`, `branch.txt`, `compare.txt`, `tests-main.txt` and `tests-branch.txt` here.
+test. It writes `main.txt`, `branch.txt`, `compare.txt`, `tests-main.txt` and `tests-branch.txt` here, and runs
+`entries.ts` into `entries.txt`.
 
 `measure.ts` opens the real registry on a SQLite file and seeds 300 threads on one node. Every third thread is a
 Claude worker with a 20-entry transcript, every fifth has a live session turn, every seventh a waiting session, and
@@ -45,10 +46,26 @@ workers with no live turn. One `thread(id)` costs the same on both, since it is 
 The per-row callers stop paying it: `nodePylons` is one join, `roomLeft` one pylon read, one thread read and the five
 batched reads, and the start-up read one SELECT.
 
+## Reading the newest entries
+
+A statement count cannot show what one statement visits. The first batched read of the Claude entries ranked them
+with `row_number() OVER (PARTITION BY thread ORDER BY seq DESC)`, which the review found visits every stored entry of
+every thread it reads, up to `maxEntries`, 3000, each. `entries.ts` times the three forms on 300 threads of 1000
+entries, every seventh only nine, averaged over five runs after one warm-up. `entries.txt`:
+
+| read of each thread's newest 16 | ms |
+|---|---:|
+| one `ORDER BY seq DESC LIMIT 16` per thread, as main | 4.9 |
+| `row_number()` window | 147.3 |
+| `json_each` join bounded by a correlated `LIMIT 1 OFFSET 16`, as the branch | 3.3 |
+
+The query plan shows the join searches the primary key by `thread=? AND seq>?`, so it reads 16 rows a thread however
+many the thread keeps. The script checks it returns the same entries per thread, in order, as main's reads.
+
 ## New tests
 
-`tests-main.txt` and `tests-branch.txt` hold the seven tests this branch adds. Three are pins of behaviour that holds
-on both checkouts: `threads()` deep-equals `thread(id)` for every kind of session fact, `setDrain(null)` reads back
-null, and the node tallies and room for an up, paused, waking, unreported, archived, reading, crashed, failed and
-orphaned pylon. Four fail on main and pass on the branch: `storedThreads` and `threadStatus`, the start-up harness
+`tests-main.txt` and `tests-branch.txt` hold the eight tests this branch adds. Four are pins of behaviour that holds
+on both checkouts: `threads()` deep-equals `thread(id)` for every kind of session fact, a usage limit is read from the
+newest 16 entries and no further, `setDrain(null)` reads back null, and the node tallies and room for an up, paused,
+waking, unreported, archived, reading, crashed, failed and orphaned pylon. Four fail on main and pass on the branch: `storedThreads` and `threadStatus`, the start-up harness
 read that leaves out a recorded abort, `onAborted` at open and at a delete, and `onParked` reporting only flips.

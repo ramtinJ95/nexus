@@ -1,7 +1,8 @@
 ℹ fail 0
-ℹ pass 7
+ℹ pass 8
 ✔ a deploy drain set to null reads back as null, as does one never set
 ✔ a node's tallies and room count each of its pylons by what it holds, and a pylon placed elsewhere as an orphan
+✔ a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()
 ✔ each deleted conversation aborted, by a delete or at open, is told to onAborted
 ✔ storedThreads reads only the threads' own rows, by status and by who started them
 ✔ the harness threads at start are those whose agent is a conversation, less deleted ones whose abort is recorded

@@ -11,7 +11,7 @@ work=$(mktemp -d)
 trap 'git -C "$repo" worktree remove --force "$work/main" 2>/dev/null; git -C "$repo" worktree remove --force "$work/branch" 2>/dev/null; rm -rf "$work"' EXIT
 branch=${2:-HEAD}
 tests=(src/control/registry.test.ts src/harness/activity.test.ts src/harness/host.test.ts)
-pattern='threads\(\) reads each|storedThreads reads only|deploy drain set to null|harness threads at start|tallies and room|parked state is reported at track|each deleted conversation aborted'
+pattern='threads\(\) reads each|storedThreads reads only|deploy drain set to null|harness threads at start|tallies and room|parked state is reported at track|each deleted conversation aborted|newest 16 entries'
 
 for run in main branch; do
   commit=${1:-origin/main}
@@ -25,6 +25,7 @@ for run in main branch; do
   (cd "$tree" && echo "$run: $(git log --oneline -1)" && node --no-warnings docs/verification/registry-reads/measure.ts "${3:-300}") > "$here/$run.txt"
   (cd "$tree" && node --test --test-reporter=spec --test-name-pattern="$pattern" "${tests[@]}" 2>&1 | grep -E '^(✔|✖|ℹ (pass|fail))' | grep -v 'failing tests:' | sed -E 's/ \([0-9.]+ms\)$//' | sort -u) > "$here/tests-$run.txt" || true
 done
+node --no-warnings "$here/entries.ts" | tee "$here/entries.txt"
 
 {
   printf '| read | main | branch |\n|---|---:|---:|\n'

@@ -1,4 +1,4 @@
-branch: 69792e5 fix(harness): report a thread's parked state only when it flips
+branch: 1841ece perf(registry): read each Claude thread's newest entries through the index
 threads(), 300 threads	6
 thread(id) for each of them	1525
 nodePylons, 225 observed pylons	1

@@ -1,0 +1,9 @@
+per thread LIMIT 16 (main) 4.9 ms 4499 rows
+window 147.3 ms 4499 rows
+bounded join 3.3 ms 4499 rows
+SCAN j VIRTUAL TABLE INDEX 1:
+SEARCH e USING INDEX sqlite_autoindex_claude_entries_1 (thread=? AND seq>?)
+CORRELATED SCALAR SUBQUERY 1
+SEARCH claude_entries USING COVERING INDEX sqlite_autoindex_claude_entries_1 (thread=?)
+USE TEMP B-TREE FOR ORDER BY
+same entries as main, in order per thread: true
