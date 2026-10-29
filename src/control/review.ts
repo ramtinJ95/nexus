@@ -279,6 +279,17 @@ const approves = (round: Round) => round.verdict?.verdict === "approve" && !find
 export const landable = (r: Review) => r.merged === null && (r.phase.kind === "approved"
   || (r.phase.kind === "needs-person" && r.phase.unreviewed === undefined && r.rounds.at(-1)!.check?.passed === true && approves(r.rounds.at(-1)!)));
 /**
+ * Why `nexus land` refuses the review, or null when it takes it: its builder is not active, it merged, the PR watch
+ * reads its PR as closed or merged outside it, or it is not landable. The dashboard offers Land by the same rule.
+ */
+export function cannotLand(r: Review, builder: Pick<Thread, "status">, pr?: Pick<PullRequest, "state">): string | null {
+  if (builder.status !== "active") return `thread ${r.builder} is ${builder.status}`;
+  if (r.merged !== null) return `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`;
+  if (pr !== undefined && pr.state !== "open") return `pull request #${r.pr.number} is ${pr.state} on GitHub outside this review, so there is nothing to land`;
+  if (!landable(r)) return `review ${r.id} of ${r.builder} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`;
+  return null;
+}
+/**
  * Whether the review is held for the person, with rounds left and no label, after an approval that a failed check, a
  * failed live check or a conflict stopped, which a new head may answer. An approval has no blocking finding of the
  * reviewer's, so the blocking ones are the loop's own. Changes the reviewer requested stay the person's.
@@ -986,11 +997,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   function landableAt(builderId: ThreadId, head: string | undefined): Review {
     const r = registry.review(builderId);
     if (r === null) throw new HttpError(409, `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
-    const builder = registry.thread(builderId)!;
-    if (builder.status !== "active") throw new HttpError(409, `thread ${builderId} is ${builder.status}`);
-    if (r.merged !== null) throw new HttpError(409, `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`);
+    const refusal = cannotLand(r, registry.thread(builderId)!, watchedPr(r));
+    if (refusal !== null) throw new HttpError(409, refusal);
     if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new HttpError(409, `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
-    if (!landable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`);
     return r;
   }
 }

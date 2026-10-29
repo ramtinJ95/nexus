@@ -462,6 +462,8 @@ test("a review is not offered for landing when its PR closed, or when the contro
   const pr = { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "closed" as const, checks: "passing" as const, review: "none" as const, conflict: false };
   s.registry.savePrWatch(fix.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a closed PR has nothing to land");
+  s.registry.savePrWatch(fix.id, { links: [{ pr: { ...pr, state: "merged" }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a PR merged outside the review has nothing to land");
 });
 
 test("a held review whose PR the watch read at a new head offers no Land for the old one, and its new round says why it started", async (t) => {

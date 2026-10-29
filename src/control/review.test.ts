@@ -1594,6 +1594,17 @@ test("a PR merged or closed outside a review that does not land ends it quietly,
   assert.equal(i.sent.length, 2, "the reviewer gets no next round");
 });
 
+test("an approved review whose PR the watch reads as closed or merged outside it is not landed", async (t) => {
+  for (const state of ["closed", "merged"] as const) {
+    const f = fixture(t);
+    const loop = await approved(f, null);
+    assert.equal(f.review().phase.kind, "approved");
+    f.watched(state);
+    assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409, message: new RegExp(`pull request #\\d+ is ${state} on GitHub outside this review, so there is nothing to land`) });
+    assert.equal(f.review().phase.kind, "approved", `a ${state} PR starts no landing`);
+  }
+});
+
 test("a review that lands still sees a merge made outside it through, and a real failure while the PR is open still asks the person", async (t) => {
   const f = fixture(t);
   released(f, previous);
