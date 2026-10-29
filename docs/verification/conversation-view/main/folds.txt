@@ -1,0 +1,70 @@
+th-6af91b64d433 · started just now · gpt-6-astra
+
+You
+
+Find out how the dashboard folds a run of tool calls into one line. Read stepsSummary and toolLooks in src/control/dashboard.ts, find their tests in src/control/dashboard.test.ts with grep, and run node --test --test-name-pattern=fold src/control/dashboard.test.ts (run npm run build first if it needs the bundle). Then set phrasesShown to 2, run that test again to see what breaks, and put it back. Report in a few sentences. Do not commit.
+
+Ran 2 commands, read a file
+›
+
+Passes without a build. Now the mutation.
+
+Ran 2 commands
+›
+
+stepsSummary (src/control/dashboard.ts:1726) folds a run of tool calls into one line. For each call it looks up the tool in toolLooks (:1653), which gives an action (read, command, change, search, subagent and so on) and the argument naming the file. Calls are grouped by action. A file counts once however often it's touched, so an edit and a write to one path make one changed file. A tool with no look becomes its own action, named as it is. Actions are sorted by priority, and the first phrasesShown (3) are phrased, like "Ran 2 commands, read 2 files". Whatever is left collapses into "used another tool" or "used N other tools".
+
+The tests are the four fold-related ones at src/control/dashboard.test.ts:796, :833, :854 and :1484, plus the Claude transcript test at :1384. All pass as is, and no build was needed.
+
+With phrasesShown set to 2, five of the seven matched tests fail. The cause is that a third action gets swallowed into the "other tools" count. For example, "read a file" or "searched the code" turns into "used another tool", and "ran a subagent" does the same. I then set it back to 3. The file now matches HEAD and nothing is committed.
+
+You
+
+Which Claude Code tool names in src/fixtures/claude-transcript.jsonl have no entry in toolLooks? Check with jq or grep, list them, and say how each would read in a fold today.
+
+Ran 4 commands
+›
+
+Only one tool name in src/fixtures/claude-transcript.jsonl has no entry in toolLooks: mcp__notes-compaction__notes, called once. jq isn't installed, so I used grep. It finds 6 tool_use blocks, and the names are Bash (3), Agent, Write and the MCP tool.
+
+In a fold, stepsSummary treats a tool with no entry as its own action. It uses the unknownTool phrase at src/control/dashboard.ts:1639, with the raw name and priority 2, below every known action. Today it reads:
+
+Alone: "used mcp__notes-compaction__notes", or "used mcp__notes-compaction__notes 2 times" for repeat calls.
+
+Past the third phrase: it collapses into "used another tool", since priority 2 sorts last.
+
+Fixture's fold: it has only three distinct actions, so the MCP tool would fall outside the shown phrases, and it already reads "Changed a file, ran a command, used another tool". That matches the failing output from the phrasesShown = 2 run, where the MCP tool is shown as "used another tool".
+
+Its row inside the fold has no subject from toolLooks. It falls back to the first of command, pattern, path or url that the call has as a string argument. If none is present, the row has no subject.
+
+You
+
+Give mcp__notes-compaction__notes a look in toolLooks so a fold says it took notes: use the Edit tool on src/control/dashboard.ts (no sed), adding a "notes" action whose phrases are "took notes" and "took notes N times". Run node --test --test-name-pattern=fold src/control/dashboard.test.ts and npm run typecheck as plain commands without pipes. If anything fails, fix it with Edit and run it again. Then show git diff --stat and revert your change with git checkout. Do not commit.
+
+Changed a file, read a file
+›
+
+I mistyped the key. The real tool name has a hyphen, so I'll fix that before testing.
+
+Changed a file, ran 3 commands
+›
+
+The change worked, and I've reverted it. Nothing is committed.
+
+Edits: I made three edits to src/control/dashboard.ts with the Edit tool.
+
+Added "notes" to the Action union.
+
+Added a notes phrase at priority 1: "took notes" / "took notes N times".
+
+Added "mcp__notes-compaction__notes": { action: "notes" } to toolLooks.
+
+Mistake and fix: I first typed the key with underscores (mcp__notes_compaction__notes). I corrected it to the hyphenated name before running anything, so no test or typecheck run used the wrong key.
+
+Tests: node --test --test-name-pattern=fold src/control/dashboard.test.ts passed all 7 tests.
+
+Typecheck: npm run typecheck ran clean.
+
+Diff: git diff --stat showed src/control/dashboard.ts | 4 +++-, with 3 insertions and 1 deletion. After git checkout src/control/dashboard.ts the tree has no changes apart from the untracked node_modules.
+
+None of the existing tests exercises the notes action. The fixture's MCP call sits in the transcript test, which still passed, so that test presumably doesn't assert the fold line for it. A real change would need a test asserting "took notes".
