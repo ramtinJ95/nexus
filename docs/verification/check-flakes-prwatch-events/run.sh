@@ -11,7 +11,7 @@ name=$(basename "$here")
 repo=$(git -C "$here" rev-parse --show-toplevel)
 work=$(mktemp -d)
 stack=
-trap '[ -n "$stack" ] && kill "$stack" 2>/dev/null; for t in "$work"/*/; do git -C "$repo" worktree remove --force "$t" 2>/dev/null; done; rm -rf "$work"' EXIT
+trap '[ -n "$stack" ] && kill "$stack" 2>/dev/null; for t in "$work"/*/; do git -C "$repo" worktree remove --force "$t" 2>/dev/null || true; done; rm -rf "$work"' EXIT
 
 for run in main branch; do
   commit=${1:-origin/main}
