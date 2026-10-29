@@ -10,7 +10,7 @@ import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { claudeProjects, type ClaudeConversation } from "../claude-transcript.ts";
+import { claudeProjects, maxRecordBytes, type ClaudeConversation } from "../claude-transcript.ts";
 import { claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
@@ -3177,8 +3177,9 @@ test("a Claude worker's page names no reply watermark while the reads after the 
   await s.call("GET", `/v1/threads/${s.thread.id}/conversation`);
 
   const reply = JSON.parse(fixture[40]!);
-  const long = (i: number) => `${JSON.stringify({ ...reply, uuid: `long-${i}`, message: { ...reply.message, id: `msg-long-${i}`, content: [{ type: "text", text: `Long ${i} ${"x".repeat(4000)}` }] } })}\n`;
-  await appendFile(s.transcript, Array.from({ length: 160 }, (_, i) => long(i)).join("") + fixture.slice(30, 43).join(""));
+  // Two records of more than half of what one read takes, so the reply lies past the first read.
+  const long = (i: number) => `${JSON.stringify({ ...reply, uuid: `long-${i}`, message: { ...reply.message, id: `msg-long-${i}`, content: [{ type: "text", text: `Long ${i} ${"x".repeat(maxRecordBytes * 0.6)}` }] } })}\n`;
+  await appendFile(s.transcript, long(0) + long(1) + fixture.slice(30, 43).join(""));
   held = reads + 2;
   s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
   t.mock.timers.tick(1_000);

@@ -1,9 +1,10 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { maxRecordBytes, parseRecord, readTranscript, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import { maxRecordBytes, parseRecord, readTranscript, readTranscriptImage, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import type { OpenPipe } from "./checkout-files.ts";
 import { processStream } from "./process-stream.ts";
 import type { ByteStream } from "./protocol.ts";
@@ -375,4 +376,60 @@ test("a usage limit's text names its reset in UTC, with its date when more than 
   assert.equal(usageLimitText({ resetsAt: Date.parse("2026-10-29T05:30:00Z") }, Date.parse("2026-10-26T05:34:00Z")), "stopped on its usage limit until Oct 29, 05:30 UTC");
   assert.equal(usageLimitText({ resetsAt: reset }, Date.parse("2026-10-26T07:00:00Z")), "stopped on its usage limit, which reset at 06:30 UTC");
   assert.equal(usageLimitText({ resetsAt: null }, reset), "stopped on its usage limit");
+});
+
+/** A user record as Claude Code writes it: a pasted image beside the prompt's text, or a Read of an image, whose base64 the record holds twice. */
+const pastedRecord = (png: Buffer, text: string) => JSON.stringify({
+  type: "user", timestamp: "2026-10-28T10:00:00.000Z", origin: { kind: "human" },
+  message: { role: "user", content: [{ type: "text", text }, { type: "image", source: { type: "base64", media_type: "image/png", data: png.toString("base64") } }] },
+});
+const readRecord = (png: Buffer, id: string) => JSON.stringify({
+  type: "user", timestamp: "2026-10-28T10:00:01.000Z",
+  message: { role: "user", content: [{ tool_use_id: id, type: "tool_result", content: [{ type: "text", text: "the screenshot" }, { type: "image", source: { type: "base64", data: png.toString("base64"), media_type: "image/png" } }] }] },
+  toolUseResult: { type: "image", file: { base64: png.toString("base64"), type: "image/png" } },
+});
+const png = (bytes: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(bytes - 8)]);
+
+test("a pasted image and a Read's image are kept as places in the transcript, which read back to the image's bytes", async (t) => {
+  const p = await projects(t);
+  const pasted = png(2_000);
+  const shot = png(300_000);
+  await writeFile(p.file, `${lines[4]}\n${pastedRecord(pasted, "What is wrong here?")}\n${readRecord(shot, "toolu_1")}\n`);
+  const all = await readAll(p.read, start);
+  const prompt = all.entries.find((e): e is Extract<ClaudeEntry, { kind: "prompt" }> => e.kind === "prompt" && e.text === "What is wrong here?")!;
+  const result = all.entries.find((e): e is Extract<ClaudeEntry, { kind: "result" }> => e.kind === "result" && e.toolUseId === "toolu_1")!;
+  assert.equal(result.output, "the screenshot");
+  assert.equal(prompt.images?.length, 1);
+  assert.equal(result.images?.length, 1);
+  assert.ok(prompt.images![0]!.offset > 0);
+  assert.deepEqual(await readTranscriptImage(p.open, session, prompt.images![0]!, p.root), pasted);
+  assert.deepEqual(await readTranscriptImage(p.open, session, result.images![0]!, p.root), shot);
+  // A record parsed alone is located as the file's first line.
+  assert.deepEqual((parseRecord(pastedRecord(pasted, "What is wrong here?"))[0] as { images: unknown[] }).images, [{ ...prompt.images![0], offset: 0 }]);
+});
+
+test("an image of a replaced transcript, or one named by a wrong hash or index, is gone rather than another's bytes", async (t) => {
+  const p = await projects(t);
+  await writeFile(p.file, `${pastedRecord(png(100), "first")}\n`);
+  const image = (await p.read(start))!.entries.flatMap((e) => e.kind === "prompt" ? e.images ?? [] : [])[0]!;
+  assert.ok(await readTranscriptImage(p.open, session, image, p.root));
+  assert.equal(await readTranscriptImage(p.open, session, { ...image, sha256: "0".repeat(64) }, p.root), null);
+  assert.equal(await readTranscriptImage(p.open, session, { ...image, index: 1 }, p.root), null);
+  assert.equal(await readTranscriptImage(p.open, session, { ...image, bytes: image.bytes + 10 }, p.root), null);
+  // The same record's length, with another image.
+  await writeFile(p.file, `${pastedRecord(png(100), "first")}\n`);
+  assert.equal(await readTranscriptImage(p.open, session, image, p.root), null);
+  assert.equal(await readTranscriptImage(p.open, "11111111-2222-4333-8444-555555555599", image, p.root), null);
+});
+
+test("a Read of an image over a megabyte fits one record, where the old 512 KiB limit skipped it", async (t) => {
+  const p = await projects(t);
+  const shot = png(1 << 20);
+  const record = readRecord(shot, "toolu_big");
+  assert.ok(Buffer.byteLength(record) > 512 << 10 && Buffer.byteLength(record) < maxRecordBytes);
+  await writeFile(p.file, `${record}\n${lines[4]}\n`);
+  const all = await readAll(p.read, start);
+  assert.equal(all.entries.some((e) => e.kind === "record"), false);
+  const result = all.entries.find((e): e is Extract<ClaudeEntry, { kind: "result" }> => e.kind === "result")!;
+  assert.deepEqual(await readTranscriptImage(p.open, session, result.images![0]!, p.root), shot);
 });
