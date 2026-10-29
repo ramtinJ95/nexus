@@ -292,6 +292,8 @@ past matching records they have not consumed.
 | `attention.changed` | The new nullable `attention` |
 | `pull-request.feedback` | New batched GitHub feedback; `requestId` |
 | `pull-request.linked` | The PR watch linked a pull request to the thread, written once per pull request when the watch first saves it read from GitHub; `repo`, `number`, `url`, `title` and `state` |
+| `pull-request.error` | The thread's PR watch failed a read or a delivery, written when its `error` goes from none to set and not again while it stays set; `error`, the retry notice |
+| `pull-request.error-cleared` | The thread's PR watch read GitHub again after a failure, written when its `error` goes back to none |
 | `release.changed` | Desired release (`desired`) or changed component report |
 | `review.changed` | A review started or changed phase or round; `review`, `reviewer`, `phase` and `round` |
 | `usage-limit.continued` | The control plane typed its continue into a Claude worker whose usage limit reset; `session`, `stoppedAt`, `resetsAt` and `requestId` |

@@ -1,0 +1,86 @@
+✖ a check that exits 75 is void, so it runs again in a fresh check thread, and three such runs in a row at a head are unrunnable (99.929381ms)
+✖ a failing read fires one pull-request.error with the retry notice, and the next good read fires pull-request.error-cleared (28.237671ms)
+✖ a failed read of a queued thread's predecessor is the predecessor's error, kept until a read of it succeeds (17.856226ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 623.076969
+
+✖ failing tests:
+
+test at src/control/gate.test.ts:199:1
+✖ a check that exits 75 is void, so it runs again in a fresh check thread, and three such runs in a row at a head are unrunnable (99.929381ms)
+  AssertionError [ERR_ASSERTION]: the first transient run says nothing of the change
+  + actual - expected
+  
+    {
+      state: {
+  +     kind: 'done',
+  +     output: 'npm error code ETIMEDOUT',
+  +     passed: false
+  -     kind: 'void'
+      },
+  +   status: 'active'
+  -   status: 'deleted'
+    }
+  
+      at TestContext.<anonymous> (file:///tmp/tmp.Rsugd51MoW/main/src/control/gate.test.ts:208:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: { state: { kind: 'done', passed: false, output: 'npm error code ETIMEDOUT' }, status: 'active' },
+    expected: { state: { kind: 'void' }, status: 'deleted' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at src/control/pr-watch.test.ts:276:1
+✖ a failing read fires one pull-request.error with the retry notice, and the next good read fires pull-request.error-cleared (28.237671ms)
+  AssertionError [ERR_ASSERTION]: once, however many passes fail
+  + actual - expected
+  
+  + []
+  - [
+  -   [
+  -     'pull-request.error',
+  -     'th-1',
+  -     {
+  -       error: 'PR watch could not read GitHub or deliver its message; it will retry.'
+  -     }
+  -   ]
+  - ]
+  
+      at TestContext.<anonymous> (file:///tmp/tmp.Rsugd51MoW/main/src/control/pr-watch.test.ts:281:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ [ 'pull-request.error', 'th-1', [Object] ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at src/control/pr-watch.test.ts:286:1
+✖ a failed read of a queued thread's predecessor is the predecessor's error, kept until a read of it succeeds (17.856226ms)
+  AssertionError [ERR_ASSERTION]: the watch's own good read does not hide it
+  + actual - expected
+  
+  + null
+  - 'PR watch could not read the pull requests a queued thread waits for; it will retry.'
+  
+      at TestContext.<anonymous> (file:///tmp/tmp.Rsugd51MoW/main/src/control/pr-watch.test.ts:295:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'PR watch could not read the pull requests a queued thread waits for; it will retry.',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

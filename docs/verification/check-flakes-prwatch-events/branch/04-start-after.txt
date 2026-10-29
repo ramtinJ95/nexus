@@ -1,0 +1,34 @@
+$ nexus start --project nexus --title After greeting --claude greet --after th-caa7dc21f076 --json
+{
+  "id": "th-dc482f185cca",
+  "title": "After greeting",
+  "project": "nexus",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1793288626901,
+  "status": "queued",
+  "after": [
+    "th-caa7dc21f076"
+  ],
+  "waits": [
+    {
+      "thread": "th-caa7dc21f076",
+      "state": "waiting",
+      "why": "PR #1 is open"
+    }
+  ],
+  "blocked": false,
+  "node": "verify-node",
+  "worker": "claude",
+  "model": "claude-opus-5-5",
+  "prompt": "greet",
+  "branch": null,
+  "commit": null,
+  "resources": {
+    "cpus": 1,
+    "memoryGiB": 1,
+    "diskGiB": 10
+  },
+  "startNow": null,
+  "lastError": null
+}
+[exit 0]

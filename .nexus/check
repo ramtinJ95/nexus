@@ -1,6 +1,7 @@
 #!/bin/sh
 # The typecheck and the full test suite, which the review loop runs at an approved head before a landing.
 set -e
-npm ci --no-audit --no-fund
+# Exit 75 tells the review loop the failure was transient, such as a registry timeout, so it runs the check again.
+npm ci --no-audit --no-fund || exit 75
 npm run typecheck
 npm test
