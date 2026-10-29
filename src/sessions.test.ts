@@ -571,6 +571,34 @@ test("an attached terminal is a client with exactly the command line attachedTer
   assert.ok(attachScript.includes("setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"));
 });
 
+test("an attached terminal lands in the pane it names: an agent's by the agent, any other by its tab, and a closed one nowhere", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-attach-"));
+  try {
+    // A Herdr whose server runs, with an agent in w1:p1, a shell in w2:p1, and no other pane.
+    writeFileSync(join(dir, "herdr"), `#!/bin/sh
+echo "$*" >> "${dir}/calls"
+case "$*" in
+  "--session nexus agent focus w1:p1"|"--session nexus workspace list"|"--session nexus tab focus w2:t1") exit 0 ;;
+  "--session nexus pane get w2:p1") echo '{"result":{"pane":{"pane_id":"w2:p1","tab_id":"w2:t1","workspace_id":"w2"}}}' ;;
+  "--session nexus") exit 0 ;;
+  *) echo '{"error":{"code":"not_found"}}'; exit 1 ;;
+esac
+`, { mode: 0o755 });
+    const attach = (pane: string) => {
+      rmSync(join(dir, "calls"), { force: true });
+      const run = spawnSync("sh", ["-c", attachScript, "attach", pane], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, encoding: "utf8" });
+      assert.equal(run.status, 0, run.stderr);
+      return readFileSync(join(dir, "calls"), "utf8").trim().split("\n").slice(1);
+    };
+    assert.deepEqual(attach("w1:p1"), ["--session nexus agent focus w1:p1", "--session nexus"]);
+    assert.deepEqual(attach("w2:p1"), ["--session nexus agent focus w2:p1", "--session nexus pane get w2:p1", "--session nexus tab focus w2:t1", "--session nexus"]);
+    assert.deepEqual(attach("w9:p1"), ["--session nexus agent focus w9:p1", "--session nexus pane get w9:p1", "--session nexus"]);
+    assert.deepEqual(attach(""), ["--session nexus"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /**
  * A pylon for prompted Claude launches: Herdr workspaces whose root pane runs a shell until a typed `claude` command
  * starts Claude there, the launch's files in ~/.nexus, and the transcripts Claude has written. Typing `claude` starts

@@ -1653,7 +1653,7 @@ test("an attach wakes the pylon, waits for it, and carries keys, resizes and out
 
   const [pylonId, argv] = s.streams.at(-1)!;
   assert.equal(pylonId, s.thread.pylonId);
-  assert.deepEqual([argv[0], argv[1], ...argv.slice(4)], ["python3", "-c", "100", "30", "xterm-ghostty", "sh", "-c", attachScript]);
+  assert.deepEqual([argv[0], argv[1], ...argv.slice(4)], ["python3", "-c", "100", "30", "xterm-ghostty", "sh", "-c", attachScript, "attach", ""]);
   const relayBytes = Number(argv[3]);
   await until(() => pipe.stdin().length >= relayBytes, "the relay's source");
   assert.match(pipe.stdin().subarray(0, relayBytes).toString(), /^# A program on a pty in a pylon/);
@@ -1669,6 +1669,28 @@ test("an attach wakes the pylon, waits for it, and carries keys, resizes and out
   pipe.exit(0);
   assert.equal(await a.closed, 1000);
   assert.deepEqual(a.received.slice(2), ["herdr screen", { type: "exit", code: 0 }]);
+});
+
+test("a Claude worker's attach lands in the pane of its Claude session, and a Nexus agent thread's where Herdr was", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
+  const claude = { ...s, thread: started.body as Thread };
+  s.registry.setClaudeWorker(claude.thread.id, "/poteto-mode fix it", "started", undefined, claudeSession);
+  const session = (herdrPane: string, harness: "shell" | "claude-code", harnessSessionId: string | null) => ({ id: herdrPane, state: "running" as const, herdrPane, harness, harnessSessionId, status: "idle" as const, title: "x", message: null });
+  observeRunning(claude, {});
+  s.registry.apply({ record: "sessions", pylonId: claude.thread.pylonId, sessions: [session("w1:p1", "shell", null), session("w2:p1", "claude-code", "another-session"), session("w3:p1", "claude-code", claudeSession)] });
+  s.probePipes(async (argv) => argv[0] === "python3" ? fakePipe().stream : processStream("true", [], () => {}));
+  const landsIn = async (thread: string) => {
+    const a = await attachTo(s.port, attachPathOf(thread));
+    assert.ok("ws" in a);
+    await until(() => a.received.length === 1, "attached");
+    a.ws.close();
+    await a.closed;
+    return s.streams.findLast(([, argv]) => argv[0] === "python3")![1].slice(7);
+  };
+  assert.deepEqual(await landsIn(claude.thread.id), ["sh", "-c", attachScript, "attach", "w3:p1"]);
+  observeRunning(s, {});
+  assert.deepEqual(await landsIn(s.thread.id), ["sh", "-c", attachScript, "attach", ""]);
 });
 
 test("deleting a thread ends its attach as a conflict, and a closing API ends one with 1001", async (t) => {

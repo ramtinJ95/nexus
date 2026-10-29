@@ -718,8 +718,12 @@ const startServer = `setsid -f tini -s -- herdr --session ${herdrSession} server
  * The shell command a human's terminal runs in the pylon to attach to its Herdr session. With no server yet, it
  * starts one as a session open does, so the server outlives the terminal and runs under tini, and waits for it.
  * `herdr --session nexus` is the whole command line of each attached client, which attachedTerminals counts.
+ *
+ * Its first argument, when not empty, is the pane the terminal lands in, such as a Claude worker's. Herdr's focus is
+ * the server's, and a client attaches to it, so focusing the pane first lands every client there. A pane Herdr runs
+ * no agent in is focused by its tab. A pane that has closed focuses nothing, and the terminal lands where Herdr was.
  */
-export const attachScript = `herdr --session ${herdrSession} workspace list >/dev/null 2>&1 || { ${startServer}; i=0; until herdr --session ${herdrSession} workspace list >/dev/null 2>&1; do i=$((i + 1)); [ $i -lt ${serverStartMs / 100} ] || break; sleep 0.1; done; }; exec herdr --session ${herdrSession}`;
+export const attachScript = `herdr --session ${herdrSession} workspace list >/dev/null 2>&1 || { ${startServer}; i=0; until herdr --session ${herdrSession} workspace list >/dev/null 2>&1; do i=$((i + 1)); [ $i -lt ${serverStartMs / 100} ] || break; sleep 0.1; done; }; [ -z "$1" ] || herdr --session ${herdrSession} agent focus "$1" >/dev/null 2>&1 || { tab=$(herdr --session ${herdrSession} pane get "$1" 2>/dev/null | sed -n 's/.*"tab_id":"\\([^"]*\\)".*/\\1/p'); [ -z "$tab" ] || herdr --session ${herdrSession} tab focus "$tab" >/dev/null 2>&1; }; exec herdr --session ${herdrSession}`;
 
 /**
  * How many terminals are attached to the pylon's Herdr session, such as `nexus attach` from a Mac, which count as
