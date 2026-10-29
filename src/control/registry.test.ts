@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { PullRequest } from "./github.ts";
-import { newPylonRecord } from "../tick.ts";
+import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { trackActivity } from "../harness/activity.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
@@ -69,7 +69,7 @@ function seeded(path: string, clock = Date.now) {
 test("records survive closing and reopening the file", async (t) => {
   const path = tempDb();
   const first = seeded(path);
-  const submitted: StoredPylon = {
+  const submitted: Omit<PylonRecord, "desired"> = {
     ...pylon, pauses: 2, failed: null,
     submitted: { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z", job: { kind: "delete", pylonId } },
     attempts: { count: 1, last: { at: 5, code: "backend", message: "pylon-th-1: the controller exited" } },
@@ -452,7 +452,7 @@ test("a registry from before repository kinds reads every stored repo, booted or
   const path = tempDb();
   const first = seeded(path);
   const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };
-  const spawning: StoredPylon = { ...pylon, submitted: { ...envelope, job: { kind: "spawn", pylonId, boot: { ...pylon.boot, source: pylon.firstBoot }, live: pylon.live, liveHash: pylon.liveHash } } };
+  const spawning: Omit<PylonRecord, "desired"> = { ...pylon, submitted: { ...envelope, job: { kind: "spawn", pylonId, boot: { ...pylon.boot, source: pylon.firstBoot }, live: pylon.live, liveHash: pylon.liveHash } } };
   first.savePylon(spawning);
   const deleting = addPylon(first, "th-2");
   const deletion: StoredPylon = { ...first.pylon(deleting)!, submitted: { ...envelope, jobId: "j2" as JobId, job: { kind: "delete", pylonId: deleting } } };

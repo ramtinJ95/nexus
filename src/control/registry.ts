@@ -92,7 +92,7 @@ export type ThreadAgent = { kind: "harness"; conversationId: string } | { kind: 
 export type RecordedImage = ImageManifest & { release: string | null };
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
-export type StoredPylon = Omit<PylonRecord, "desired">;
+export type StoredPylon = Omit<PylonRecord, "desired" | "thread"> & { thread: ThreadId };
 
 /**
  * A session of a pylon. `id` names it, and is what closes it: its Herdr pane, or `failed-` and a hash for a failed
@@ -439,7 +439,7 @@ function sessionRow(r: Row): Session {
 function pylonRow(r: Row): StoredPylon {
   return {
     pylonId: r.id as PylonId,
-    thread: r.thread as string,
+    thread: r.thread as ThreadId,
     node: r.node as NodeName,
     boot: json(r.boot),
     firstBoot: json(r.first_boot),
@@ -481,7 +481,7 @@ export function openRegistry(path: string, clock = Date.now) {
   };
 
 
-  const pylonParams = (p: StoredPylon) => ({
+  const pylonParams = (p: Omit<PylonRecord, "desired">) => ({
     $id: p.pylonId, $thread: p.thread, $node: p.node,
     $boot: JSON.stringify(p.boot), $firstBoot: JSON.stringify(p.firstBoot), $live: JSON.stringify(p.live), $liveHash: p.liveHash,
     $pauses: p.pauses, $submitted: p.submitted === null ? null : JSON.stringify(p.submitted), $attempts: JSON.stringify(p.attempts), $failed: p.failed,
@@ -953,7 +953,7 @@ export function openRegistry(path: string, clock = Date.now) {
       const event = pylonEventSchema.parse(report.event);
       const stored = pylon(report.pylon);
       if (stored === undefined || stored.node !== node) return;
-      const thread = stored.thread as ThreadId;
+      const thread = stored.thread;
       transaction(() => {
         const receipt = eventReceipt(node);
         if (receipt !== null && receipt >= report.sequence) return;
@@ -1220,7 +1220,7 @@ export function openRegistry(path: string, clock = Date.now) {
      * queue record is marked started in the same transaction, so a queued thread starts at most once, and so is a
      * start's `key`, so a repeat of its request ID finds the thread.
      */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: StoredPylon, claudePrompt?: string, model = defaultClaudeModel, queued = false, key?: StartKey) {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt">, pylon: Omit<PylonRecord, "desired">, claudePrompt?: string, model = defaultClaudeModel, queued = false, key?: StartKey) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         if (queued) {
@@ -1300,14 +1300,14 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     reserved: (node: NodeName) => [...reservations.values()].filter((r) => r.node === node).map((r) => r.resources),
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
-    savePylon(saved: StoredPylon) {
+    savePylon(saved: Omit<PylonRecord, "desired">) {
       transaction(() => {
         const previous = pylon(saved.pylonId);
-        const { changes } = sql(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
+        if (previous === undefined) throw new Error(`no pylon ${saved.pylonId} to save`);
+        sql(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
           live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed, retrying = $retrying WHERE id = $id`).run(pylonParams(saved));
-        if (changes !== 1) throw new Error(`no pylon ${saved.pylonId} to save`);
-        if (saved.failed !== null && previous?.failed !== saved.failed) appendEvent("thread.failed", saved.thread as ThreadId, { message: saved.failed });
-        updateAttention(saved.thread as ThreadId);
+        if (saved.failed !== null && previous.failed !== saved.failed) appendEvent("thread.failed", previous.thread, { message: saved.failed });
+        updateAttention(previous.thread);
       });
     },
     /** Forgets the pylon's failed jobs, and only those, as the usage backfill does for a wake it gave up on. */

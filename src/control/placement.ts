@@ -2,7 +2,7 @@ import type { BootInputs } from "../project.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeName, type NodeObservation, type PylonId, type PylonObservation } from "../protocol.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
-import type { NodeRecord, Registry, StoredPylon, ThreadId } from "./registry.ts";
+import type { NodeRecord, Registry, StoredPylon } from "./registry.ts";
 
 /**
  * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
@@ -62,7 +62,7 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
 export function roomLeft(registry: Registry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
   const now = Date.now();
   const pending = [...registry.pylonsOn(node)
-    .filter((p) => p.failed === null && ["running", "reading"].includes(desiredPhase(registry.thread(p.thread as ThreadId)!, now)))
+    .filter((p) => p.failed === null && ["running", "reading"].includes(desiredPhase(registry.thread(p.thread)!, now)))
     .map((p) => uncounted(p, o.pylons.find((seen) => seen.pylonId === p.pylonId))), ...registry.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
   const left: Room = {
@@ -114,7 +114,7 @@ export function nodePylons(registry: Registry, node: NodeRecord): NodePylons | n
       orphaned.push(seen.pylonId);
       continue;
     }
-    const { status } = registry.thread(p.thread as ThreadId)!;
+    const { status } = registry.thread(p.thread)!;
     const crashed = seen.phase === "broken" && seen.cause === "controller";
     const tally = tallies[(crashed || seen.phase === "stopped") && (status === "archived" || status === "deleted") ? "archived"
       : crashed ? "crashed" : seen.phase !== "stopped" ? "up" : "paused"];
