@@ -12,18 +12,18 @@ Updated project nexus-review, auto review, set by nLAPTOP, pipeline off. Existin
 
 $ nexus start --project nexus-review --title Hold in review --claude push hold-review --json
 {
-  "id": "th-fa313f7756c4",
+  "id": "th-f1dafd8f247a",
   "title": "Hold in review",
   "project": "nexus-review",
-  "pylonId": "pylon-th-fa313f7756c4",
+  "pylonId": "pylon-th-f1dafd8f247a",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289308619,
+  "createdAt": 1793290066958,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289308619,
+  "lastHumanActivityAt": 1793290066958,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -39,18 +39,18 @@ $ nexus start --project nexus-review --title Hold in review --claude push hold-r
 
 $ nexus start --project nexus-review --title Hold in fixing --claude push hold-fixing --json
 {
-  "id": "th-0e15a3c1b1a5",
+  "id": "th-2cb452651e48",
   "title": "Hold in fixing",
   "project": "nexus-review",
-  "pylonId": "pylon-th-0e15a3c1b1a5",
+  "pylonId": "pylon-th-2cb452651e48",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289308798,
+  "createdAt": 1793290067131,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289308798,
+  "lastHumanActivityAt": 1793290067131,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -66,18 +66,18 @@ $ nexus start --project nexus-review --title Hold in fixing --claude push hold-f
 
 $ nexus start --project nexus --title Deploy slowly --claude push deploy-slowly --json
 {
-  "id": "th-0ebd518d20f7",
+  "id": "th-bdf277d1d85c",
   "title": "Deploy slowly",
   "project": "nexus",
-  "pylonId": "pylon-th-0ebd518d20f7",
+  "pylonId": "pylon-th-bdf277d1d85c",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289308973,
+  "createdAt": 1793290067306,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289308973,
+  "lastHumanActivityAt": 1793290067306,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -93,18 +93,18 @@ $ nexus start --project nexus --title Deploy slowly --claude push deploy-slowly 
 
 $ nexus start --project nexus-review --title Bystander --claude look around --json
 {
-  "id": "th-f86c2a27e7b8",
+  "id": "th-a297c0341eda",
   "title": "Bystander",
   "project": "nexus-review",
-  "pylonId": "pylon-th-f86c2a27e7b8",
+  "pylonId": "pylon-th-a297c0341eda",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289309150,
+  "createdAt": 1793290067482,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289309150,
+  "lastHumanActivityAt": 1793290067482,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
@@ -119,67 +119,67 @@ $ nexus start --project nexus-review --title Bystander --claude look around --js
 [exit 0]
 
 waited: each review is where the capture needs it
-$ nexus review th-fa313f7756c4
-[stderr] nexus: review rv-9bec04e2 of th-fa313f7756c4 is reviewing
+$ nexus review th-f1dafd8f247a
+[stderr] nexus: review rv-abec993b of th-f1dafd8f247a is reviewing
 [exit 5]
 
-$ nexus review --cancel th-fa313f7756c4
+$ nexus review --cancel th-f1dafd8f247a
 [stderr] nexus: Unknown option '--cancel'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--cancel". Run nexus --help for usage
 [exit 64]
 
-$ nexus show th-fa313f7756c4
-th-fa313f7756c4  Hold in review
+$ nexus show th-f1dafd8f247a
+th-f1dafd8f247a  Hold in review
 project: nexus-review
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: active
-pylon: pylon-th-fa313f7756c4 on verify-node, running, observed 0s ago
-attach: nexus attach th-fa313f7756c4
+pylon: pylon-th-f1dafd8f247a on verify-node, running, observed 0s ago
+attach: nexus attach th-f1dafd8f247a
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #1: Hold in review — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
-review rv-9bec04e2 of PR #1, started on its own: reviewing, round 1 of 5, reviewer th-7439f989db9b on gpt-6-astra
+review rv-abec993b of PR #1, started on its own: reviewing, round 1 of 5, reviewer th-079f1fc5ecc0 on gpt-6-astra
 output: branch origin/hold-review
 output: pull-request https://github.com/ramtinJ95/nexus/pull/1
 [exit 0]
 
-$ nexus show th-7439f989db9b
-th-7439f989db9b  Review of #1: Hold in review
+$ nexus show th-079f1fc5ecc0
+th-079f1fc5ecc0  Review of #1: Hold in review
 project: nexus-review
 attention: none
 status: active
-pylon: pylon-th-7439f989db9b on verify-node, running, observed 0s ago
-attach: nexus attach th-7439f989db9b
+pylon: pylon-th-079f1fc5ecc0 on verify-node, running, observed 0s ago
+attach: nexus attach th-079f1fc5ecc0
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, as the start named
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at hold-review: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 [exit 0]
 
-$ nexus review --cancel th-fa313f7756c4
+$ nexus review --cancel th-f1dafd8f247a
 [stderr] nexus: Unknown option '--cancel'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--cancel". Run nexus --help for usage
 [exit 64]
 
-$ nexus review --cancel th-0ebd518d20f7
+$ nexus review --cancel th-bdf277d1d85c
 [stderr] nexus: Unknown option '--cancel'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--cancel". Run nexus --help for usage
 [exit 64]
 
 waited: the slow deploy landed
-$ nexus show th-0ebd518d20f7
-th-0ebd518d20f7  Deploy slowly
+$ nexus show th-bdf277d1d85c
+th-bdf277d1d85c  Deploy slowly
 project: nexus
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: archived
-pylon: pylon-th-0ebd518d20f7 on verify-node, running, observed 0s ago
+pylon: pylon-th-bdf277d1d85c on verify-node, running, observed 0s ago
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #3: Deploy slowly — merged, checks none, review none https://github.com/ramtinJ95/nexus/pull/3
-review rv-bf5e0617 of PR #3, started on its own: landed as eeee000500000000000000000000000000000000, round 1 of 5, reviewer th-9a90f270e35c on gpt-6-astra, landing when approved
+review rv-c4b44b43 of PR #3, started on its own: landed as eeee000500000000000000000000000000000000, round 1 of 5, reviewer th-d5fa105fb222 on gpt-6-astra, landing when approved
 no live check: cccc00040000 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
 output: branch origin/deploy-slowly
 output: pull-request https://github.com/ramtinJ95/nexus/pull/3
@@ -188,31 +188,31 @@ output: pull-request https://github.com/ramtinJ95/nexus/pull/3
 the review line of Hold in fixing offers no Cancel review button
 screenshot 01-hold-fixing-before.png
 screenshot 02-hold-fixing-after.png
-$ nexus show th-0e15a3c1b1a5
-th-0e15a3c1b1a5  Hold in fixing
+$ nexus show th-2cb452651e48
+th-2cb452651e48  Hold in fixing
 project: nexus-review
 Claude worker: started, model claude-opus-5-5
 attention: none
 status: active
-pylon: pylon-th-0e15a3c1b1a5 on verify-node, running, observed 0s ago
-attach: nexus attach th-0e15a3c1b1a5
+pylon: pylon-th-2cb452651e48 on verify-node, running, observed 0s ago
+attach: nexus attach th-2cb452651e48
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #2: Hold in fixing — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/2
-review rv-d17f480b of PR #2, started on its own: fixing, round 1 of 5, reviewer th-f73f855440a3 on gpt-6-astra
+review rv-a3c482a8 of PR #2, started on its own: fixing, round 1 of 5, reviewer th-8958ff3274ce on gpt-6-astra
 output: branch origin/hold-fixing
 output: pull-request https://github.com/ramtinJ95/nexus/pull/2
 [exit 0]
 
-$ nexus show th-f73f855440a3
-th-f73f855440a3  Review of #2: Hold in fixing
+$ nexus show th-8958ff3274ce
+th-8958ff3274ce  Review of #2: Hold in fixing
 project: nexus-review
 attention: reply
 status: active
-pylon: pylon-th-f73f855440a3 on verify-node, running, observed 0s ago
-attach: nexus attach th-f73f855440a3
+pylon: pylon-th-8958ff3274ce on verify-node, running, observed 0s ago
+attach: nexus attach th-8958ff3274ce
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, as the start named
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at hold-fixing: the verify stack reads no remote, so every thread boots fresh
@@ -220,39 +220,39 @@ PR watch: on
 [exit 0]
 
 calling as control node
-$ nexus abort th-f86c2a27e7b8
-[stderr] nexus: thread th-f86c2a27e7b8 has no conversation
+$ nexus abort th-a297c0341eda
+[stderr] nexus: thread th-a297c0341eda has no conversation
 [exit 5]
 
-$ nexus retry th-f86c2a27e7b8
-[stderr] nexus: thread th-f86c2a27e7b8 has no conversation
+$ nexus retry th-a297c0341eda
+[stderr] nexus: thread th-a297c0341eda has no conversation
 [exit 5]
 
-$ nexus retry-pylon th-f86c2a27e7b8
-[stderr] nexus: pylon pylon-th-f86c2a27e7b8 has not failed
+$ nexus retry-pylon th-a297c0341eda
+[stderr] nexus: pylon pylon-th-a297c0341eda has not failed
 [exit 5]
 
-$ nexus session open th-f86c2a27e7b8 --harness shell
+$ nexus session open th-a297c0341eda --harness shell
 [stderr] nexus: the verify stack's pylons run no open-session
 [exit 1]
 
-$ nexus session close th-f86c2a27e7b8 w1:p1
+$ nexus session close th-a297c0341eda w1:p1
 [stderr] nexus: the verify stack's pylons run no close-session
 [exit 1]
 
-$ nexus preview th-f86c2a27e7b8 3000
+$ nexus preview th-a297c0341eda 3000
 [stderr] nexus: the verify stack's pylons run no link-port
 [exit 1]
 
-$ nexus unpreview th-f86c2a27e7b8 3000
+$ nexus unpreview th-a297c0341eda 3000
 [stderr] nexus: the verify stack's pylons run no unlink-port
 [exit 1]
 
-$ nexus review th-f86c2a27e7b8
-[stderr] nexus: thread th-f86c2a27e7b8 has no open pull request that the PR watch linked
+$ nexus review th-a297c0341eda
+[stderr] nexus: thread th-a297c0341eda has no open pull request that the PR watch linked
 [exit 5]
 
-$ nexus review --cancel th-f86c2a27e7b8
+$ nexus review --cancel th-a297c0341eda
 [stderr] nexus: Unknown option '--cancel'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--cancel". Run nexus --help for usage
 [exit 64]
 
@@ -260,25 +260,25 @@ $ nexus project edit nexus-review --branch trunk
 Updated project nexus-review, auto review, set by nLAPTOP, pipeline off. Existing threads keep their boot settings and grants; start a new thread to apply them.
 [exit 0]
 
-$ nexus unarchive th-f86c2a27e7b8
-[stderr] nexus: thread th-f86c2a27e7b8 is active, not archived
+$ nexus unarchive th-a297c0341eda
+[stderr] nexus: thread th-a297c0341eda is active, not archived
 [exit 5]
 
-$ nexus archive th-f86c2a27e7b8
-Archived th-f86c2a27e7b8.
+$ nexus archive th-a297c0341eda
+Archived th-a297c0341eda.
 [exit 0]
 
-$ nexus delete th-f86c2a27e7b8
-Deleted th-f86c2a27e7b8.
+$ nexus delete th-a297c0341eda
+Deleted th-a297c0341eda.
 [exit 0]
 
-$ nexus attach th-f86c2a27e7b8   (in a pty)
-nexus: this terminal's size cannot be attached: cols must be a whole number from 1 to 9999, got 0. Run nexus --help for usage
-[exit 64]
+$ nexus attach th-a297c0341eda   (in a pty)
+nexus: thread th-a297c0341eda is deleted, so its pylon stays paused
+[exit 5]
 
 calling as person
-$ nexus archive th-f86c2a27e7b8
-[stderr] nexus: thread th-f86c2a27e7b8 is deleted
+$ nexus archive th-a297c0341eda
+[stderr] nexus: thread th-a297c0341eda is deleted
 [exit 5]
 
 $ nexus projects
@@ -287,23 +287,23 @@ nexus-review  node verify-node  branch trunk  auto review, set by nLAPTOP       
 [exit 0]
 
 $ nexus threads --all
-th-fa313f7756c4  active    -  pylon running  nexus-review  16s ago  Hold in review
-th-0e15a3c1b1a5  active    -  pylon running  nexus-review  15s ago  Hold in fixing
-th-0ebd518d20f7  archived  -  pylon running  nexus         15s ago  Deploy slowly
-th-f86c2a27e7b8  deleted   -  pylon running  nexus-review  15s ago  Bystander
-th-7439f989db9b  active    -  pylon running  nexus-review  14s ago  Review of #1: Hold in review
-th-f73f855440a3  active    -  pylon running  nexus-review  14s ago  Review of #2: Hold in fixing
-th-9a90f270e35c  archived  -  pylon running  nexus         14s ago  Review of #3: Deploy slowly
+th-f1dafd8f247a  active    -  pylon running  nexus-review  16s ago  Hold in review
+th-2cb452651e48  active    -  pylon running  nexus-review  15s ago  Hold in fixing
+th-bdf277d1d85c  archived  -  pylon running  nexus         15s ago  Deploy slowly
+th-a297c0341eda  deleted   -  pylon running  nexus-review  15s ago  Bystander
+th-079f1fc5ecc0  active    -  pylon running  nexus-review  15s ago  Review of #1: Hold in review
+th-8958ff3274ce  active    -  pylon running  nexus-review  15s ago  Review of #2: Hold in fixing
+th-d5fa105fb222  archived  -  pylon running  nexus         15s ago  Review of #3: Deploy slowly
 [exit 0]
 
 $ nexus events --kind review.changed
-10 2026-10-29T15:55:09.679Z th-fa313f7756c4 review.changed {"review":"rv-9bec04e2","reviewer":"th-7439f989db9b","phase":{"kind":"reviewing"},"round":1}
-12 2026-10-29T15:55:09.684Z th-0e15a3c1b1a5 review.changed {"review":"rv-d17f480b","reviewer":"th-f73f855440a3","phase":{"kind":"reviewing"},"round":1}
-14 2026-10-29T15:55:09.689Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"reviewing"},"round":1}
-20 2026-10-29T15:55:10.696Z th-0e15a3c1b1a5 review.changed {"review":"rv-d17f480b","reviewer":"th-f73f855440a3","phase":{"kind":"fixing"},"round":1}
-21 2026-10-29T15:55:10.701Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"checking","startedAt":1793289310701,"thread":null},"round":1}
-22 2026-10-29T15:55:12.696Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"merging","authorized":null},"round":1}
-23 2026-10-29T15:55:12.706Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793291112706},"round":1}
-27 2026-10-29T15:55:18.698Z th-0ebd518d20f7 review.changed {"review":"rv-bf5e0617","reviewer":"th-9a90f270e35c","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
+10 2026-10-29T16:07:48.002Z th-f1dafd8f247a review.changed {"review":"rv-abec993b","reviewer":"th-079f1fc5ecc0","phase":{"kind":"reviewing"},"round":1}
+12 2026-10-29T16:07:48.008Z th-2cb452651e48 review.changed {"review":"rv-a3c482a8","reviewer":"th-8958ff3274ce","phase":{"kind":"reviewing"},"round":1}
+14 2026-10-29T16:07:48.012Z th-bdf277d1d85c review.changed {"review":"rv-c4b44b43","reviewer":"th-d5fa105fb222","phase":{"kind":"reviewing"},"round":1}
+20 2026-10-29T16:07:49.019Z th-2cb452651e48 review.changed {"review":"rv-a3c482a8","reviewer":"th-8958ff3274ce","phase":{"kind":"fixing"},"round":1}
+21 2026-10-29T16:07:49.027Z th-bdf277d1d85c review.changed {"review":"rv-c4b44b43","reviewer":"th-d5fa105fb222","phase":{"kind":"checking","startedAt":1793290069026,"thread":null},"round":1}
+22 2026-10-29T16:07:51.019Z th-bdf277d1d85c review.changed {"review":"rv-c4b44b43","reviewer":"th-d5fa105fb222","phase":{"kind":"merging","authorized":null},"round":1}
+23 2026-10-29T16:07:51.022Z th-bdf277d1d85c review.changed {"review":"rv-c4b44b43","reviewer":"th-d5fa105fb222","phase":{"kind":"deploying","commit":"eeee000500000000000000000000000000000000","previous":"aaaa000100000000000000000000000000000000","requested":false,"deadline":1793291871022},"round":1}
+27 2026-10-29T16:07:57.021Z th-bdf277d1d85c review.changed {"review":"rv-c4b44b43","reviewer":"th-d5fa105fb222","phase":{"kind":"landed","commit":"eeee000500000000000000000000000000000000"},"round":1}
 [exit 0]
 

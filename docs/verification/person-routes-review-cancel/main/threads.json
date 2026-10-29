@@ -1,13 +1,13 @@
 {
   "builders": {
-    "holdReview": "th-fa313f7756c4",
-    "holdFixing": "th-0e15a3c1b1a5",
-    "deploySlowly": "th-0ebd518d20f7",
-    "bystander": "th-f86c2a27e7b8"
+    "holdReview": "th-f1dafd8f247a",
+    "holdFixing": "th-2cb452651e48",
+    "deploySlowly": "th-bdf277d1d85c",
+    "bystander": "th-a297c0341eda"
   },
   "reviewers": {
-    "holdReview": "th-7439f989db9b",
-    "holdFixing": "th-f73f855440a3",
-    "deploySlowly": "th-9a90f270e35c"
+    "holdReview": "th-079f1fc5ecc0",
+    "holdFixing": "th-8958ff3274ce",
+    "deploySlowly": "th-d5fa105fb222"
   }
 }

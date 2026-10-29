@@ -1,17 +1,17 @@
-$ nexus show th-fa313f7756c4
-th-fa313f7756c4  Hold in review
+$ nexus show th-f1dafd8f247a
+th-f1dafd8f247a  Hold in review
 project: nexus-review
 Claude worker: started, model claude-opus-5-5
 attention: reply
 status: active
-pylon: pylon-th-fa313f7756c4 on verify-node, running, observed 0s ago
-attach: nexus attach th-fa313f7756c4
+pylon: pylon-th-f1dafd8f247a on verify-node, running, observed 0s ago
+attach: nexus attach th-f1dafd8f247a
 size: 1 CPUs, 1 GiB memory, 10 GiB disk
 placement: verify-node, the project's default node
 setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: the verify stack reads no remote, so every thread boots fresh
 PR watch: on
 PR #1: Hold in review — open, checks none, review none https://github.com/ramtinJ95/nexus/pull/1
-review rv-9bec04e2 of PR #1, started on its own: reviewing, round 1 of 5, reviewer th-7439f989db9b on gpt-6-astra
+review rv-abec993b of PR #1, started on its own: reviewing, round 1 of 5, reviewer th-079f1fc5ecc0 on gpt-6-astra
 output: branch origin/hold-review
 output: pull-request https://github.com/ramtinJ95/nexus/pull/1
 [exit 0]

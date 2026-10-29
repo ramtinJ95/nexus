@@ -1,17 +1,17 @@
 $ nexus start --project nexus-review --title Hold in review --claude push hold-review --json
 {
-  "id": "th-fa313f7756c4",
+  "id": "th-f1dafd8f247a",
   "title": "Hold in review",
   "project": "nexus-review",
-  "pylonId": "pylon-th-fa313f7756c4",
+  "pylonId": "pylon-th-f1dafd8f247a",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289308619,
+  "createdAt": 1793290066958,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289308619,
+  "lastHumanActivityAt": 1793290066958,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

@@ -1,9 +1,9 @@
 $ nexus threads --all
-th-fa313f7756c4  active    -  pylon running  nexus-review  16s ago  Hold in review
-th-0e15a3c1b1a5  active    -  pylon running  nexus-review  15s ago  Hold in fixing
-th-0ebd518d20f7  archived  -  pylon running  nexus         15s ago  Deploy slowly
-th-f86c2a27e7b8  deleted   -  pylon running  nexus-review  15s ago  Bystander
-th-7439f989db9b  active    -  pylon running  nexus-review  14s ago  Review of #1: Hold in review
-th-f73f855440a3  active    -  pylon running  nexus-review  14s ago  Review of #2: Hold in fixing
-th-9a90f270e35c  archived  -  pylon running  nexus         14s ago  Review of #3: Deploy slowly
+th-f1dafd8f247a  active    -  pylon running  nexus-review  16s ago  Hold in review
+th-2cb452651e48  active    -  pylon running  nexus-review  15s ago  Hold in fixing
+th-bdf277d1d85c  archived  -  pylon running  nexus         15s ago  Deploy slowly
+th-a297c0341eda  deleted   -  pylon running  nexus-review  15s ago  Bystander
+th-079f1fc5ecc0  active    -  pylon running  nexus-review  15s ago  Review of #1: Hold in review
+th-8958ff3274ce  active    -  pylon running  nexus-review  15s ago  Review of #2: Hold in fixing
+th-d5fa105fb222  archived  -  pylon running  nexus         15s ago  Review of #3: Deploy slowly
 [exit 0]

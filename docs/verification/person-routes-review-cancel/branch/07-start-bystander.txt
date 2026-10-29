@@ -1,17 +1,17 @@
 $ nexus start --project nexus-review --title Bystander --claude look around --json
 {
-  "id": "th-02dd5519bc18",
+  "id": "th-e005de25c52c",
   "title": "Bystander",
   "project": "nexus-review",
-  "pylonId": "pylon-th-02dd5519bc18",
+  "pylonId": "pylon-th-e005de25c52c",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289454201,
+  "createdAt": 1793290204380,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289454201,
+  "lastHumanActivityAt": 1793290204380,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

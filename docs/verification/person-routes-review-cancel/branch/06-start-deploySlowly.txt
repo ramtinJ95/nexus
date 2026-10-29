@@ -1,17 +1,17 @@
 $ nexus start --project nexus --title Deploy slowly --claude push deploy-slowly --json
 {
-  "id": "th-dc8d828f41ce",
+  "id": "th-bbc30b55b40f",
   "title": "Deploy slowly",
   "project": "nexus",
-  "pylonId": "pylon-th-dc8d828f41ce",
+  "pylonId": "pylon-th-bbc30b55b40f",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289454002,
+  "createdAt": 1793290204195,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289454002,
+  "lastHumanActivityAt": 1793290204195,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {

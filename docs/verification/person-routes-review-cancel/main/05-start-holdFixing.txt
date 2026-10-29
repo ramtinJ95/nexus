@@ -1,17 +1,17 @@
 $ nexus start --project nexus-review --title Hold in fixing --claude push hold-fixing --json
 {
-  "id": "th-0e15a3c1b1a5",
+  "id": "th-2cb452651e48",
   "title": "Hold in fixing",
   "project": "nexus-review",
-  "pylonId": "pylon-th-0e15a3c1b1a5",
+  "pylonId": "pylon-th-2cb452651e48",
   "status": "active",
   "conversationId": null,
   "startedBy": "nLAPTOP",
-  "createdAt": 1793289308798,
+  "createdAt": 1793290067131,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793289308798,
+  "lastHumanActivityAt": 1793290067131,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
