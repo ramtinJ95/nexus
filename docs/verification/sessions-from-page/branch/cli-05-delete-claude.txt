@@ -1,3 +1,3 @@
-$ nexus delete th-a4c374a2a1bc
-Deleted th-a4c374a2a1bc.
+$ nexus delete th-5c8a8b00157d
+Deleted th-5c8a8b00157d.
 [exit 0]

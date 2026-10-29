@@ -1,11 +1,11 @@
-$ nexus show th-a4c374a2a1bc
-th-a4c374a2a1bc  Claude thread
+$ nexus show th-5c8a8b00157d
+th-5c8a8b00157d  Claude thread
 project: drinks
 Claude worker: started, model claude-sonnet-5-5
 attention: none
 status: active
-pylon: pylon-th-a4c374a2a1bc on node-a, running, observed 5s ago
-attach: nexus attach th-a4c374a2a1bc
+pylon: pylon-th-5c8a8b00157d on node-a, running, observed 3s ago
+attach: nexus attach th-5c8a8b00157d
 size: 1 CPUs, 3 GiB memory, 5 GiB disk
 placement: node-a, the project's default node
 setup: fresh boot runs .nexus/setup, because the project is scratch, so it has no template
@@ -13,9 +13,7 @@ session: claude-code "Claude thread" in pane w1:p1, idle
 port: 7470
 port: 7480
 port: 7489
-port: 36199
-port: 39583
-port: 44523
-port: 46153
+port: 37447
+port: 41749
 PR watch: off (no control-plane GitHub token configured)
 [exit 0]

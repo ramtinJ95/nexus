@@ -1,1 +1,1 @@
-branch: 0e17c27 fix(dashboard): focus a session only once the terminal's attach has landed, and close a Claude session when no worker owns it
+branch: 57bb4e1 chore(cli): 0.50.0 for the attach route's pane and the focus route
