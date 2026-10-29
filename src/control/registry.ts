@@ -380,6 +380,9 @@ const migrations: readonly string[] = [
 ];
 
 type Row = Record<string, unknown>;
+/** The tables that keep each record as JSON in a `record` column under one key. */
+type RecordTable = "reviews" | "pr_watches" | "nudges" | "planning_threads" | "pipeline_items" | "queued_threads" | "questions" | "judgments";
+type RecordKey = "builder" | "thread" | "id" | "failure";
 const json = <T>(value: unknown): T => JSON.parse(value as string) as T;
 const jsonOrNull = <T>(value: unknown): T | null => value === null ? null : json<T>(value);
 function observationOf(value: unknown): NodeObservation | null {
@@ -517,6 +520,12 @@ export function openRegistry(path: string, clock = Date.now) {
     return row && recordedImage(row);
   }
 
+  /** The highest journal sequence applied from the node, or null before its first. */
+  function eventReceipt(node: NodeName): number | null {
+    const receipt = sql("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
+    return receipt === undefined ? null : Number(receipt.sequence);
+  }
+
   const setting = (key: string): string | null => (sql("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null) as string | null;
   const setSetting = (key: string, value: string) => sql("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
 
@@ -539,14 +548,20 @@ export function openRegistry(path: string, clock = Date.now) {
     });
   }
 
-  function queuedThread(id: ThreadId): QueuedRecord | undefined {
-    const row = sql("SELECT record FROM queued_threads WHERE id = ?").get(id);
-    return row === undefined ? undefined : json<QueuedRecord>(row.record);
+  /** The table and key column are SQL, so they come only from this code, never from input. */
+  function recordOf<T>(table: RecordTable, keyColumn: RecordKey, key: string | number): T | null {
+    return jsonOrNull<T>(sql(`SELECT record FROM ${table} WHERE ${keyColumn} = ?`).get(key)?.record ?? null);
   }
+
+  function saveRecord(table: RecordTable, keyColumn: RecordKey, key: string | number, record: unknown) {
+    sql(`INSERT INTO ${table} (${keyColumn}, record) VALUES (?, ?) ON CONFLICT (${keyColumn}) DO UPDATE SET record = excluded.record`).run(key, JSON.stringify(record));
+  }
+
+  const queuedThread = (id: ThreadId): QueuedRecord | undefined => recordOf<QueuedRecord>("queued_threads", "id", id) ?? undefined;
 
   function saveQueued(record: QueuedRecord, key?: StartKey) {
     transaction(() => {
-      sql("INSERT INTO queued_threads (id, record) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(record.id, JSON.stringify(record));
+      saveRecord("queued_threads", "id", record.id, record);
       if (key !== undefined) saveStartKey(key, record.id);
     });
   }
@@ -587,7 +602,7 @@ export function openRegistry(path: string, clock = Date.now) {
   }
 
   function questionRecord(id: string): Question | null {
-    return jsonOrNull<Question>(sql("SELECT record FROM questions WHERE id = ?").get(id)?.record ?? null);
+    return recordOf<Question>("questions", "id", id);
   }
 
   function waitingAsks(thread: ThreadId): WaitingAsk[] {
@@ -620,9 +635,9 @@ export function openRegistry(path: string, clock = Date.now) {
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = pylon(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
-    const decision = needsPerson(jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(id)?.record ?? null))
+    const decision = needsPerson(recordOf<Review>("reviews", "builder", id))
       || sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(id) !== undefined
-      || jsonOrNull<Nudge>(sql("SELECT record FROM nudges WHERE thread = ?").get(id)?.record ?? null)?.state === "person";
+      || recordOf<Nudge>("nudges", "thread", id)?.state === "person";
     const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
@@ -745,6 +760,10 @@ export function openRegistry(path: string, clock = Date.now) {
     };
   }
 
+  function endUsageBackfill(state: "stopped" | "done", now: number) {
+    sql("UPDATE usage_backfill SET state = ?, finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(state, now);
+  }
+
   const sums = (calls: string) => `coalesce(sum(input), 0) AS input, coalesce(sum(output), 0) AS output, coalesce(sum(cache_write), 0) AS cache_write,
     coalesce(sum(cache_read), 0) AS cache_read, ${calls} AS calls, coalesce(sum(input + output + cache_write + cache_read), 0) AS total`;
 
@@ -826,13 +845,11 @@ export function openRegistry(path: string, clock = Date.now) {
     },
     /** A running run stops, and lets go of its pylon, whose desired phase is then paused again. */
     stopUsageBackfill(now: number): UsageBackfill {
-      sql("UPDATE usage_backfill SET state = 'stopped', finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(now);
+      endUsageBackfill("stopped", now);
       return usageBackfill();
     },
     /** A running run has read every thread it listed. */
-    finishUsageBackfill(now: number) {
-      sql("UPDATE usage_backfill SET state = 'done', finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(now);
-    },
+    finishUsageBackfill(now: number) { endUsageBackfill("done", now); },
     /** Why a running run waits before its next pylon, or null when it does not. */
     waitUsageBackfill(waiting: string | null) {
       sql("UPDATE usage_backfill SET waiting = ? WHERE state = 'running' AND waiting IS NOT ?").run(waiting, waiting);
@@ -931,19 +948,15 @@ export function openRegistry(path: string, clock = Date.now) {
         updateAttention(thread);
       });
     },
-    /** The highest journal sequence applied from the node, or null before its first. */
-    eventReceipt(node: NodeName): number | null {
-      const receipt = sql("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
-      return receipt === undefined ? null : Number(receipt.sequence);
-    },
+    eventReceipt,
     reportSession(node: NodeName, report: ReportedEvent) {
       const event = pylonEventSchema.parse(report.event);
       const stored = pylon(report.pylon);
       if (stored === undefined || stored.node !== node) return;
       const thread = stored.thread as ThreadId;
       transaction(() => {
-        const receipt = sql("SELECT sequence FROM event_receipts WHERE node = ?").get(node);
-        if (receipt !== undefined && Number(receipt.sequence) >= report.sequence) return;
+        const receipt = eventReceipt(node);
+        if (receipt !== null && receipt >= report.sequence) return;
         sql("INSERT INTO event_receipts VALUES (?, ?) ON CONFLICT(node) DO UPDATE SET sequence = excluded.sequence").run(node, report.sequence);
         pruneSessions();
         const session = event.session ?? "default";
@@ -998,7 +1011,7 @@ export function openRegistry(path: string, clock = Date.now) {
     newestEvent: () => String(sql("SELECT max(id) AS id FROM events").get()?.id ?? 0),
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     review(builder: ThreadId): Review | null {
-      const record = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(builder)?.record ?? null);
+      const record = recordOf<Review>("reviews", "builder", builder);
       return record === null ? null : storedReview(record);
     },
     reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
@@ -1013,7 +1026,7 @@ export function openRegistry(path: string, clock = Date.now) {
      */
     saveReview(review: Review, archive: readonly ThreadId[] = [], previous?: Review): boolean {
       return transaction(() => {
-        const before = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
+        const before = recordOf<Review>("reviews", "builder", review.builder);
         if (previous !== undefined && JSON.stringify(before === null ? null : storedReview(before)) !== JSON.stringify(previous)) return false;
         for (const id of archive) setThreadStatus(id, "archived");
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
@@ -1085,22 +1098,19 @@ export function openRegistry(path: string, clock = Date.now) {
         return answered;
       });
     },
-    planning: (thread: ThreadId): PlanningRecord | null => jsonOrNull<PlanningRecord>(sql("SELECT record FROM planning_threads WHERE thread = ?").get(thread)?.record ?? null),
+    planning: (thread: ThreadId): PlanningRecord | null => recordOf<PlanningRecord>("planning_threads", "thread", thread),
     planningThreads: (): PlanningRecord[] => sql("SELECT record FROM planning_threads ORDER BY rowid").all().map((r) => json<PlanningRecord>(r.record)),
     savePlanning(record: PlanningRecord) {
-      sql("INSERT INTO planning_threads (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(record.thread, JSON.stringify(record));
+      saveRecord("planning_threads", "thread", record.thread, record);
     },
-    prWatch(thread: ThreadId): PrWatchState | null {
-      const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
-      return row ? json<PrWatchState>(row.record) : null;
-    },
+    prWatch: (thread: ThreadId): PrWatchState | null => recordOf<PrWatchState>("pr_watches", "thread", thread),
     /**
      * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
      * of an error that starts or clears.
      */
     savePrWatch(thread: ThreadId, state: PrWatchState) {
       transaction(() => {
-        const previous = jsonOrNull<PrWatchState>(sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread)?.record ?? null);
+        const previous = recordOf<PrWatchState>("pr_watches", "thread", thread);
         if (state.pending !== null && previous?.pending?.id !== state.pending.id) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
         // A link counts once the watch has read its PR, as outputs() counts it, so a placeholder never fires.
         const linked = new Set(previous?.links.filter((l) => l.pr.url !== "").map((l) => `${l.pr.repo}#${l.pr.number}`));
@@ -1109,10 +1119,10 @@ export function openRegistry(path: string, clock = Date.now) {
         }
         if ((previous?.error ?? null) === null && state.error !== null) appendEvent("pull-request.error", thread, { error: state.error });
         if ((previous?.error ?? null) !== null && state.error === null) appendEvent("pull-request.error-cleared", thread, {});
-        sql("INSERT INTO pr_watches (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(state));
+        saveRecord("pr_watches", "thread", thread, state);
       });
     },
-    judgment: (failure: number): Judgment | null => jsonOrNull<Judgment>(sql("SELECT record FROM judgments WHERE failure = ?").get(failure)?.record ?? null),
+    judgment: (failure: number): Judgment | null => recordOf<Judgment>("judgments", "failure", failure),
     /** The thread's judgments, oldest failure first. */
     judgments: (thread: ThreadId): Judgment[] => sql("SELECT record FROM judgments WHERE thread = ? ORDER BY failure").all(thread).map((r) => json<Judgment>(r.record)),
     /**
@@ -1139,22 +1149,19 @@ export function openRegistry(path: string, clock = Date.now) {
         WHERE p.thread = ? ORDER BY e.id DESC LIMIT 1`).get(thread);
       return row === undefined ? null : { event: row.id as number, at: row.time as number };
     },
-    nudge: (thread: ThreadId): Nudge | null => jsonOrNull<Nudge>(sql("SELECT record FROM nudges WHERE thread = ?").get(thread)?.record ?? null),
+    nudge: (thread: ThreadId): Nudge | null => recordOf<Nudge>("nudges", "thread", thread),
     /** Replaces the builder's nudge record, or with null deletes it. */
     saveNudge(thread: ThreadId, nudge: Nudge | null) {
       transaction(() => {
         if (nudge === null) sql("DELETE FROM nudges WHERE thread = ?").run(thread);
-        else sql("INSERT INTO nudges (thread, record) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET record = excluded.record").run(thread, JSON.stringify(nudge));
+        else saveRecord("nudges", "thread", thread, nudge);
         updateAttention(thread);
       });
     },
-    desiredRelease(): DesiredRelease | null {
-      const row = sql("SELECT value FROM settings WHERE key = 'release'").get();
-      return row === undefined ? null : JSON.parse(row.value as string) as DesiredRelease;
-    },
+    desiredRelease: (): DesiredRelease | null => jsonOrNull<DesiredRelease>(setting("release")),
     setDesiredRelease(release: DesiredRelease) {
       appendEvent("release.changed", null, { desired: release });
-      sql("INSERT INTO settings VALUES ('release', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(release));
+      setSetting("release", JSON.stringify(release));
     },
     releaseReports(): ReleaseReport[] {
       return sql("SELECT record FROM release_reports ORDER BY node, role").all().map((r) => JSON.parse(r.record as string) as ReleaseReport);
@@ -1166,13 +1173,9 @@ export function openRegistry(path: string, clock = Date.now) {
       if (before === null || before.state !== report.state || before.commit !== report.commit || before.target !== report.target || before.reason !== report.reason) appendEvent("release.changed", null, state);
       sql("INSERT INTO release_reports VALUES (?, ?, ?) ON CONFLICT(node, role) DO UPDATE SET record = excluded.record").run(report.node, report.role, JSON.stringify(report));
     },
-    drain(): Drain | null {
-      const row = sql("SELECT value FROM settings WHERE key = 'deploy-drain'").get();
-      return row === undefined ? null : JSON.parse(row.value as string) as Drain;
-    },
-    setDrain(drain: Drain | null) {
-      sql("INSERT INTO settings VALUES ('deploy-drain', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(JSON.stringify(drain));
-    },
+    drain: (): Drain | null => jsonOrNull<Drain>(setting("deploy-drain")),
+    /** Null is stored as the JSON text null, which reads back as null. */
+    setDrain(drain: Drain | null) { setSetting("deploy-drain", JSON.stringify(drain)); },
 
     /** Nodes come from the config file or a join. Their state and capacity come from observations. */
     upsertNode,
@@ -1241,13 +1244,8 @@ export function openRegistry(path: string, clock = Date.now) {
       return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };
     },
     items: (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record)),
-    item(id: ItemId): ItemRecord | undefined {
-      const row = sql("SELECT record FROM pipeline_items WHERE id = ?").get(id);
-      return row === undefined ? undefined : json<ItemRecord>(row.record);
-    },
-    saveItem(record: ItemRecord) {
-      sql("INSERT INTO pipeline_items (id, record) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(record.id, JSON.stringify(record));
-    },
+    item: (id: ItemId): ItemRecord | undefined => recordOf<ItemRecord>("pipeline_items", "id", id) ?? undefined,
+    saveItem(record: ItemRecord) { saveRecord("pipeline_items", "id", record.id, record); },
     queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
     queuedThread,
     saveQueued,
@@ -1371,10 +1369,10 @@ export function openRegistry(path: string, clock = Date.now) {
     releasePreview(pylonId: PylonId, service: string) { sql("DELETE FROM previews WHERE pylon = ? AND service = ?").run(pylonId, service); },
     previews,
     outputs(thread: ThreadId): Output[] {
-      const row = sql("SELECT record FROM pr_watches WHERE thread = ?").get(thread) as Row | undefined;
+      const watch = recordOf<PrWatchState>("pr_watches", "thread", thread);
       return [
         ...(sql("SELECT * FROM outputs WHERE thread = ? ORDER BY kind, ref").all(thread) as Row[]).map((r): Output => ({ thread, kind: r.kind as Output["kind"], ref: r.ref as string })),
-        ...(row ? json<PrWatchState>(row.record).links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),
+        ...(watch ? watch.links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),
       ];
     },
     orphans: () => (sql("SELECT * FROM orphans ORDER BY node, pylon_id").all() as Row[]).map((r): Orphan => ({ node: r.node as NodeName, pylonId: r.pylon_id as PylonId })),
