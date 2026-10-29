@@ -1,0 +1,118 @@
+desktop long-lines: drawn in: 648 ms, longest task 470 ms, page wider than the window false -> ok
+screenshot desktop-01-long-lines.png
+desktop wide-file: drawn in: 162 ms, longest task 62 ms, page wider than the window false -> ok
+screenshot desktop-02-wide-file.png
+desktop rename-with-edits: drawn in: 83 ms, longest task 282 ms, page wider than the window false -> ok
+screenshot desktop-03-rename-with-edits.png
+desktop pure-rename: drawn in: 188 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-04-pure-rename.png
+desktop binary: drawn in: 163 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-05-binary.png
+desktop binary-added: drawn in: 125 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-06-binary-added.png
+desktop added: drawn in: 205 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-07-added.png
+desktop deleted: drawn in: 175 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-08-deleted.png
+desktop mode-change: drawn in: 204 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-09-mode-change.png
+desktop type-change: drawn in: 206 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-10-type-change.png
+desktop no-newline-at-end: drawn in: 207 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-11-no-newline-at-end.png
+desktop very-long-file: drawn in: 1002 ms, longest task 633 ms, page wider than the window false -> ok
+screenshot desktop-12-very-long-file.png
+desktop crlf: drawn in: 232 ms, longest task 50 ms, page wider than the window false -> ok
+screenshot desktop-13-crlf.png
+desktop crlf-endings-only: drawn in: 205 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-14-crlf-endings-only.png
+desktop tabs-make: drawn in: 187 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-15-tabs-make.png
+desktop tabs-go: drawn in: 220 ms, longest task 245 ms, page wider than the window false -> ok
+screenshot desktop-16-tabs-go.png
+desktop unicode: drawn in: 132 ms, longest task 132 ms, page wider than the window false -> ok
+screenshot desktop-17-unicode.png
+desktop deep-path: drawn in: 195 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot desktop-18-deep-path.png
+desktop long lines: text hidden to the side, and the sideways scrollbar below the panel's bottom by: 0px, 4249px -> ok
+desktop long lines: the whole of line 2 is drawn within the panel's width: true -> ok
+desktop wide file: the changed cell R6C37 is in the panel: true -> ok
+screenshot desktop-19-wide-file-changed-cell.png
+desktop very long file, whose first line changed: the band above its first row: none -> ok
+desktop very long file: rows drawn, and says above them that it is cut short: 2000, true -> ok
+desktop only the line endings changed: the panel says so: true -> ok
+screenshot desktop-20-crlf-endings-only.png
+desktop deep path: the file's name shows in the panel's header: true -> ok
+desktop deep path: the height of the header's base label, as "vs boot": 17px -> ok
+desktop split picked: layout drawn, and characters a line shows before it wraps or scrolls: split, 41 -> ok
+screenshot desktop-21-split-long-lines.png
+desktop eight files open: the narrowest file tab's name is: 41px wide -> ok
+desktop eight files open: the conversation's tab is in the bar's view: true -> ok
+screenshot desktop-22-eight-tabs.png
+desktop eight files open, the first opened again: its tab shows beside the conversation's, not under it: true -> ok
+screenshot desktop-23-first-tab-again.png
+desktop long lines: a note on line 3 is saved, drawn and inside the panel: true, true, true -> ok
+screenshot desktop-24-note-on-long-line.png
+desktop CRLF: a note on line 6 quotes it without its CR: ["+Line 5 changed, still with CRLF."] -> ok
+screenshot desktop-25-note-on-crlf-line.png
+desktop very long file: a note written and saved in: 3919 ms, longest task 470 ms -> ok
+screenshot desktop-26-note-on-very-long-file.png
+phone long-lines: drawn in: 542 ms, longest task 422 ms, page wider than the window false -> ok
+screenshot phone-01-long-lines.png
+phone wide-file: drawn in: 175 ms, longest task 61 ms, page wider than the window false -> ok
+screenshot phone-02-wide-file.png
+phone rename-with-edits: drawn in: 198 ms, longest task 291 ms, page wider than the window false -> ok
+screenshot phone-03-rename-with-edits.png
+phone pure-rename: drawn in: 212 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-04-pure-rename.png
+phone binary: drawn in: 215 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-05-binary.png
+phone binary-added: drawn in: 198 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-06-binary-added.png
+phone added: drawn in: 224 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-07-added.png
+phone deleted: drawn in: 198 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-08-deleted.png
+phone mode-change: drawn in: 190 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-09-mode-change.png
+phone type-change: drawn in: 196 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-10-type-change.png
+phone no-newline-at-end: drawn in: 177 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-11-no-newline-at-end.png
+phone very-long-file: drawn in: 1042 ms, longest task 692 ms, page wider than the window false -> ok
+screenshot phone-12-very-long-file.png
+phone crlf: drawn in: 216 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-13-crlf.png
+phone crlf-endings-only: drawn in: 195 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-14-crlf-endings-only.png
+phone tabs-make: drawn in: 196 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-15-tabs-make.png
+phone tabs-go: drawn in: 128 ms, longest task 222 ms, page wider than the window false -> ok
+screenshot phone-16-tabs-go.png
+phone unicode: drawn in: 214 ms, longest task 131 ms, page wider than the window false -> ok
+screenshot phone-17-unicode.png
+phone deep-path: drawn in: 198 ms, longest task 0 ms, page wider than the window false -> ok
+screenshot phone-18-deep-path.png
+phone long lines: text hidden to the side, and the sideways scrollbar below the panel's bottom by: 0px, 8344px -> ok
+phone long lines: the whole of line 2 is drawn within the panel's width: true -> ok
+phone wide file: the changed cell R6C37 is in the panel: true -> ok
+screenshot phone-19-wide-file-changed-cell.png
+phone very long file, whose first line changed: the band above its first row: none -> ok
+phone very long file: rows drawn, and says above them that it is cut short: 2000, true -> ok
+phone only the line endings changed: the panel says so: true -> ok
+screenshot phone-20-crlf-endings-only.png
+phone deep path: the file's name shows in the panel's header: true -> ok
+phone deep path: the height of the header's base label, as "vs boot": 17px -> ok
+phone split picked: layout drawn, and characters a line shows before it wraps or scrolls: single, 46 -> ok
+screenshot phone-21-split-long-lines.png
+phone eight files open: the narrowest file tab's name is: 41px wide -> ok
+phone eight files open: the conversation's tab is in the bar's view: true -> ok
+screenshot phone-22-eight-tabs.png
+phone eight files open, the first opened again: its tab shows beside the conversation's, not under it: true -> ok
+screenshot phone-23-first-tab-again.png
+phone long lines: a note on line 3 is saved, drawn and inside the panel: true, true, true -> ok
+screenshot phone-24-note-on-long-line.png
+phone CRLF: a note on line 6 quotes it without its CR: ["+Line 5 changed, still with CRLF."] -> ok
+screenshot phone-25-note-on-crlf-line.png
+phone very long file: a note written and saved in: 4463 ms, longest task 457 ms -> ok
+screenshot phone-26-note-on-very-long-file.png
