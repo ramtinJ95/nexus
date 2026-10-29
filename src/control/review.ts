@@ -240,19 +240,21 @@ export interface ReviewDeps {
  * The text of each block fenced as `fence` in the replies, oldest first. The closing fence starts a line, which no
  * JSON string can, so a brief or a finding that quotes fenced code stays in its block.
  */
-export const fencedBlocks = (replies: readonly string[], fence: string): string[] =>
+const fencedBlocks = (replies: readonly string[], fence: string): string[] =>
   replies.flatMap((text) => [...text.matchAll(new RegExp("```" + fence + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```", "g"))].map((m) => m[1]!));
 
-/** The newest fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, or null when none does. */
-export const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null => {
-  for (const block of fencedBlocks(replies, fence).toReversed()) {
+/** Every fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, oldest first. */
+export const tokenBlocks = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T[] =>
+  fencedBlocks(replies, fence).flatMap((block) => {
     let value: unknown;
-    try { value = JSON.parse(block); } catch { continue; }
+    try { value = JSON.parse(block); } catch { return []; }
     const parsed = schema.safeParse(value);
-    if (parsed.success && parsed.data.token === token) return parsed.data;
-  }
-  return null;
-};
+    return parsed.success && parsed.data.token === token ? [parsed.data] : [];
+  });
+
+/** The newest fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, or null when none does. */
+export const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null =>
+  tokenBlocks(replies, fence, schema, token).at(-1) ?? null;
 
 const checkFinding = (round: Round): Finding[] => round.check?.passed === false
   ? [{ id: "CHECK", priority: "P0", where: ".nexus/check", summary: `.nexus/check failed at ${round.head}`, detail: round.check.output }] : [];
