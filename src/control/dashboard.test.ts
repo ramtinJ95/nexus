@@ -839,9 +839,35 @@ test("the thread page shows a paused session as resuming on wake, or on unarchiv
   const shown = await sessions();
   assert.match(shown.text, /Claude Code review paused, resumes on wake w1:p1/);
   assert.match(shown.text, /pi plan failed It did not come back from the last wake, which the next tries again: pi exited 1/);
-  assert.ok(!shown.section.includes("failed-0123456789ab"), "a session in no pane shows no pane");
+  assert.ok(!shown.text.includes("failed-0123456789ab"), "a session in no pane shows no pane");
   assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
   assert.match((await sessions()).text, /Claude Code review paused, resumes on unarchive w1:p1/);
+});
+
+test("the thread page's sessions open, show in the terminal and close from the page, but not the Claude worker's own, and an archived thread's do none", async (t) => {
+  const s = await seeded(t);
+  const worker = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
+  s.registry.setClaudeWorker(worker.id, "port it", "started", undefined, "5f0c");
+  s.observe(worker);
+  s.registry.apply({ record: "sessions", pylonId: worker.pylonId, sessions: [
+    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "5f0c", title: "Port the CLI", status: "working", message: null },
+    { id: "w2:p1", state: "running", herdrPane: "w2:p1", harness: "shell", harnessSessionId: null, title: "shell", status: "idle", message: null },
+    { id: "w3:p1", state: "paused", herdrPane: "w3:p1", harness: "pi", harnessSessionId: null, title: "plan", status: null, message: null },
+    { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "claude-code", harnessSessionId: "9a1b", title: "review", status: null, message: "claude exited 1" },
+  ] });
+  const buttons = async () => [...sectionOf((await s.call("GET", `/threads/${worker.id}`)).text, "sessions-h").matchAll(/<button [^>]*data-action="([^"]+)"[^>]*>/g)]
+    .map(([button, action]) => [action, ...["harness", "pane", "session", "confirm"].flatMap((key) => new RegExp(`data-${key}="([^"]*)"`).exec(button!)?.slice(1).map(textOf) ?? [])].join(" "));
+  assert.deepEqual(await buttons(), [
+    'close-session failed-0123456789ab Close the Claude Code session "review"? No wake tries it again.',
+    "show-session w1:p1",
+    "show-session w2:p1",
+    'close-session w2:p1 Close the Shell session "shell"? Its pane closes, and what runs there ends.',
+    "open-session shell",
+    "open-session pi",
+    "open-session claude-code",
+  ]);
+  assert.equal((await s.call("POST", `/v1/threads/${worker.id}/archive`)).status, 200);
+  assert.deepEqual(await buttons(), []);
 });
 
 test("the thread page lists a session of a harness this control plane does not know, such as a newer probe's, with no label", async (t) => {
@@ -883,7 +909,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.match(sessions, /^Sessions 3 /);
   assert.match(sessions, /Claude Code review working w1:p1 session 5f0c/);
   assert.match(sessions, /pi idle w2:p1 session \/home\/user\/\.pi\/sessions\/a\.jsonl/);
-  assert.match(sessions, /Shell idle w3:p1 Attach from a shell in the pylon herdr --session nexus Copy$/);
+  assert.match(sessions, /Shell idle w3:p1 Show in terminal Close New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included\. Attach from a shell in the pylon herdr --session nexus Copy$/);
 
   const previews = sectionOf(res.text, "previews-h");
   assert.ok(previews.includes('href="https://rj-firebat.tail.ts.net:8443/"'), "a ready preview links to its tailnet HTTPS URL");

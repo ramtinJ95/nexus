@@ -263,6 +263,14 @@ const actions = {
   "approve-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/approve`, {}),
   "cancel-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/cancel`, {}),
   answer: (_, { question, option }) => api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option }),
+  // As `nexus session open`, then shows the session in the terminal.
+  "open-session": async (thread, { harness }) => {
+    const { herdrPane } = await whenRunning(thread, () => api("POST", `/v1/threads/${thread}/sessions`, { harness }));
+    await showSession(thread, herdrPane);
+  },
+  // As `nexus session close`.
+  "close-session": (thread, { session }) => api("DELETE", `/v1/threads/${thread}/sessions/${encodeURIComponent(session)}`, {}),
+  "show-session": (thread, { pane }) => showSession(thread, pane),
 };
 
 document.addEventListener("click", async (event) => {
@@ -1040,6 +1048,19 @@ function terminalFollows() {
 // terminal that ends on its own keeps its last screen until the next attach replaces it.
 let terminal = null;
 let lastTerminal = null;
+/** The pane the next attach lands in, in place of the Claude worker's. */
+let landing = null;
+
+/**
+ * Shows `pane` in the terminal tab. A terminal that is not attached attaches there, and an attached one has Herdr
+ * focus it, which moves every terminal attached to the pylon.
+ */
+async function showSession(thread, pane) {
+  if (terminal === null) landing = pane;
+  else await api("POST", `/v1/threads/${thread}/sessions/${encodeURIComponent(pane)}/focus`, {});
+  showTab(terminalTab);
+}
+
 async function showTerminal() {
   if (terminal !== null) return terminal.then((t) => t?.focus());
   const status = document.getElementById("term-status");
@@ -1052,10 +1073,12 @@ async function showTerminal() {
     if (over) terminal = null;
   };
   shown({ text: "Attaching…", over: false });
+  const pane = landing;
+  landing = null;
   terminal = import("./term-view.js").then(({ openTerminal }) => {
     lastTerminal?.close();
     document.getElementById("term-host").replaceChildren();
-    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown);
+    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, pane);
     return lastTerminal;
   }).catch((err) => {
     shown({ text: `The terminal did not load: ${err.message}`, over: true });

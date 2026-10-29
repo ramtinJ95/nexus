@@ -50,8 +50,11 @@ function terminalTheme() {
 /** Opens a link in the terminal, a URL or an OSC 8 hyperlink, in a new tab without xterm.js's confirm. */
 const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
 
-/** A terminal in `host` attached to the thread's pylon, fitted to `host` whenever it shows at a new size. */
-export function openTerminal(host, thread, status) {
+/**
+ * A terminal in `host` attached to the thread's pylon, landing in `pane` when it is not null, and fitted to `host`
+ * whenever it shows at a new size. An attach again after a drop lands where any attach does.
+ */
+export function openTerminal(host, thread, status, pane) {
   const unstyle = adoptStyles(host);
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, scrollback: 5000,
@@ -76,7 +79,12 @@ export function openTerminal(host, thread, status) {
   });
   term.open(host);
   fit.fit();
-  const detach = keepAttached(term, () => new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows })), status);
+  let landing = pane;
+  const detach = keepAttached(term, () => {
+    const socket = new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, landing));
+    landing = null;
+    return socket;
+  }, status);
   const sized = new ResizeObserver(() => { if (host.offsetParent !== null) fit.fit(); });
   sized.observe(host);
   const unwatch = onThemeChange(() => { term.options.theme = terminalTheme(); });

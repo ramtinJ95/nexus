@@ -1,9 +1,12 @@
 // A thread page's browser terminal: the attach route's WebSocket, as docs/cli.md describes it, joined to a terminal
 // such as xterm.js. It lands where `nexus attach` does, and Herdr keeps its sessions when the terminal ends.
 
-/** The attach route for a terminal of `size` on the page's own host, which the route checks against the Origin. */
-export function attachUrl(location, thread, { cols, rows }) {
-  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/threads/${encodeURIComponent(thread)}/attach?cols=${cols}&rows=${rows}&term=xterm-256color`;
+/**
+ * The attach route for a terminal of `size` on the page's own host, which the route checks against the Origin. It
+ * lands in `pane` when that is given, and otherwise where `nexus attach` does.
+ */
+export function attachUrl(location, thread, { cols, rows }, pane = null) {
+  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/threads/${encodeURIComponent(thread)}/attach?cols=${cols}&rows=${rows}&term=xterm-256color${pane === null ? "" : `&pane=${encodeURIComponent(pane)}`}`;
 }
 
 /**
