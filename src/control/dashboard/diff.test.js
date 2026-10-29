@@ -160,3 +160,40 @@ ${now.join("\n")}
   assert.equal(shown.files[0].hunks[0].collapsedBefore, 0);
   assert.equal(errors.mock.callCount(), 0);
 });
+
+const endings = (from, to) => `diff --git a/notes.txt b/notes.txt
+index 1111111..2222222 100644
+--- a/notes.txt
++++ b/notes.txt
+@@ -1,2 +1,2 @@
+-one${from}
+-two${from}
++one${to}
++two${to}
+`;
+
+test("a change from LF to CRLF line endings says so beside its lines", () => {
+  const shown = diffOf(endings("", "\r"));
+  assert.equal(shown.kind, "lines");
+  assert.deepEqual(shown.meta, ["line endings changed from LF to CRLF"]);
+});
+
+test("a change from CRLF to LF line endings says so beside its lines", () => {
+  assert.deepEqual(diffOf(endings("\r", "")).meta, ["line endings changed from CRLF to LF"]);
+});
+
+test("an edit to a file with CRLF line endings says nothing of them", () => {
+  assert.deepEqual(diffOf(endings("\r", " again\r")).meta, []);
+});
+
+test("a CRLF file that loses its last newline says nothing of line endings", () => {
+  assert.deepEqual(diffOf(`diff --git a/notes.txt b/notes.txt
+index 1111111..2222222 100644
+--- a/notes.txt
++++ b/notes.txt
+@@ -1 +1 @@
+-one\r
++one
+\\ No newline at end of file
+`).meta, []);
+});

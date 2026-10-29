@@ -31,6 +31,24 @@ function cutPatch(patch) {
   return { patch, cut: false };
 }
 
+/** A line's ending, or none for a last line with no newline. */
+const ending = (line) => line.endsWith("\r\n") ? "CRLF" : line.endsWith("\n") ? "LF" : null;
+
+/**
+ * The meta line that says a file's changed lines went from LF to CRLF endings or back, which the diff draws as every
+ * line removed and added again with the same text, or none.
+ */
+function endingsChange(file) {
+  const parts = file.hunks.flatMap((hunk) => hunk.hunkContent).filter((part) => part.type === "change");
+  const endings = (lines, at, count) => parts.flatMap((part) => lines.slice(part[at], part[at] + part[count]).map(ending)).filter((e) => e !== null);
+  const removed = new Set(endings(file.deletionLines, "deletionLineIndex", "deletions"));
+  const added = new Set(endings(file.additionLines, "additionLineIndex", "additions"));
+  if (removed.size !== 1 || added.size !== 1) return [];
+  const [from] = removed;
+  const [to] = added;
+  return from === to ? [] : [`line endings changed from ${from} to ${to}`];
+}
+
 /**
  * What the pylon's diff of one file has to show: its lines, or that it is binary, or only what it says of the file
  * beyond its lines, or nothing. Every kind but the last has those lines of meta. A file whose type changed, such as
@@ -40,7 +58,7 @@ export function diffOf(text) {
   const meta = text.split("\n").filter((line) => metaLine.test(line));
   const { patch, cut } = cutPatch(text);
   const files = parsePatchFiles(patch).flatMap((p) => p.files).filter((file) => file.hunks.length > 0);
-  if (files.length > 0) return { kind: "lines", files, meta, cut };
+  if (files.length > 0) return { kind: "lines", files, meta: [...meta, ...files.flatMap(endingsChange)], cut };
   if (/^Binary files /m.test(text)) return { kind: "binary", meta };
   return meta.length > 0 ? { kind: "meta", meta } : { kind: "none" };
 }
