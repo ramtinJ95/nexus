@@ -1548,7 +1548,7 @@ function modelOf(view: ConversationView): string | null {
 /**
  * What the agent's run is doing. Busy comes from the view rather than agentTurnRunning, which a parked run
  * reports as false, so a stuck run can still be aborted. A parked run is stuck, not working. A Claude worker works
- * while a turn of its session runs, and the harness cannot abort it. An agent waits on the person while a question it
+ * while a turn of its session runs, which Interrupt stops as Esc does. An agent waits on the person while a question it
  * asked is open, a Claude worker's dialog waits in its terminal, or a usage limit stopped it. A dialog stops the turn
  * it is in, so it outranks working. A question that does not stop the run, as a planning thread's proposal, does not.
  */
@@ -1588,12 +1588,14 @@ function working(d: ThreadDetail, items: readonly Item[], asks: (item: UserItem)
 function stateBar(t: Thread, run: Run, now: number): Html {
   const open = t.status === "active" || t.status === "idle";
   const abort = html`<button type="button" class="btn btn-xs btn-abort" id="abort" data-action="abort" data-thread="${t.id}">Abort</button>`;
+  // The abort route presses Esc in a Claude worker's pane, as a person at its terminal interrupts a turn.
+  const interrupt = html`<button type="button" class="btn btn-xs btn-abort" id="abort" data-action="abort" data-thread="${t.id}" title="Presses Esc in Claude's terminal">Interrupt</button>`;
   const terminal = html`<button type="button" class="btn btn-xs" data-terminal>${icon("terminal")}Open terminal</button>`;
   const attach = open && html`<span class="attach-line"><code id="attach-line">nexus attach ${t.id}</code><button type="button" class="btn btn-xs btn-ghost" data-copy="attach-line" aria-label="Copy nexus attach ${t.id}">Copy</button></span>`;
   const [label, detail, end] = (() => {
     switch (run.kind) {
       case "idle": return [html`Idle`, html`${run.repliedAt !== null && html`replied ${ago(run.repliedAt, now)}`}${run.paused && html`${run.repliedAt !== null && " · "}the pylon is paused, and a message wakes it`}`, html``];
-      case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, !run.claude && abort];
+      case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, run.claude ? interrupt : abort];
       case "waiting": return [html`Waiting for you`, html`${run.why}`, open && run.inTerminal && terminal];
       case "parked": return [html`Stuck`, html`${run.tasks} ${run.tasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry" data-action="retry" data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
     }
