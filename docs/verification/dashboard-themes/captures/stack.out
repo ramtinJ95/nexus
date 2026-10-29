@@ -1,2 +1,2 @@
-{"long":"th-53062178d9c0","live":"th-893e42671e98","claude":"th-dd62997600e3","asks":"th-aab350fc69eb","reviewed":"th-a605580325fe","landable":"th-a07196f85b26","archived":"th-19e4909a70a9","deleted":"th-97298a047ecc","node":"verify-node"}
-pylon-th-dd62997600e3: reading Claude's transcript failed, so it shows the last read: the verify stack reads only the checkout
+{"long":"th-c2c5ba851dbf","live":"th-0c4a102a1ec9","claude":"th-97a602fb7082","asks":"th-32b11492f456","reviewed":"th-3a9adf07ea6c","landable":"th-68447748fdf7","archived":"th-080e5558bacc","deleted":"th-bcd7b0b91d23","node":"verify-node"}
+pylon-th-97a602fb7082: reading Claude's transcript failed, so it shows the last read: the verify stack reads only the checkout

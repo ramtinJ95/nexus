@@ -1,6 +1,6 @@
 # Dashboard themes verification
 
-Verified in this thread's pylon on 2026-10-29, on branch `feat/dashboard-themes` against main at `7ccdc81`, with Node 26.12.1 and headless Chromium from `@sparticuz/chromium`. No live control plane, node, image or other thread was touched.
+Verified in this thread's pylon on 2026-10-29, on branch `feat/dashboard-themes` against main at `0c6e230`, with Node 26.12.1 and headless Chromium from `@sparticuz/chromium`. No live control plane, node, image or other thread was touched.
 
 ## How to rerun
 
@@ -44,6 +44,7 @@ No pylon runs, so the terminal tab's WebSocket is a stand-in in the page. It att
 - `another tab when this one picks Kanagawa Wave: data-theme kanagawa-wave, picker kanagawa-wave -> ok`
 - `the open diff when Light becomes Catppuccin Mocha: code background lab(93.7649 7.77516 4.64429), then lab(18.8417 8.25015 -9.10847), same document true -> ok`
 - `the open terminal through Light, Tokyo Night and Kanagawa Wave: background rgb(22, 24, 29), rgb(26, 27, 38), rgb(31, 31, 40); red rgb(204, 0, 0), rgb(247, 118, 142), rgb(195, 64, 67) -> ok`
+- `storage that refuses writes: pick Tokyo Night, toggle, toggle: data-theme tokyo-night, light, tokyo-night -> ok`
 - `a toast in light: shown true -> ok`
 - `a toast in dark: shown true -> ok`
 - `a toast in tokyo-night: shown true -> ok`
@@ -69,4 +70,5 @@ The misses are macarchy's own colours, kept as macarchy has them: Tokyo Night's 
 - Safari, Firefox and a real phone. Chromium's mobile emulation stands in for a phone.
 - A real pylon's terminal. The screen is a fixed stand-in, as above.
 - The native `<select>` popup, which headless Chromium does not draw in a screenshot. The driver picks with the element itself.
+- Storage that refuses reads. Then client.js stops at its first read, before the picker loads, as it does on main. `theme.test.js` covers the picker's store in that case.
 - The flash on load is checked by refusing `client.js`, so only the head script runs, and reading the theme the page painted. A slow device's first frame was not filmed.

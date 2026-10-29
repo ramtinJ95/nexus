@@ -1,1 +1,1 @@
-29df1d2 docs: the dashboard's themes
+e6cd4c2 fix(dashboard): the theme picker works when storage refuses reads or writes
