@@ -9,13 +9,13 @@ A user sends a thread's agent a message. The agent runs tools inside the thread'
 - `msg-disk` leaves the tool call's file on the pylon's disk.
 - `msg-dedupe` takes a resend with the same `--request-id` as the same message.
 - `msg-ui` sends from the dashboard's composer and shows the turn on the thread page, with its tool calls folded under `Ran a command`.
-- `msg-busy` shows the composer in its queue mode while a run is busy, and joins a busy run with `--steer`. Submitting a queued follow-up from the composer is not driven.
+- `msg-busy` shows the composer in its steer mode while a run is busy, and joins a busy run with `--steer`. Steering and queueing from the composer are driven by [the thread page's capture](../../../../docs/verification/thread-page-interaction/README.md), not here.
 
 ## How to get to it (user POV)
 
 - Run `nexus send <thread> <text...>` in a terminal, with `--steer` to join a busy run, or `--request-id <ID>` to make a retry safe.
 - Read the result with `nexus conversation <thread>`, or follow it with `nexus watch <thread>`.
-- Type into `Message the agent` on the thread page, `/threads/<id>`, and choose the send button, an arrow named `Send`, or press `⌘↵` or `Ctrl↵`, as the hint `⌘↵ to send` says. While a run is busy the page reads `The agent is working.`, the button is named `Queue`, the field reads `Queue a follow-up…` and the hint `⌘↵ to queue`, and the message waits for the run.
+- Type into `Message the agent` on the thread page, `/threads/<id>`, and choose the button `Send ⌘↵`, or press `⌘↵` or `Ctrl↵`. The line above the composer, `#agent-state`, reads `Idle`. While a run is busy it reads `Working`, the field reads `Steer the run…`, `#send` is named `Steer ⌘↵` and steers the run, and `#queue`, `Queue ⌥↵`, or `Alt↵` queues the message after the run.
 
 ## Driving it with verify-nexus
 
@@ -37,7 +37,7 @@ Preconditions:
   - Unfold the turn's tool calls with `$V browser msg-ui-unfold -- click "details.steps >> nth=-1 >> :scope > summary"`. Then `$V browser msg-ui-snap-open -- snapshot --filename msg-ui.md` shows the row `bash echo from-ui >> proof.txt ✓`, and `$V browser msg-ui-shot -- screenshot --filename msg-ui.png` captures it.
   - Send by keyboard: `$V browser msg-ui-kbd-fill -- fill "#prompt-text" "bash: echo from-kbd >> proof.txt"`, then `$V browser msg-ui-kbd -- press Meta+Enter`. The message, a new `Ran a command` group and the answer appear as above.
   - Confirm from the other views: `$V pylon msg-ui-disk $T -- cat proof.txt` prints `msg-proof`, `from-ui` and `from-kbd`, and `$V cli msg-ui-conversation -- conversation $T --json` holds the dashboard's message as a `pi.user` entry, followed by its `toolCall` and a final `scripted answer after toolResult`.
-- **Busy.** Run `$V cli msg-busy -- send $T "stream: 400" --json`, whose answer streams for about 8 s, and right away `$V browser msg-ui-busy -- snapshot --filename msg-ui-busy.md`. It shows `The agent is working.`, the placeholder `Queue a follow-up…`, a button named `Queue` and the hint `⌘↵ to queue`. Right away too, run `$V cli msg-steer -- send $T "steered note" --steer --json`, which exits 0 with a `.submission`. Once `show` reads `.thread.agentTurnRunning` `false`, `$V cli msg-steer-conversation -- conversation $T --json` holds, in order, `pi.user` `stream: 400`, the `pi.assistant` `word0` to `word399`, `pi.user` `steered note` and `pi.assistant` `scripted answer after user`.
+- **Busy.** Run `$V cli msg-busy -- send $T "stream: 400" --json`, whose answer streams for about 8 s, and right away `$V browser msg-ui-busy -- snapshot --filename msg-ui-busy.md`. It shows `Working` in `#agent-state`, the placeholder `Steer the run…`, and the buttons `Queue ⌥↵` and `Steer ⌘↵`. Right away too, run `$V cli msg-steer -- send $T "steered note" --steer --json`, which exits 0 with a `.submission`. Once `show` reads `.thread.agentTurnRunning` `false`, `$V cli msg-steer-conversation -- conversation $T --json` holds, in order, `pi.user` `stream: 400`, the `pi.assistant` `word0` to `word399`, `pi.user` `steered note` and `pi.assistant` `scripted answer after user`.
 - **Proof.** The recorded `msg-cli-send`, the final `msg-conversation`, `msg-disk`, `msg-dedupe` with `msg-dedupe-conversation`, `msg-ui-conversation`, `msg-ui.md`, `msg-ui.png`, `msg-ui-disk`, `msg-ui-busy.md`, `msg-steer` and `msg-steer-conversation`.
 
 ## Gotchas
