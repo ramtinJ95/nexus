@@ -6,20 +6,24 @@
 import { lookup } from "node:dns/promises";
 import { rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../artifacts.ts";
+import { exit, type Exit } from "../exec.ts";
+import { shellQuote } from "../project.ts";
 import { isImageId, probePort, tailnetNodeIdSchema, type TailnetNodeId } from "../protocol.ts";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
-import { tailscaleCli } from "../probe/serve.ts";
+import { parseServeStatus, tailscaleCli } from "../probe/serve.ts";
 import { localApiWhois } from "../tailscale.ts";
+import { callText } from "../test-kit.ts";
 import type { ThreadDetail } from "./api.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
-import { openRegistry } from "./registry.ts";
+import { openRegistry, type PortRange } from "./registry.ts";
 
 /**
  * Reads the probe's config named by argv[2] and refuses to go on unless the probe runs pylon-vm, holds `image` (the
@@ -73,6 +77,20 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     return await startControlPlane(config, scriptedModels());
   };
 
+  const serveJson = () => tailscale(["serve", "status", "--json"], AbortSignal.timeout(30_000));
+
+  /**
+   * Refuses to go on while tailscale serve serves a port in `ports`, which this check's previews would get. Taking over
+   * an entry there would break whatever owns it. With `exceptGateway`, the probe's gateway may serve them.
+   */
+  const refuseServedPorts = async (ports: PortRange, { exceptGateway = false } = {}) => {
+    for (const [port, listener] of parseServeStatus(await serveJson(), `http://127.0.0.1:${previews.gatewayPort}`)) {
+      if (port < ports.first || port > ports.last) continue;
+      if (!exceptGateway) throw new Error(`tailscale serve already serves port ${port}, which this check's previews would get. Free it first`);
+      if (listener.kind === "other") throw new Error(`tailscale serve serves port ${port} with something other than the probe's gateway. Free it first`);
+    }
+  };
+
   return {
     probeConfig,
     stateRoot: backend.stateRoot,
@@ -80,7 +98,9 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     previews,
     dnsName,
     host,
-    serveJson: () => tailscale(["serve", "status", "--json"], AbortSignal.timeout(30_000)),
+    serveJson,
+    serveStatus: async () => JSON.parse(await serveJson()) as { TCP?: Record<string, unknown> },
+    refuseServedPorts,
     planeConfig,
     startPlane,
   };
@@ -114,20 +134,9 @@ async function personWhois(self: TailnetNodeId): Promise<string> {
 
 /** A client of a control plane's API. It reads the port at each request, so it follows a control plane the check replaces. */
 export function apiClient(host: string, port: () => number) {
-  function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
-    return new Promise((resolve, reject) => {
-      const req = request({
-        host, port: port(), method, path: `/v1${path}`,
-        headers: { host: `${host}:${port()}`, ...(method === "GET" ? {} : { "content-type": "application/json" }) },
-      }, (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk: string) => { text += chunk; });
-        res.on("end", () => resolve({ status: res.statusCode!, body: text === "" ? null : JSON.parse(text) }));
-      });
-      req.on("error", reject);
-      req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
+  async function call(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
+    const { status, text } = await callText({ host, port: port(), method, path: `/v1${path}`, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status, body: text === "" ? null : JSON.parse(text) };
   }
 
   async function expect(status: number, method: string, path: string, body?: unknown) {
@@ -145,22 +154,44 @@ export function apiClient(host: string, port: () => number) {
     return d.pylon.actualState === state ? d : undefined;
   });
 
-  /** Sends `bash: <command>`, which the scripted model turns into one bash call, waits for the run to end, and returns that call's result. */
-  async function runTool(threadId: string, requestId: string, command: string): Promise<string> {
-    const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)) as { entries: { kind: string }[] }).entries.filter((e) => e.kind === "pi.tool-result").map((e) => JSON.stringify(e));
+  /**
+   * Sends `bash: <command>`, which the scripted model turns into one bash call, waits for the run to end, and returns
+   * that call's result as `read` gives it. With `stepLimitS`, the command runs under `timeout`, so one that hangs ends
+   * the agent's turn after that and fails the check by name.
+   */
+  async function runTool(threadId: string, requestId: string, command: string, { stepLimitS, read = JSON.stringify }: { stepLimitS?: number; read?: (result: ToolResult) => string } = {}): Promise<string> {
+    const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)) as { entries: ToolResult[] }).entries.filter((e) => e.kind === "pi.tool-result").map((e) => read(e));
     const seen = (await results()).length;
-    await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${command}`, requestId });
-    const result = await until("the tool result is in the conversation", 6 * 60_000, async () => (await results())[seen]);
+    const bounded = stepLimitS === undefined ? command : `timeout ${stepLimitS} bash -c ${shellQuote(command)}; code=$?; if [ $code = 124 ]; then echo "STEP TIMED OUT"; fi`;
+    await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${bounded}`, requestId });
+    const result = await until(`the result of ${requestId} is in the conversation`, stepLimitS === undefined ? 6 * 60_000 : (stepLimitS + 60) * 1000, async () => (await results())[seen]);
     await until("the run ends", 60_000, async () => (await detail(threadId)).thread.agentTurnRunning ? undefined : true);
+    if (stepLimitS !== undefined && result.includes("STEP TIMED OUT")) throw new Error(`${requestId} ran past ${stepLimitS} s: ${result}`);
     return result;
   }
+
+  /** Runs the real CLI against the control plane, directly on the tailnet. */
+  const runCli = (args: readonly string[]): Promise<Exit> => exit(process.execPath, [cli, ...args, "--url", `http://${host}:${port()}`, "--socks", "none"]);
 
   /** Deletes a thread the check left behind and waits for its pylon to be absent, or says what to delete by hand. */
   const cleanup = (threadId: string) => call("DELETE", `/threads/${threadId}`).then(() => reaches(threadId, "absent", 5 * 60_000)).catch((err: unknown) => {
     console.error(`cleanup: could not delete ${threadId}: ${(err as Error).message}. Delete pylon-${threadId} on the probe by hand`);
   });
 
-  return { call, expect, detail, reaches, runTool, cleanup };
+  return { call, expect, detail, reaches, runTool, runCli, cleanup };
+}
+
+const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
+
+export type ToolResult = { kind: string; model?: { content: { type: string; text?: string }[] }[] };
+
+/**
+ * A tool result's output as text, so a check can anchor on its lines. A command that prints nothing has a result with
+ * no content, which reads as "". A result with no model entry is a shape the checks do not know, so it fails loudly.
+ */
+export function toolText(result: ToolResult): string {
+  if (result.model === undefined || result.model.length === 0) throw new Error(`a tool result has no model entry: ${JSON.stringify(result)}`);
+  return result.model.flatMap((m) => m.content).flatMap((c) => c.type === "text" && c.text !== undefined ? [c.text] : []).join("\n");
 }
 
 export async function until<T>(what: string, timeoutMs: number, check: () => Promise<T | undefined>): Promise<T> {

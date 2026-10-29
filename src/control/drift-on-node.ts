@@ -21,24 +21,20 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { JobStatus, PylonId } from "../protocol.ts";
-import { parseServeStatus, readRoutes } from "../probe/serve.ts";
+import { readRoutes } from "../probe/serve.ts";
 import { defaultPreviewPorts } from "./main.ts";
 import { apiClient, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
+import { openRegistry } from "./registry.ts";
 
-const { probeConfig, stateRoot, previews, host, serveJson, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "previews", resolvesToProbe: true });
+const { probeConfig, stateRoot, previews, host, serveJson, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "previews", resolvesToProbe: true });
 
 const routes = () => readRoutes(previews.routesFile);
 const serveBefore = await serveJson();
 const routesBefore = await routes();
 console.log(`tailscale serve status before: ${serveBefore.trim()}`);
 console.log(`route table before: ${JSON.stringify([...routesBefore])}`);
-for (const [port, listener] of parseServeStatus(serveBefore, `http://127.0.0.1:${previews.gatewayPort}`)) {
-  if (listener.kind === "other" && port >= defaultPreviewPorts.first && port <= defaultPreviewPorts.last) {
-    throw new Error(`tailscale serve serves port ${port} with something other than the probe's gateway. Free it first`);
-  }
-}
+await refuseServedPorts(defaultPreviewPorts, { exceptGateway: true });
 
 /** One control plane over the registry in `dir`, which it creates on first use. */
 async function plane(dir: string) {
@@ -95,12 +91,11 @@ const pass = passLogger();
 
 /** The latest job each registry recorded for the pylon. */
 function lastJob(dir: string, pylonId: PylonId): JobStatus | undefined {
-  const db = new DatabaseSync(join(dir, "registry.db"));
+  const registry = openRegistry(join(dir, "registry.db"));
   try {
-    const row = db.prepare("SELECT status FROM jobs WHERE subject = ?").get(pylonId) as { status: string } | undefined;
-    return row && JSON.parse(row.status) as JobStatus;
+    return registry.job(pylonId);
   } finally {
-    db.close();
+    registry.close();
   }
 }
 

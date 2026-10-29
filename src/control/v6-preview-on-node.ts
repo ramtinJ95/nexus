@@ -21,26 +21,21 @@
  * It prints PASS v6-preview-on-node last.
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
-import { relayPorts, shellQuote } from "../project.ts";
+import { relayPorts } from "../project.ts";
 import { relayLog, relayStatus } from "../pylon-vm/relay.ts";
 import type { ThreadDetail } from "./api.ts";
 import { defaultPreviewPorts } from "./main.ts";
-import { apiClient, fetchUntil, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
+import { apiClient, fetchUntil, openNodeCheck, passLogger, toolText, until } from "./on-node-kit.ts";
 
-const { probeConfig, image, host, serveJson, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3] || undefined, opens: "previews", resolvesToProbe: false });
+const { probeConfig, image, host, serveStatus, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3] || undefined, opens: "previews", resolvesToProbe: false });
 const holdMs = Number(process.argv[4] ?? 45) * 1000;
-const serveStatus = async () => JSON.parse(await serveJson()) as { TCP?: Record<string, unknown> };
 const serveBefore = await serveStatus();
-// The check's registry is new, so its previews get the first ports. Taking over an entry there would break whatever owns it.
-for (const port of [defaultPreviewPorts.first, defaultPreviewPorts.first + 1]) {
-  if (Object.keys(serveBefore.TCP ?? {}).includes(String(port))) throw new Error(`tailscale serve already serves port ${port}, which this check's previews would get. Free it first`);
-}
+// The check's registry is new, so its previews get the first ports.
+await refuseServedPorts({ first: defaultPreviewPorts.first, last: defaultPreviewPorts.first + 1 });
 
 const dir = await mkdtemp(join(tmpdir(), "nexus-v6-preview-"));
 const controlPlane = await startPlane(planeConfig(dir));
@@ -54,40 +49,14 @@ const detail = () => api.detail(threadId!);
 const reaches = (state: string, timeoutMs: number) => api.reaches(threadId!, state, timeoutMs);
 
 const stepLimitS = 90;
-type ToolResult = { kind: string; model?: { content: { type: string; text?: string }[] }[] };
-/**
- * Sends `bash: <command>`, which the scripted model turns into one bash call, and returns that call's output as text,
- * so a check can anchor on its lines. The command runs under `timeout`, so one that hangs ends the agent's turn after
- * stepLimitS and fails the check by name.
- */
-async function runTool(requestId: string, command: string): Promise<string> {
-  // A command that prints nothing has a result with no content, which reads as "". A result with no model entry is a
-  // shape this check does not know, so it fails loudly.
-  const text = (e: ToolResult) => {
-    if (e.model === undefined || e.model.length === 0) throw new Error(`a tool result has no model entry: ${JSON.stringify(e)}`);
-    return e.model.flatMap((m) => m.content).flatMap((c) => c.type === "text" && c.text !== undefined ? [c.text] : []).join("\n");
-  };
-  const results = async () => ((await expect(200, "GET", `/threads/${threadId}/conversation`)).entries as ToolResult[]).filter((e) => e.kind === "pi.tool-result").map(text);
-  const seen = (await results()).length;
-  const bounded = `timeout ${stepLimitS} bash -c ${shellQuote(command)}; code=$?; if [ $code = 124 ]; then echo "STEP TIMED OUT"; fi`;
-  await expect(202, "POST", `/threads/${threadId}/messages`, { text: `bash: ${bounded}`, requestId });
-  const result = await until(`the result of ${requestId} is in the conversation`, (stepLimitS + 60) * 1000, async () => (await results())[seen]);
-  await until("the run ends", 60_000, async () => (await detail()).thread.agentTurnRunning ? undefined : true);
-  if (result.includes("STEP TIMED OUT")) throw new Error(`${requestId} ran past ${stepLimitS} s: ${result}`);
-  return result;
-}
+/** The output of a bash call as text, which ends the agent's turn after stepLimitS if the command hangs. */
+const runTool = (requestId: string, command: string) => api.runTool(threadId!, requestId, command, { stepLimitS, read: toolText });
 
-const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
 /** Runs the real CLI against this check's control plane with --json, and parses what it prints. */
-function nexus(...args: string[]): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cli, ...args, "--json", "--url", `http://${host}:${controlPlane.port}`, "--socks", "none"], { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
-    child.on("exit", (code) => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(`nexus ${args.join(" ")} exited ${code}: ${stderr}`)));
-  });
+async function nexus(...args: string[]): Promise<unknown> {
+  const { code, stdout, stderr } = await api.runCli([...args, "--json"]);
+  if (code !== 0) throw new Error(`nexus ${args.join(" ")} exited ${code}: ${stderr}`);
+  return JSON.parse(stdout);
 }
 
 type Preview = ThreadDetail["previews"][number];
