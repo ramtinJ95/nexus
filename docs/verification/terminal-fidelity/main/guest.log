@@ -1,0 +1,95 @@
++   4.2s backend: booted pylon-th-300910f612cf
++   4.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++   4.2s guest: exec herdr --session nexus api snapshot
++   4.2s guest: exec sh -c test -e "$0" || exit 3; exec cat -- "$0" /home/verify/.nexus/sessions.json
++   4.2s guest: exec python3 -c import json import os import signal import subprocess import sys   def expired(signum, frame):     raise TimeoutError...
++   4.2s guest: exec sh -c for f in /home/verify/.nexus/outputs/*.json; do test -e "$f" || continue; printf '%s\t' "${f##*/}"; cat "$f"; done sh
++   4.2s guest: exec pgrep -c -x -f herdr --session nexus
++   4.3s guest: exec herdr --session nexus workspace list
++   4.3s guest: exec sh -c setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1
++   4.3s guest: exec herdr --session nexus workspace list
++   4.5s guest: exec sh -c test -f "$0/opened" || exit 0; cat "$0/opened"; test -e "$0/typed" && echo typed; exit 0 /home/verify/.nexus/claude-launches/f50c1d58-abdd-48eb-9cf8-9bd4b78e88c4
++   4.5s guest: exec herdr --session nexus api snapshot
++   4.6s guest: exec herdr --session nexus workspace create --cwd /home/verify/workspace/repo --label Claude thread --no-focus
++   4.6s guest: exec node -e  const fs = require('node:fs'); const path = require('node:path'); const home = process.env.HOME; const cwd = fs.real... /home/verify/workspace/repo
++   4.7s guest: exec sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] && exit 0; done; exit 1 f50c1d58-abdd-48eb-9cf8-9bd4b78e88c4 /home/verify/.claude/projects
++   4.7s guest: exec herdr --session nexus pane process-info --pane w1:p1
++   4.7s guest: exec sh -c pid=$1; i=0; until s=$(cat /proc/$pid/stat) && set -- ${s##*) } && test "$6" = "$pid" && stty -a -F /proc/$pid/fd/0 |... shell-ready 1506
++   4.7s guest: exec sh -c mkdir "$0" 2>/dev/null && exec "$@"; test -d "$0" && exit 75; mkdir "$0" /home/verify/.nexus/claude-launches/f50c1d58-abdd-48eb-9cf8-9bd4b78e88c4/typed herdr --session nexus pane run w1:p1 $'claude' $'--session-id' $'f50c1d58-abdd-48eb-9cf8-9bd4b78e88c4' $'--model' $'claude-sonnet-5-5' $'--permission-mode...
++   4.7s guest: exec sh -c i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done claude-submitted /home/verify/.nexus/claude-launches/f50c1d58-abdd-48eb-9cf8-9bd4b78e88c4/submitted
++   6.6s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++   6.6s guest: exec herdr --session nexus api snapshot
++   6.6s guest: exec sh -c test -e "$0" || exit 3; exec cat -- "$0" /home/verify/.nexus/sessions.json
++   6.6s guest: exec sh -c for f in /home/verify/.nexus/outputs/*.json; do test -e "$f" || continue; printf '%s\t' "${f##*/}"; cat "$f"; done sh
++   6.6s guest: exec pgrep -c -x -f herdr --session nexus
++   9.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++   9.5s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  11.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  12.5s guest: stream python3 -c """Reads the model calls agents in this pylon recorded, from where the last read of each transcript stopped.  Takes {"claude": dir, "pi": dir, "offse
++  12.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  12.7s guest: stream python3 - /home/verify/workspace/repo changes start
++  12.7s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  13.3s guest: stream python3 -c import os, sys n = int(sys.argv[1]) src = b'' while len(src) < n:     chunk = os.read(0, n - len(src))     if not chunk: sys.exit('guest-terminal: st
++  21.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  29.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  29.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  31.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  31.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  31.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  33.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  33.5s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  34.5s guest: stream python3 -c """Reads the model calls agents in this pylon recorded, from where the last read of each transcript stopped.  Takes {"claude": dir, "pi": dir, "offse
++  34.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  37.7s guest: stream python3 - /home/verify/workspace/repo changes start
++  41.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  45.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  45.5s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  47.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  47.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  49.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  49.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  50.5s guest: stream python3 -c """Reads the model calls agents in this pylon recorded, from where the last read of each transcript stopped.  Takes {"claude": dir, "pi": dir, "offse
++  50.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  51.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  52.7s guest: stream python3 - /home/verify/workspace/repo changes start
++  58.2s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  61.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  62.5s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  62.5s guest: exec herdr --session nexus api snapshot
++  62.5s guest: exec sh -c test -e "$0" || exit 3; exec cat -- "$0" /home/verify/.nexus/sessions.json
++  62.5s guest: exec sh -c for f in /home/verify/.nexus/outputs/*.json; do test -e "$f" || continue; printf '%s\t' "${f##*/}"; cat "$f"; done sh
++  62.5s guest: exec pgrep -c -x -f herdr --session nexus
++  71.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  72.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  72.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  74.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  74.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  76.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  76.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  78.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  78.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  80.5s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  80.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  81.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  81.6s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  81.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  82.7s guest: stream python3 - /home/verify/workspace/repo changes start
++  91.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  98.6s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  98.6s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++ 100.5s guest: stream python3 -c """Reads the model calls agents in this pylon recorded, from where the last read of each transcript stopped.  Takes {"claude": dir, "pi": dir, "offse
++ 100.6s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++ 100.6s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++ 101.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++ 102.7s guest: stream python3 - /home/verify/workspace/repo changes start
++ 111.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++ 121.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++ 122.5s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++ 122.5s guest: exec herdr --session nexus api snapshot
++ 122.5s guest: exec sh -c test -e "$0" || exit 3; exec cat -- "$0" /home/verify/.nexus/sessions.json
++ 122.6s guest: exec python3 -c import json import os import signal import subprocess import sys   def expired(signum, frame):     raise TimeoutError...
++ 122.6s guest: exec sh -c for f in /home/verify/.nexus/outputs/*.json; do test -e "$f" || continue; printf '%s\t' "${f##*/}"; cat "$f"; done sh
++ 122.6s guest: exec pgrep -c -x -f herdr --session nexus
++ 131.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++ 141.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++ 151.2s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }

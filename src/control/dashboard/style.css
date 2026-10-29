@@ -460,7 +460,9 @@ h4.md-h { font-size: 1.07em; }
 
 /* composer: an open input over a hairline, with the model as a chip and a round send button */
 .dock { flex: none; padding: 10px 32px 16px; width: 100%; position: relative; display: grid; grid-template-columns: minmax(0, 780px); justify-content: center; gap: 6px; border-top: 1px solid var(--line-soft); }
-.main[data-view="file"] .dock, .main[data-view="term"] .dock { display: none; }
+.main[data-view="file"] .dock { display: none; }
+/* a Claude worker's terminal is its prompt, so under the terminal the composer gives way to it */
+.main[data-view="term"] #composer { display: none; }
 .refresh-state { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 24px); margin: 0; padding: 6px 12px; font-size: 12px; color: var(--warn); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--pop); }
 .refresh-state:empty { display: none; }
 #run:empty { display: none; }

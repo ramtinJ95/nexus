@@ -1,0 +1,3 @@
+$ nexus delete th-300910f612cf
+Deleted th-300910f612cf.
+[exit 0]

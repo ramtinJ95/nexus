@@ -1,0 +1,52 @@
++   0.1s set up /home/verify from <repo>/src/../images/pylon
++   0.4s browser HeadlessChrome/153.0.8010.0
++   2.5s the control plane answers after 0.0 s
++   3.0s nexus --version -> exit 0 (cli-01-version.txt)
++   3.6s nexus project add drinks --scratch --node node-a --cpus 1 --memory 3 --disk 5 -> exit 0 (cli-02-project-add.txt)
++   4.2s nexus start --project drinks --title Claude thread --claude This thread only checks Nexus's dashboard. Do nothing els... --model claude-sonnet-5-5 --json -> exit 0 (cli-03-start-claude.txt)
++  12.5s Claude has answered its prompt after 8.3 s
++  12.5s == the Terminal tab attaches
++  13.3s the page opened attach socket 1
++  15.5s the pylon sent an OSC 8 hyperlink
++  15.8s the terminal attaches after 2.6 s
++  19.1s -> 01-terminal.png
++  19.1s == copying out: a drag that Herdr selects, then an Option-drag that the page selects
++  19.1s "Reply with the single" is at {"left":620.109375,"right":782.75,"y":294}
++  19.3s the pylon sent OSC 52, selection "c", text "Reply with the single" (1)
++  20.8s after a plain drag over it, the clipboard holds "(nothing copied yet)"
++  22.1s -> 02-herdr-drag.png
++  22.4s the pylon sent OSC 52, selection "c", text "Reply with the single" (2)
++  22.9s after an Option-drag, xterm.js has 0 selection boxes
++  24.2s -> 03-option-drag.png
++  24.7s after ⌘C, the clipboard holds "(nothing copied yet)"
++  24.7s == Shift+Enter between two lines, then Enter
++  32.1s typed a line, Shift+Enter and a second line into the page's terminal
++  34.7s herdr panes -> panes-shift-enter.txt
++  43.1s -> 04-shift-enter.png
++  43.1s pressed Enter
++  55.8s Claude's turns end after 12.6 s
++  58.3s nexus conversation th-300910f612cf -> exit 0 (cli-04-conversation-shift-enter.txt)
++  59.5s -> 05-replied.png
++  59.5s == a link in the output
++  59.5s the link is at {"left":502.5,"right":672.984375,"y":519}
++  60.4s hovered it: the pointer is default
++  60.6s -> 06-link-hover.png
++  61.4s clicked it: window.open was called with []
++  61.4s == a question arrives while the terminal shows
++  75.7s the thread asks a question after 5.7 s
++  95.9s gave up after 20 s waiting until the question shows on the page beside the terminal
++  95.9s the page's view is term, the question does not show, and the dock reads "(hidden)"
++  96.0s -> 07-question.png
++  96.0s answered in the terminal with Enter
++  99.4s the question is answered after 3.3 s
++ 106.0s Claude's turn ends after 6.7 s
++ 106.0s == the attach socket's connection is reset
++ 108.0s reset 1 attach connection
++ 108.0s attach socket 1 closed
++ 108.7s -> 08-dropped.png
++ 153.8s gave up after 45 s waiting until the terminal is attached again
++ 155.3s the status line went:
+    + 108.0s "The connection dropped. Herdr keeps the session, so attach again.", Attach again
++ 156.3s -> 09-after-drop.png
++ 156.3s the page opened 1 attach sockets in all
++ 156.8s nexus delete th-300910f612cf -> exit 0 (cli-05-delete-claude.txt)
