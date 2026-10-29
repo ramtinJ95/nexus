@@ -39,14 +39,16 @@ screenshot desktop-17-diff-tab.png
 desktop diff tab: scrolled to 4000px, three replies came and the page polled, scrolled to: 4000px -> ok
 desktop live conversation: left at the end for a diff tab, three replies came, back on the conversation, distance from the end: 291px -> BUG
 screenshot desktop-18-back-from-diff-tab.png
+desktop long conversation: scrolled up to 600px with a fold opened, a reply came while a diff tab covered it, back on the conversation, scrolled to: 600px -> ok
+screenshot desktop-19-scrolled-up-behind-diff-tab.png
 desktop sidebar: the open thread's row is inside the list's visible part: row ends at 730px, the list at 701px -> BUG
-screenshot desktop-19-sidebar-open-thread.png
+screenshot desktop-20-sidebar-open-thread.png
 desktop sidebar: scrolled to 400px, the page polled, scrolled to: 400px -> ok
 desktop inspector: scrolled to 400px, the page polled, scrolled to: 400px -> ok
 desktop inspector: scrolled down the changes, its Changes, Previews and Pylon tabs show: false -> BUG
-screenshot desktop-20-inspector-scrolled.png
+screenshot desktop-21-inspector-scrolled.png
 desktop pipeline: cells whose text is cut off: 19 -> BUG
-screenshot desktop-21-pipeline-cells.png
+screenshot desktop-22-pipeline-cells.png
 phone page home: the document itself scrolls: false -> ok
 screenshot phone-01-home.png
 phone page long-conversation: the document itself scrolls: true -> BUG
@@ -88,10 +90,12 @@ screenshot phone-17-diff-tab.png
 phone diff tab: scrolled to 4000px, three replies came and the page polled, scrolled to: 4000px -> ok
 phone live conversation: left at the end for a diff tab, three replies came, back on the conversation, distance from the end: 423px -> BUG
 screenshot phone-18-back-from-diff-tab.png
+phone long conversation: scrolled up to 600px with a fold opened, a reply came while a diff tab covered it, back on the conversation, scrolled to: 600px -> ok
+screenshot phone-19-scrolled-up-behind-diff-tab.png
 phone sidebar: the open thread's row is inside the list's visible part: row ends at 1284px, the list at 645px -> BUG
-screenshot phone-19-sidebar-open-thread.png
+screenshot phone-20-sidebar-open-thread.png
 phone inspector: scrolled to 400px, the page polled, scrolled to: 400px -> ok
 phone inspector: scrolled down the changes, its Changes, Previews and Pylon tabs show: false -> BUG
-screenshot phone-20-inspector-scrolled.png
+screenshot phone-21-inspector-scrolled.png
 phone pipeline: cells whose text is cut off: 2 -> BUG
-screenshot phone-21-pipeline-cells.png
+screenshot phone-22-pipeline-cells.png

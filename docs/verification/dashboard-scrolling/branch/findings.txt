@@ -20,6 +20,7 @@ desktop live conversation: at the end, a question card joined the dock, distance
 desktop live conversation: scrolled up to 600px, two replies came, one streamed and the page polled, scrolled to: 600px -> ok
 desktop diff tab: scrolled to 4000px, three replies came and the page polled, scrolled to: 4000px -> ok
 desktop live conversation: left at the end for a diff tab, three replies came, back on the conversation, distance from the end: 0px -> ok
+desktop long conversation: scrolled up to 600px with a fold opened, a reply came while a diff tab covered it, back on the conversation, scrolled to: 600px -> ok
 desktop sidebar: the open thread's row is inside the list's visible part: row ends at 685px, the list at 685px -> ok
 desktop sidebar: scrolled to 400px, the page polled, scrolled to: 400px -> ok
 desktop inspector: scrolled to 400px, the page polled, scrolled to: 400px -> ok
@@ -47,6 +48,7 @@ phone live conversation: at the end, a question card joined the dock, distance f
 phone live conversation: scrolled up to 600px, two replies came, one streamed and the page polled, scrolled to: 600px -> ok
 phone diff tab: scrolled to 4000px, three replies came and the page polled, scrolled to: 4000px -> ok
 phone live conversation: left at the end for a diff tab, three replies came, back on the conversation, distance from the end: 0px -> ok
+phone long conversation: scrolled up to 600px with a fold opened, a reply came while a diff tab covered it, back on the conversation, scrolled to: 600px -> ok
 phone sidebar: the open thread's row is inside the list's visible part: row ends at 629px, the list at 629px -> ok
 phone inspector: scrolled to 400px, the page polled, scrolled to: 400px -> ok
 phone inspector: scrolled down the changes, its Changes, Previews and Pylon tabs show: true -> ok

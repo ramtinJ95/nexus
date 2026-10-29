@@ -40,10 +40,11 @@ Only what a pylon cannot host is a stand-in: whois answers the laptop, a deploye
 | Scrolled up to 600 px, replies, a stream and a poll (`16`) | Held at 600 px. | Held at 600 px. |
 | A diff tab scrolled to 4,000 px across a poll (`17`) | Held. | Held. |
 | At the end, open a diff tab, three replies, back to the conversation (`18`) | 291 px and 423 px above the end. | At the end. |
-| The open thread's row in the sidebar (`19`) | Hidden under the notifications button on the desktop, and below the fold when the phone opens the list. | In view. |
+| Scrolled up with a fold opened, a reply while a diff tab covers the conversation, back to it (`19`) | Held. | Held. Before the review's second finding was fixed, the branch threw the reader to the end. |
+| The open thread's row in the sidebar (`20`) | Hidden under the notifications button on the desktop, and below the fold when the phone opens the list. | In view. |
 | The sidebar and the inspector scrolled across a poll | Held. | Held. |
-| The inspector's Changes, Previews and Pylon tabs while its pane scrolls (`20`) | Scrolled away. | Stay at the top. |
-| Pipeline cells whose text is cut off (`21`) | 19 on the desktop, 2 on the phone, mid-word and with no ellipsis. | None. Titles and reasons wrap. |
+| The inspector's Changes, Previews and Pylon tabs while its pane scrolls (`21`) | Scrolled away. | Stay at the top. |
+| Pipeline cells whose text is cut off (`22`) | 19 on the desktop, 2 on the phone, mid-word and with no ellipsis. | None. Titles and reasons wrap. |
 
 ## Not verified here
 

@@ -156,6 +156,27 @@ for (const view of widths) {
   finding("live conversation: left at the end for a diff tab, three replies came, back on the conversation, distance from the end", `${back.fromEnd}px`, back.fromEnd > 48);
   await shot("back-from-diff-tab");
 
+  await open(`/threads/${ids.long}`);
+  await ev(() => { document.getElementById("scroll").scrollTop = 600; });
+  await sleep(300);
+  await ev(() => {
+    const top = document.getElementById("scroll").getBoundingClientRect().top;
+    [...document.querySelectorAll("#convo .steps > summary")].find((s) => s.getBoundingClientRect().top > top).click();
+  });
+  await sleep(300);
+  const before = (await conversation()).top;
+  await page.waitForSelector('.tree-file[data-path="src/control/loop.ts"]');
+  await ev(() => document.querySelector('.tree-file[data-path="src/control/loop.ts"]').click());
+  await ev(() => document.querySelector(".scrim")?.click());
+  await sleep(1_000);
+  await control("append", { thread: ids.long, n: 1 });
+  await poll();
+  await ev(() => document.querySelector('[data-tab="convo"]').click());
+  await sleep(500);
+  const behind = (await conversation()).top;
+  finding(`long conversation: scrolled up to ${before}px with a fold opened, a reply came while a diff tab covered it, back on the conversation, scrolled to`, `${behind}px`, Math.abs(behind - before) > 2);
+  await shot("scrolled-up-behind-diff-tab");
+
   await open(`/threads/${ids.landable}`);
   if (view.mobile) {
     await ev(() => document.querySelector(".menu").click());

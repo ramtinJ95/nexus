@@ -1,1 +1,1 @@
-branch: c3ff595 fix(dashboard): stop following the end once the reader opens a fold there
+branch: 88da8eb fix(dashboard): keep the reader's place while a diff tab hides the conversation
