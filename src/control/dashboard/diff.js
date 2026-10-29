@@ -21,8 +21,10 @@ function cutPatch(patch) {
       const kept = lines.slice(header + 1, i).filter((line) => /^[ +-]/.test(line));
       const old = kept.filter((line) => line[0] !== "+").length;
       const added = kept.filter((line) => line[0] !== "-").length;
-      const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(lines[header]);
-      lines[header] = `@@ -${at[1]},${old} +${at[2]},${added} @@${at[3]}`;
+      const at = /^@@ -(\d+)(,\d+)? \+(\d+)(,\d+)? @@(.*)$/.exec(lines[header]);
+      // A side with no lines names the line before it, so a side the cut emptied starts a line earlier.
+      const start = (from, count, kept) => kept === 0 && count !== ",0" ? Number(from) - 1 : from;
+      lines[header] = `@@ -${start(at[1], at[2], old)},${old} +${start(at[3], at[4], added)},${added} @@${at[5]}`;
       return { patch: lines.slice(0, i).join("\n") + "\n", cut: true };
     } else if (/^diff --git /.test(lines[i])) header = -1;
   }

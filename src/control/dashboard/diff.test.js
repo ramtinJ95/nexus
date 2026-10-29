@@ -143,3 +143,20 @@ ${lines.join("\n")}
 test("a diff within the row cap is not cut", () => {
   assert.equal(diffOf(edit).cut, false);
 });
+
+test("a cut that keeps none of a hunk's added lines claims no unchanged lines before the hunk", (t) => {
+  const errors = t.mock.method(console, "error", () => {});
+  const old = Array.from({ length: maxDiffRows + 10 }, (_, i) => `-old ${i}`);
+  const now = Array.from({ length: maxDiffRows + 10 }, (_, i) => `+new ${i}`);
+  const shown = diffOf(`diff --git a/gen.ts b/gen.ts
+index 1111111..2222222 100644
+--- a/gen.ts
++++ b/gen.ts
+@@ -1,${old.length} +1,${now.length} @@
+${old.join("\n")}
+${now.join("\n")}
+`);
+  assert.equal(shown.cut, true);
+  assert.equal(shown.files[0].hunks[0].collapsedBefore, 0);
+  assert.equal(errors.mock.callCount(), 0);
+});
