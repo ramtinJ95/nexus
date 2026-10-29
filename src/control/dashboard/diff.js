@@ -3,7 +3,7 @@
 import { DiffHunksRenderer, parsePatchFiles, wrapCoreCSS, wrapThemeCSS } from "@pierre/diffs";
 
 /** A diff this long is shown up to here, so a huge one does not stall the page. */
-export const maxDiffRows = 20_000;
+export const maxDiffRows = 2_000;
 /** What a diff says of a file beyond its lines, such as a rename or a new mode. */
 const metaLine = /^(old mode|new mode|new file mode|deleted file mode|similarity index|rename from|rename to|copy from|copy to) /;
 
