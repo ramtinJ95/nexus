@@ -54,7 +54,8 @@ import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import { HttpError } from "./http-error.ts";
-import { answerRefusal, type AnswerRefusal, type Question } from "./questions.ts";
+import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "./questions.ts";
+import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { startKey, type StartRequest } from "./threads.ts";
@@ -801,9 +802,50 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
   }
 
-  async function pylonCommand<K extends "link-port" | "unlink-port" | "open-session" | "close-session" | "drop-failed-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
+  async function pylonCommand<K extends "exec" | "link-port" | "unlink-port" | "open-session" | "close-session" | "drop-failed-session">(t: Thread, command: Extract<PylonCommand, { kind: K }>): Promise<Extract<CommandResult, { kind: K }>> {
     // The client checks that the result is the command's kind.
     return await inPylon(t, (probe, pylonId) => probe.command(pylonId, command)) as Extract<CommandResult, { kind: K }>;
+  }
+
+  /**
+   * Hands the person's choices to the Claude worker's AskUserQuestion dialog through the hook that waits in its pylon,
+   * then records them, so a recorded answer is one Claude has. The hook takes one answer per ask, and the same one
+   * again, so a retry after a lost reply is safe. When nobody waits any more, as after the terminal answered or the
+   * turn ended, the question is withdrawn.
+   */
+  async function answerAsk(question: Question & { ask: ClaudeAsk }, choices: Choice[], caller: TailnetNodeId): Promise<Question> {
+    const same = (q: Question) => JSON.stringify(q.answer?.choices) === JSON.stringify(choices);
+    const answeredOtherwise = (q: Question) => new HttpError(409, `question ${q.id} was answered ${JSON.stringify(q.answer!.option)} by ${q.answer!.by}`);
+    if (question.answer !== null) {
+      if (same(question)) return question;
+      throw answeredOtherwise(question);
+    }
+    const t = registry.thread(question.thread)!;
+    const delivery = { kind: "exec", argv: [claudeHook, "answer", JSON.stringify(askAnswer(question.ask, choices))], cwd: "/", timeoutMs: 15_000 } as const;
+    const { exitCode, output } = await pylonCommand(t, delivery);
+    void claude.refresh(t);
+    if (exitCode === answerExits.nobodyWaits) {
+      registry.withdrawAsk(question.id);
+      throw new HttpError(409, "Claude no longer waits for this answer: it was answered in the terminal, its turn ended, or its pylon paused since. Send it to Claude as a message instead");
+    }
+    if (exitCode === answerExits.answeredOtherwise) {
+      const now = registry.question(question.id);
+      throw now?.answer != null ? answeredOtherwise(now) : new HttpError(409, `another answer to question ${question.id} reached Claude first`);
+    }
+    if (exitCode === 127 || (exitCode === answerExits.delivered && !new RegExp(`^${answerDelivered}$`, "m").test(output))) {
+      throw new HttpError(409, `pylon ${t.pylonId} runs an image from before AskUserQuestion could be answered from the dashboard, so answer it in the pylon's terminal (\`nexus attach ${t.id}\`)`);
+    }
+    if (exitCode !== answerExits.delivered) {
+      throw new HttpError(502, exitCode === null ? `the answer was not handed to Claude: nexus-claude-hook answer did not finish within 15 s in pylon ${t.pylonId}`
+        : `the answer was not handed to Claude: nexus-claude-hook answer exited ${exitCode} in pylon ${t.pylonId}: ${output.trim().slice(0, 500)}`);
+    }
+    // A pull since the delivery, which finds the hook that took the answer gone, may have withdrawn the unanswered
+    // question, and the answer is still its.
+    const { answer: _, ...asked } = question;
+    registry.askQuestion(asked);
+    const answered = registry.answerQuestion(question.id, { option: choicesSummary(question.ask, choices), by: caller, at: Date.now(), choices });
+    if (!same(answered)) throw answeredOtherwise(answered);
+    return answered;
   }
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
@@ -998,7 +1040,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         stream(res) {
           const agent = registry.agent(t);
           return agent.kind === "claude"
-            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model))
+            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model, Date.now, () => registry.questions(t.id)))
             : stream<ConversationView>(res, conversing(t), () => agents.harness.watch(t), liveFrames(t));
         },
       };
@@ -1109,11 +1151,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(reviewsOrRefuse().land(t.id, r.caller, body.head, body.waive));
     }],
     ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, async ([, id], r) => {
-      const { option } = parse(answerSchema, await r.body());
+      const body = parse(answerSchema, await r.body());
       const question = registry.question(id!);
       if (question === null) throw new HttpError(404, `no question ${id}`);
       const refused = refusalOf(r.caller, question);
       if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]}`);
+      if (question.ask !== undefined) {
+        if (!("choices" in body)) throw new HttpError(400, `question ${question.id} is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks`);
+        return ok(await answerAsk({ ...question, ask: question.ask }, parse(choicesSchema(question.ask), body.choices), r.caller));
+      }
+      if (!("option" in body)) throw new HttpError(400, `question ${question.id} is answered with {"option": "<one of its options>"}`);
+      const { option } = body;
       if (!question.options.includes(option)) throw new HttpError(400, `${JSON.stringify(option)} is not an option of question ${question.id}, which are ${question.options.map((o) => JSON.stringify(o)).join(", ")}`);
       const answered = registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() }, options.planning?.answered);
       if (answered.answer!.option !== option) throw new HttpError(409, `question ${question.id} was answered ${JSON.stringify(answered.answer!.option)} by ${answered.answer!.by}`);
@@ -1430,7 +1478,8 @@ const holdsSchema = z.array(z.string().min(1).max(4_000)).min(1).max(20);
 const landSchema = z.strictObject({ head: commitSchema.optional(), waive: holdsSchema.optional() })
   .refine((b) => b.waive === undefined || b.head !== undefined, "a waiver needs the head it confirmed");
 
-const answerSchema = z.strictObject({ option: z.string() });
+/** An ask is answered with a choice per question it asks, and any other question with one of its options. */
+const answerSchema = z.union([z.strictObject({ option: z.string() }), z.strictObject({ choices: z.array(z.unknown()) })]);
 const answerRefusals: Record<AnswerRefusal, string> = {
   "not a person": "only a person's device may, never infrastructure nodes or pylons",
   "not a deployer": "its answer may deploy, so only deployers may",

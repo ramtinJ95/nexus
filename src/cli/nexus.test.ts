@@ -1499,6 +1499,20 @@ test("show prints each question with its options, its reserved case, and who mus
   assert.deepEqual((await s.json(["show", thread.id])).questions.map((q: { id: string }) => q.id), ["qn-image", "qn-brief"]);
 });
 
+test("show prints a Claude worker's ask with a line per question it asks, and the choices that answered it in one line", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Ask"]);
+  const option = (label: string) => ({ label, description: "" });
+  const questions = [
+    { question: "Which drink?", header: "Drink", multiSelect: false, options: [option("Tea"), option("Coffee")] },
+    { question: "What goes in it?", header: "Extras", multiSelect: true, options: [option("Milk"), option("Sugar")] },
+  ];
+  s.registry.askQuestion({ id: "ask-toolu_1", thread: thread.id, text: "Drink: Which drink?\nExtras: What goes in it?", options: [], reserved: null, answerer: "person", askedAt: 1, ask: { session: "s1", toolUseId: "toolu_1", questions } });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^question ask-toolu_1: Drink: Which drink\?\n {2}Extras: What goes in it\?\n {2}needs you$/m);
+  s.registry.answerQuestion("ask-toolu_1", { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.UTC(2026, 9, 28, 9), choices: [{ picked: ["Tea"] }, { picked: ["Milk"], own: "Oat cream" }] });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^question ask-toolu_1: Drink: Which drink\?\n {2}Extras: What goes in it\?\n {2}answered "Drink: Tea; Extras: Milk, Oat cream" by nLAPTOP at 2026-10-28T09:00:00.000Z$/m);
+});
+
 test("show prints each judgment of a failed pylon: its verdict and who gave it, then what Nexus did or what it waits for", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Flaky node"]);
@@ -1521,7 +1535,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.41.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.42.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));

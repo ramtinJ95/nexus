@@ -32,7 +32,7 @@ import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptS
 import { queuedOf } from "./claude-conversation.ts";
 import { blocks as blocking, findingsOf, landable, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
-import type { AnswerRefusal, Question } from "./questions.ts";
+import { askedIn, askQuestionId, type AnswerRefusal, type AskedQuestion, type Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 import { itemView, type ItemPhase, type PipelineItem } from "./pipeline.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
@@ -688,7 +688,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
   const { thread: t } = d;
   const agent = c.registry.agent(t).kind;
   const read = view === null || view instanceof Error ? null : view;
-  const items = read === null ? [] : itemsOf(read);
+  const items = read === null ? [] : itemsOf(read, d.questions ?? []);
   const run = runOf(d, read, items);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read?.kind === "claude" ? shownKey(read.view, model) : null;
@@ -774,11 +774,12 @@ ${j.brief !== null && html`<details><summary>What the judgment was asked and ans
 
 /**
  * Above the landing card, each question the thread asked: open ones as a card with a button per option, and answered
- * ones as a line saying what the answer was. As with landing, the page says up front when the answer route would
- * refuse this device.
+ * ones as a line saying what the answer was. A Claude worker's open ask is a form, and an answered one shows in the
+ * conversation instead. As with landing, the page says up front when the answer route would refuse this device.
  */
 function questionCards(c: Context, d: ThreadDetail): Html[] {
-  return (d.questions ?? []).map((q) => {
+  return (d.questions ?? []).filter((q) => q.ask === undefined || q.answer === null).map((q) => {
+    if (q.ask !== undefined) return askCard(c, q, q.ask.questions);
     if (q.answer !== null) {
       return html`<section class="landing question answered" data-question="${q.id}" aria-label="Answered question"><div class="question-text">${prose(q.text)}</div>
 <p class="land-meta">Answered "${q.answer.option}" from ${q.answer.by}, ${ago(q.answer.at, c.now)}</p></section>`;
@@ -794,6 +795,34 @@ function questionCards(c: Context, d: ThreadDetail): Html[] {
 <div class="land-act"><div class="question-options">${buttons}</div>${refusal !== null && html`<p class="error">${answerRefusals[refusal](c.caller)}</p>`}</div>
 </section>`;
   });
+}
+
+/**
+ * A Claude worker's open AskUserQuestion as a form: each question with its options as radios, or checkboxes when it
+ * takes several, each option's preview, an answer of the person's own, and notes. client.js sends it as the answer's
+ * choices. The terminal's dialog stays open meanwhile, and whichever answers first is the answer.
+ */
+function askCard(c: Context, q: Question, asked: readonly AskedQuestion[]): Html {
+  const refusal = c.answerRefusal(q);
+  // Each field has an ID, so a swap of the region keeps the focus in it.
+  const field = (i: number, name: string) => `${q.id}-${i}-${name}`;
+  return html`<section class="landing question ask" data-question="${q.id}" aria-label="Claude asks">
+<div class="land-top"><h2>Claude asks</h2></div>
+<form class="ask" data-thread="${q.thread}" data-question="${q.id}">
+<fieldset class="ask-all"${refusal !== null && " disabled"}>
+${asked.map((aq, i) => html`<fieldset class="ask-q" data-multi="${String(aq.multiSelect)}" data-header="${aq.header}">
+<legend><span class="tag">${aq.header}</span> ${aq.question}</legend>
+${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.multiSelect ? "checkbox" : "radio"}" name="picked-${i}" value="${o.label}" id="${field(i, `o${j}`)}"><span class="ask-label">${o.label}</span>${o.description !== "" && html`<span class="ask-desc">${o.description}</span>`}</label>${o.preview !== undefined && html`<pre class="ask-preview">${o.preview}</pre>`}</div>`)}
+<div class="ask-opt ask-own">${aq.multiSelect
+  ? html`<label for="${field(i, "own")}"><span class="ask-label">And your own answer</span></label>`
+  : html`<label><input type="radio" name="picked-${i}" value="" id="${field(i, "pick-own")}"><span class="ask-label">Your own answer</span></label>`}<input type="text" name="own-${i}" id="${field(i, "own")}" maxlength="4000" aria-label="Your own answer to ${aq.header}"></div>
+<input type="text" class="ask-notes" name="notes-${i}" id="${field(i, "notes")}" maxlength="4000" placeholder="Notes for Claude (optional)" aria-label="Notes on ${aq.header}">
+</fieldset>`)}
+</fieldset>
+<p class="land-meta">Asked ${ago(q.askedAt, c.now)}. Answer here or in the pylon's terminal, whichever comes first.</p>
+<div class="land-act"><button type="submit" class="btn"${refusal !== null && " disabled"}>Answer</button>${refusal !== null && html`<p class="error">${answerRefusals[refusal](c.caller)}</p>`}</div>
+</form>
+</section>`;
 }
 
 const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
@@ -934,7 +963,7 @@ ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread i
   : view instanceof Error ? html`<p class="error">The conversation could not be read: ${view.message}</p>`
   : claude !== null && items.length === 0 ? html`<p class="empty">${claude.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet."}</p>`
   : items.length === 0 ? html`<p class="empty">No messages yet.</p>`
-  : html`${claude !== null && claude.dropped > 0 && html`<p class="note">${claude.dropped} older ${claude.dropped === 1 ? "entry is" : "entries are"} not kept.</p>`}${blocks(items).map(blockView)}`}
+  : html`${claude !== null && claude.dropped > 0 && html`<p class="note">${claude.dropped} older ${claude.dropped === 1 ? "entry is" : "entries are"} not kept.</p>`}${blocks(items).map((block) => blockView(block, now))}`}
 `;
 }
 
@@ -969,13 +998,13 @@ const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
  * its growing parts changed, such as a new entry or a tool call that finished, and otherwise only the parts that
  * grew. Each frame is the change since the one this reader got last, so a reader that fell behind skips ahead.
  */
-export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now): (view: ConversationView | ClaudeConversation) => LiveFrame | null {
+export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now, questions: () => readonly Question[] = () => []): (view: ConversationView | ClaudeConversation) => LiveFrame | null {
   let shape: string | null = null;
   let parts: string[] = [];
   let shown: string | null = null;
   return (served) => {
     const view = agentView(served);
-    const region = convo(t, view, itemsOf(view), view.kind === "claude" ? claudeModel : modelOf(view.view), now()).text;
+    const region = convo(t, view, itemsOf(view, questions()), view.kind === "claude" ? claudeModel : modelOf(view.view), now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
@@ -1115,11 +1144,14 @@ type Item =
   | { kind: "user"; text: string; queued: string | null; at: number; from: PromptFrom }
   | { kind: "agent"; text: string; streaming: boolean }
   | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result"> }
+  /** A Claude worker's AskUserQuestion call, with its question while one was asked for it. */
+  | { kind: "ask"; id: string; questions: readonly AskedQuestion[]; result: ToolResult; question: Question | null }
   | { kind: "notice"; text: string; tone: Tone }
   | { kind: "note"; text: string }
   | { kind: "link"; text: string; url: string };
 type ToolResult = { state: "done"; output: string; isError: boolean } | { state: "running"; output: string } | { state: "none" };
 type ToolItem = Extract<Item, { kind: "tool" }>;
+type AskItem = Extract<Item, { kind: "ask" }>;
 type UserItem = Extract<Item, { kind: "user" }>;
 
 /** Who a message came from. Nexus's PR watch, review loop and nudge write into a conversation as a user. */
@@ -1178,16 +1210,18 @@ function conversationItems(view: ConversationView): Item[] {
   return items;
 }
 
-const itemsOf = (view: AgentView): Item[] => view.kind === "claude" ? claudeItems(view.view) : conversationItems(view.view);
+const itemsOf = (view: AgentView, questions: readonly Question[]): Item[] => view.kind === "claude" ? claudeItems(view.view, questions) : conversationItems(view.view);
 
 /**
  * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a
  * background task's finish on the call that started it. A call of the current turn without a result runs while
- * Claude works. A message Claude Code queued and has not taken shows queued at the end. A pull request shows once.
+ * Claude works. An AskUserQuestion call is its own row, with the thread's question for it. A message Claude Code
+ * queued and has not taken shows queued at the end. A pull request shows once.
  */
-function claudeItems({ entries, working }: ClaudeConversation): Item[] {
+function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[]): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, ToolItem>();
+  const asks = new Map<string, AskItem>();
   const pullRequests = new Set<string>();
   let turn: ToolItem[] = [];
   for (const entry of entries) {
@@ -1195,6 +1229,13 @@ function claudeItems({ entries, working }: ClaudeConversation): Item[] {
       case "prompt": items.push({ kind: "user", text: entry.text, queued: null, at: entry.at, from: entry.from }); break;
       case "reply": items.push({ kind: "agent", text: entry.text, streaming: false }); break;
       case "tool": {
+        const asked = askedIn(entry);
+        if (asked !== null) {
+          const ask: AskItem = { kind: "ask", id: entry.id, questions: asked, result: { state: "none" }, question: questions.find((q) => q.id === askQuestionId(entry.id)) ?? null };
+          asks.set(entry.id, ask);
+          items.push(ask);
+          break;
+        }
         const tool: ToolItem = { kind: "tool", call: { id: entry.id, name: entry.name, arguments: entry.input }, result: { state: "none" } };
         tools.set(entry.id, tool);
         turn.push(tool);
@@ -1203,7 +1244,7 @@ function claudeItems({ entries, working }: ClaudeConversation): Item[] {
       }
       case "result": {
         const result: ToolResult = { state: "done", output: entry.output, isError: entry.isError };
-        const tool = tools.get(entry.toolUseId);
+        const tool = tools.get(entry.toolUseId) ?? asks.get(entry.toolUseId);
         if (tool === undefined) items.push({ kind: "tool", call: { id: entry.toolUseId, name: "tool", arguments: {} }, result });
         else tool.result = result;
         break;
@@ -1316,7 +1357,7 @@ function blocks(items: readonly Item[]): Block[] {
   return out;
 }
 
-function blockView(block: Block): Html {
+function blockView(block: Block, now: number): Html {
   switch (block.kind) {
     case "user": {
       const from: PromptFrom = block.from !== "person" ? block.from : block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.text.startsWith("[Nexus review") ? "review" : block.text.startsWith("[Nexus nudge") ? "nudge" : "person";
@@ -1330,7 +1371,34 @@ function blockView(block: Block): Html {
     case "note": return html`<p class="note">${block.text}</p>`;
     case "link": return html`<p class="note"><a class="link" href="${block.url}" target="_blank" rel="noopener">${block.text} ↗</a></p>`;
     case "tools": return stepsView(block.tools);
+    case "ask": return askView(block, now);
   }
+}
+
+/**
+ * A Claude worker's AskUserQuestion in the conversation: its questions and options, with what the person picked on
+ * the dashboard, their own answer and notes, and from which device, or what Claude got when the terminal answered.
+ */
+function askView(item: AskItem, now: number): Html {
+  const answer = item.question?.answer ?? null;
+  const choices = answer?.choices;
+  const status = answer !== null ? html`Answered from ${answer.by}, ${ago(answer.at, now)}.`
+    : item.result.state === "done" ? (item.result.isError ? "Not answered." : "Answered in the terminal.")
+    : item.question !== null ? "Waits for your answer below." : "Not answered.";
+  return html`<section class="ask-card" id="ask-${item.id}" aria-label="Claude asked">
+<p class="ask-head">Claude asked</p>
+${item.questions.map((q, i) => {
+  const choice = choices?.[i];
+  return html`<div class="ask-q"><p class="ask-question"><span class="tag">${q.header}</span> ${q.question}</p>
+<ul class="ask-picks">${q.options.map((o) => {
+  const picked = choice?.picked.includes(o.label) === true;
+  return html`<li${picked && html` class="picked"`}>${picked && html`<span class="ask-mark">✓ </span>`}<span class="ask-label">${o.label}</span>${o.description !== "" && html` <span class="ask-desc">${o.description}</span>`}${picked && o.preview !== undefined && html`<pre class="ask-preview">${o.preview}</pre>`}</li>`;
+})}</ul>
+${choice?.own !== undefined && html`<p class="ask-said">Own answer: ${choice.own}</p>`}${choice?.notes !== undefined && html`<p class="ask-said">Notes: ${choice.notes}</p>`}</div>`;
+})}
+${choices === undefined && item.result.state === "done" && html`<pre class="t-out">${item.result.output}</pre>`}
+<p class="land-meta">${status}</p>
+</section>`;
 }
 
 /** A reply or prompt's markdown, with `end` after its last character, where a streaming reply's caret goes. */

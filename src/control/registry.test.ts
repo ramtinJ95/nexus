@@ -18,6 +18,7 @@ import type { JobId, LiveHash, NodeName, NodeObservation, PylonId, ServiceFact, 
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { ImageManifest, TemplateRecord } from "../images.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import type { WaitingAsk } from "./questions.ts";
 
 const node = "rj-firebat" as NodeName;
 const threadId = "th-1" as ThreadId;
@@ -994,7 +995,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 19}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 20}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1308,6 +1309,85 @@ test("a read that ends on a usage limit ends the turn that ran into it, though C
   assert.equal(attention(), "working");
 });
 
+/** A Claude worker on session s1 whose transcript reads and pylon reports of waiting asks the test makes, as the reader would. */
+function claudeAsking(registry: ReturnType<typeof seeded>) {
+  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
+  let offset = 0;
+  return {
+    waiting: (...asks: WaitingAsk[]) => registry.setWaitingAsks(threadId, asks),
+    append: (...entries: ClaudeEntry[]) => assert.equal(registry.appendClaudeRead(threadId, { session: "s1", from: cursorAt(offset), entries, cursor: cursorAt(offset += 10), reset: false, readAt: offset }), true),
+    asks: () => registry.questions(threadId).map((q) => [q.id, q.answer?.option ?? null]),
+  };
+}
+const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot" }, { label: "Coffee", description: "Strong" }] };
+const waitingAsk = (toolUseId: string, at: number, session = "s1"): WaitingAsk => ({ ask: { session, toolUseId, questions: [drink] }, at });
+const askCall = (id: string, at: number): ClaudeEntry => ({ kind: "tool", at, id, name: "AskUserQuestion", input: { questions: [drink] } });
+const answered = (id: string, at: number): ClaudeEntry => ({ kind: "result", at, toolUseId: id, output: 'User has answered your questions: "Which drink?"="Tea".', isError: false });
+
+test("a Claude worker's AskUserQuestion is a question while its pylon reports the dialog waiting, though the transcript holds no call yet, and is withdrawn once a report leaves it out or the transcript holds its result", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const { waiting, append, asks } = claudeAsking(registry);
+  append({ kind: "prompt", at: 40, text: "Make me a drink", from: "person" });
+  assert.equal(waiting(waitingAsk("t1", 50)), true);
+  assert.deepEqual(registry.questions(threadId), [{
+    id: "ask-t1", thread: threadId, text: "Drink: Which drink?", options: [], reserved: null, answerer: "person", askedAt: 50,
+    ask: { session: "s1", toolUseId: "t1", questions: [drink] }, answer: null,
+  }]);
+  assert.equal(registry.attention(threadId), "decision");
+  assert.equal(waiting(waitingAsk("t1", 50)), false, "the same report again asks nothing new");
+  assert.equal(waiting(), true);
+  assert.deepEqual(asks(), [], "a report without it, as after the terminal answered it");
+  assert.notEqual(registry.attention(threadId), "decision");
+
+  waiting(waitingAsk("t2", 70));
+  append(askCall("t2", 69), answered("t2", 75));
+  assert.deepEqual(asks(), [], "the transcript holds its result");
+  waiting(waitingAsk("t2", 70));
+  assert.deepEqual(asks(), [], "a report taken before the hook stopped still names it");
+
+  waiting(waitingAsk("t3", 80), waitingAsk("t4", 81, "person-session"));
+  assert.deepEqual(asks(), [["ask-t3", null]], "another Claude's ask in the pylon, such as the person's own, asks nothing");
+  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s2");
+  assert.deepEqual(asks(), [], "the worker started again on another session");
+});
+
+test("an answered ask stays answered whatever the pylon reports, and a withdrawn one is not asked again before the next report", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const { waiting, append, asks } = claudeAsking(registry);
+  waiting(waitingAsk("t1", 50));
+  registry.answerQuestion("ask-t1", { option: "Drink: Tea", by: "nLAPTOP" as TailnetNodeId, at: 55, choices: [{ picked: ["Tea"] }] });
+  waiting();
+  registry.withdrawAsk("ask-t1");
+  assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]]);
+  assert.deepEqual(registry.question("ask-t1")!.answer!.choices, [{ picked: ["Tea"] }]);
+
+  waiting(waitingAsk("t2", 90));
+  assert.equal(registry.attention(threadId), "decision");
+  registry.withdrawAsk("ask-t2");
+  assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]]);
+  assert.notEqual(registry.attention(threadId), "decision");
+  append();
+  registry.reportSession(node, { sequence: 1, pylon: pylonId, time: 1000, event: { kind: "session.waiting", session: "s1", at: 95 } });
+  assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]], "a read and a session event before the pylon's next report");
+});
+
+test("archiving or deleting a Claude worker's thread withdraws its asks, and a report that lands after asks nothing", (t) => {
+  const registry = seeded(tempDb());
+  t.after(() => registry.close());
+  const { waiting, asks } = claudeAsking(registry);
+  for (const status of ["archived", "deleted"] as const) {
+    waiting(waitingAsk("t1", 50));
+    assert.deepEqual(asks(), [["ask-t1", null]]);
+    registry.setThreadStatus(threadId, status);
+    assert.deepEqual(asks(), [], status);
+    assert.equal(waiting(waitingAsk("t1", 50)), false);
+    assert.deepEqual(asks(), [], `a pull that was under way when the thread was ${status}`);
+    if (status === "archived") registry.setThreadStatus(threadId, "active");
+  }
+});
+
 test("a write waits while another process, such as a second open of the registry, holds its write lock", async (t) => {
   const path = tempDb();
   const registry = openRegistry(path);
@@ -1339,7 +1419,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 9}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 10}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1380,7 +1460,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 3}`);
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 4}`);
     db.close();
   };
   rewind();
@@ -1406,7 +1486,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 2}`);
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 3}`);
     db.close();
   };
   rewind();
@@ -1418,7 +1498,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 2}`);
+  db.exec(`PRAGMA user_version = ${version - 3}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());

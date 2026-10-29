@@ -348,6 +348,66 @@ test("an open question is a card with a button per option, disabled with the rea
   assert.ok(!answered.includes("<button"));
 });
 
+const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };
+const extras = { question: "What goes in it?", header: "Extras", multiSelect: true, options: [{ label: "Milk", description: "" }, { label: "Sugar", description: "" }] };
+const askCall = (id: string, at: number): ClaudeEntry => ({ kind: "tool", at, id, name: "AskUserQuestion", input: { questions: [drink, extras] } });
+const waitingAsk = (toolUseId: string, at: number) => ({ ask: { session: "s1", toolUseId, questions: [drink, extras] }, at });
+/** Each AskUserQuestion card of the conversation as a reader sees it, by its call. */
+const askCardsOf = (page: string) => Object.fromEntries([...page.split('id="convo"')[1]!.matchAll(/<section class="ask-card" id="ask-([^"]+)"[\s\S]*?<\/section>/g)].map((m) => [m[1], textOf(m[0])]));
+
+test("a Claude worker's open AskUserQuestion is a form in the dock from the pylon's report alone, with each question's options and previews, an answer of one's own and notes, disabled with the reason for a device that may not answer", async (t) => {
+  const s = await seeded(t, { ...landingOptions(), allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId]) });
+  const at = Date.now();
+  const thread = await claudeThread(s, [{ kind: "prompt", at, text: "Make me a drink", from: "person" }]);
+  s.registry.setWaitingAsks(thread.id, [waitingAsk("toolu_1", at + 1)]);
+
+  const asked = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.match(questionsOf(asked), /<form class="ask" data-thread="[^"]+" data-question="ask-toolu_1">/, "the pylon's report alone, before Claude writes the call");
+  assert.deepEqual(askCardsOf(asked), {});
+  assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: { ...transcriptStart, offset: 1 }, readAt: Date.now(), reset: false, cursor: { ...transcriptStart, offset: 2 }, entries: [askCall("toolu_1", at + 1)] }));
+
+  const page = (await s.call("GET", `/threads/${thread.id}`)).text;
+  const card = questionsOf(page);
+  assert.match(card, /<section class="landing question ask" data-question="ask-toolu_1" aria-label="Claude asks">/);
+  assert.match(card, new RegExp(`<form class="ask" data-thread="${thread.id}" data-question="ask-toolu_1">`));
+  assert.equal(textOf(card), "Claude asks Drink Which drink? Tea Hot a cup of tea Coffee Strong Your own answer Extras What goes in it? Milk Sugar And your own answer Asked just now . Answer here or in the pylon's terminal, whichever comes first. Answer");
+  const fields = card.match(/<input [^>]*>/g)!.map((input) => [/type="([^"]+)"/.exec(input)![1], /name="([^"]+)"/.exec(input)![1], /value="([^"]*)"/.exec(input)?.[1] ?? null]);
+  assert.deepEqual(fields, [
+    ["radio", "picked-0", "Tea"], ["radio", "picked-0", "Coffee"], ["radio", "picked-0", ""], ["text", "own-0", null], ["text", "notes-0", null],
+    ["checkbox", "picked-1", "Milk"], ["checkbox", "picked-1", "Sugar"], ["text", "own-1", null], ["text", "notes-1", null],
+  ], "a single-select question's own answer is one of its radios, and a multi-select one's goes with the boxes");
+  assert.match(card, /<pre class="ask-preview">a cup of tea<\/pre>/);
+  assert.ok(!card.includes("disabled"));
+  assert.equal(askCardsOf(page)["toolu_1"], "Claude asked Drink Which drink? Tea Hot Coffee Strong Extras What goes in it? Milk Sugar Waits for your answer below.");
+
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  const refused = questionsOf((await s.call("GET", `/threads/${thread.id}`)).text);
+  assert.match(refused, /<fieldset class="ask-all" disabled>/);
+  assert.match(refused, /<button type="submit" class="btn" disabled>Answer<\/button>/);
+  assert.match(textOf(refused), /Answer This device cannot answer: tailnet node nFIREBAT is the control plane or one of its nodes, whose pylons call under its identity, and only a person's device may answer\./);
+});
+
+test("an answered AskUserQuestion leaves the dock and shows in the conversation with what was picked, one's own answer, notes and the device, or with what Claude got from the terminal", async (t) => {
+  const s = await seeded(t);
+  const thread = await claudeThread(s, [askCall("toolu_1", 2)]);
+  s.registry.setWaitingAsks(thread.id, [waitingAsk("toolu_1", 2)]);
+  s.registry.answerQuestion("ask-toolu_1", { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.now(), choices: [{ picked: ["Tea"], notes: "no rush" }, { picked: ["Milk"], own: "Oat cream" }] });
+  const terminal = 'User has answered your questions: "Which drink?"="Coffee", "What goes in it?"="Sugar".';
+  assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: { ...transcriptStart, offset: 1 }, readAt: Date.now(), reset: false, cursor: { ...transcriptStart, offset: 2 }, entries: [
+    { kind: "result", at: 3, toolUseId: "toolu_1", output: 'User has answered your questions: "Which drink?"="Tea".', isError: false },
+    askCall("toolu_2", 4), { kind: "result", at: 5, toolUseId: "toolu_2", output: terminal, isError: false },
+  ] }));
+
+  const page = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.equal(questionsOf(page), "", "neither waits in the dock");
+  assert.deepEqual(askCardsOf(page), {
+    toolu_1: `Claude asked Drink Which drink? ✓ Tea Hot a cup of tea Coffee Strong Notes: no rush Extras What goes in it? ✓ Milk Sugar Own answer: Oat cream Answered from ${laptop}, just now .`,
+    toolu_2: `Claude asked Drink Which drink? Tea Hot Coffee Strong Extras What goes in it? Milk Sugar ${terminal} Answered in the terminal.`,
+  });
+  const frame = liveFrames(thread, null, Date.now, () => s.registry.questions(thread.id))({ kind: "claude", session: "s1", entries: s.registry.claudeEntries(thread.id), dropped: 0, readAt: 1, working: false, usageLimit: null });
+  assert.equal(askCardsOf(`id="convo"${(frame as { convo: string }).convo}`)["toolu_1"], askCardsOf(page)["toolu_1"], "the page's stream shows the answer as the page does");
+});
+
 const judgmentsOf = (page: string) => /<div id="judgments" data-live>([\s\S]*?)<\/div>\n<div id="questions"/.exec(page)![1]!;
 
 test("each judgment of a failed pylon is a card above the questions: what failed, the verdict and who gave it, what Nexus did, and what it was asked and answered", async (t) => {

@@ -1,0 +1,105 @@
+$ nexus show th-2d0de65a7582 --json
+{
+  "thread": {
+    "id": "th-2d0de65a7582",
+    "title": "Ask about drinks",
+    "project": "drinks",
+    "pylonId": "pylon-th-2d0de65a7582",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nVERIFYLAPTOP",
+    "createdAt": 1793244176803,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1793244179927,
+    "lastHumanActivityAt": 1793244176803,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "node-a"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the project is scratch, so it has no template"
+    },
+    "working": false,
+    "sessionWaiting": true
+  },
+  "claudeWorker": {
+    "model": "claude-sonnet-5-5",
+    "state": "started"
+  },
+  "attention": "waiting",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-2d0de65a7582",
+    "node": "node-a",
+    "failed": null,
+    "observedAt": "2026-10-29T03:22:57.845Z",
+    "resources": {
+      "cpus": 1,
+      "memoryGiB": 3,
+      "diskGiB": 5
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [
+    {
+      "pylon": "pylon-th-2d0de65a7582",
+      "id": "w1:p1",
+      "herdrPane": "w1:p1",
+      "harness": "claude-code",
+      "harnessSessionId": "c6a26728-fd53-434e-8277-4b048af4da99",
+      "title": "Ask about drinks",
+      "status": "unknown",
+      "state": "running",
+      "message": null
+    }
+  ],
+  "previews": [],
+  "ports": [
+    {
+      "port": 7470,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 7480,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 7489,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 40807,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 41345,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+[exit 0]

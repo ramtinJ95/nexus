@@ -112,6 +112,14 @@ test("Claude's bookkeeping records give no entries, and every record in the real
   assert.deepEqual(only("record"), []);
 });
 
+test("the decision a PermissionRequest hook gave, such as an answer to AskUserQuestion from the dashboard, gives no entry", () => {
+  const line = JSON.stringify({
+    parentUuid: "c6bc6b70-88b0-437e-8547-aa9d0ab19ae9", isSidechain: false, type: "attachment", uuid: "06e5a9e7-19f8-49af-9b75-6ab2991d941b", timestamp: "2026-10-29T01:18:13.666Z",
+    attachment: { type: "hook_permission_decision", decision: "allow", toolUseID: "toolu_016wvy3M5xAQrTr6CabP4GTH", hookEvent: "PermissionRequest" },
+  });
+  assert.deepEqual(parseRecord(line), []);
+});
+
 test("the session metadata Claude Code writes again on each save gives no entries", () => {
   // Shapes from the writer in Claude Code 2.1.308, which saves these with last-prompt and mode.
   const sessionId = session;

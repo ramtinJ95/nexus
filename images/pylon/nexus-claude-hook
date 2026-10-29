@@ -4,24 +4,25 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
+import { alive, answerDelivered, answerExits, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
 const at = Date.now();
+const asks = join(userInfo().homedir, ".nexus", "asks");
 
 /** Reports the hook's event, and answers its session, or null when the input names none. */
 async function report() {
-  let input = "";
-  for await (const chunk of process.stdin) {
-    input += chunk;
-    if (input.length > 64 * 1024) return null;
-  }
-  const payload = JSON.parse(input);
-  const { session_id: session } = payload;
+  const payload = await hookInput(process.stdin);
+  const { session_id: session } = payload ?? {};
   if (typeof session !== "string" || session.length > 200) return null;
+  const answered = payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion";
+  if (answered) await forgetAsk(asks, session, payload.tool_input).catch(() => {});
   const { kind, shells } = reportedKind(process.argv[2], payload);
+  // Before the event is queued, so the control plane's pull of the asks after it lists none of the session's.
+  if (kind === "session.turn-started" || kind === "session.turn-ended" || kind === "session.ended") await forgetSession(asks, session).catch(() => {});
   if (shells !== undefined) {
     const groups = process.env.CLAUDE_PID === undefined ? [] : await backgroundGroups(Number(process.env.CLAUDE_PID));
     send(process.execPath, [import.meta.filename, "hold", session, String(at), groups.map((g) => `${g.pgid}@${g.start}`).join(","), ...shells]);
@@ -30,7 +31,9 @@ async function report() {
   const path = join(dir, sessionFile(session));
   if (kind === "session.heartbeat") {
     await mkdir(dir, { recursive: true });
-    if (!await heartbeatDue(path)) return session;
+    // An answered AskUserQuestion's heartbeat skips the throttle, since only the read after it withdraws the dashboard's
+    // question for it and ends the session's wait.
+    if (!answered && !await heartbeatDue(path)) return session;
   } else if (kind === "session.ended") {
     await rm(path, { force: true });
   }
@@ -68,8 +71,36 @@ if (process.argv[2] === "hold") {
   await releaseHold(owner, Number(stamp), process.pid);
   process.exit(0);
 }
+// The control plane runs these through the probe, outside any Claude: `answer` with an answer from the dashboard, and
+// `asks` for the asks that wait, to which an image from before it prints nothing.
+if (process.argv[2] === "answer") {
+  const answer = parseAskAnswer(process.argv[3] ?? "");
+  const code = answer === null ? answerExits.malformed : await deliverAnswer(asks, answer);
+  if (code === answerExits.delivered) process.stdout.write(`${answerDelivered}\n`);
+  process.exit(code);
+}
+if (process.argv[2] === "asks") {
+  process.stdout.write(`${JSON.stringify(await waitingAsks(asks))}\n`);
+  process.exit(0);
+}
 const home = userInfo().homedir;
 if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(join(home, ".nexus", "pylon.json")))) process.exit(0);
+// AskUserQuestion's PreToolUse records the call's ID, which its PermissionRequest input lacks. The PermissionRequest
+// runs while Claude's terminal dialog shows, and prints nothing unless the dashboard answers first. A dialog the
+// terminal answers stays the terminal's.
+if (process.argv[2] === "ask") {
+  const payload = await hookInput(process.stdin).catch(() => null);
+  const session = payload?.session_id;
+  if (typeof session !== "string" || session.length > 200) process.exit(0);
+  if (payload.hook_event_name === "PreToolUse") {
+    if (typeof payload.tool_use_id === "string") await recordCall(asks, session, payload.tool_input, payload.tool_use_id).catch(() => {});
+    process.exit(0);
+  }
+  const claude = process.env.CLAUDE_PID === undefined ? () => true : () => alive(Number(process.env.CLAUDE_PID));
+  const answer = await awaitAnswer(asks, { session, input: payload.tool_input, pid: process.pid, at }, claude);
+  if (answer !== null) process.stdout.write(JSON.stringify(askDecision(payload.tool_input, answer)));
+  process.exit(0);
+}
 const session = await report().catch(() => null);
 // A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
 // snapshot cannot pass for its own.

@@ -7,10 +7,17 @@
  * The session events say when to read, so an idle thread costs no pylon traffic. Each session event the log retains
  * for a Claude worker thread is followed by a read, a watched thread is read every `workingReadMs` while a turn of
  * its session runs, so its entries show during the turn, and a watch reads once when it starts.
+ *
+ * A read that reaches the transcript's end then asks the pylon's hook which AskUserQuestion dialogs wait, while a turn
+ * of the thread runs or waits or one of its asks is open, and the registry opens and withdraws the worker's asks from
+ * that. The transcript cannot say: Claude may write the call to it only once its dialog is answered.
  */
 import { sessionKinds } from "../events.ts";
-import { readTranscript, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
-import type { NodeName, ProbeClient } from "../protocol.ts";
+import { drained, readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
+import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-ask.ts";
+import type { OpenPipe } from "../checkout-files.ts";
+import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
+import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 
 export interface ClaudeConversations {
@@ -89,11 +96,21 @@ interface Reader {
   working: boolean;
   /** The failure logged last, so a pylon that keeps failing is logged once. */
   failure: string | null;
+  /** The same, for pulls of the asks that wait. */
+  askFailure: string | null;
   /**
    * The newest view while the thread is watched, whose entries the next view reads on from. A read that replaces the
    * transcript drops it, as only these reads write the transcript.
    */
   kept: ClaudeConversation | null;
+}
+
+/** The asks whose dialogs wait in the pylon, as its hook reports them. */
+async function readWaitingAsks(open: OpenPipe): Promise<WaitingAsk[]> {
+  const { end, out } = await drained(await open([claudeHook, "asks"]), transcriptDeadlineMs, maxAsksBytes, "its waiting asks");
+  if (end.kind === "lost") throw new Error("the pipe to the pylon was lost before its waiting asks were read");
+  if (end.code !== 0) throw new Error(`nexus-claude-hook asks exited ${end.code}`);
+  return reportedAsks(out.toString("utf8"));
 }
 
 /** One refresh takes this many reads at most. A transcript with more to read goes on in the refresh after it. */
@@ -106,7 +123,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
 
   const readerOf = (id: ThreadId): Reader => {
     let r = readers.get(id);
-    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failure: null, kept: null });
+    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failure: null, askFailure: null, kept: null });
     return r;
   };
 
@@ -195,9 +212,31 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
       if (appended && found?.reset === true) r.kept = null;
       // A read that found nothing new changes only `readAt`, which no watcher shows once it is set.
       update(id, r, appended && (stored?.session !== session || (found !== null && (found.entries.length > 0 || found.reset))));
-      if (found === null || !found.more) return;
+      if (found === null || !found.more) return await pullAsks(id, r, t.pylonId, probe);
     }
     if (!closed) void refreshOf(id);
+  }
+
+  /**
+   * Stores which asks wait in the pylon, while a turn of the thread runs or waits, and so may show a dialog, or one of
+   * its asks is open and may have closed. A pull that fails keeps the last report, as a failed read keeps the transcript.
+   */
+  async function pullAsks(id: ThreadId, r: Reader, pylonId: PylonId, probe: Pick<ProbeClient, "stream">) {
+    const t = registry.thread(id);
+    const due = t !== undefined && (t.sessionTurnRunning === true || t.sessionWaiting === true || registry.questions(id).some((q) => q.ask !== undefined && q.answer === null));
+    if (!due) return;
+    let asks: WaitingAsk[];
+    try {
+      asks = await readWaitingAsks((argv) => probe.stream(pylonId, argv));
+    } catch (err) {
+      const message = (err as Error).message;
+      if (r.askFailure !== message) console.error(`${pylonId}: asking which of Claude's questions wait failed, so the last report stands: ${message}`);
+      r.askFailure = message;
+      return;
+    }
+    r.askFailure = null;
+    if (closed || registry.thread(id)?.status === "deleted") return;
+    update(id, r, registry.setWaitingAsks(id, asks));
   }
 
   /** A deleted thread's reader goes once nothing reads or watches it. */

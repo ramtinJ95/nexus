@@ -1,0 +1,24 @@
+== run 1, branch: 2b7180d fix(pylon): nexus-claude-hook answer says delivered only once the waiting hook took the answer
++  15.2s its card shows after 1.3 s
++  24.6s the card leaves the dock after 1.0 s
++  28.3s Claude's turn ends with its reply after 3.7 s
++  41.0s the second card shows after 3.8 s
++  46.2s the second card is withdrawn after 0.3 s
++  49.9s Claude's second turn ends after 3.7 s
++  58.3s nexus delete th-6a2f2d55d82a -> exit 0 (11-delete.txt)
+== run 2, branch: 2b7180d fix(pylon): nexus-claude-hook answer says delivered only once the waiting hook took the answer
++  15.2s its card shows after 0.2 s
++  24.6s the card leaves the dock after 1.0 s
++  29.6s Claude's turn ends with its reply after 5.0 s
++  41.2s the second card shows after 2.6 s
++  47.6s the second card is withdrawn after 1.5 s
++  50.1s Claude's second turn ends after 2.5 s
++  58.4s nexus delete th-6f6905dbb062 -> exit 0 (11-delete.txt)
+== run 3, branch: 2b7180d fix(pylon): nexus-claude-hook answer says delivered only once the waiting hook took the answer
++  16.6s its card shows after 1.4 s
++  26.1s the card leaves the dock after 1.0 s
++  29.8s Claude's turn ends with its reply after 3.7 s
++  41.4s the second card shows after 2.7 s
++  47.7s the second card is withdrawn after 1.4 s
++  50.2s Claude's second turn ends after 2.5 s
++  58.6s nexus delete th-24acb3f47f5b -> exit 0 (11-delete.txt)

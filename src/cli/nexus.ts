@@ -39,7 +39,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.41.0";
+const version = "0.42.0";
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
@@ -363,11 +363,16 @@ function reviewText(r: Review): string {
   ].join("\n");
 }
 
-/** A question's first line, its options and reserved case, and who must answer it or how it was answered. */
+/**
+ * A question's first line, its options and reserved case, and who must answer it or how it was answered. A Claude
+ * worker's ask has a line per question it asks, and no options of its own.
+ */
 function questionText(q: Question): string {
+  const [first, ...rest] = q.text.split("\n");
   return [
-    `question ${q.id}: ${q.text.split("\n")[0]}`,
-    `  options: ${q.options.map((o) => JSON.stringify(o)).join(", ")}`,
+    `question ${q.id}: ${first}`,
+    ...q.ask === undefined ? [] : rest.map((line) => `  ${line}`),
+    ...q.options.length === 0 ? [] : [`  options: ${q.options.map((o) => JSON.stringify(o)).join(", ")}`],
     ...q.reserved === null ? [] : [`  reserved: ${reservedNames[q.reserved]}`],
     q.answer !== null ? `  answered ${JSON.stringify(q.answer.option)} by ${q.answer.by} at ${new Date(q.answer.at).toISOString()}` : q.answerer === "deployer" ? "  needs a deployer" : "  needs you",
   ].join("\n");

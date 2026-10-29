@@ -150,15 +150,15 @@ export async function readTranscript(open: OpenPipe, session: string, cursor: Tr
   return { entries: next.entries, cursor: { ...next.cursor, before }, more: size > start + body.length, reset };
 }
 
-/** The pipe's whole output. A pipe that passes the deadline or prints past the cap is dropped. */
-async function drained(stream: ByteStream, deadlineMs: number): Promise<{ end: StreamEnd; out: Buffer }> {
+/** The pipe's whole output, as it reads `what`. A pipe that passes the deadline or prints past the cap is dropped. */
+export async function drained(stream: ByteStream, deadlineMs: number, maxBytes = maxReplyBytes, what = "the transcript"): Promise<{ end: StreamEnd; out: Buffer }> {
   const reply = (async () => {
     await stream.close();
     const chunks: Uint8Array[] = [];
     let bytes = 0;
     for await (const chunk of stream) {
       bytes += chunk.length;
-      if (bytes > maxReplyBytes) throw new Error(`the transcript reader printed over ${maxReplyBytes} bytes`);
+      if (bytes > maxBytes) throw new Error(`reading ${what} printed over ${maxBytes} bytes`);
       chunks.push(chunk);
     }
     return { end: await stream.done, out: Buffer.concat(chunks) };
@@ -167,7 +167,7 @@ async function drained(stream: ByteStream, deadlineMs: number): Promise<{ end: S
   reply.catch(() => undefined);
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`the pylon did not read the transcript within ${deadlineMs / 1000} s`)), deadlineMs);
+    timer = setTimeout(() => reject(new Error(`the pylon did not read ${what} within ${deadlineMs / 1000} s`)), deadlineMs);
   });
   try {
     return await Promise.race([reply, late]);
@@ -290,7 +290,7 @@ const systems = table<Parse>({
 });
 
 const attachments = table<Parse>({
-  ...hidden("environment", "model", "deferred_tools_delta", "agent_listing_delta", "mcp_instructions_delta", "skill_listing", "auto_mode", "command_permissions", "instructions", "session_context", "date", "prompt_snapshot", "total_tokens_reminder", "deferred_tools_record", "silent_turn_reminder", "remote_session_change"),
+  ...hidden("environment", "model", "deferred_tools_delta", "agent_listing_delta", "mcp_instructions_delta", "skill_listing", "auto_mode", "command_permissions", "instructions", "session_context", "date", "prompt_snapshot", "total_tokens_reminder", "deferred_tools_record", "silent_turn_reminder", "remote_session_change", "hook_permission_decision"),
   // A prompt or a task's notification that Claude took from its queue in the middle of a turn.
   queued_command: (r, at) => {
     const queued = fields(r.attachment, "attachment");

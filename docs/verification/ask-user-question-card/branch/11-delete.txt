@@ -1,0 +1,3 @@
+$ nexus delete th-c510a57b0537
+Deleted th-c510a57b0537.
+[exit 0]
