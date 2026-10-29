@@ -651,6 +651,9 @@ h4.md-h { font-size: 1.07em; }
 .outs .s-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text); }
 .outs .sid { flex-basis: 100%; padding-left: 60px; }
 .outs .s-why { flex-basis: 100%; }
+.outs .s-acts { flex-basis: 100%; padding-left: 60px; display: flex; gap: 6px; }
+.outs .s-acts:empty { display: none; }
+.s-new { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
 .attach-h { margin: 12px 0 6px; font-size: 11.5px; color: var(--text-3); }
 .attach { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 5px 5px 9px; font-size: 11.5px; color: var(--text-2); }
 

@@ -1,0 +1,33 @@
++   4.6s backend: booted pylon-th-69892b8fb123
++   4.6s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++   4.6s guest: exec herdr --session nexus api snapshot
++   4.6s guest: exec sh -c test -e "$0" || exit 3; exec cat -- "$0" /home/verify/.nexus/sessions.json
++   4.6s guest: exec python3 -c import json import os import signal import subprocess import sys   def expired(signum, frame):     raise TimeoutError...
++   4.6s guest: exec sh -c for f in /home/verify/.nexus/outputs/*.json; do test -e "$f" || continue; printf '%s\t' "${f##*/}"; cat "$f"; done sh
++   4.6s guest: exec pgrep -c -x -f herdr --session nexus
++   4.7s guest: exec herdr --session nexus workspace list
++   4.7s guest: exec sh -c setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1
++   4.7s guest: exec herdr --session nexus workspace list
++   4.9s guest: exec sh -c test -f "$0/opened" || exit 0; cat "$0/opened"; test -e "$0/typed" && echo typed; exit 0 /home/verify/.nexus/claude-launches/2263dff3-933a-491a-a722-1da722ae013d
++   4.9s guest: exec herdr --session nexus api snapshot
++   4.9s guest: exec herdr --session nexus workspace create --cwd /home/verify/workspace/repo --label Claude thread --no-focus
++   4.9s guest: exec node -e  const fs = require('node:fs'); const path = require('node:path'); const home = process.env.HOME; const cwd = fs.real... /home/verify/workspace/repo
++   5.0s guest: exec sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] && exit 0; done; exit 1 2263dff3-933a-491a-a722-1da722ae013d /home/verify/.claude/projects
++   5.0s guest: exec herdr --session nexus pane process-info --pane w1:p1
++   5.0s guest: exec sh -c pid=$1; i=0; until s=$(cat /proc/$pid/stat) && set -- ${s##*) } && test "$6" = "$pid" && stty -a -F /proc/$pid/fd/0 |... shell-ready 12063
++   5.0s guest: exec sh -c mkdir "$0" 2>/dev/null && exec "$@"; test -d "$0" && exit 75; mkdir "$0" /home/verify/.nexus/claude-launches/2263dff3-933a-491a-a722-1da722ae013d/typed herdr --session nexus pane run w1:p1 $'claude' $'--session-id' $'2263dff3-933a-491a-a722-1da722ae013d' $'--model' $'claude-sonnet-5-5' $'--permission-mode...
++   5.0s guest: exec sh -c i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done claude-submitted /home/verify/.nexus/claude-launches/2263dff3-933a-491a-a722-1da722ae013d/submitted
++   6.7s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++   6.7s guest: exec herdr --session nexus api snapshot
++   6.7s guest: exec sh -c test -e "$0" || exit 3; exec cat -- "$0" /home/verify/.nexus/sessions.json
++   6.7s guest: exec sh -c for f in /home/verify/.nexus/outputs/*.json; do test -e "$f" || continue; printf '%s\t' "${f##*/}"; cat "$f"; done sh
++   6.7s guest: exec pgrep -c -x -f herdr --session nexus
++   8.9s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++   9.0s guest: stream /home/verify/.verify-bin/nexus-claude-hook asks
++  11.7s guest: exec sh -c cat /proc/net/tcp && { cat /proc/net/tcp6 2>/dev/null || true; }
++  11.9s guest: stream python3 -c """Reads the model calls agents in this pylon recorded, from where the last read of each transcript stopped.  Takes {"claude": dir, "pi": dir, "offse
++  11.9s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  12.6s guest: stream python3 - /home/verify/workspace/repo changes start
++  12.6s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||
++  15.4s guest: stream python3 - /home/verify/workspace/repo changes start
++  15.4s guest: stream sh -c for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5)) { [ "$size" -lt "$start" ] ||

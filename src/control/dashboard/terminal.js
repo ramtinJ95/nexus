@@ -1,9 +1,12 @@
 // A thread page's browser terminal: the attach route's WebSocket, as docs/cli.md describes it, joined to a terminal
 // such as xterm.js. It lands where `nexus attach` does, and Herdr keeps its sessions when the terminal ends.
 
-/** The attach route for a terminal of `size` on the page's own host, which the route checks against the Origin. */
-export function attachUrl(location, thread, { cols, rows }) {
-  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/threads/${encodeURIComponent(thread)}/attach?cols=${cols}&rows=${rows}&term=xterm-256color`;
+/**
+ * The attach route for a terminal of `size` on the page's own host, which the route checks against the Origin. It
+ * lands in `pane` when that is given, and otherwise where `nexus attach` does.
+ */
+export function attachUrl(location, thread, { cols, rows }, pane = null) {
+  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/threads/${encodeURIComponent(thread)}/attach?cols=${cols}&rows=${rows}&term=xterm-256color${pane === null ? "" : `&pane=${encodeURIComponent(pane)}`}`;
 }
 
 /**
@@ -166,4 +169,33 @@ export function keepAttached(term, open, status, page = document) {
   join(false);
   visibility();
   return () => { if (state.kind !== "over") end(detached); };
+}
+
+/**
+ * Whether the terminal's current connection has landed, from the statuses keepAttached gives and `term`'s writes: Herdr's
+ * client draws after `attached`, once the attach focused its pane. A drop starts the wait again, so a focus asked for
+ * then waits for the reattach, which focuses a pane of its own. `landed()` answers false once the terminal is over.
+ */
+export function landing(term) {
+  let state = "joining";
+  let waiting = [];
+  const settle = (value) => {
+    for (const resolve of waiting) resolve(value);
+    waiting = [];
+  };
+  const drawn = term.onWriteParsed(() => {
+    if (state !== "attached") return;
+    state = "landed";
+    settle(true);
+  });
+  return {
+    heard({ text, over }) {
+      if (state === "over") return;
+      if (!over) return void (state = text === null ? "attached" : "joining");
+      state = "over";
+      drawn.dispose();
+      settle(false);
+    },
+    landed: () => state === "landed" ? Promise.resolve(true) : state === "over" ? Promise.resolve(false) : new Promise((resolve) => waiting.push(resolve)),
+  };
 }

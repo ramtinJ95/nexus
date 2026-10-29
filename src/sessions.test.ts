@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
-import { attachedTerminals, attachScript, claudeTextProblem, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { attachedTerminals, attachScript, claudeTextProblem, focusScript, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply, type FakeGuest } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
@@ -571,7 +571,7 @@ test("an attached terminal is a client with exactly the command line attachedTer
   assert.ok(attachScript.includes("setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"));
 });
 
-test("an attached terminal lands in the pane it names: an agent's by the agent, any other by its tab, and a closed one nowhere", () => {
+test("an attached terminal lands in the pane it names, as a focus does: an agent's by the agent, any other by its tab, and a closed one nowhere", () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-attach-"));
   try {
     // A Herdr whose server runs, with an agent in w1:p1, a shell in w2:p1, and no other pane.
@@ -594,6 +594,8 @@ esac
     assert.deepEqual(attach("w2:p1"), ["--session nexus agent focus w2:p1", "--session nexus pane get w2:p1", "--session nexus tab focus w2:t1", "--session nexus"]);
     assert.deepEqual(attach("w9:p1"), ["--session nexus agent focus w9:p1", "--session nexus pane get w9:p1", "--session nexus"]);
     assert.deepEqual(attach(""), ["--session nexus"]);
+    const focus = (pane: string) => spawnSync("sh", ["-c", focusScript, "focus", pane], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } }).status;
+    assert.deepEqual(["w1:p1", "w2:p1", "w9:p1"].map(focus), [0, 0, 1], "a focus says whether the pane is open");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

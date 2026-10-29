@@ -1,0 +1,1 @@
+{ "extends": "../../../tsconfig.json", "compilerOptions": { "typeRoots": ["../../../node_modules/@types"] }, "include": ["stack.ts"] }

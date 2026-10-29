@@ -23,7 +23,7 @@ import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { countedCapacity, type HerdrStatus, type NodeHealth, type NodeName } from "../protocol.ts";
 import { githubTokenGrant, linkedPort, type Project, type ProjectId } from "../project.ts";
-import { checkoutDir, harnessNamed } from "../sessions.ts";
+import { checkoutDir, harnessNamed, type SessionHarness } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { attentions, needsPerson, type Attention } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, ThreadId } from "./registry.ts";
@@ -838,7 +838,7 @@ ${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${acti
 <div id="facts" data-live hidden>${facts(d)}</div>
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
-${t.status !== "deleted" && termView(t, agent)}
+${t.status !== "deleted" && termView(t)}
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
@@ -849,18 +849,19 @@ ${t.status !== "deleted" && termView(t, agent)}
 <div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, agent, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
 </div>`,
-    inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total),
+    inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total, workerSession(c.registry.agent(t))),
   });
 }
 
 /**
  * The terminal tab, which client.js attaches on its first show, as `nexus attach` does, and shows while the thread is
  * open, so an unarchive brings it back without a reload. A Nexus agent runs on the control plane, so its thread's
- * terminal is the pylon's Herdr session and its conversation stays in the composer.
+ * terminal is the pylon's Herdr session and its conversation stays in the composer. A Claude worker's lands in its
+ * pane, but Show in terminal moves it to any session's, so the head names the whole session.
  */
-function termView(t: Thread, agent: ThreadAgent["kind"]): Html {
+function termView(t: Thread): Html {
   return html`<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
-<div class="tv-head"><span class="tv-where">${agent === "claude" ? "Claude Code's pane in the pylon's Herdr session" : "The pylon's Herdr session"}</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
+<div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
 <div class="tv-host" id="term-host"></div>
 </section>`;
 }
@@ -1245,7 +1246,7 @@ const panes = [["changes", "Changes", "changes"], ["previews", "Previews", "glob
  * The inspector's tabs are radios, so the one picked stays picked while the regions under it are swapped, and
  * shows its pane without a script. The Changes pane is filled by client.js, so it is outside every live region.
  */
-function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals): Html {
+function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
   // The Previews tab counts what its pane lists: the previews and the ports without one.
   const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
   return html`<aside class="inspect" aria-label="Thread details">
@@ -1257,11 +1258,11 @@ function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageT
 <p class="ch-base dim small" id="changes-base">Since the pylon booted</p>
 <div id="changes-body"><p class="empty">The changes show once the page's script loads.</p></div>
 </section>
-<div class="pane-live" id="inspect" data-live>${inspectorPanes(d, node, now, usage)}</div>
+<div class="pane-live" id="inspect" data-live>${inspectorPanes(d, node, now, usage, worker)}</div>
 </aside>`;
 }
 
-function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals): Html {
+function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
   const { thread: t, pylon } = d;
   const count = (n: number) => html`<span class="count">${n}</span>`;
   const desired = desiredPhase(t, now);
@@ -1322,11 +1323,30 @@ ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul c
   : state("failed", "bad")}${s.herdrPane !== null && html`<code class="dim pane">${s.herdrPane}</code>`}
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}
 ${s.state === "failed" && html`<p class="error s-why">It did not come back from the last wake, which the next tries again: ${s.message}</p>`}
+${t.status === "active" && sessionActions(t.id, s, worker !== null && s.harness === "claude-code" && s.harnessSessionId === worker)}
 </li>`)}</ul>`}
+${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, label]) => html`<button type="button" class="btn btn-xs" data-action="open-session" data-thread="${t.id}" data-harness="${harness}">${label}</button>`)}</div>
+<p class="dim small">Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, <code>nexus attach</code> included.</p>`}
 <p class="attach-h">Attach from a shell in the pylon</p>
 <div class="attach"><code id="attach-command">${d.attach}</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>
 </section>
 </div>`;
+}
+
+const newSessions = [["shell", "New shell"], ["pi", "New pi"], ["claude-code", "New Claude"]] as const satisfies readonly (readonly [SessionHarness, string])[];
+
+/** The Claude Code session the thread's worker runs in, whose pane the page offers no Close for. */
+function workerSession(agent: ThreadAgent): string | null {
+  return agent.kind === "claude" ? agent.worker.session : null;
+}
+
+/**
+ * A running session shows in the terminal. Any but the worker's own closes, and a failed one in no pane is dropped by
+ * its ID. A paused one does neither until its pylon wakes.
+ */
+function sessionActions(thread: string, s: ThreadDetail["sessions"][number], own: boolean): Html {
+  const named = `${harnessNamed(s.harness)?.label ?? s.harness} session${s.title === null ? "" : ` "${s.title}"`}`;
+  return html`<span class="s-acts">${s.state === "running" && html`<button type="button" class="btn btn-xs" data-action="show-session" data-thread="${thread}" data-pane="${s.herdrPane}">${icon("terminal")}Show in terminal</button>`}${s.state !== "paused" && !own && html`<button type="button" class="btn btn-xs btn-ghost danger" data-action="close-session" data-thread="${thread}" data-session="${s.id}" data-confirm="${`Close the ${named}? ${s.state === "running" ? "Its pane closes, and what runs there ends." : "No wake tries it again."}`}">Close</button>`}</span>`;
 }
 
 /**

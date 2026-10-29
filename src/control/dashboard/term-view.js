@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import css from "@xterm/xterm/css/xterm.css";
-import { attachUrl, clipboardOf, keepAttached, keyFor } from "./terminal.js";
+import { attachUrl, clipboardOf, keepAttached, keyFor, landing } from "./terminal.js";
 import { onThemeChange, themeValue } from "./theme.js";
 
 const base = new CSSStyleSheet();
@@ -50,8 +50,12 @@ function terminalTheme() {
 /** Opens a link in the terminal, a URL or an OSC 8 hyperlink, in a new tab without xterm.js's confirm. */
 const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
 
-/** A terminal in `host` attached to the thread's pylon, fitted to `host` whenever it shows at a new size. */
-export function openTerminal(host, thread, status) {
+/**
+ * A terminal in `host` attached to the thread's pylon, landing in `pane` when it is not null, and fitted to `host`
+ * whenever it shows at a new size. An attach again after a drop lands where any attach does. `landed()` waits for the
+ * current connection to land, as landing says.
+ */
+export function openTerminal(host, thread, status, pane) {
   const unstyle = adoptStyles(host);
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, scrollback: 5000,
@@ -76,12 +80,22 @@ export function openTerminal(host, thread, status) {
   });
   term.open(host);
   fit.fit();
-  const detach = keepAttached(term, () => new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows })), status);
+  const lands = landing(term);
+  let first = pane;
+  const detach = keepAttached(term, () => {
+    const socket = new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, first));
+    first = null;
+    return socket;
+  }, (s) => {
+    lands.heard(s);
+    status(s);
+  });
   const sized = new ResizeObserver(() => { if (host.offsetParent !== null) fit.fit(); });
   sized.observe(host);
   const unwatch = onThemeChange(() => { term.options.theme = terminalTheme(); });
   return {
     focus: () => term.focus(),
+    landed: lands.landed,
     close() {
       sized.disconnect();
       unwatch();

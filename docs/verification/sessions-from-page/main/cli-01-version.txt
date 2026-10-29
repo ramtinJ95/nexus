@@ -1,0 +1,3 @@
+$ nexus --version
+nexus 0.49.0
+[exit 0]

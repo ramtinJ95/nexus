@@ -43,14 +43,14 @@ import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
 import type { ClaudeSent, JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames } from "./dashboard.ts";
-import { attachScript, checkoutDir, claudeTextProblem, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
+import { attachScript, checkoutDir, claudeTextProblem, focusScript, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
 import { threadAgents, type AgentView, type Watch } from "./thread-agent.ts";
 import { usageFilter } from "./usage.ts";
 import type { UsageBackfillJob } from "./usage-backfill.ts";
 import { maxRecordBytes, readTranscriptImage, type ClaudeConversation } from "../claude-transcript.ts";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
-import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
+import { attachRoute, herdrPanePattern, parseAttachQuery } from "../attach-wire.ts";
 import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
@@ -1004,6 +1004,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (outcome === "moved") throw new HttpError(404, `pane ${id} of pylon ${t.pylonId} runs another session now, so it was left open. A wake moved session ${id} to another pane, which the thread's sessions list`);
   }
 
+  /**
+   * Focuses a session's pane in the pylon's Herdr, which moves every terminal attached to it there, as the dashboard's
+   * Show in terminal does for one already attached.
+   */
+  async function focusSession(t: Thread, pane: string): Promise<void> {
+    if (!herdrPanePattern.test(pane)) throw new HttpError(400, `pane must be a Herdr pane ID such as w1:p1, got ${JSON.stringify(pane.slice(0, 80))}`);
+    const { exitCode, output } = await pylonCommand(t, { kind: "exec", argv: ["sh", "-c", focusScript, "focus", pane], cwd: "/", timeoutMs: 15_000 });
+    if (exitCode === 1) throw new HttpError(404, `no pane ${pane} is open in pylon ${t.pylonId}`);
+    if (exitCode !== 0) throw new Error(`focusing pane ${pane} exited ${exitCode}: ${output.trim().slice(-200)}`);
+  }
+
   /** What a thread page shows: a Claude worker's transcript as last read, the harness conversation's view, or none. */
   async function conversation(t: Thread): Promise<AgentView | null> {
     const agent = registry.agent(t);
@@ -1300,6 +1311,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       await closeSession(thread(m[1]!), m[2]!);
       return noContent;
     }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)\/focus$/, async (m, r) => {
+      personOnly(r.caller, "focus a session in a thread's pylon");
+      await focusSession(thread(m[1]!), m[2]!);
+      return noContent;
+    }],
     ["GET", /^\/v1\/threads\/([^/]+)\/files$/, async (m, r) => {
       const path = parse(checkoutPath, r.query.get("path") ?? "");
       return ok(await inCheckout(thread(m[1]!), (c) => c.list(path)));
@@ -1451,10 +1467,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         if (pylon.actualState === "failed") return { kind: "over", error: { kind: "failed", message: `the pylon of ${t.id} failed: ${pylon.failed ?? "no reason given"}` } };
         return { kind: "pylon", state: pylon.actualState };
       },
-      open({ size, term }) {
+      open({ size, term, pane }) {
         registry.recordActivity(t.id, { human: Date.now() });
         wake(node);
-        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", agentPane(registry.thread(t.id)!) ?? ""]);
+        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", pane ?? agentPane(registry.thread(t.id)!) ?? ""]);
       },
     };
   }

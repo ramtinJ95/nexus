@@ -42,7 +42,7 @@ import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { parseProbeConfig } from "../probe/config.ts";
-import { attachScript, checkoutDir } from "../sessions.ts";
+import { attachScript, checkoutDir, focusScript } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
 import type { ByteStream, CommandResult, InterruptClaudeOutcome, JobId, NodeHealth, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
@@ -98,6 +98,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     if (command.kind === "open-session") return { kind: "open-session", herdrPane: "w1:p1" };
     if (command.kind === "close-session") return { kind: "close-session", outcome: "closed" };
     if (command.kind === "drop-failed-session") return { kind: "drop-failed-session", dropped: true };
+    if (command.kind === "exec") return { kind: "exec", exitCode: 0, output: "", truncated: false };
     throw new Error(`unexpected ${command.kind} command`);
   };
   const streams: [PylonId, readonly string[]][] = [];
@@ -1330,6 +1331,21 @@ test("closing a session goes through the node's probe, and a pane that is not op
   assert.match(stale.body.error, /no session is open in pane w1:p1 .* A wake may have moved it/);
 });
 
+test("focusing a session runs Herdr's focus on its pane in the pylon as an argument, a pane that is not open is a 404, and anything but a pane ID is a 400", async (t) => {
+  const s = await withThread(t);
+  const focus = (pane: string) => s.call("POST", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent(pane)}/focus`, {});
+  assert.deepEqual(await focus("w3:p1"), { status: 204, body: null });
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "exec", argv: ["sh", "-c", focusScript, "focus", "w3:p1"], cwd: "/", timeoutMs: 15_000 }]]);
+  s.probeAnswers(async () => ({ kind: "exec", exitCode: 1, output: "", truncated: false }));
+  assert.deepEqual(await focus("w9:p1"), { status: 404, body: { error: `no pane w9:p1 is open in pylon ${s.thread.pylonId}` } });
+  for (const pane of ["p1", "w1:p1;reboot", "$(id)", "w1:p1 w2:p1"]) {
+    const refused = await focus(pane);
+    assert.equal(refused.status, 400, pane);
+    assert.match(refused.body.error, /^pane must be a Herdr pane ID such as w1:p1/);
+  }
+  assert.equal(s.commands.length, 2, "no refused pane reached the probe");
+});
+
 test("closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open", async (t) => {
   const s = await withThread(t);
   s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
@@ -1842,6 +1858,9 @@ test("the attach route refuses before the 101 with the API's JSON errors, and a 
   await refused(400, /cols must be a whole number from 1 to 9999, got 0/, attachTo(s.port, attachPathOf(s.thread.id, "cols=0&rows=30")));
   await refused(400, /rows must be a whole number/, attachTo(s.port, attachPathOf(s.thread.id, "cols=80")));
   await refused(400, /term must be a terminal type/, attachTo(s.port, attachPathOf(s.thread.id, "cols=80&rows=24&term=x%20y")));
+  for (const pane of ["", "p1", "w1:p1%3Breboot", "%24(id)"]) {
+    await refused(400, /^pane must be a Herdr pane ID such as w1:p1, got /, attachTo(s.port, attachPathOf(s.thread.id, `cols=80&rows=24&pane=${pane}`)));
+  }
   await refused(404, /^no thread th-missing$/, attachTo(s.port, attachPathOf("th-missing")));
   assert.equal(s.streams.length, 0, "no refusal reached the probe");
 
@@ -1896,7 +1915,7 @@ test("an attach wakes the pylon, waits for it, and carries keys, resizes and out
   assert.deepEqual(a.received.slice(2), ["herdr screen", { type: "exit", code: 0 }]);
 });
 
-test("a Claude worker's attach lands in the pane of its Claude session, and a Nexus agent thread's where Herdr was", async (t) => {
+test("a Claude worker's attach lands in the pane of its Claude session, one that names a pane lands there, and a Nexus agent thread's where Herdr was", async (t) => {
   const s = await withThread(t, { attachTiming: fastAttach });
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
   const claude = { ...s, thread: started.body as Thread };
@@ -1905,8 +1924,8 @@ test("a Claude worker's attach lands in the pane of its Claude session, and a Ne
   observeRunning(claude, {});
   s.registry.apply({ record: "sessions", pylonId: claude.thread.pylonId, sessions: [session("w1:p1", "shell", null), session("w2:p1", "claude-code", "another-session"), session("w3:p1", "claude-code", claudeSession)] });
   s.probePipes(async (argv) => argv[0] === "python3" ? fakePipe().stream : processStream("true", [], () => {}));
-  const landsIn = async (thread: string) => {
-    const a = await attachTo(s.port, attachPathOf(thread));
+  const landsIn = async (thread: string, query?: string) => {
+    const a = await attachTo(s.port, attachPathOf(thread, query));
     assert.ok("ws" in a);
     await until(() => a.received.length === 1, "attached");
     a.ws.close();
@@ -1914,6 +1933,7 @@ test("a Claude worker's attach lands in the pane of its Claude session, and a Ne
     return s.streams.findLast(([, argv]) => argv[0] === "python3")![1].slice(7);
   };
   assert.deepEqual(await landsIn(claude.thread.id), ["sh", "-c", attachScript, "attach", "w3:p1"]);
+  assert.deepEqual(await landsIn(claude.thread.id, "cols=100&rows=30&pane=w1:p1"), ["sh", "-c", attachScript, "attach", "w1:p1"], "an argument, never the script's text");
   observeRunning(s, {});
   assert.deepEqual(await landsIn(s.thread.id), ["sh", "-c", attachScript, "attach", ""]);
 });
@@ -3583,6 +3603,7 @@ test("only a person acts on a thread, its pylon or a project, never the control 
     ["retry a thread's pylon", "POST", `/v1/threads/${id}/pylon/retry`, undefined, 204],
     ["open a session in a thread's pylon", "POST", `/v1/threads/${id}/sessions`, { harness: "shell" }, 201],
     ["close a session in a thread's pylon", "DELETE", `/v1/threads/${id}/sessions/${encodeURIComponent("w1:p1")}`, {}, 204],
+    ["focus a session in a thread's pylon", "POST", `/v1/threads/${id}/sessions/${encodeURIComponent("w1:p1")}/focus`, {}, 204],
     ["publish a preview", "POST", `/v1/threads/${id}/previews`, { port: 3000 }, 200],
     ["unpublish a preview", "DELETE", `/v1/threads/${id}/previews/3000`, {}, 204],
     ["start a review", "POST", `/v1/threads/${id}/review`, {}, 201],
