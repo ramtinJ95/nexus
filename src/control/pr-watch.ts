@@ -16,6 +16,13 @@ export interface PrWatchState {
   pending: { id: string; text: string } | null;
   error: string | null;
 }
+/** A description's first paragraph past its headings, images and comments, on one line and at most 400 characters. */
+export function summaryOf(body: string): string {
+  const prose = body.replace(/<!--[\s\S]*?-->/g, "").split("\n").filter((line) => !/^ {0,3}#{1,6}(\s|$)/.test(line)).join("\n");
+  const paragraph = prose.split(/\n\s*\n/).map((p) => p.trim()).find((p) => p !== "" && !/^(!\[|<img)/.test(p)) ?? "";
+  const line = paragraph.replace(/\s+/g, " ");
+  return line.length > 400 ? `${line.slice(0, 399)}…` : line;
+}
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
 const active = (t: Thread | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
@@ -110,7 +117,7 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
           const snapshot = await poll(link.pr.repo, link.pr.number);
           const initial = link.pr.url === "";
           const before = link.pr;
-          link.pr = { ...snapshot.pr, head: snapshot.detail.head, conflict: snapshot.pr.conflict ?? before.conflict };
+          link.pr = { ...snapshot.pr, head: snapshot.detail.head, summary: summaryOf(snapshot.detail.body), conflict: snapshot.pr.conflict ?? before.conflict };
           if (snapshot.pr.state !== "open") { link.pr.checks = before.checks; link.pr.review = before.review; continue; }
           if (initial) fresh.push(link.pr);
           const seen = new Set(link.seen);
