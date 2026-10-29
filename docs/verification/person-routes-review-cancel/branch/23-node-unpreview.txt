@@ -1,0 +1,3 @@
+$ nexus unpreview th-e005de25c52c 3000
+[stderr] nexus: caller may not unpublish a preview: only a person may, never the control plane, infrastructure nodes or pylons
+[exit 3]

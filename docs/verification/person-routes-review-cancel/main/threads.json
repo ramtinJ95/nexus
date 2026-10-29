@@ -1,0 +1,13 @@
+{
+  "builders": {
+    "holdReview": "th-f1dafd8f247a",
+    "holdFixing": "th-2cb452651e48",
+    "deploySlowly": "th-bdf277d1d85c",
+    "bystander": "th-a297c0341eda"
+  },
+  "reviewers": {
+    "holdReview": "th-079f1fc5ecc0",
+    "holdFixing": "th-8958ff3274ce",
+    "deploySlowly": "th-d5fa105fb222"
+  }
+}

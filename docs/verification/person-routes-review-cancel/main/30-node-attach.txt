@@ -1,0 +1,3 @@
+$ nexus attach th-a297c0341eda   (in a pty)
+nexus: thread th-a297c0341eda is deleted, so its pylon stays paused
+[exit 5]

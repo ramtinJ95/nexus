@@ -1,0 +1,3 @@
+$ nexus archive th-a297c0341eda
+[stderr] nexus: thread th-a297c0341eda is deleted
+[exit 5]

@@ -124,8 +124,9 @@ export type Phase =
   /** The PR merged or closed outside a review that does not land it, so nothing was left to review. */
   | { kind: "merged" }
   | { kind: "closed" }
-  /** The person archived or deleted one of the review's threads. */
-  | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" };
+  /** The person archived or deleted one of the review's threads, or, as `by`, cancelled the review itself. */
+  | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
+  | { kind: "cancelled"; who: "person"; by: string };
 /** The "needs human review" label on the PR, which only a review whose rounds ran out gets. */
 export type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };
 export type PhaseKind = Phase["kind"];
@@ -179,6 +180,9 @@ const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "c
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
+/** A landing that authorized its merge, or is deploying or rolling back, is seen through, so the person cannot cancel it. */
+const seenThrough = (r: Review) => r.phase.kind === "deploying" || r.phase.kind === "rolling-back" || (r.phase.kind === "merging" && r.phase.authorized !== null);
+export const cancellable = (r: Review) => !ended.has(r.phase.kind) && !seenThrough(r);
 
 /**
  * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
@@ -273,7 +277,7 @@ export function roundNote(r: Review): string | null {
 }
 const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, labelled "${humanLabel}"`, failed: `, label "${humanLabel}" not added` } as const;
 /** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
-export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
+export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.who === "person" ? `, cancelled by ${r.phase.by}` : `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
   : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state] : "";
 /** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
 export function liveNote(r: Review): string | null {
@@ -728,6 +732,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const gone = live ? await endedOnGitHub(r) : null;
       if (gone !== null) return gone;
       if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
+      // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
+      if (JSON.stringify(registry.review(r.builder)) !== JSON.stringify(r)) return r;
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
       return { ...r, outbox: null, since: r.outbox.attempted };
     }
@@ -738,10 +744,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   }
 
   /**
-   * A landed PR leaves its builder and reviewer nothing to do, so they are archived in the transaction that saves the
-   * landing, and never later. A thread in a turn, such as one the person is talking to, stays open.
+   * A landed PR leaves its builder and reviewer nothing to do, and a cancelled review its reviewer, so they are
+   * archived in the transaction that saves it, and never later. A thread in a turn, such as one the person is talking
+   * to, stays open.
    */
-  const finished = (r: Review): Thread[] => [registry.thread(r.builder), registry.thread(r.reviewer)]
+  const gateThread = (r: Review) => (r.phase.kind === "checking" || r.phase.kind === "verifying") ? r.phase.thread : null;
+  const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
 
   async function pass() {
@@ -760,8 +768,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         for (let i = 0; i < 8; i++) {
           const next = await step(r);
           if (next === r) break;
-          const archive = next.phase.kind === "landed" && r.phase.kind !== "landed" ? finished(next) : [];
-          registry.saveReview(next, archive.map((t) => t.id));
+          const archive = next.phase.kind === "landed" && r.phase.kind !== "landed" ? finished(next.builder, next.reviewer) : [];
+          // A save made while this step ran, such as the person's land or cancel, wins, and the next pass steps from it.
+          // A gate thread the step started is then no review's, so it goes now rather than at the next pass's sweep.
+          if (!registry.saveReview(next, archive.map((t) => t.id), r)) {
+            const started = gateThread(next);
+            if (started !== null && started !== gateThread(r)) (next.phase.kind === "checking" ? checks : live).discard(started);
+            break;
+          }
           for (const t of archive) deps.wake(t);
           r = next;
         }
@@ -810,7 +824,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (builder.status !== "active") throw new HttpError(409, `thread ${builder.id} is ${builder.status}`);
       if (registry.isReviewer(builder.id)) throw new HttpError(409, `thread ${builder.id} is a reviewer`);
       const existing = registry.review(builder.id);
-      if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of ${builder.id} is ${existing.phase.kind}`);
+      if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of ${builder.id} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder.id} to start another` : ""}`);
       const open = (registry.prWatch(builder.id)?.links ?? []).filter((l) => l.pr.state === "open" && (request.pr === undefined || l.pr.number === request.pr));
       if (open.length === 0) throw new HttpError(409, `thread ${builder.id} has no open pull request${request.pr === undefined ? "" : ` #${request.pr}`} that the PR watch linked`);
       if (open.length > 1) throw new HttpError(409, `thread ${builder.id} has ${open.length} open pull requests, so name one: ${open.map((l) => `#${l.pr.number}`).join(", ")}`);
@@ -859,6 +873,19 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const next: Review = { ...r, land: { requestedBy }, waiver, phase: checking(), outbox: null, nudges: 0 };
       registry.saveReview(next);
       void poll();
+      return next;
+    },
+
+    /** Ends a running review for the person, and archives its reviewer. The builder is the person's, and stays as it is. */
+    cancel(builderId: ThreadId, by: string): Review {
+      const r = registry.review(builderId);
+      if (r === null) throw new HttpError(409, `thread ${builderId} has no review`);
+      if (ended.has(r.phase.kind)) throw new HttpError(409, `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
+      if (!cancellable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}, and a merge or deploy that has begun is seen through, so it cannot be cancelled. It ends landed or with the person`);
+      const next = end(r, { kind: "cancelled", who: "person", by });
+      const archive = finished(r.reviewer);
+      registry.saveReview(next, archive.map((t) => t.id));
+      for (const t of archive) deps.wake(t);
       return next;
     },
   };

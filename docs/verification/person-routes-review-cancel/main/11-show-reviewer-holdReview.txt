@@ -1,0 +1,12 @@
+$ nexus show th-079f1fc5ecc0
+th-079f1fc5ecc0  Review of #1: Hold in review
+project: nexus-review
+attention: none
+status: active
+pylon: pylon-th-079f1fc5ecc0 on verify-node, running, observed 0s ago
+attach: nexus attach th-079f1fc5ecc0
+size: 1 CPUs, 1 GiB memory, 10 GiB disk
+placement: verify-node, as the start named
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at hold-review: the verify stack reads no remote, so every thread boots fresh
+PR watch: on
+[exit 0]

@@ -39,7 +39,7 @@ import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
 
-const version = "0.44.0";
+const version = "0.45.0";
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
@@ -91,6 +91,7 @@ const usage = `nexus ${version}, the Nexus control plane from this Mac
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
   nexus review <thread> [--pr N] [--rounds N] [--land]
     a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy
+  nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying
   nexus land <thread>                          land an approved review under the merge policy, or try a held landing again
   nexus deploy <commit|main> [--wait]
   nexus release
@@ -1061,8 +1062,13 @@ const commands: Readonly<Record<string, Command>> = {
     },
   },
   review: {
-    args: [1, 1], options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" } },
+    args: [1, 1], options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
     async run(api, [id], v) {
+      if (v.cancel === true) {
+        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
+        const r = await api("POST", `${thread(id!)}/review/cancel`, {}) as Review;
+        return { json: r, text: `Cancelled ${reviewText(r)}` };
+      }
       const pr = str(v, "pr");
       const rounds = str(v, "rounds");
       const body = { ...pr === undefined ? {} : { pr: int(pr, "--pr", 0) }, ...rounds === undefined ? {} : { rounds: int(rounds, "--rounds", 0) }, ...v.land === true ? { land: true } : {} };

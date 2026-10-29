@@ -1,0 +1,3 @@
+$ nexus project edit nexus-review --branch trunk
+[stderr] nexus: caller may not edit a project: only a person may, never the control plane, infrastructure nodes or pylons
+[exit 3]

@@ -1,0 +1,3 @@
+$ nexus archive th-e005de25c52c
+Archived th-e005de25c52c.
+[exit 0]

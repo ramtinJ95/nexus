@@ -1048,12 +1048,14 @@ export function openRegistry(path: string, clock = Date.now) {
     prReviewed: (repo: string, number: number) => sql("SELECT 1 FROM reviewed_prs WHERE repo = ? AND number = ?").get(repo, number) !== undefined,
     /**
      * Replaces the builder's review, and tells the event log when its phase, round or label changed, or the person waived
-     * holds. The threads in `archive` are archived in the same transaction.
+     * holds. The threads in `archive` are archived in the same transaction. Given `previous`, the review as it was read,
+     * false, with nothing written, when the stored review is no longer that: another save came first.
      */
-    saveReview(review: Review, archive: readonly ThreadId[] = []) {
-      transaction(() => {
-        for (const id of archive) setThreadStatus(id, "archived");
+    saveReview(review: Review, archive: readonly ThreadId[] = [], previous?: Review): boolean {
+      return transaction(() => {
         const before = jsonOrNull<Review>(sql("SELECT record FROM reviews WHERE builder = ?").get(review.builder)?.record ?? null);
+        if (previous !== undefined && JSON.stringify(before === null ? null : storedReview(before)) !== JSON.stringify(previous)) return false;
+        for (const id of archive) setThreadStatus(id, "archived");
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
         sql("INSERT OR IGNORE INTO reviewed_prs (repo, number) VALUES (?, ?)").run(review.pr.repo, review.pr.number);
@@ -1065,6 +1067,7 @@ export function openRegistry(path: string, clock = Date.now) {
           appendEvent("review.waived", review.builder, { review: review.id, repo: review.pr.repo, pr: review.pr.number, ...review.waiver });
         }
         updateAttention(review.builder);
+        return true;
       });
     },
     /** Stores the question unless one with its ID exists, and answers the stored one either way. */

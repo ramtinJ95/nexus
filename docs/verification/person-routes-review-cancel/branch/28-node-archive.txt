@@ -1,0 +1,3 @@
+$ nexus archive th-e005de25c52c
+[stderr] nexus: caller may not archive a thread: only a person may, never the control plane, infrastructure nodes or pylons
+[exit 3]
