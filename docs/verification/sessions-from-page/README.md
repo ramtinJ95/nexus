@@ -1,6 +1,6 @@
 # Sessions from the thread page
 
-Verified in this thread's pylon on 2026-10-29, on branch `feat/sessions-from-page` at `57bb4e1` against main at `8fdc92b`, with Claude Code 2.1.310 on Sonnet 5.5, Herdr 0.9.5, Node 26.12.1 and headless Chromium 143 from `@sparticuz/chromium`. No live control plane, node, image or other thread was touched.
+Verified in this thread's pylon on 2026-10-29, on branch `feat/sessions-from-page` at `34af3f6` against main at `8fdc92b`, with Claude Code 2.1.310 on Sonnet 5.5, Herdr 0.9.5, Node 26.12.1 and headless Chromium 143 from `@sparticuz/chromium`. No live control plane, node, image or other thread was touched.
 
 ## How to rerun
 
@@ -29,10 +29,10 @@ The driver starts a Claude worker in project `drinks`, waits for its first answe
 | Step | main, 8fdc92b | this branch |
 |---|---|---|
 | The Sessions list, `01-sessions-*.png` | The sessions and the `herdr --session nexus` line. Nothing to press | New shell, New pi and New Claude, Show in terminal on Claude's session, no Close on it, and a line that says focus moves every attached terminal, `nexus attach` included |
-| New shell, `02-new-shell-desktop.png` | Not possible from the page | `POST .../sessions {"harness":"shell"}`, then the terminal attached with `attach "w2:p1"` in the pylon, the shell's pane, 0.7 s after the press |
+| New shell, `02-new-shell-desktop.png` | Not possible from the page | `POST .../sessions {"harness":"shell"}`, then the terminal attached with `attach "w2:p1"` in the pylon, the shell's pane, 0.6 s after the press |
 | A command in it, `03-shell-ran-desktop.png` | Not possible | The shell printed `from the page 42`, in the page's terminal and in Herdr's pane |
-| Show in terminal on Claude, `04-claude-shown-desktop.png` | Not possible | `POST .../sessions/w1%3Ap1/focus`, and Herdr focused `w1:p1` 0.5 s later. The terminal showed Claude Code's `READY` |
-| Show in terminal on the shell, `05-shell-shown-desktop.png` | Not possible | `POST .../sessions/w2%3Ap1/focus`, and Herdr focused `w2:p1` 0.1 s later |
+| Show in terminal on Claude, `04-claude-shown-desktop.png` | Not possible | `POST .../sessions/w1%3Ap1/focus`, and Herdr focused `w1:p1` 0.6 s later. The terminal showed Claude Code's `READY` |
+| Show in terminal on the shell, `05-shell-shown-desktop.png` | Not possible | `POST .../sessions/w2%3Ap1/focus`, and Herdr focused `w2:p1` 0.5 s later |
 | Show in terminal while an attach is under way, `06-show-while-attaching-desktop.png` | Not possible | The attach started in Claude's pane, `attach "w1:p1"`, and the page sent the focus once Herdr's client drew, within 0.1 s. Herdr focused `w2:p1`, and still did 3 s later |
 | Close on the shell, `07-shell-closed-desktop.png` | Not possible | The confirm read `Close the Shell session "shell"? Its pane closes, and what runs there ends.` OK sent `DELETE .../sessions/w2%3Ap1`. Herdr closed the pane, and the list dropped it on its next poll |
 
@@ -59,4 +59,5 @@ The fonts `@sparticuz/chromium` ships have no monospace face, and this run's `fo
 - A Gondolin pylon and a real node. The pylon is this machine through sudo, so the focus ran as an `exec` here, not in a VM, and no tailnet or HTTPS listener stood between the page and the routes.
 - `nexus attach` from a Mac while the page jumps. The focus is Herdr's server's, which the existing attach already relies on to land every client in Claude's pane, but no second client was attached in this run.
 - New pi and New Claude from the page. They send the same request as New shell with another harness, which the unit tests cover. The `verify` user has no pi login.
+- Show in terminal pressed while the terminal reattaches on its own after a dropped link. A unit test drives that through `keepAttached` with fake sockets.
 - Show in terminal on a session the node has not reported yet, and a phone's taps. The phone capture only shows the list.
