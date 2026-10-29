@@ -203,6 +203,8 @@ toggled = await toggle();
 finding("the toggle again", `data-theme ${toggled.theme}, picker ${toggled.picked}`, toggled.theme === "tokyo-night");
 await pick(page, "light");
 await ev(page, () => localStorage.removeItem("nexus.theme.dark"));
+await page.reload();
+await settle();
 toggled = await toggle();
 finding("the toggle from Light before any dark theme was picked", `data-theme ${toggled.theme}`, toggled.theme === "dark");
 await pick(page, "system");
@@ -248,6 +250,24 @@ const kanagawaTerm = await terminalColours(page);
 finding("the open terminal through Light, Tokyo Night and Kanagawa Wave", `background ${lightTerm.bg}, ${tokyoTerm.bg}, ${kanagawaTerm.bg}; red ${lightTerm.red}, ${tokyoTerm.red}, ${kanagawaTerm.red}`,
   lightTerm.bg === "rgb(22, 24, 29)" && tokyoTerm.bg === "rgb(26, 27, 38)" && kanagawaTerm.bg === "rgb(31, 31, 40)" && tokyoTerm.red === "rgb(247, 118, 142)" && kanagawaTerm.red === "rgb(195, 64, 67)");
 await page.screenshot({ path: join(out, "terminal-switched-to-kanagawa-wave.png") });
+
+// A browser whose storage refuses every write, as a full quota does: the picker and the toggle still apply.
+const refusing = await newPage(desktop);
+await refusing.evaluateOnNewDocument(() => {
+  Storage.prototype.setItem = () => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); };
+});
+await refusing.goto(`${base}/`);
+await settle();
+await pick(refusing, "tokyo-night");
+const refusedPick = await shown(refusing);
+await refusing.click("#theme-toggle");
+await sleep(150);
+const refusedLight = await shown(refusing);
+await refusing.click("#theme-toggle");
+await sleep(150);
+const refusedBack = await shown(refusing);
+finding("storage that refuses writes: pick Tokyo Night, toggle, toggle", `data-theme ${refusedPick.theme}, ${refusedLight.theme}, ${refusedBack.theme}`, refusedPick.theme === "tokyo-night" && refusedLight.theme === "light" && refusedBack.theme === "tokyo-night");
+await refusing.close();
 
 // A question asked on another thread toasts on the page the reader has focused, once its poll sees it.
 const asked = [ids.long, ids.live, ids.claude, ids.reviewed, ids.landable];
