@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
@@ -10,10 +10,10 @@ import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds } from "./policy.ts";
-import { agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { agentModelFailure, agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { checkCaller, verifyCaller, type CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 import { HttpError } from "./http-error.ts";
@@ -48,6 +48,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
 
   let clock = 1_000_000;
   const replies = new Map<ThreadId, string[]>();
+  const failures = new Map<ThreadId, string>();
   const sent: { to: ThreadId; message: AutomatedMessage }[] = [];
   const started: StartRequest[] = [];
   let snapshot: PrSnapshot = { pr: { ...pr }, detail: { head: head1, branch: "feature", base: "main", body: "Adds a cache.\n\nNot checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
@@ -95,6 +96,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     },
     inbox: async (target, message) => { delivering++; if (held !== null) { held.entered(); await held.released; } if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
     replies: async (target) => replies.get(target.id) ?? [],
+    modelFailure: async (target) => failures.get(target.id) ?? null,
     checks: {
       async start() { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); return id; },
       poll: () => check,
@@ -116,13 +118,21 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     async startThread(request, caller) { started.push(request); return registry.thread(add(`th-reviewer-${started.length}`, request.claude !== undefined, caller))!; },
   });
   const reply = (id: ThreadId, text: string) => {
+    failures.delete(id);
     replies.set(id, [...replies.get(id) ?? [], text]);
     clock += 1_000;
     registry.recordReply(id, clock);
     clock += 61_000;
   };
+  /** A turn that ended because the agent's model failed with `error`, with no reply. */
+  const failedTurn = (id: ThreadId, error: string) => {
+    failures.set(id, error);
+    clock += 1_000;
+    registry.recordReply(id, clock);
+    clock += 61_000;
+  };
   return {
-    registry, builder, pr, loop, add, sent, started, merges, replies, reply, deployers, woken, others,
+    registry, builder, pr, loop, add, sent, started, merges, replies, reply, failedTurn, deployers, woken, others,
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
     set files(f: ChangedFile[]) { files = f; },
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
@@ -261,6 +271,99 @@ test("rounds that run out, and agents that never answer in the block, end with t
   assert.equal(g.sent.length, 3, "a reply in the old turn's shape is not answered twice");
   assert.equal((g.review().phase as { label?: unknown }).label, undefined, "only rounds that ran out label the PR");
   assert.deepEqual(g.labelCalls, []);
+});
+
+test("a reviewer whose model fails gets its request again after 2, 5 and 10 minutes, under its token and with no reminder, and goes on once it answers", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  const request = f.sent[0]!.message.text;
+  const token = f.review().expect;
+  for (const minutes of [2, 5, 10]) {
+    f.failedTurn(reviewer, "Request timed out.");
+    await loop.poll();
+    const sent = f.sent.length;
+    f.tick(minutes * 60_000 - 1_000);
+    await loop.poll();
+    assert.equal(f.sent.length, sent, `nothing goes before the ${minutes} minutes are up`);
+    f.tick(1_000);
+    await loop.poll();
+    assert.equal(f.sent.length, sent + 1, `the request goes again after ${minutes} minutes`);
+    assert.equal(f.sent.at(-1)!.message.text, request);
+  }
+  assert.deepEqual(f.sent.map((s) => s.message.id), [1, 2, 3, 4].map((n) => `${f.review().id}:${n}`));
+  assert.equal(f.review().expect, token);
+  assert.equal(f.review().nudges, 0, "a model failure is no reminder");
+  assert.match(phaseNote(f.review()), /^, the reviewer's model is failing \(3 in a row, last: Request timed out\.\)/);
+
+  f.reply(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+test("nexus show and the dashboard say the agent's model is failing and when the loop tries again", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.failedTurn(f.review().reviewer, "Request timed out.");
+  await loop.poll();
+  assert.equal(new Date(f.now).toISOString().slice(11, 19), "00:17:42");
+  assert.equal(phaseNote(f.review()), ", the reviewer's model is failing (1 in a row, last: Request timed out.), retrying at 00:19 UTC");
+});
+
+test("a model that fails a fifth time in a row ends the review for the person with its last error", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  for (const error of ["Request timed out.", "Request timed out.", "Request timed out.", "Request timed out.", "529 Overloaded"]) {
+    f.failedTurn(reviewer, error);
+    await loop.poll();
+    f.tick(20 * 60_000);
+    await loop.poll();
+  }
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer's model failed 5 times in a row (last: 529 Overloaded), in round 1. Run nexus review again once the provider recovers."] });
+  assert.equal(f.sent.length, 5, "the request and four resends");
+  assert.deepEqual(f.labelCalls, []);
+});
+
+test("a turn with no answer after a model failure gets a reminder, and a Claude builder whose model fails gets its findings again", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.failedTurn(reviewer, "Request timed out.");
+  await loop.poll();
+  f.tick(2 * 60_000);
+  await loop.poll();
+  f.reply(reviewer, "I looked and it seems fine.");
+  await loop.poll();
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-review block/);
+  assert.equal(f.review().nudges, 1);
+  assert.deepEqual(f.review().phase, { kind: "reviewing" }, "a turn that did not fail ends the failures in a row");
+
+  f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const findings = f.sent.at(-1)!;
+  assert.equal(findings.to, f.builder);
+  f.failedTurn(f.builder, "API Error: 529 Overloaded");
+  await loop.poll();
+  assert.equal(f.sent.at(-1), findings);
+  assert.match(phaseNote(f.review()), /^, the builder's model is failing \(1 in a row, last: API Error: 529 Overloaded\)/);
+  f.tick(2 * 60_000);
+  await loop.poll();
+  assert.equal(f.sent.at(-1)!.message.text, findings.message.text);
+  assert.equal(f.sent.at(-1)!.to, f.builder);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "reviewing" });
+  assert.equal(f.review().rounds.length, 2);
 });
 
 test("a Claude builder whose turn ends with a background shell running is read from its transcript, though it stays working", async (t) => {
@@ -735,7 +838,7 @@ test("the policy's review conditions: another model, an approval with no P0 to P
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
   const review: Review = {
     id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" }, reviewerKind: "harness",
-    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, since: 0, nudges: 0, startedAt: 0,
+    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   };
   const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
@@ -2046,6 +2149,30 @@ test("a harness, a Claude worker and a bare thread each give the replies and tak
   await assert.rejects(inbox(bare, message), "a bare thread takes no message");
   assert.deepEqual(woken, [harness.id, claude.id], "a message a bare thread refused wakes nothing");
   assert.ok(f.registry.thread(claude.id)!.lastAgentActivityAt > 0);
+});
+
+test("a model failure is a harness turn's last message that stopped on an error, or a Claude worker's API error with nothing after it", async (t) => {
+  const f = fixture(t, { claudeBuilder: false });
+  const fake = fakeHarness();
+  const harness = f.registry.thread(f.builder)!;
+  await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
+  const failure = agentModelFailure(f.registry, fake.harness);
+  fake.transcript(harness.id).messages.push({ role: "user", content: "review it", timestamp: 1 });
+  for (let i = 0; i < 4; i++) fake.transcript(harness.id).messages.push({ role: "assistant", content: [], stopReason: "error", errorMessage: "Request timed out.", timestamp: 2 + i } as never);
+  fake.commit(harness.id);
+  assert.equal(await failure(harness), "Request timed out.");
+  fake.transcript(harness.id).messages.push({ role: "assistant", content: [{ type: "text", text: "Done." }], stopReason: "stop", timestamp: 9 } as never);
+  fake.commit(harness.id);
+  assert.equal(await failure(harness), null, "a turn the model finished did not fail");
+
+  const claude = f.registry.thread(f.add("th-claude", true))!;
+  f.registry.setClaudeWorker(claude.id, "fix it", "started", undefined, "s1");
+  const [overloaded] = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").slice(3).map(parseRecord);
+  const read = (entries: ClaudeEntry[], offset: number) => f.registry.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
+  read([{ kind: "prompt", at: 1, text: "fix it", from: "person" }, ...overloaded!, { kind: "turn", at: 5, durationMs: 100 }], 1);
+  assert.match((await failure(claude))!, /^API Error: 529 Overloaded\./);
+  read([{ kind: "prompt", at: 6, text: "fix it", from: "other" }, { kind: "reply", at: 7, text: "Done." }], 2);
+  assert.equal(await failure(claude), null);
 });
 
 /** A push of `head` to the PR's branch, as GitHub and then the PR watch's next read see it. */

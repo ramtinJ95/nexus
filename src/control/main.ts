@@ -21,7 +21,7 @@ import { startLoop } from "./loop.ts";
 import { openRegistry, type NodeRecord, type Thread, type ThreadId } from "./registry.ts";
 import { peerHandoff } from "./peers.ts";
 import { githubClient, githubRepo } from "./github.ts";
-import { agentReplies, reviewLoop } from "./review.ts";
+import { agentModelFailure, agentReplies, reviewLoop } from "./review.ts";
 import { threadStarter } from "./threads.ts";
 import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
@@ -208,6 +208,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     replies: agentReplies(registry, harness),
+    modelFailure: agentModelFailure(registry, harness),
     checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
     live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
