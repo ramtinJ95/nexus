@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
-import { alive, answerDelivered, answerExits, askDecision, askKey, askedTexts, awaitAnswer, deliverAnswer, forgetAsk, parseAskAnswer } from "./nexus-ask.ts";
+import { alive, answerDelivered, answerExits, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
 import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
@@ -30,6 +30,8 @@ async function report() {
   if (typeof session !== "string" || session.length > 200) return null;
   if (payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion") await forgetAsk(asks, session, payload.tool_input).catch(() => {});
   const { kind, shells } = reportedKind(process.argv[2], payload);
+  // Before the event is queued, so the control plane's pull of the asks after it lists none of the session's.
+  if (kind === "session.turn-started" || kind === "session.turn-ended" || kind === "session.ended") await forgetSession(asks, session).catch(() => {});
   if (shells !== undefined) {
     const groups = process.env.CLAUDE_PID === undefined ? [] : await backgroundGroups(Number(process.env.CLAUDE_PID));
     send(process.execPath, [import.meta.filename, "hold", session, String(at), groups.map((g) => `${g.pgid}@${g.start}`).join(","), ...shells]);
@@ -76,24 +78,34 @@ if (process.argv[2] === "hold") {
   await releaseHold(owner, Number(stamp), process.pid);
   process.exit(0);
 }
-// The control plane runs this through the probe, outside any Claude, with an answer from the dashboard.
+// The control plane runs these through the probe, outside any Claude: `answer` with an answer from the dashboard, and
+// `asks` for the asks that wait, to which an image from before it prints nothing.
 if (process.argv[2] === "answer") {
   const answer = parseAskAnswer(process.argv[3] ?? "");
   const code = answer === null ? answerExits.malformed : await deliverAnswer(asks, answer);
   if (code === answerExits.delivered) process.stdout.write(`${answerDelivered}\n`);
   process.exit(code);
 }
+if (process.argv[2] === "asks") {
+  process.stdout.write(`${JSON.stringify(await waitingAsks(asks))}\n`);
+  process.exit(0);
+}
 const home = userInfo().homedir;
 if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(join(home, ".nexus", "pylon.json")))) process.exit(0);
-// AskUserQuestion's PermissionRequest runs while Claude's terminal dialog shows, and prints nothing unless the
-// dashboard answers first. A dialog the terminal answers stays the terminal's.
+// AskUserQuestion's PreToolUse records the call's ID, which its PermissionRequest input lacks. The PermissionRequest
+// runs while Claude's terminal dialog shows, and prints nothing unless the dashboard answers first. A dialog the
+// terminal answers stays the terminal's.
 if (process.argv[2] === "ask") {
   // AskUserQuestion's input holds every option's preview.
   const payload = await hookInput(4 << 20).catch(() => null);
-  const texts = askedTexts(payload?.tool_input);
-  if (typeof payload?.session_id !== "string" || texts === null) process.exit(0);
+  const session = payload?.session_id;
+  if (typeof session !== "string" || session.length > 200) process.exit(0);
+  if (payload.hook_event_name === "PreToolUse") {
+    if (typeof payload.tool_use_id === "string") await recordCall(asks, session, payload.tool_input, payload.tool_use_id).catch(() => {});
+    process.exit(0);
+  }
   const claude = process.env.CLAUDE_PID === undefined ? () => true : () => alive(Number(process.env.CLAUDE_PID));
-  const answer = await awaitAnswer(asks, askKey(payload.session_id, texts), process.pid, claude);
+  const answer = await awaitAnswer(asks, { session, input: payload.tool_input, pid: process.pid, at }, claude);
   if (answer !== null) process.stdout.write(JSON.stringify(askDecision(payload.tool_input, answer)));
   process.exit(0);
 }

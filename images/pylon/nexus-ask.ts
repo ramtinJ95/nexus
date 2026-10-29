@@ -1,16 +1,22 @@
 /**
  * The pylon's side of answering a Claude worker's AskUserQuestion from the dashboard. Claude Code runs
- * `nexus-claude-hook ask` as a PermissionRequest hook while its terminal dialog shows, and the hook waits for an
- * answer file. The control plane writes one with `nexus-claude-hook answer`, which it runs through the probe, and the
- * waiting hook hands it to Claude as the tool's input. An ask is named by askKey, and its files in ~/.nexus/asks are:
- *   <key>.waiting    the pid of the hook that waits
+ * `nexus-claude-hook ask` at AskUserQuestion's PreToolUse, which records the call's ID, and then as its
+ * PermissionRequest hook while the terminal dialog shows, which waits for an answer file. The control plane runs
+ * `nexus-claude-hook asks` through the probe to learn which asks wait, and `nexus-claude-hook answer` to write an
+ * answer, which the waiting hook hands to Claude as the tool's input. An ask is named by askKey, and its files in
+ * ~/.nexus/asks are:
+ *   <key>.call       the call's ID from PreToolUse, which the PermissionRequest hook takes
+ *   <key>.waiting    the hook that waits and the ask it waits for, a Waiting
  *   <key>.answer     the answer written for it, which the hook takes
  *   <key>.delivered  the answer the hook handed to Claude, so a retried delivery of it still succeeds
  * Claude Code's PermissionRequest input names no tool call, so the key is the session and the questions' texts.
  */
 import { createHash } from "node:crypto";
-import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
+/** Where the image installs the hook, which the control plane runs through the probe. */
+export const claudeHook = "/usr/local/bin/nexus-claude-hook";
 
 /**
  * What the control plane hands `nexus-claude-hook answer`: the session and question texts that name the ask, and
@@ -30,6 +36,20 @@ export interface AskAnswer {
  */
 export const answerExits = { delivered: 0, nobodyWaits: 20, answeredOtherwise: 21, malformed: 64 } as const;
 export const answerDelivered = "delivered";
+
+/** An ask whose hook waits, as `nexus-claude-hook asks` prints it: the call and its input as Claude gave it. */
+export interface ReportedAsk { session: string; toolUseId: string; at: number; input: Record<string, unknown> }
+
+/**
+ * What `<key>.waiting` holds. `start` is when the hook's process started, in clock ticks since boot, so a pid that a
+ * pause or a killed hook freed for another process is not taken for the hook. It is null where there is no /proc.
+ * `toolUseId` is null when no PreToolUse recorded the call, and `at` is when the hook started waiting.
+ */
+interface Waiting { pid: number; start: number | null; session: string; toolUseId: string | null; at: number; input: Record<string, unknown> }
+
+/** `asks` leaves out a waiting file over maxWaitingBytes, and prints at most maxAsksBytes. */
+const maxWaitingBytes = 256 << 10;
+export const maxAsksBytes = 1 << 20;
 
 export const askKey = (session: string, questions: readonly string[]): string => createHash("sha256").update(`${session}\n${JSON.stringify(questions)}`).digest("hex");
 
@@ -68,9 +88,30 @@ export function askDecision(input: Record<string, unknown>, answer: Pick<AskAnsw
   return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow", updatedInput: { ...input, answers: answer.answers, annotations } } } };
 }
 
-const file = (dir: string, key: string, kind: "waiting" | "answer" | "delivered") => join(dir, `${key}.${kind}`);
+const file = (dir: string, key: string, kind: "call" | "waiting" | "answer" | "delivered") => join(dir, `${key}.${kind}`);
 const contentOf = (answer: Pick<AskAnswer, "answers" | "annotations">) => JSON.stringify({ answers: answer.answers, annotations: answer.annotations });
 const read = (path: string) => readFile(path, "utf8").catch(() => null);
+
+/** Writes the file whole, so no reader sees part of it. */
+async function writeWhole(path: string, content: string) {
+  await writeFile(`${path}.${process.pid}`, content);
+  await rename(`${path}.${process.pid}`, path);
+}
+
+/** The file's JSON, or null for no file or one that is not JSON. */
+function jsonOf(text: string | null): unknown {
+  try {
+    return JSON.parse(text ?? "null");
+  } catch {
+    return null;
+  }
+}
+
+/** The waiting file's record, or null for none, such as the bare pid an image from before the record wrote. */
+function waitingOf(text: string | null): Waiting | null {
+  const waiting = jsonOf(text) as Partial<Waiting> | null;
+  return typeof waiting?.pid === "number" ? waiting as Waiting : null;
+}
 
 /** Whether the process lives, which a pid this user may not signal does too. */
 export function alive(pid: number): boolean {
@@ -82,24 +123,51 @@ export function alive(pid: number): boolean {
   }
 }
 
+/** When the process started, in clock ticks since boot, or null for none or where there is no /proc. */
+async function startOf(pid: number): Promise<number | null> {
+  const stat = await read(`/proc/${pid}/stat`);
+  return stat === null ? null : Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
+}
+
+/** Whether the hook that wrote the waiting file still runs. */
+const waits = async (waiting: Waiting) => alive(waiting.pid) && await startOf(waiting.pid) === waiting.start;
+
 /**
- * Waits, as `nexus-claude-hook ask` does, for the ask's answer, and answers it once it is written, or null to leave
- * the dialog to the terminal: once the waiting file no longer names `pid`, as after PostToolUse removed it when the
- * terminal answered, or once `claude` says Claude is gone. An answer or delivery left by an earlier ask of the same
- * questions in the session is removed first, so neither passes for this one's.
+ * Records the call's ID for its ask, as `nexus-claude-hook ask` does at AskUserQuestion's PreToolUse, whose input has
+ * it. Claude finishes its PreToolUse hooks before it asks for permission, so the PermissionRequest hook finds it.
+ */
+export async function recordCall(dir: string, session: string, input: unknown, toolUseId: string): Promise<void> {
+  const texts = askedTexts(input);
+  if (texts === null) return;
+  await mkdir(dir, { recursive: true });
+  await writeWhole(file(dir, askKey(session, texts), "call"), JSON.stringify({ toolUseId }));
+}
+
+/**
+ * Waits, as `nexus-claude-hook ask` does at AskUserQuestion's PermissionRequest, for the ask's answer, and answers it
+ * once it is written, or null to leave the dialog to the terminal: at once for an input with no questions, once the
+ * waiting file is no longer this hook's, as after PostToolUse removed it when the terminal answered, or once `claude`
+ * says Claude is gone. The waiting file takes the call's ID that PreToolUse recorded. An answer or delivery left by an
+ * earlier ask of the same questions in the session is removed first, so neither passes for this one's.
  */
 export async function awaitAnswer(
-  dir: string, key: string, pid: number, claude: () => boolean,
+  dir: string, asked: { session: string; input: Record<string, unknown>; pid: number; at: number }, claude: () => boolean,
   { sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 500)) }: { sleep?: () => Promise<void> } = {},
 ): Promise<Pick<AskAnswer, "answers" | "annotations"> | null> {
+  const texts = askedTexts(asked.input);
+  if (texts === null) return null;
+  const key = askKey(asked.session, texts);
   await mkdir(dir, { recursive: true });
   await rm(file(dir, key, "answer"), { force: true });
   await rm(file(dir, key, "delivered"), { force: true });
+  const call = (jsonOf(await read(file(dir, key, "call"))) as { toolUseId?: unknown } | null)?.toolUseId;
+  await rm(file(dir, key, "call"), { force: true });
+  const toolUseId = typeof call === "string" ? call : null;
   const waiting = file(dir, key, "waiting");
-  await writeFile(`${waiting}.${pid}`, String(pid));
-  await rename(`${waiting}.${pid}`, waiting);
+  const mine = JSON.stringify({ pid: asked.pid, start: await startOf(asked.pid), session: asked.session, toolUseId, at: asked.at, input: asked.input } satisfies Waiting);
+  await writeWhole(waiting, mine);
   for (;;) {
-    if (await read(waiting) !== String(pid)) return null;
+    if (await read(waiting) !== mine) return null;
     if (!claude()) {
       await rm(waiting, { force: true });
       return null;
@@ -123,8 +191,8 @@ export async function deliverAnswer(dir: string, answer: AskAnswer): Promise<num
   const key = askKey(answer.session, answer.questions);
   const content = contentOf(answer);
   if (await read(file(dir, key, "delivered")) === content) return answerExits.delivered;
-  const waiter = await read(file(dir, key, "waiting"));
-  if (waiter === null || !alive(Number(waiter))) return answerExits.nobodyWaits;
+  const waiter = waitingOf(await read(file(dir, key, "waiting")));
+  if (waiter === null || !await waits(waiter)) return answerExits.nobodyWaits;
   const temp = `${file(dir, key, "answer")}.${process.pid}`;
   await writeFile(temp, content);
   try {
@@ -139,8 +207,44 @@ export async function deliverAnswer(dir: string, answer: AskAnswer): Promise<num
   }
 }
 
+/**
+ * The asks whose hooks wait now and know their call, newest first, as `nexus-claude-hook asks` prints them. A waiting
+ * file over maxWaitingBytes is left out, and so is every ask after the one that would pass maxAsksBytes.
+ */
+export async function waitingAsks(dir: string): Promise<ReportedAsk[]> {
+  const asks: ReportedAsk[] = [];
+  for (const name of await readdir(dir).catch(() => [])) {
+    const path = join(dir, name);
+    if (!name.endsWith(".waiting") || ((await stat(path).catch(() => null))?.size ?? Infinity) > maxWaitingBytes) continue;
+    const waiting = waitingOf(await read(path));
+    if (waiting?.toolUseId == null || !await waits(waiting)) continue;
+    asks.push({ session: waiting.session, toolUseId: waiting.toolUseId, at: waiting.at, input: waiting.input });
+  }
+  const printed: ReportedAsk[] = [];
+  let bytes = 2;
+  for (const ask of asks.sort((a, b) => b.at - a.at)) {
+    bytes += Buffer.byteLength(JSON.stringify(ask)) + 1;
+    if (bytes > maxAsksBytes) break;
+    printed.push(ask);
+  }
+  return printed;
+}
+
 /** Ends the wait of the ask Claude has an answer to, as its PostToolUse does, so a hook whose dialog the terminal answered stops. */
 export async function forgetAsk(dir: string, session: string, input: unknown): Promise<void> {
   const texts = askedTexts(input);
-  if (texts !== null) await rm(file(dir, askKey(session, texts), "waiting"), { force: true });
+  if (texts === null) return;
+  await rm(file(dir, askKey(session, texts), "waiting"), { force: true });
+  await rm(file(dir, askKey(session, texts), "call"), { force: true });
+}
+
+/**
+ * Ends the wait of every ask of the session, as the start or end of its turn and the end of the session do, since no
+ * dialog of it shows then. A dialog that closed without a PostToolUse, such as one the person interrupted, may have
+ * left its hook waiting.
+ */
+export async function forgetSession(dir: string, session: string): Promise<void> {
+  for (const name of await readdir(dir).catch(() => [])) {
+    if (name.endsWith(".waiting") && waitingOf(await read(join(dir, name)))?.session === session) await rm(join(dir, name), { force: true });
+  }
 }

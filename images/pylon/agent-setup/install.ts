@@ -85,8 +85,9 @@ export function pylonProfile(json: string): string {
 
 /**
  * Each Claude hook nexus-claude-hook runs for, the kind it reports or `ask`, its matcher and its timeout in seconds.
- * Claude's idle prompt, 60 seconds after every turn, waits for no one. AskUserQuestion's PermissionRequest waits for an
- * answer from the dashboard while the terminal dialog shows, for as long as a person may take.
+ * Claude's idle prompt, 60 seconds after every turn, waits for no one. AskUserQuestion's PreToolUse records the call's
+ * ID, and its PermissionRequest waits for an answer from the dashboard while the terminal dialog shows, for as long as
+ * a person may take.
  */
 export const claudeHooks = [
   ["UserPromptSubmit", "session.turn-started", "", 2],
@@ -95,6 +96,7 @@ export const claudeHooks = [
   ["StopFailure", "session.turn-ended", "", 2],
   ["Notification", "session.waiting", "permission_prompt|elicitation_dialog", 2],
   ["SessionEnd", "session.ended", "", 2],
+  ["PreToolUse", "ask", "AskUserQuestion", 2],
   ["PermissionRequest", "ask", "AskUserQuestion", 86_400],
 ] as const;
 
