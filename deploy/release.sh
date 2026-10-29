@@ -7,6 +7,7 @@
 # moves on. Each service has its own link to the release it runs, so installing one never moves the other.
 
 prefix=/opt/nexus
+etc=/etc/nexus
 service_path=/usr/local/bin:/usr/bin
 
 fail() { echo "$(basename "$0" .sh): $*" >&2; exit 1; }
