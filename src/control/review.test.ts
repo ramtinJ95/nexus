@@ -1527,7 +1527,7 @@ test("the person cancels a review that is reviewing, fixing or checking, which a
 
 test("a review that authorized its merge, is deploying or rolling back, or has ended other than for the person is not cancelled, and says why", async (t) => {
   const f = fixture(t);
-  f.registry.setDesiredRelease({ commit: previous, requestedBy: "person", requestedAt: 1 });
+  released(f, previous);
   const loop = await approved(f, "nLAPTOP");
   assert.equal(f.review().phase.kind, "deploying");
   const seenThrough = (err: HttpError) => err.status === 409 && /a merge or deploy that has begun is seen through, so it cannot be cancelled/.test(err.message);
