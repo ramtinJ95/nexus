@@ -1882,8 +1882,8 @@ test("an attach wakes the pylon, waits for it, and carries keys, resizes and out
 
   const [pylonId, argv] = s.streams.at(-1)!;
   assert.equal(pylonId, s.thread.pylonId);
-  assert.deepEqual([argv[0], argv[1], ...argv.slice(4)], ["python3", "-c", "100", "30", "xterm-ghostty", "sh", "-c", attachScript, "attach", ""]);
-  const relayBytes = Number(argv[3]);
+  assert.deepEqual([argv[0], argv[1], argv[3], ...argv.slice(5)], ["python3", "-c", "guest-terminal.py", "100", "30", "xterm-ghostty", "sh", "-c", attachScript, "attach", ""]);
+  const relayBytes = Number(argv[4]);
   await until("the relay's source", () => pipe.stdin().length >= relayBytes);
   assert.match(pipe.stdin().subarray(0, relayBytes).toString(), /^# A program on a pty in a pylon/);
 
@@ -1915,7 +1915,7 @@ test("a Claude worker's attach lands in the pane of its Claude session, one that
     await until("attached", () => a.received.length === 1);
     a.ws.close();
     await a.closed;
-    return s.streams.findLast(([, argv]) => argv[0] === "python3")![1].slice(7);
+    return s.streams.findLast(([, argv]) => argv[0] === "python3")![1].slice(8);
   };
   assert.deepEqual(await landsIn(claude.thread.id), ["sh", "-c", attachScript, "attach", "w3:p1"]);
   assert.deepEqual(await landsIn(claude.thread.id, "cols=100&rows=30&pane=w1:p1"), ["sh", "-c", attachScript, "attach", "w1:p1"], "an argument, never the script's text");

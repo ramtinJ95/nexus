@@ -5,11 +5,11 @@
  */
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import type { OpenPipe } from "./checkout-files.ts";
 import { claudeProjects } from "./claude-transcript.ts";
 import type { AgentCall } from "./control/usage.ts";
+import { openPython, pipeOutput, type OpenPipe } from "./pipe.ts";
 
-const helper = readFileSync(new URL("./agent-usage.py", import.meta.url), "utf8");
+const helper = readFileSync(new URL("./agent-usage.py", import.meta.url));
 
 /** Where a pylon's agents keep their transcripts. */
 export const agentLogs = { claude: claudeProjects, pi: "/home/user/.pi/agent/sessions" };
@@ -36,37 +36,10 @@ export interface UsageRead { calls: AgentCall[]; offsets: Map<string, FileCursor
 
 /** The calls recorded past `offsets`, and where the read stopped in each file it moved on in. */
 export async function readAgentUsage(open: OpenPipe, offsets: ReadonlyMap<string, FileCursor>, logs = agentLogs, deadlineMs = usageReadDeadlineMs): Promise<UsageRead> {
-  const stream = await open(["python3", "-c", helper]);
-  const reply = (async () => {
-    await stream.write(Buffer.from(JSON.stringify({ ...logs, offsets: Object.fromEntries(offsets), limit: limitBytes })));
-    await stream.close();
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
-    for await (const chunk of stream) {
-      bytes += chunk.length;
-      if (bytes > maxReplyBytes) throw new Error(`the usage reader printed over ${maxReplyBytes} bytes`);
-      chunks.push(chunk);
-    }
-    return { end: await stream.done, out: Buffer.concat(chunks).toString("utf8") };
-  })();
-  // A reply that loses the race fails unwatched.
-  reply.catch(() => undefined);
-  let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`the pylon did not read its agents' usage within ${deadlineMs / 1000} s`)), deadlineMs);
-  });
-  let result: Awaited<typeof reply>;
-  try {
-    result = await Promise.race([reply, late]);
-  } catch (err) {
-    stream.abort();
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-  if (result.end.kind === "lost") throw new Error("the pipe to the pylon was lost before its agents' usage was read");
-  if (result.end.code !== 0) throw new Error(`reading the agents' usage exited ${result.end.code}`);
-  const lines = result.out.split("\n").filter((line) => line !== "");
+  const stream = await openPython(open, helper, [], "agent-usage.py");
+  const input = Buffer.from(JSON.stringify({ ...logs, offsets: Object.fromEntries(offsets), limit: limitBytes }));
+  const { out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "its agents' usage", input });
+  const lines = out.toString("utf8").split("\n").filter((line) => line !== "");
   const end = endSchema.parse(JSON.parse(lines.pop() ?? "null"));
   return { calls: lines.map((line) => callSchema.parse(JSON.parse(line))), offsets: new Map(Object.entries(end.offsets) as [string, FileCursor][]), more: end.more };
 }

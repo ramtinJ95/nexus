@@ -1,7 +1,6 @@
-# A program on a pty in a pylon, such as Herdr's client for `nexus attach`. guest-terminal.ts runs it over a raw
-# pipe as `python3 -c <bootstrap> <source bytes> <cols> <rows> <term> <program...>`. The bootstrap reads exactly this
-# file from stdin and runs it, so the rest of stdin is free for frames, and the probe's request URL, whose length is
-# limited, carries only the bootstrap. It must run on Python 3.9, which the Mac's tests run it with.
+# A program on a pty in a pylon, such as Herdr's client for `nexus attach`, as `guest-terminal.py <cols> <rows> <term>
+# <program...>`. guest-terminal.ts runs it over a raw pipe through pipe.ts's openPython, which sends this file ahead of
+# the frames on stdin. It must run on Python 3.9, which the Mac's tests run it with.
 #
 # stdin carries frames: a type byte, a 4-byte big-endian length, then the payload. Type 0 is keys for the program.
 # Type 1 is a resize, whose payload is the cols and rows as 2-byte big-endian numbers. The end of stdin hangs the
@@ -86,8 +85,9 @@ def main(argv):
     cols, rows, term, program = int(argv[0]), int(argv[1]), argv[2], argv[3:]
     pid, master = start(cols, rows, term, program)
     os.set_blocking(master, False)
-    frames = b""
-    pending = b""
+    # bytearrays, which drop bytes from the front without copying the rest, so a big paste costs linear work.
+    frames = bytearray()
+    pending = bytearray()
     stdin_open = True
     stdout_open = True
     master_open = True
@@ -96,12 +96,12 @@ def main(argv):
     status = None
 
     def hang_up():
-        nonlocal master, pending, hung_up_at
+        nonlocal master, hung_up_at
         # Closing the master hangs the terminal up, and the kernel sends SIGHUP to the program, its session leader.
         if master is not None:
             os.close(master)
             master = None
-        pending = b""
+        pending.clear()
         if hung_up_at is None:
             hung_up_at = time.monotonic()
 
@@ -132,7 +132,8 @@ def main(argv):
                 kind, length = struct.unpack(">BI", frames[:5])
                 if len(frames) < 5 + length:
                     break
-                payload, frames = frames[5:5 + length], frames[5 + length:]
+                payload = bytes(frames[5:5 + length])
+                del frames[:5 + length]
                 if master is None:
                     continue
                 if kind == KEYS:
@@ -150,13 +151,13 @@ def main(argv):
 
         if master is not None and master in writable:
             try:
-                pending = pending[os.write(master, pending):]
+                del pending[:os.write(master, pending)]
             except BlockingIOError:
                 pass
             except OSError as err:
                 if err.errno != errno.EIO:
                     raise
-                pending = b""
+                pending.clear()
 
         if master is not None and master in readable:
             data = read_master(master)
@@ -184,4 +185,4 @@ def main(argv):
     sys.exit(exit_code(status))
 
 
-main(sys.argv[2:])
+main(sys.argv[1:])

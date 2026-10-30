@@ -29,7 +29,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { localApiWhois, PeerRefused, tailnetNodeIdPattern, verifyPeer, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPortMessage, reservedPorts, type BootInputs, type LiveSpec, type ProjectId } from "./project.ts";
-import { claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
+import { claudeSessionId, claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
 import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
 import type {
   ArtifactManifest, CheckpointId, ImageId, ImageManifest, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId, TemplateManifest,
@@ -756,7 +756,7 @@ function clientByteStream(socket: Duplex, head: Buffer): ByteStream {
   };
 }
 
-function frame(type: number, payload: Uint8Array): Buffer {
+export function frame(type: number, payload: Uint8Array): Buffer {
   const header = Buffer.alloc(5);
   header.writeUInt8(type, 0);
   header.writeUInt32BE(payload.length, 1);
@@ -939,7 +939,7 @@ const openSession = (harness: SessionHarness) => {
     model: agent?.modelFlag === undefined ? onlyFor("modelFlag") : nonEmpty.max(200).exactOptional(),
   });
 };
-const claudeSessionId = z.string().regex(/^[A-Za-z0-9-]{1,200}$/, "expected a Claude Code session ID");
+const claudeSession = z.string().regex(claudeSessionId, "expected a Claude Code session ID");
 const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), argv: z.array(z.string()).min(1), cwd: z.string().startsWith("/", "expected an absolute path"), timeoutMs: z.int().min(1).max(60_000) }),
   z.discriminatedUnion("harness", sessionHarnessSchema.options.map(openSession) as [ReturnType<typeof openSession>, ...ReturnType<typeof openSession>[]]),
@@ -950,7 +950,7 @@ const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("drop-failed-session"), id: nonEmpty }),
   z.looseObject({
     kind: z.literal("send-claude"),
-    session: claudeSessionId,
+    session: claudeSession,
     text: nonEmpty.max(16_384).superRefine((t, ctx) => {
       const problem = claudeTextProblem(t);
       if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
@@ -959,7 +959,7 @@ const pylonCommandSchema = z.discriminatedUnion("kind", [
     requestId: nonEmpty.exactOptional(),
   }),
   z.looseObject({ kind: z.literal("send-claude-outcome"), requestId: nonEmpty }),
-  z.looseObject({ kind: z.literal("interrupt-claude"), session: claudeSessionId }),
+  z.looseObject({ kind: z.literal("interrupt-claude"), session: claudeSession }),
   z.looseObject({
     kind: z.literal("service"), op: z.enum(["ensure", "restart", "stop", "logs"]), name: nonEmpty.exactOptional(),
     lines: z.number().min(1).refine(Number.isInteger, "expected an integer").exactOptional(),

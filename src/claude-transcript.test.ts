@@ -1,11 +1,11 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maxRecordBytes, parseRecord, readTranscript, readTranscriptImage, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
-import type { OpenPipe } from "./checkout-files.ts";
+import type { OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
 import type { ByteStream } from "./protocol.ts";
 
@@ -402,6 +402,8 @@ test("a pasted image and a Read's image are kept as places in the transcript, wh
   assert.equal(prompt.images?.length, 1);
   assert.equal(result.images?.length, 1);
   assert.ok(prompt.images![0]!.offset > 0);
+  const line = Buffer.from(pastedRecord(pasted, "What is wrong here?"));
+  assert.deepEqual(prompt.images![0], { offset: Buffer.byteLength(`${lines[4]}\n`), bytes: line.length, sha256: createHash("sha256").update(line).digest("hex"), index: 0 });
   assert.deepEqual(await readTranscriptImage(p.open, session, prompt.images![0]!, p.root), pasted);
   assert.deepEqual(await readTranscriptImage(p.open, session, result.images![0]!, p.root), shot);
   // A record parsed alone is located as the file's first line.

@@ -67,8 +67,19 @@ function pylonHome() {
 }
 
 /** A probe that runs each pipe as a local process, counting them. */
+const usageHelper = readFileSync(new URL("../agent-usage.py", import.meta.url), "utf8");
+
+/** Each stream runs on this machine. Its argv must fit the probe's request URL, as protocol.ts's streamPath encodes it. */
 function localProbe() {
-  const probe = { reads: 0, stream: async (_pylon: PylonId, argv: readonly string[]) => { probe.reads++; return processStream(argv[0]!, argv.slice(1), () => undefined); } };
+  const probe = {
+    reads: 0,
+    stream: async (_pylon: PylonId, argv: readonly string[]) => {
+      assert.ok(encodeURIComponent(JSON.stringify({ argv })).length < 2048, "the usage read's argv fits a small request URL");
+      assert.ok(!argv.some((arg) => arg.includes(usageHelper.split("\n")[0]!)), "the helper's source is not in argv");
+      probe.reads++;
+      return processStream(argv[0]!, argv.slice(1), () => undefined);
+    },
+  };
   return probe as typeof probe & Pick<ProbeClient, "stream">;
 }
 

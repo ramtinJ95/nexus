@@ -26,6 +26,8 @@ export const herdrSession = "nexus";
 export const sessionsFile = "/home/user/.nexus/sessions.json";
 /** Where the repository is checked out in every pylon. */
 export const checkoutDir = "/home/user/workspace/repo";
+/** A Claude Code session ID as Nexus takes one: it names the session's transcript file and its launch directory. */
+export const claudeSessionId = /^[A-Za-z0-9-]{1,200}$/;
 
 const home = "/home/user";
 const callTimeoutMs = 10_000;
@@ -238,7 +240,7 @@ const launchesDir = `${home}/.nexus/claude-launches`;
 type ClaudeLaunch = { dir: `/${string}` } & ({ progress: "none" } | { progress: "opened" | "typed"; workspace: string; pane: string });
 
 async function claudeLaunch(guest: Guest, session: string): Promise<ClaudeLaunch> {
-  if (!/^[A-Za-z0-9-]{1,200}$/.test(session)) throw new Error(`a prompted Claude launch needs a session ID of letters, digits and dashes, not ${JSON.stringify(session)}`);
+  if (!claudeSessionId.test(session)) throw new Error(`a prompted Claude launch needs a session ID of letters, digits and dashes, not ${JSON.stringify(session)}`);
   const dir = `${launchesDir}/${session}` as const;
   const { exitCode, output } = await guest.exec(["sh", "-c", 'test -f "$0/opened" || exit 0; cat "$0/opened"; test -e "$0/typed" && echo typed; exit 0', dir], { cwd: home, timeoutMs: callTimeoutMs });
   if (exitCode !== 0) throw new Error(`reading Claude launch ${dir} failed with exit ${exitCode}: ${output}`);

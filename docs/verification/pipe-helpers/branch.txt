@@ -1,0 +1,19 @@
+branch: 36a569d docs(verification): rerun the pipe helper capture on the final branch
+## agent-usage.py as committed
+usage: 11 calls, 9 of them Claude's
+  request URL query bytes: 575
+checkout list: [{"name":".git","kind":"dir","size":null},{"name":"app.txt","kind":"file","size":4}]
+  request URL query bytes: 645
+transcript: 50 entries
+  request URL query bytes: 1004
+terminal paste: 307200 bytes, same SHA-256 as sent, {"kind":"exited","code":0}
+  request URL query bytes: 996
+## agent-usage.py grown to 17068 bytes
+usage: 11 calls, 9 of them Claude's
+  request URL query bytes: 576
+checkout list: [{"name":".git","kind":"dir","size":null},{"name":"app.txt","kind":"file","size":4}]
+  request URL query bytes: 645
+transcript: 50 entries
+  request URL query bytes: 1004
+terminal paste: 307200 bytes, same SHA-256 as sent, {"kind":"exited","code":0}
+  request URL query bytes: 996

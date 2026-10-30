@@ -1,0 +1,19 @@
+main: 6b7dc36 refactor(backend): let the compiler check the backend interface the probe drives (#329)
+## agent-usage.py as committed
+usage: 11 calls, 9 of them Claude's
+  request URL query bytes: 8100
+checkout list: [{"name":".git","kind":"dir","size":null},{"name":"app.txt","kind":"file","size":4}]
+  request URL query bytes: 114
+transcript: 50 entries
+  request URL query bytes: 1004
+terminal paste: 307200 bytes, same SHA-256 as sent, {"kind":"exited","code":0}
+  request URL query bytes: 867
+## agent-usage.py grown to 17068 bytes
+usage: FAILED verify-node: GET /v1/pylons/pylon-verify/stream?request=… HTTP 431: 
+  request URL query bytes: 21384
+checkout list: [{"name":".git","kind":"dir","size":null},{"name":"app.txt","kind":"file","size":4}]
+  request URL query bytes: 114
+transcript: 50 entries
+  request URL query bytes: 1004
+terminal paste: 307200 bytes, same SHA-256 as sent, {"kind":"exited","code":0}
+  request URL query bytes: 867
