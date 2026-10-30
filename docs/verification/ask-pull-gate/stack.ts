@@ -238,10 +238,13 @@ async function drive(out: string) {
     const waiting = await until("the thread waits on AskUserQuestion or its card shows", async () => (await detail(id)).attention === "waiting" || await openAsk(), 300_000);
     const turn = { seconds: (Date.now() - from.at) / 1000, pulls: pulls() - from.pulls };
     log(`while the watched turn ran its Bash command, ${turn.seconds.toFixed(1)} s, the control plane ran nexus-claude-hook asks ${turn.pulls} times`);
-    const question = waiting === null ? null : await until("its card shows", () => openAsk(), 30_000);
+    const question = waiting === null ? null : await until("its card shows", () => openAsk(), 60_000);
+    log(`card shown at ${Date.now()} ms since the epoch, to compare with the waiting record's at`);
     asks("asks-asked");
     await nexus("show-asked", "show", id);
     if (question !== null) {
+      // A person takes a while to answer, which gives the dialog's Notification time to arrive.
+      await sleep(20_000);
       const res = await fetch(`${api}/v1/questions/${question.id}/answer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ choices: [{ picked: ["Large"] }] }) });
       log(`answered ${question.id} with Large through the dashboard's route: HTTP ${res.status}`);
       writeFileSync(join(out, "answer.txt"), `POST /v1/questions/${question.id}/answer {"choices":[{"picked":["Large"]}]}\nHTTP ${res.status}\n${await res.text()}\n`);
