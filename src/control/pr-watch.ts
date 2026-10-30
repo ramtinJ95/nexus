@@ -128,6 +128,7 @@ export function prWatcher(options: { registry: PrWatchRegistry; github: Pick<Git
           const before = link.pr;
           link.pr = { ...snapshot.pr, head: snapshot.detail.head, summary: summaryOf(snapshot.detail.body), conflict: snapshot.pr.conflict ?? before.conflict };
           if (snapshot.pr.state !== "open") { link.pr.checks = before.checks; link.pr.review = before.review; continue; }
+          if (snapshot.checksUnread) link.pr.checks = before.checks;
           if (initial) fresh.push(link.pr);
           const seen = new Set(link.seen);
           const events: string[] = [];

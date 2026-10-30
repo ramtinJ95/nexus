@@ -1334,6 +1334,24 @@ test("every merge attempt checks the policy again, so checks that fail after app
   assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed."] });
 });
 
+test("a landing whose head's checks GitHub could not read neither merges nor goes to the person, and the next complete read merges", async (t) => {
+  const f = fixture(t);
+  f.mergeAnswer = () => { throw new Error("GitHub is down"); };
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "merging");
+  const phase = f.review().phase;
+  f.mergeAnswer = () => ({ kind: "merged", commit: merged });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" }, checksUnread: true };
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "only the attempt before the unread checks");
+  assert.deepEqual(f.review().phase, phase);
+  const { checksUnread: _, ...complete } = f.snapshot;
+  f.snapshot = { ...complete, pr: { ...complete.pr, checks: "passing" } };
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1, head1]);
+  assert.notEqual(f.review().phase.kind, "merging");
+});
+
 test("a reply that came while a delivered message was not yet cleared is still read after a crash", async (t) => {
   const f = fixture(t);
   const loop = f.loop();

@@ -19,6 +19,11 @@ export interface PrSnapshot {
   detail: PrDetail;
   failures: { id: string; text: string }[];
   comments: { id: string; text: string }[];
+  /**
+   * GitHub failed to read the head commit's check runs or statuses this pass, so `pr.checks` is `failed` or `pending`,
+   * never `passing` or `none`, and `failures` lacks what was not read.
+   */
+  checksUnread?: true;
 }
 /** `previous` is the path a renamed file had, so a rename cannot carry a file past a check on its path. */
 export interface ChangedFile { path: string; previous: string | null; patch: string }
@@ -137,24 +142,27 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       if (before !== undefined && (before !== p.head.sha || pr.state !== "open")) for (const key of cache.keys()) if (key.startsWith(`${base}/commits/${before}/`)) cache.delete(key);
       if (pr.state === "open") heads.set(`${repo}#${number}`, p.head.sha); else heads.delete(`${repo}#${number}`);
       if (pr.state !== "open") return { pr, detail, failures: [], comments: [] };
-      const [checks, statuses, reviews, inline, issue] = await Promise.all([
-        list<Check>(`${base}/commits/${p.head.sha}/check-runs?filter=latest`, "check_runs"),
-        list<Status>(`${base}/commits/${p.head.sha}/statuses`),
+      const [checkRuns, statusList, reviews, inline, issue] = await Promise.all([
+        list<Check>(`${base}/commits/${p.head.sha}/check-runs?filter=latest`, "check_runs").catch(() => null),
+        list<Status>(`${base}/commits/${p.head.sha}/statuses`).catch(() => null),
         list<Comment>(`${base}/pulls/${number}/reviews`),
         list<Comment>(`${base}/pulls/${number}/comments`),
         list<Comment>(`${base}/issues/${number}/comments`),
       ]);
+      const unread = checkRuns === null || statusList === null;
+      const checks = checkRuns ?? [], statuses = statusList ?? [];
       const latest = [...new Map(statuses.toReversed().map((s) => [s.context, s])).values()];
       const failed = checks.filter((c) => c.status === "completed" && ["failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"].includes(c.conclusion ?? ""));
       const badStatuses = latest.filter((s) => s.state === "failure" || s.state === "error");
       pr.checks = failed.length + badStatuses.length ? "failed" : checks.some((c) => c.status !== "completed" || !["success", "neutral", "skipped"].includes(c.conclusion ?? "")) || latest.some((s) => s.state === "pending") ? "pending" : checks.length + latest.length ? "passing" : "none";
+      if (unread && pr.checks !== "failed") pr.checks = "pending";
       const verdicts = [...new Map(reviews.filter((r) => r.state !== "COMMENTED" && r.state !== "PENDING").map((r) => [r.user.login, r.state])).values()];
       pr.review = verdicts.includes("CHANGES_REQUESTED") ? "changes_requested" : verdicts.includes("APPROVED") ? "approved" : "none";
       const comments = ([ ["review", reviews.filter((r) => r.submitted_at)], ["review-comment", inline], ["issue-comment", issue] ] as const).flatMap(([kind, items]) => items.filter((c) => ["OWNER", "MEMBER", "COLLABORATOR"].includes(c.author_association)).map((c) => ({ id: `${kind}:${c.id}`, text: `${kind} by ${c.user.login}${c.state ? ` (${c.state})` : ""}: ${c.html_url}\n${(c.body ?? "").slice(0, 4000)}` })));
       return { pr, detail, comments, failures: [
         ...failed.map((c) => ({ id: `check:${c.id}:${c.completed_at}:${c.conclusion}`, text: `Check failed: ${c.name} — ${c.details_url ?? c.html_url ?? pr.url}` })),
         ...badStatuses.map((s) => ({ id: `status:${s.id}`, text: `Check failed: ${s.context} — ${s.target_url ?? pr.url}` })),
-      ] };
+      ], ...(unread ? { checksUnread: true as const } : {}) };
     },
     async files(repo, number) {
       return (await list<{ filename: string; previous_filename?: string; patch?: string }>(`/repos/${repo}/pulls/${number}/files`)).map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" }));
