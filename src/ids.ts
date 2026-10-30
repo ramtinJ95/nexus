@@ -13,6 +13,8 @@ export type LiveHash = Brand<string, "LiveHash">;
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
 export type TailnetNodeId = Brand<string, "TailnetNodeId">;
 
+/** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
+export type ThreadId = Brand<string, "ThreadId">;
 export type ProjectId = string & { readonly __project: unique symbol };
 
 /** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */

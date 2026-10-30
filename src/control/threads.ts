@@ -12,18 +12,10 @@ import { HttpError } from "./http-error.ts";
 import { placeAuto, placeNear, type Placement } from "./placement.ts";
 import { pylonLive } from "./live.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
+import type { StartRequest } from "./start-request.ts";
 
-/**
- * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front
- * unless `raw`, as for the review loop's reviewers. A `bare` thread has neither agent, as a check thread needs only
- * its pylon. Only the control plane itself asks for `raw` or `bare`. `node` names a node, or is `auto` for the one
- * where the pylon fits best. `near` is a node to place the pylon on while it has room, which only the control plane asks
- * for. `resources` overrides the project's size field by field.
- */
-export interface StartRequest {
-  project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean;
-  near?: NodeName | undefined; resources?: { [K in keyof BootInputs["resources"]]?: BootInputs["resources"][K] | undefined } | undefined;
-}
+// Temporary: StartRequest moved to start-request.ts, and E1 deletes this re-export.
+export type { StartRequest };
 
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });

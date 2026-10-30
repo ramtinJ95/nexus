@@ -18,11 +18,12 @@ import type { Nudge } from "./nudge.ts";
 import type { Judgment } from "./judgment.ts";
 import type { ItemId, ItemRecord } from "./pipeline.ts";
 import type { QueuedRecord } from "./queue.ts";
+import type { StartKey } from "./start-request.ts";
 import type { Placement } from "./placement.ts";
 import { HttpError } from "./http-error.ts";
 import { json, jsonOrNull, openDb, type Row } from "./db.ts";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
-import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import {
   upgradeObservation, type HerdrStatus, type NodeObservation, type OlderObservation, type ReportedCapacity,
@@ -43,9 +44,8 @@ import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type Tra
 import type { AgentCall } from "../agent-usage.ts";
 import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
 
-declare const brand: unique symbol;
-/** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
-export type ThreadId = string & { readonly [brand]: "ThreadId" };
+// Temporary: ThreadId moved to ids.ts and StartKey to start-request.ts, and E1 deletes these re-exports.
+export type { StartKey, ThreadId };
 
 export interface NodeRecord {
   name: NodeName;
@@ -149,9 +149,6 @@ export type ClaudeMessage = { state: "sending" } | { state: "sent"; result: Clau
 export type ClaudeMessageSender = Sender | "person" | "unknown";
 /** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
 export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
-
-/** A start's request ID and a hash of the body it came with, stored with the thread or queued record the start made. */
-export interface StartKey { requestId: string; body: string }
 
 function observationOf(value: unknown): NodeObservation | null {
   const o = jsonOrNull<OlderObservation>(value);
