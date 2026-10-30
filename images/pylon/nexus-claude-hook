@@ -97,7 +97,13 @@ if (process.argv[2] === "ask") {
     process.exit(0);
   }
   const claude = process.env.CLAUDE_PID === undefined ? () => true : () => alive(Number(process.env.CLAUDE_PID));
-  const answer = await awaitAnswer(asks, { session, input: payload.tool_input, pid: process.pid, at }, claude);
+  // The dialog's Notification may reach the control plane before the waiting file exists, so the file's own event makes
+  // the pull that lists the ask. A heartbeat would turn the waiting session back into a running turn.
+  const waiting = async () => {
+    await enqueue({ kind: "session.waiting", at: Date.now(), session }).catch(() => {});
+    startSender();
+  };
+  const answer = await awaitAnswer(asks, { session, input: payload.tool_input, pid: process.pid, at }, claude, { waiting });
   if (answer !== null) process.stdout.write(JSON.stringify(askDecision(payload.tool_input, answer)));
   process.exit(0);
 }

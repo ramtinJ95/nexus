@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -22,6 +22,9 @@ const answer = (session: string, { call = "toolu_1", extras = "Milk, Oat cream" 
   answers: { "Which drink?": "Tea", "What goes in it?": extras }, annotations: { "Which drink?": { notes: "no rush" } },
 });
 
+/** The waiting file a hook of the session writes for the questions of `input`, or of `texts`. */
+const waitingFile = (dir: string, session: string, texts = ["Which drink?", "What goes in it?"]) => join(dir, `${createHash("sha256").update(session).digest("hex")}.${askKey(session, texts)}.waiting`);
+
 async function asksDir(t: { after(fn: () => Promise<void>): void }) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-asks-"));
   t.after(() => rm(dir, { recursive: true }));
@@ -32,7 +35,7 @@ async function asksDir(t: { after(fn: () => Promise<void>): void }) {
  * An ask that waits in `dir` as the PermissionRequest hook does, after its PreToolUse recorded `call` unless that is
  * null, and whose polls the test lets through one at a time.
  */
-async function waitingAsk(dir: string, session: string, { call = "toolu_1" as string | null, pid = process.pid, claude = (): boolean => true } = {}) {
+async function waitingAsk(dir: string, session: string, { call = "toolu_1" as string | null, pid = process.pid, at = 5, claude = (): boolean => true, waiting = undefined as (() => Promise<void>) | undefined } = {}) {
   if (call !== null) await recordCall(dir, session, input, call);
   let asleep = Promise.withResolvers<void>();
   let wake = Promise.withResolvers<void>();
@@ -40,7 +43,7 @@ async function waitingAsk(dir: string, session: string, { call = "toolu_1" as st
     asleep.resolve();
     return wake.promise;
   };
-  const waited = awaitAnswer(dir, { session, input, pid, at: 5 }, claude, { sleep });
+  const waited = awaitAnswer(dir, { session, input, pid, at }, claude, { sleep, ...waiting === undefined ? {} : { waiting } });
   await Promise.race([asleep.promise, waited]);
   return {
     waited,
@@ -146,11 +149,10 @@ test("the asks that wait name the call PreToolUse recorded, and leave out one wh
 
   await waitingAsk(dir, "s3", { pid: spawnSync(process.execPath, ["-e", ""]).pid! });
   assert.equal(await deliverAnswer(dir, answer("s3")), answerExits.nobodyWaits, "an ask whose hook died");
-  const key = askKey("s4", ["Which drink?", "What goes in it?"]);
   // A pause stops every hook, and the waiting file it left names a pid that a process after the wake may have.
-  await writeFile(join(dir, `${key}.waiting`), JSON.stringify({ pid: process.pid, start: 1, session: "s4", toolUseId: "toolu_4", at: 4, input }));
+  await writeFile(waitingFile(dir, "s4"), JSON.stringify({ pid: process.pid, start: 1, at: 4, session: "s4", toolUseId: "toolu_4", input }));
   assert.equal(await deliverAnswer(dir, answer("s4")), answerExits.nobodyWaits, "a waiting file whose pid another process took");
-  await writeFile(join(dir, `${askKey("s5", ["Which drink?", "What goes in it?"])}.waiting`), String(process.pid));
+  await writeFile(waitingFile(dir, "s5"), String(process.pid));
   assert.equal(await deliverAnswer(dir, answer("s5")), answerExits.nobodyWaits, "the bare pid an image from before the record wrote");
   assert.deepEqual((await waitingAsks(dir)).map((a) => a.session), ["s1"]);
 });
@@ -190,6 +192,36 @@ test("a turn's start or end, or its session's end, stops the session's waiting a
   assert.equal(await interrupted.waited, null);
   assert.deepEqual((await waitingAsks(dir)).map((a) => [a.session, a.toolUseId]), [["s2", "toolu_2"]]);
   assert.equal(await delivered(dir, answer("s2", { call: "toolu_2" }), others), answerExits.delivered);
+});
+
+test("a waiting ask's event is reported once its waiting file lists it", async (t) => {
+  const dir = await asksDir(t);
+  let listed: string[] | null = null;
+  const ask = await waitingAsk(dir, "s1", { waiting: async () => { listed = (await waitingAsks(dir)).map((a) => a.toolUseId); } });
+  assert.deepEqual(listed, ["toolu_1"]);
+  await forgetSession(dir, "s1");
+  await ask.poll();
+});
+
+test("a session's end removes its waiting files by their names, one that is not JSON too, and leaves another session's", async (t) => {
+  const dir = await asksDir(t);
+  const interrupted = await waitingAsk(dir, "s1");
+  await waitingAsk(dir, "s2", { call: "toolu_2" });
+  await writeFile(waitingFile(dir, "s1", ["Which colour?"]), "not JSON");
+  await forgetSession(dir, "s1");
+  await interrupted.poll();
+  assert.equal(await interrupted.waited, null);
+  assert.deepEqual((await readdir(dir)).filter((name) => name.endsWith(".waiting")), [waitingFile(dir, "s2").slice(dir.length + 1)]);
+});
+
+test("a hook whose waiting file another hook of the same ask rewrote stops waiting, and the other takes the answer", async (t) => {
+  const dir = await asksDir(t);
+  const first = await waitingAsk(dir, "s1", { call: "toolu_1" });
+  const second = await waitingAsk(dir, "s1", { call: "toolu_2", at: 6 });
+  await first.poll();
+  assert.equal(await first.waited, null);
+  assert.equal(await delivered(dir, answer("s1", { call: "toolu_2" }), second), answerExits.delivered);
+  assert.equal((await second.waited)?.answers["Which drink?"], "Tea");
 });
 
 test("an ask whose Claude is gone stops waiting, and an answer then finds nobody waiting", async (t) => {

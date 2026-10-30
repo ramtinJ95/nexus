@@ -5,15 +5,16 @@
  * `nexus-claude-hook asks` through the probe to learn which asks wait, and `nexus-claude-hook answer` to write an
  * answer, which the waiting hook hands to Claude as the tool's input. An ask is named by askKey, and its files in
  * ~/.nexus/asks are:
- *   <key>.call       the call's ID from PreToolUse, which the PermissionRequest hook takes
- *   <key>.waiting    the hook that waits and the ask it waits for, a Waiting
- *   <key>.<call>.answer     the answer written for the call, which its hook takes
- *   <key>.<call>.delivered  the answer the hook handed to Claude, so a retried delivery of it still succeeds
+ *   <key>.call                the call's ID from PreToolUse, which the PermissionRequest hook takes
+ *   <session>.<key>.waiting   the hook that waits and the ask it waits for, a Waiting
+ *   <key>.<call>.answer       the answer written for the call, which its hook takes
+ *   <key>.<call>.delivered    the answer the hook handed to Claude, so a retried delivery of it still succeeds
  * Claude Code's PermissionRequest input names no tool call, so the key is the session and the questions' texts, and
- * <call> is the SHA-256 of the call's ID, so an answer meant for one call is never another's.
+ * <call> is the SHA-256 of the call's ID, so an answer meant for one call is never another's. <session> is the
+ * SHA-256 of the session, so the end of a session's turn finds its waiting files by name.
  */
 import { createHash } from "node:crypto";
-import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { startTime } from "./nexus-heartbeat.ts";
 
@@ -44,11 +45,12 @@ export const answerDelivered = "delivered";
 export interface ReportedAsk { session: string; toolUseId: string; at: number; input: Record<string, unknown> }
 
 /**
- * What `<key>.waiting` holds. `start` is when the hook's process started, in clock ticks since boot, so a pid that a
- * pause or a killed hook freed for another process is not taken for the hook. It is null where there is no /proc.
- * `toolUseId` is null when no PreToolUse recorded the call, and `at` is when the hook started waiting.
+ * What `<session>.<key>.waiting` holds. `start` is when the hook's process started, in clock ticks since boot, so a
+ * pid that a pause or a killed hook freed for another process is not taken for the hook. It is null where there is no
+ * /proc. `at` is when the hook started waiting, and `toolUseId` is null when no PreToolUse recorded the call. The file
+ * starts with `pid`, `start` and `at`, which name the hook that wrote it.
  */
-interface Waiting { pid: number; start: number | null; session: string; toolUseId: string | null; at: number; input: Record<string, unknown> }
+interface Waiting { pid: number; start: number | null; at: number; session: string; toolUseId: string | null; input: Record<string, unknown> }
 
 /** `asks` leaves out a waiting file over maxWaitingBytes, and prints at most maxAsksBytes. */
 const maxWaitingBytes = 256 << 10;
@@ -72,7 +74,9 @@ export async function hookInput(chunks: AsyncIterable<string | Buffer> | Iterabl
   return input.length <= maxReportInput || payload?.tool_name === "AskUserQuestion" ? payload : null;
 }
 
-export const askKey = (session: string, questions: readonly string[]): string => createHash("sha256").update(`${session}\n${JSON.stringify(questions)}`).digest("hex");
+const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+export const askKey = (session: string, questions: readonly string[]): string => sha256(`${session}\n${JSON.stringify(questions)}`);
 
 /** The question texts of Claude's AskUserQuestion input, or null for an input that has none. */
 export function askedTexts(input: unknown): string[] | null {
@@ -110,8 +114,9 @@ export function askDecision(input: Record<string, unknown>, answer: Pick<AskAnsw
   return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow", updatedInput: { ...input, answers: answer.answers, annotations } } } };
 }
 
-const file = (dir: string, key: string, kind: "call" | "waiting") => join(dir, `${key}.${kind}`);
-const callFile = (dir: string, key: string, toolUseId: string, kind: "answer" | "delivered") => join(dir, `${key}.${createHash("sha256").update(toolUseId).digest("hex")}.${kind}`);
+const recordedCall = (dir: string, key: string) => join(dir, `${key}.call`);
+const waitingFile = (dir: string, session: string, key: string) => join(dir, `${sha256(session)}.${key}.waiting`);
+const callFile = (dir: string, key: string, toolUseId: string, kind: "answer" | "delivered") => join(dir, `${key}.${sha256(toolUseId)}.${kind}`);
 const contentOf = (answer: Pick<AskAnswer, "answers" | "annotations">) => JSON.stringify({ answers: answer.answers, annotations: answer.annotations });
 const read = (path: string) => readFile(path, "utf8").catch(() => null);
 
@@ -152,6 +157,18 @@ async function startOf(pid: number): Promise<number | null> {
   return stat === null ? null : startTime(stat);
 }
 
+/** Whether the file starts with `prefix`, read with one short read rather than whole. */
+async function startsWith(path: string, prefix: Buffer): Promise<boolean> {
+  const handle = await open(path).catch(() => null);
+  if (handle === null) return false;
+  try {
+    const { bytesRead, buffer } = await handle.read(Buffer.alloc(prefix.length), 0, prefix.length, 0);
+    return bytesRead === prefix.length && buffer.equals(prefix);
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Renames the file, or answers false when it is not there. */
 const renamed = (from: string, to: string) => rename(from, to).then(() => true, (err: NodeJS.ErrnoException) => {
   if (err.code === "ENOENT") return false;
@@ -169,7 +186,7 @@ export async function recordCall(dir: string, session: string, input: unknown, t
   const texts = askedTexts(input);
   if (texts === null) return;
   await mkdir(dir, { recursive: true });
-  await writeWhole(file(dir, askKey(session, texts), "call"), JSON.stringify({ toolUseId }));
+  await writeWhole(recordedCall(dir, askKey(session, texts)), JSON.stringify({ toolUseId }));
 }
 
 /**
@@ -178,10 +195,11 @@ export async function recordCall(dir: string, session: string, input: unknown, t
  * waiting file is no longer this hook's, as after PostToolUse removed it when the terminal answered, or once `claude`
  * says Claude is gone. The waiting file takes the call's ID that PreToolUse recorded, and without one no answer can
  * name the call. Answers and deliveries left by earlier asks of the same questions in the session are removed first.
+ * `waiting` runs once the waiting file is written, so the control plane's pull after the event it reports lists the ask.
  */
 export async function awaitAnswer(
   dir: string, asked: { session: string; input: Record<string, unknown>; pid: number; at: number }, claude: () => boolean,
-  { sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 500)) }: { sleep?: () => Promise<void> } = {},
+  { sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 500)), waiting }: { sleep?: () => Promise<void>; waiting?: () => Promise<void> } = {},
 ): Promise<Pick<AskAnswer, "answers" | "annotations"> | null> {
   const texts = askedTexts(asked.input);
   if (texts === null) return null;
@@ -190,21 +208,25 @@ export async function awaitAnswer(
   for (const name of await readdir(dir)) {
     if (name.startsWith(`${key}.`) && (name.endsWith(".answer") || name.endsWith(".delivered"))) await rm(join(dir, name), { force: true });
   }
-  const call = (jsonOf(await read(file(dir, key, "call"))) as { toolUseId?: unknown } | null)?.toolUseId;
-  await rm(file(dir, key, "call"), { force: true });
+  const call = (jsonOf(await read(recordedCall(dir, key))) as { toolUseId?: unknown } | null)?.toolUseId;
+  await rm(recordedCall(dir, key), { force: true });
   const toolUseId = typeof call === "string" ? call : null;
-  const waiting = file(dir, key, "waiting");
-  const mine = JSON.stringify({ pid: asked.pid, start: await startOf(asked.pid), session: asked.session, toolUseId, at: asked.at, input: asked.input } satisfies Waiting);
-  await writeWhole(waiting, mine);
+  const waitingPath = waitingFile(dir, asked.session, key);
+  const hook = { pid: asked.pid, start: await startOf(asked.pid), at: asked.at };
+  const mine = JSON.stringify({ ...hook, session: asked.session, toolUseId, input: asked.input } satisfies Waiting);
+  // The record up to the comma after `at`, which no other hook's file starts with.
+  const token = Buffer.from(mine.slice(0, JSON.stringify(hook).length));
+  await writeWhole(waitingPath, mine);
+  await waiting?.();
   for (;;) {
-    if (await read(waiting) !== mine) return null;
+    if (!await startsWith(waitingPath, token)) return null;
     if (!claude()) {
-      await rm(waiting, { force: true });
+      await rm(waitingPath, { force: true });
       return null;
     }
     if (toolUseId !== null && await renamed(callFile(dir, key, toolUseId, "answer"), callFile(dir, key, toolUseId, "delivered"))) {
       const answer = await read(callFile(dir, key, toolUseId, "delivered"));
-      await rm(waiting, { force: true });
+      await rm(waitingPath, { force: true });
       return JSON.parse(answer!) as Pick<AskAnswer, "answers" | "annotations">;
     }
     await sleep();
@@ -228,7 +250,8 @@ export async function deliverAnswer(
   const content = contentOf(answer);
   const delivered = async () => await read(callFile(dir, key, answer.toolUseId, "delivered")) === content;
   if (await delivered()) return answerExits.delivered;
-  const waitingText = await read(file(dir, key, "waiting"));
+  const waitingPath = waitingFile(dir, answer.session, key);
+  const waitingText = await read(waitingPath);
   const waiter = waitingOf(waitingText);
   if (waiter?.toolUseId !== answer.toolUseId || !await waits(waiter)) return answerExits.nobodyWaits;
   const temp = `${answerFile}.${process.pid}`;
@@ -243,7 +266,7 @@ export async function deliverAnswer(
   }
   const giveUp = Date.now() + giveUpMs;
   while (!await delivered()) {
-    if (await read(file(dir, key, "waiting")) !== waitingText || !await waits(waiter) || Date.now() >= giveUp) {
+    if (await read(waitingPath) !== waitingText || !await waits(waiter) || Date.now() >= giveUp) {
       const back = `${answerFile}.${process.pid}.back`;
       if (await renamed(answerFile, back)) await rm(back, { force: true });
       return await delivered() ? answerExits.delivered : answerExits.nobodyWaits;
@@ -280,8 +303,9 @@ export async function waitingAsks(dir: string): Promise<ReportedAsk[]> {
 export async function forgetAsk(dir: string, session: string, input: unknown): Promise<void> {
   const texts = askedTexts(input);
   if (texts === null) return;
-  await rm(file(dir, askKey(session, texts), "waiting"), { force: true });
-  await rm(file(dir, askKey(session, texts), "call"), { force: true });
+  const key = askKey(session, texts);
+  await rm(waitingFile(dir, session, key), { force: true });
+  await rm(recordedCall(dir, key), { force: true });
 }
 
 /**
@@ -290,7 +314,8 @@ export async function forgetAsk(dir: string, session: string, input: unknown): P
  * left its hook waiting.
  */
 export async function forgetSession(dir: string, session: string): Promise<void> {
+  const prefix = `${sha256(session)}.`;
   for (const name of await readdir(dir).catch(() => [])) {
-    if (name.endsWith(".waiting") && waitingOf(await read(join(dir, name)))?.session === session) await rm(join(dir, name), { force: true });
+    if (name.startsWith(prefix) && name.endsWith(".waiting")) await rm(join(dir, name), { force: true });
   }
 }
