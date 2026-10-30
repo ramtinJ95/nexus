@@ -1515,7 +1515,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.51.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.52.0");
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -2258,4 +2258,191 @@ test("node prints a node's health, unknown where the host exposes nothing, and -
   ].join("\n"));
   s.nodeHealth(async () => ({ ...health, load: null, memory: null, temperatures: null, pylons: null }));
   assert.match((await s.nexus(["node", node])).stdout, /^load: unknown on 16 CPUs\nmemory: unknown\nswap: unknown\n.*\ntemperatures: unknown\npylons: unknown\n$/m);
+});
+
+test("start and item add check their worker flags alike, and item add refuses an --after that names nothing without a request", async (t) => {
+  const s = await setup(t, { queue: true });
+  for (const command of [["start"], ["item", "add"]]) {
+    const res = await s.nexus([...command, "--project", "acme", "--message", "Build A", "--model", "claude-opus-5-5"]);
+    assert.deepEqual([res.code, res.stderr], [64, "nexus: --model requires --claude. Run nexus --help for usage\n"], command.join(" "));
+  }
+  await s.nexus(["project", "edit", "acme", "--pipeline", "start"]);
+  const asked = s.requests();
+  const empty = await s.nexus(["item", "add", "--project", "acme", "--message", "Build A", "--after", " , "]);
+  assert.deepEqual([empty.code, empty.stderr], [64, "nexus: --after needs a thread. Run nexus --help for usage\n"]);
+  assert.equal(s.requests(), asked, "nothing was sent");
+  assert.deepEqual(await s.json(["items"]), []);
+});
+
+test("preview --wait rides through a restart of the control plane and prints the preview once it is served", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "ports"]);
+  observeRunning(s, thread, [], [3000]);
+  const { url } = await s.json(["preview", thread.id, "3000"]);
+  const asked = s.requests();
+  const waiting = s.nexus(["preview", thread.id, "3000", "--wait"]);
+  await until("the wait polls a preview that is not served yet", () => s.requests() >= asked + 2);
+  const restart = await s.stop();
+  const tried = s.proxy.connects.length;
+  await until("a poll met the stopped control plane", () => s.proxy.connects.length > tried);
+  await restart();
+  observeRunning(s, thread, [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], [3000]);
+  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
+  const served = await waiting;
+  assert.deepEqual([served.code, served.stdout], [0, `${url}\n`], served.stderr);
+});
+
+test("send to a Claude worker whose message meets an unreachable control plane fails at once with exit code 2, and is not sent again", { timeout: 30_000 }, async (t) => {
+  const s = await setup(t);
+  const sends: string[] = [];
+  const dropping = createHttpServer((req, res) => {
+    if (req.method === "GET") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ thread: { status: "active" }, claudeWorker: {} }));
+    sends.push(req.url!);
+    req.socket.destroy();
+  });
+  const port = await listening(t, dropping);
+  const started = Date.now();
+  const sent = await s.nexus(["send", "th-0123456789ab", "deploy", "--json"], { NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" });
+  assert.equal(sent.code, 2, sent.stderr);
+  assert.equal(JSON.parse(sent.stderr).kind, "unreachable");
+  assert.equal(sends.length, 1, "the message may have run, so it is not sent again");
+  assert.ok(Date.now() - started < 10_000, "it fails at once rather than waiting for the pylon");
+});
+
+/** Runs `args` with its output in a file under a shell, kills the shell once the output has `ready`, and answers how long the orphan outlived it. */
+async function orphanLife(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], ready: string): Promise<number> {
+  const out = join(await mkdtemp(join(tmpdir(), "nexus-orphan-")), "out");
+  const sh = spawn("sh", ["-c", `"$0" "$@" > "${out}" 2>&1 & echo $!; wait`, process.execPath, cli, ...args], { env: s.env() });
+  t.after(() => { sh.kill("SIGKILL"); });
+  const [pidLine] = await once(sh.stdout, "data") as [Buffer];
+  const pid = Number(pidLine.toString().trim());
+  t.after(() => { try { process.kill(pid); } catch {} });
+  await until(`${args[0]} printed ${ready}`, async () => (await readFile(out, "utf8").catch(() => "")).includes(ready));
+  sh.kill("SIGKILL");
+  await once(sh, "exit");
+  const killed = Date.now();
+  await until(`the orphaned ${args[0]} exited`, async () => {
+    try {
+      process.kill(pid, 0);
+      // A container's PID 1 may leave an exited orphan as a zombie.
+      return /\) Z /.test(await readFile(`/proc/${pid}/stat`, "utf8").catch(() => ""));
+    } catch { return true; }
+  });
+  return Date.now() - killed;
+}
+
+test("a watch or events --follow whose parent is killed exits within about a second, however long the watch's interval", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "idle"]);
+  // The bounds are well under the minute's interval, and loose for a loaded suite.
+  assert.ok(await orphanLife(t, s, ["watch", thread.id, "--json", "--interval", "60000"], '"type":"state"') < 10_000, "the watch did not wait out its interval");
+  s.registry.appendEvent("release.changed", null, { state: "pending" });
+  assert.ok(await orphanLife(t, s, ["events", "--follow"], "release.changed") < 10_000, "events --follow exited");
+});
+
+test("deploy --wait polls over one connection through the proxy, and its PUT opens its own", async (t) => {
+  const s = await setup(t);
+  const asked = s.requests();
+  const waiting = s.nexus(["deploy", "main", "--wait", "--json"]);
+  await until("the wait polled a few times", () => s.requests() >= asked + 4);
+  for (const role of ["control", "probe"] as const) s.registry.reportRelease({ node, role, commit: "a".repeat(40), target: "a".repeat(40), state: "healthy", reason: null, observedAt: Date.now() });
+  const done = await waiting;
+  assert.equal(done.code, 0, done.stderr);
+  assert.ok(s.requests() >= asked + 5);
+  assert.equal(s.proxy.connects.length, 2, "one CONNECT for the PUT, and one the polls share");
+});
+
+/**
+ * A control plane whose pylon runs from the second read of its checkout, which `files` waits for without riding
+ * through a lost connection. `close` says what it does to a kept connection: hang up on it while idle, or on its
+ * next request without an answer. Answers the requests each connection carried.
+ */
+async function closingApi(t: TestContext, close: "idle" | "request") {
+  const carried: string[][] = [];
+  let reads = 0;
+  const of = new WeakMap<Socket, string[]>();
+  const idle = new WeakMap<Socket, NodeJS.Timeout>();
+  const server = createHttpServer((req, res) => {
+    const requests = of.get(req.socket)!;
+    if (close === "request" && requests.length > 0) return void req.socket.destroy();
+    requests.push(req.url!.split("?")[0]!);
+    clearTimeout(idle.get(req.socket));
+    if (close === "idle") res.on("finish", () => idle.set(req.socket, setTimeout(() => req.socket.destroy(), 200)));
+    // Without Node's keep-alive hint, which would tell the client when the server closes a connection.
+    const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json", connection: "keep-alive" }).end(JSON.stringify(body));
+    if (!req.url!.includes("/files")) return reply(200, { thread: { status: "active" } });
+    if (++reads === 1) return reply(409, { error: "pylon pylon-x is not running yet", code: "not-running" });
+    reply(200, { path: "", entries: [], truncated: false });
+  });
+  server.on("connection", (socket) => {
+    const requests: string[] = [];
+    of.set(socket, requests);
+    carried.push(requests);
+  });
+  return { port: await listening(t, server), carried };
+}
+
+test("a GET whose kept connection the server closed, idle or as the GET went out, goes out again on a new one without an error", { timeout: 60_000 }, async (t) => {
+  const s = await setup(t);
+  const [files, thread] = ["/v1/threads/th-0123456789ab/files", "/v1/threads/th-0123456789ab"];
+  const expected = { idle: [[files, thread], [files]], request: [[files], [thread], [files]] };
+  for (const close of ["idle", "request"] as const) {
+    const api = await closingApi(t, close);
+    const res = await s.nexus(["files", "th-0123456789ab"], { NEXUS_URL: `http://127.0.0.1:${api.port}`, NEXUS_SOCKS: "none" });
+    assert.deepEqual([res.code, res.stdout, res.stderr], [0, "the checkout is empty.\n", ""], close);
+    assert.deepEqual(api.carried.filter((requests) => requests.length > 0), expected[close], `${close}: the connections and what each carried`);
+  }
+});
+
+test("the CLI exits as soon as its command is done, though the server keeps the connection open", { timeout: 60_000 }, async (t) => {
+  const s = await setup(t);
+  const dir = await mkdtemp(join(tmpdir(), "nexus-keep-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const certificate = await testCertificate(dir, apiName);
+  let answered = 0;
+  const server = createHttpsServer(certificate, (_req, res) => {
+    res.on("finish", () => { answered = Date.now(); });
+    res.writeHead(200, { "content-type": "application/json" }).end("[]");
+  });
+  server.keepAliveTimeout = 60_000;
+  const open = new Set<Socket>();
+  server.on("secureConnection", (socket) => { open.add(socket); socket.on("close", () => open.delete(socket)); });
+  const port = await listening(t, server);
+  t.after(() => { for (const socket of open) socket.destroy(); });
+  const res = await s.nexus(["projects"], { NEXUS_URL: `https://${apiName}:${port}`, NODE_EXTRA_CA_CERTS: join(dir, "cert.pem") });
+  assert.deepEqual([res.code, res.stdout], [0, "No projects.\n"], res.stderr);
+  // The pool lets go of an idle connection after 4 s, so a socket that held the process would show here.
+  assert.ok(Date.now() - answered < 3_000, `the CLI exited ${Date.now() - answered} ms after its answer`);
+});
+
+test("a watch whose reader closed the pipe exits 0 when the thread's deletion ends it", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "closing"]);
+  const watch = watchLines(t, s, [thread.id]);
+  const exited = once(watch.child, "exit");
+  assert.equal((await watch.next()).type, "reset");
+  watch.child.stdout.destroy();
+  await s.json(["delete", thread.id]);
+  assert.deepEqual(await exited, [0, null]);
+});
+
+test("a reused connection takes each request's own idle timeout, and a silence on it is not sent again", { timeout: 60_000 }, async (t) => {
+  const seen: string[] = [];
+  const sockets = new Set<Socket>();
+  const server = createHttpServer((req, res) => {
+    seen.push(req.url!);
+    sockets.add(req.socket);
+    if (req.url === "/slow") return;
+    res.writeHead(200, { "content-type": "application/json" }).end("{}");
+  });
+  const port = await listening(t, server);
+  t.after(() => { for (const socket of sockets) socket.destroy(); });
+  const endpoint = { url: new URL(`http://127.0.0.1:${port}`), socks: null };
+  await call(endpoint, "GET", "/fast", undefined, 100);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual(await call(endpoint, "GET", "/fast", undefined, 60_000), {}, "the first request's 100 ms did not stay on the socket");
+  await assert.rejects(call(endpoint, "GET", "/slow", undefined, 200),
+    (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at 127.0.0.1:${port} sent nothing for 0.2s`);
+  assert.deepEqual(seen, ["/fast", "/fast", "/slow"]);
+  assert.equal(sockets.size, 1, "the three requests shared one connection");
 });
