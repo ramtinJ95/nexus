@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
@@ -29,6 +30,9 @@ const self = "nCONTROL" as TailnetNodeId;
 const head1 = "1".repeat(40);
 const head2 = "2".repeat(40);
 const merged = "m".repeat(40);
+// One directory for the file, so each test's registry is closed before it is removed.
+const registries = await tempDir("nexus-review-");
+const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
@@ -1897,7 +1901,7 @@ test("nothing starts on its own without the project's setting, for a thread the 
   await off.loop().auto(off.registry.thread(off.builder)!, off.pr);
   assert.equal(off.registry.review(off.builder), null, "a project without the setting");
 
-  const f = fixture(t, { path: join(await tempDir("nexus-review-", t), "registry.db"), autoReview: { land: false, enabledBy: "nPHONE" } });
+  const f = fixture(t, { path: tempDb(), autoReview: { land: false, enabledBy: "nPHONE" } });
   const loop = f.loop();
   for (const [id, by] of [["th-reviewing", reviewerCaller], ["th-checking", checkCaller]] as const) {
     await loop.auto(f.registry.thread(f.add(id, true, by))!, f.pr);
@@ -1962,7 +1966,7 @@ test("a builder that cannot rebase, or a conflict after the last round, goes to 
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: main rewrote the cache this PR adds, so one side has to go."] });
 
-  const last = fixture(t, { path: join(await tempDir("nexus-review-", t), "registry.db") });
+  const last = fixture(t, { path: tempDb() });
   const capped = last.loop();
   await capped.start(last.builder, { land: "nLAPTOP", rounds: 1 });
   await capped.poll();
@@ -2024,7 +2028,7 @@ test("each landing asks again whether its lander may deploy, and whether the pro
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["nLAPTOP, who asked for this landing, is not among the control plane's deployers, so only the person can land it."] });
 
-  const auto = fixture(t, { path: join(await tempDir("nexus-review-", t), "registry.db"), autoReview: { land: true, enabledBy: "nLAPTOP" } });
+  const auto = fixture(t, { path: tempDb(), autoReview: { land: true, enabledBy: "nLAPTOP" } });
   const own = auto.loop();
   await own.auto(auto.registry.thread(auto.builder)!, auto.pr);
   await own.poll();

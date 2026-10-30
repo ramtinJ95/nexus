@@ -37,7 +37,7 @@ export async function freePort(): Promise<number> {
   return port;
 }
 
-/** A new directory under the system's temporary one, removed with all it holds once `t` ends, or once the file's tests end. */
+/** A new directory under the system's temporary one, removed with all it holds once `t` ends. Without `t`, it goes once the test that makes it ends, or the file's tests when made outside any test. */
 export async function tempDir(prefix: string, t?: Pick<TestContext, "after">): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   (t?.after.bind(t) ?? after)(() => rm(dir, { recursive: true, force: true }));

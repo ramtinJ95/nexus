@@ -17,6 +17,7 @@ import { tempDir, testImage } from "../test-kit.ts";
 const node = "rj-firebat" as NodeName;
 const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
 const laptop = "nLAPTOP";
+const dir = await tempDir("nexus-pipeline-");
 
 function fixture(t: import("node:test").TestContext, setting: PipelineSetting | null = { autoStart: true }, path = ":memory:") {
   const registry = openRegistry(path);
@@ -163,7 +164,7 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
 });
 
 test("an item is queued once across passes and restarts, under its request ID", async (t) => {
-  const path = join(await tempDir("nexus-pipeline-", t), "registry.db");
+  const path = join(dir, "registry.db");
   const first = fixture(t, { autoStart: true }, path);
   const a = first.add("A");
   const b = first.add("B", [a], { claude: "Build B" });
