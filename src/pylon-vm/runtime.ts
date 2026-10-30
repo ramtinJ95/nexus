@@ -2,6 +2,7 @@ import { access, readFile, rename } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { join, posix } from "node:path";
 import { VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
+import { z } from "zod";
 import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
 import {
 	checked,
@@ -79,7 +80,7 @@ export async function loadKvm(vm: VM, resources: BootSpec["resources"]): Promise
 const chained = (commands: readonly string[]) => commands.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n");
 
 /** Actions that wait on a process, only read, or touch only the host, which run beside the lifecycle queue so that they never wait behind it. */
-const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "read", "write-files", "logs", "update-secret"]);
+const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "write-files", "logs", "update-secret"]);
 export const runsBesideQueue = (action: string) => besideQueue.has(action);
 
 /**
@@ -151,7 +152,7 @@ export class SandboxRuntime {
 	private bootedAt: string | undefined;
 	private recovery: string | undefined;
 	private terminal:
-		| { user: string; command: string; access: SshAccess; close(): Promise<void> }
+		| { user: string; access: SshAccess; close(): Promise<void> }
 		| undefined;
 	private state:
 		| "starting"
@@ -457,20 +458,13 @@ export class SandboxRuntime {
 					this.terminal = {
 						user: action.user,
 						access: { user: action.user, port: terminal.port, identityFile: ssh.identityFile },
-						command: `ssh -p ${terminal.port} -i ${q(ssh.identityFile)} -o ForwardAgent=no -o ClearAllForwardings=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${action.user}@127.0.0.1`,
 						close: async () => {
 							await terminal.close();
 							await ssh.close();
 						},
 					};
 				}
-				return {
-					name: this.record.name,
-					access: this.terminal.access,
-					command: this.terminal.command,
-					handoff:
-						"Run this command in a terminal on this host to access the guest. No host credentials were copied",
-				};
+				return { name: this.record.name, access: this.terminal.access };
 			}
 			case "exec":
 				return this.processes!.status(
@@ -484,21 +478,6 @@ export class SandboxRuntime {
 				return this.processes!.status(action.pid, action.timeoutMs);
 			case "exec-kill":
 				return this.processes!.kill(action.pid);
-			case "read": {
-				const result = await execute(
-					vm,
-					`head -c 65537 ${q(action.path)}`,
-					"/",
-					10000,
-				);
-				if (result.exitCode !== 0)
-					throw new Error(`Guest file could not be read: ${result.output}`);
-				return {
-					path: action.path,
-					content: result.output,
-					truncated: result.truncated,
-				};
-			}
 			case "write-files":
 				await writeFiles(vm, action.files, this.stopping.signal);
 				return { paths: action.files.map((file) => file.path) };
@@ -603,6 +582,5 @@ export function setupOnDisk(marker: string | null, record: SandboxRecord): Setup
 	return ran.setupError === undefined ? {} : { setupError: ran.setupError };
 }
 export async function readIntent(dir: string): Promise<{ prepare: boolean }> {
-	const { z } = await import("zod");
 	return z.strictObject({ prepare: z.boolean() }).parse(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")));
 }

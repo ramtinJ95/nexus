@@ -7,6 +7,8 @@ import { checked, direct, readGuestFile, serviceRunning, startService, stopServi
 import { openPortal } from "./portals.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
 import { readJson, saveJson } from "../json-file.ts";
+import { parse } from "../parse.ts";
+import type { ServiceFact } from "../protocol.ts";
 
 const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
 type Entry = {
@@ -23,16 +25,6 @@ const assignmentsSchema = z.record(
 	}),
 );
 
-/** One service as Nexus reports it, ServiceFact in src/protocol.ts. */
-export type ServiceFact = {
-	name: string;
-	state: "starting" | "ready" | "failed" | "stopped";
-	port: number;
-	declared: boolean;
-	wantsPreview: boolean;
-	/** Why its preview has no route, while it has none. */
-	unrouted?: string;
-};
 const linkedSchema = z.array(z.number().int().min(1).max(65535));
 
 /**
@@ -104,9 +96,11 @@ export class GuestServices {
 			}
 		const adHoc = await readJson(join(this.dir, "adhoc.json"));
 		for (const [name, service] of Object.entries(adHoc === undefined ? {} : z.record(z.string(), z.unknown()).parse(adHoc))) {
-			const parsed = configSchema.safeParse({ services: { [name]: service } });
-			if (parsed.success) this.adHocConfig[name] = parsed.data.services[name]!;
-			else console.log(`services: ad hoc service ${name} is not restored: ${parsed.error.issues.map((issue) => `${issue.path.join(".")} ${issue.message}`).join("; ")}`);
+			try {
+				this.adHocConfig[name] = parse(configSchema.shape.services, { [name]: service }, "adhoc.json")[name]!;
+			} catch (error) {
+				console.log(`services: ad hoc service ${name} is not restored: ${(error as Error).message}`);
+			}
 		}
 		// A linked port outlives the boot, because the control plane keeps its preview for the thread's life.
 		const linked = linkedSchema.parse(await readJson(join(this.dir, "linked.json"), []));

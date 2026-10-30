@@ -223,7 +223,7 @@ test("a wake drops restored ports that are Nexus's own and routes the rest, rath
 	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
 	assert.deepEqual(logged.mock.calls.map((call) => call.arguments[0]), [
 		"services: old's saved port 750 is Nexus's own: sshd's 22, or the preview relay's 700 to 799, so it gets another",
-		"services: ad hoc service api is not restored: services.api.port is Nexus's own: sshd's 22, or the preview relay's 700 to 799",
+		"services: ad hoc service api is not restored: adhoc.json.api.port: is Nexus's own: sshd's 22, or the preview relay's 700 to 799",
 		"services: linked port 700 is Nexus's own: sshd's 22, or the preview relay's 700 to 799, so it is not routed",
 	]);
 });

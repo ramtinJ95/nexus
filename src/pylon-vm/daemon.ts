@@ -3,10 +3,13 @@ import { chmod, rm } from "node:fs/promises";
 import http from "node:http";
 import { join } from "node:path";
 import { text } from "node:stream/consumers";
-import { actionSchema, bootSchema } from "./contracts.ts";
+import { controlSocket } from "./client.ts";
+import { type Action, actionSchema, bootSchema } from "./contracts.ts";
 import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
 import { agentError, readRecord } from "./storage.ts";
+import { parse } from "../parse.ts";
+import { BodyTooLarge, readBody } from "../request-body.ts";
 
 async function main(): Promise<void> {
 	const dir = process.argv[2];
@@ -33,53 +36,50 @@ async function main(): Promise<void> {
 		return;
 	}
 	const queue = lifecycleQueue();
-	const socket = join(dir, "control.sock");
-	const server = http.createServer((req, res) => {
-		let body = "";
-		req.setEncoding("utf8");
-		req.on("data", (chunk: string) => {
-			body += chunk;
-			if (body.length > 8388608) req.destroy();
-		});
-		req.on("end", () => {
-			const handle = async () => {
-				try {
-					const action = actionSchema.parse(JSON.parse(body));
-					if (!("name" in action) || action.name !== record.name)
-						throw new Error("Sandbox name does not match this instance");
-					const result = await runtime.handle(action);
-					res.end(JSON.stringify({ ok: true, result }));
-					if (action.action === "stop" || action.action === "destroy") {
-						server.close();
-						await rm(socket, { force: true });
-					}
-				} catch (error) {
-					if (error instanceof NotRunning) console.error(`deferred: ${error.message}`);
-					else console.error(error);
-					const failure = agentError(error);
-					if (runtime.retired) {
-						server.close();
-						await rm(socket, { force: true });
-						await rm(pidFile, { force: true });
-					}
-					res.end(
-						JSON.stringify({
-							ok: false,
-							error:
-								failure instanceof Error
-									? failure.message
-									: "Sandbox operation failed. Inspect its state and logs before retrying",
-						}),
-					);
-				}
-			};
-			let beside = false;
-			try {
-				beside = runsBesideQueue(actionSchema.parse(JSON.parse(body)).action);
-			} catch {}
-			if (beside) void handle();
-			else void queue.run(handle);
-		});
+	const socket = controlSocket(dir);
+	const closeServer = async () => {
+		server.close();
+		await rm(socket, { force: true });
+	};
+	const refuse = (res: http.ServerResponse, error: unknown) => {
+		const failure = agentError(error);
+		res.end(
+			JSON.stringify({
+				ok: false,
+				error:
+					failure instanceof Error
+						? failure.message
+						: "Sandbox operation failed. Inspect its state and logs before retrying",
+			}),
+		);
+	};
+	const handle = async (action: Action, res: http.ServerResponse) => {
+		try {
+			if (!("name" in action) || action.name !== record.name)
+				throw new Error("Sandbox name does not match this instance");
+			const result = await runtime.handle(action);
+			res.end(JSON.stringify({ ok: true, result }));
+			if (action.action === "stop" || action.action === "destroy") await closeServer();
+		} catch (error) {
+			if (error instanceof NotRunning) console.error(`deferred: ${error.message}`);
+			else console.error(error);
+			if (runtime.retired) {
+				await closeServer();
+				await rm(pidFile, { force: true });
+			}
+			refuse(res, error);
+		}
+	};
+	const server = http.createServer(async (req, res) => {
+		let action: Action;
+		try {
+			action = parse(actionSchema, JSON.parse(await readBody(req, 8 << 20)), "action");
+		} catch (error) {
+			if (!(error instanceof BodyTooLarge)) console.error(error);
+			return refuse(res, error);
+		}
+		if (runsBesideQueue(action.action)) void handle(action, res);
+		else void queue.run(() => handle(action, res));
 	});
 	server.listen(socket);
 	await once(server, "listening");
@@ -101,8 +101,7 @@ async function main(): Promise<void> {
 		void queue
 			.run(async () => {
 				await runtime.stop();
-				server.close();
-				await rm(socket, { force: true });
+				await closeServer();
 			})
 			.catch(async (error: unknown) => {
 				await runtime.fail(error);

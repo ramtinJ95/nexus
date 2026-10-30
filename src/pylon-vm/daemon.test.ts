@@ -33,16 +33,17 @@ async function controller(t: TestContext) {
 	child.stderr.setEncoding("utf8").on("data", (chunk: string) => (log += chunk));
 	child.stdin.end(JSON.stringify(spec));
 	const exited = once(child, "exit").then(([code]) => code as number | null);
-	const inspect = () =>
-		new Promise<string>((accept, reject) => {
+	const post = (body: string) =>
+		new Promise<{ ok: boolean; error?: string; result?: { status: { state: string } } }>((accept, reject) => {
 			const req = http.request({ socketPath: join(dir, "control.sock"), agent: false, method: "POST", path: "/" }, (res) => {
-				let body = "";
-				res.setEncoding("utf8").on("data", (chunk: string) => (body += chunk));
-				res.on("end", () => accept((JSON.parse(body) as { result: { status: { state: string } } }).result.status.state));
+				let reply = "";
+				res.setEncoding("utf8").on("data", (chunk: string) => (reply += chunk));
+				res.on("end", () => accept(JSON.parse(reply)));
 			});
 			req.on("error", reject);
-			req.end(JSON.stringify({ action: "inspect", name }));
+			req.end(body);
 		});
+	const inspect = async () => (await post(JSON.stringify({ action: "inspect", name }))).result!.status.state;
 	const until = async (done: () => boolean) => {
 		while (!done()) {
 			if (child.exitCode !== null) throw new Error(`controller exited ${child.exitCode}:\n${log}`);
@@ -55,7 +56,7 @@ async function controller(t: TestContext) {
 		await until(() => log.includes(`injected accept error ${n}\n`));
 	};
 	await until(() => existsSync(join(dir, "control.sock")));
-	return { dir, child, exited, inspect, failAccept, log: () => log };
+	return { dir, child, exited, post, inspect, failAccept, log: () => log };
 }
 
 test("the controller logs each server error after it listens, and keeps serving", async (t) => {
@@ -71,4 +72,16 @@ test("the controller logs each server error after it listens, and keeps serving"
 	assert.equal(await exited, 0);
 	assert.equal(existsSync(join(dir, "control.sock")), false);
 	assert.equal(existsSync(join(dir, "controller.pid")), false);
+});
+
+test("a body over 8 MiB is refused with a reply, and one that is no action is answered without waiting behind the lifecycle queue", async (t) => {
+	const { post, inspect } = await controller(t);
+	const refused = await post(JSON.stringify({ action: "inspect", name, padding: "x".repeat(8 << 20) }));
+	assert.deepEqual(refused, { ok: false, error: "request body over 8388608 bytes" });
+	void post(JSON.stringify({ action: "services", name, op: "status" })).catch(() => {});
+	const answered = await Promise.race([post(JSON.stringify({ action: "frob", name })), delay(5000, "still waiting")]);
+	assert.notEqual(answered, "still waiting", "the reply to a body that is no action waited for the queue");
+	assert.equal((answered as { ok: boolean }).ok, false);
+	assert.match((answered as { error: string }).error, /^action\.action: /);
+	assert.equal(await inspect(), "running");
 });

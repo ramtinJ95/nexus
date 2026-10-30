@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync } from "node:fs";
 import {
@@ -42,7 +42,7 @@ function request(
 	return new Promise((accept, reject) => {
 		const req = http.request(
 			{
-				socketPath: join(dir, "control.sock"),
+				socketPath: controlSocket(dir),
 				// A stopping controller stops listening, but a connection with a request in flight stays open. Pooled,
 				// it would reach the stopped controller after its socket is gone and keep it, and its controller.pid, alive.
 				agent: false,
@@ -141,21 +141,6 @@ async function launch(
 		throw new Error(
 			`Sandbox state path ${dir} is too long for a local control socket. Choose a shorter state root`,
 		);
-	let nodeVersion: string;
-	try {
-		nodeVersion = execFileSync("node", ["--version"], {
-			encoding: "utf8",
-			timeout: 3000,
-		}).trim();
-	} catch {
-		throw new Error(
-			"Starting a sandbox requires Node.js 24 or newer on PATH. Install Node.js, then retry start",
-		);
-	}
-	if (Number(nodeVersion.match(/^v(\d+)\./)?.[1] ?? 0) < 24)
-		throw new Error(
-			`Node.js 24 or newer is required, found ${nodeVersion}. Update Node.js, then retry start`,
-		);
 	const daemonPath = fileURLToPath(new URL("./daemon.ts", import.meta.url));
 	if (!existsSync(daemonPath))
 		throw new Error(
@@ -198,7 +183,7 @@ async function launch(
 		await publishIdentity(join(lock, "owner"));
 		// The boot's resources, so the node counts what a VM still coming up holds.
 		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
-		await rm(join(dir, "control.sock"), { force: true });
+		await rm(controlSocket(dir), { force: true });
 		const env: NodeJS.ProcessEnv = {};
 		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME"])
 			if (process.env[key]) env[key] = process.env[key];
@@ -210,7 +195,7 @@ async function launch(
 		await privateDirectory(env.TMPDIR);
 		const fd = openSync(join(dir, "controller.log"), "a", 0o600);
 		// The spec carries secret values, so it goes over a pipe and never through the environment or a file.
-		const child = spawn("node", [daemonPath, dir], {
+		const child = spawn(process.execPath, [daemonPath, dir], {
 			detached: true,
 			stdio: ["pipe", fd, fd],
 			env,

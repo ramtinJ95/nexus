@@ -256,9 +256,18 @@ test("a stop checkpoints although reads whose waits ran out still hold command s
 
 /** Opens the guest terminal, a real listener on the host, and closes it after the test even when the code under test does not. */
 async function openTerminal(runtime: SandboxRuntime, t: { after(fn: () => Promise<void>): void }) {
-	await runtime.handle({ action: "shell", name: "pylon-a", user: "user" } as Action);
+	const reply = await runtime.handle({ action: "shell", name: "pylon-a", user: "user" } as Action);
 	t.after(async () => void (await runtime.handle({ action: "destroy", name: "pylon-a", confirm: "pylon-a" } as Action)));
+	return reply;
 }
+
+test("the shell reply is the guest terminal's SSH access and nothing else", async (t) => {
+	const { runtime } = await runningOnAFakeVm(t, /^$/, "queued");
+	const reply = (await openTerminal(runtime, t)) as { name: string; access: { user: string; port: number; identityFile: string } };
+	assert.deepEqual(Object.keys(reply), ["name", "access"]);
+	assert.deepEqual({ ...reply.access, port: 0 }, { user: "user", port: 0, identityFile: "/nonexistent/key" });
+	assert.equal(reply.name, "pylon-a");
+});
 
 test("a stop that closes the VM at its deadline first closes the guest terminal, which the VM's close would wait on", async (t) => {
 	const { fake, runtime } = await runningOnAFakeVm(t, staged, "answering");

@@ -159,7 +159,6 @@ export const actionSchema = z.discriminatedUnion("action", [
 		...identity,
 		pid: z.string().uuid(),
 	}),
-	z.strictObject({ action: z.literal("read"), ...identity, path: guestPath }),
 	z.strictObject({
 		action: z.literal("write-files"),
 		...identity,

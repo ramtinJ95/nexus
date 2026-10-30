@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { Guest } from "../backend.ts";
 import { processStream } from "../process-stream.ts";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId, ServiceFact } from "../protocol.ts";
 import type { PylonLog } from "../session-wake.ts";
 import { statusSchema } from "./contracts.ts";
 import { shellQuote as q } from "../project.ts";
@@ -59,7 +59,7 @@ const factsSchema = z.array(z.strictObject({
 	declared: z.boolean(),
 	wantsPreview: z.boolean(),
 	unrouted: z.string().exactOptional(),
-}));
+})) satisfies z.ZodType<ServiceFact[]>;
 const logsReplySchema = z.object({ output: z.string() });
 const linkReplySchema = z.object({ service: z.string() });
 const unlinkReplySchema = z.object({ refused: z.string().nullable() });
