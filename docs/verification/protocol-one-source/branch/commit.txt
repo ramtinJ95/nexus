@@ -1,1 +1,1 @@
-6b38699 refactor(project): check ServiceDecl and PreviewLink against their schemas
+2cc7977 test: pin a stream's status errors and whois's 1 MiB cap

@@ -146,6 +146,9 @@ src/protocol.test.ts(340,21): error TS18046: 'stopped' is of type 'unknown'.
 src/protocol.test.ts(340,37): error TS18046: 'stopped' is of type 'unknown'.
 src/protocol.test.ts(340,51): error TS18046: 'stopped' is of type 'unknown'.
 src/protocol.test.ts(342,63): error TS18046: 'conflict' is of type 'unknown'.
+src/protocol.test.ts(346,52): error TS18046: 'refused' is of type 'unknown'.
+src/protocol.test.ts(347,18): error TS18046: 'refused' is of type 'unknown'.
+src/protocol.test.ts(348,28): error TS18046: 'refused' is of type 'unknown'.
 src/tailscale.test.ts(9,44): error TS2305: Module '"./tailscale.ts"' has no exported member 'PeerRefused'.
 src/tailscale.test.ts(9,57): error TS2305: Module '"./tailscale.ts"' has no exported member 'verifyPeer'.
-src/tailscale.test.ts(91,40): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/tailscale.test.ts(93,40): error TS7006: Parameter 'id' implicitly has an 'any' type.

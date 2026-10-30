@@ -1,6 +1,6 @@
 # One source for the peer check, the probe's status errors and the protocol's unions
 
-`run.sh` ran in this thread's pylon on 2026-10-30, on Node 26.12.1, against main at 90f4299 and this branch at 6b38699, the last commit that changes code.
+`run.sh` ran in this thread's pylon on 2026-10-30, on Node 26.12.1, against main at 90f4299 and this branch at 2cc7977, the last commit that changes code.
 
 `capture.ts` drives each checkout's real `connectProbe` client, `fetchArtifact`, the deployer's `jsonRequest`, and the LocalAPI whois and certificate reads. A loopback HTTP server stands in for a probe and a peer, a raw TCP server for a node that whois does not name, and a Unix-socket server for tailscaled. The capture writes each answer, or each rejection's class, message, `code` and `status`. It then copies the deployer bootstrap's files, as `deploy/install-deployer.sh` lists them, into a directory with no node_modules and loads `tailscale.ts` and `deploy/http.ts` from there.
 

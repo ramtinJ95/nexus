@@ -1,4 +1,4 @@
-# branch's code, 6b38699 refactor(project): check ServiceDecl and PreviewLink against their schemas, with the branch's tests
+# branch's code, 2cc7977 test: pin a stream's status errors and whois's 1 MiB cap, with the branch's tests
 ✔ node requests verify the control identity before sending the root credential
 ✔ health requests bound the whole response, not just connecting
 ✔ a refused request carries its status and whole body, and a long join refusal reaches the person as the control plane's words
