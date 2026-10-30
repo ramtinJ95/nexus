@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { NodeName, PylonId, TailnetNodeId } from "./ids.ts";
 import { parseJobEnvelope, parseSubmitReply } from "./protocol/jobs.ts";
@@ -396,4 +396,20 @@ test("ids.ts imports nothing, so every module can take its IDs from it without a
   const source = readFileSync(new URL("./ids.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /^\s*import\b|\bimport\s*\(/m);
   assert.doesNotMatch(source, /^\s*export\b[^;]*\bfrom\s*["']/m);
+});
+
+test("the probe never loads the control plane's probe client", () => {
+  const client = new URL("./protocol/client.ts", import.meta.url).href;
+  const loaders = (dir: string) => readdirSync(new URL(dir, import.meta.url), { recursive: true, encoding: "utf8" })
+    .filter((f) => f.endsWith(".ts") && !/\.(test|check)\.ts$/.test(f)).map((f) => new URL(`${dir}${f}`, import.meta.url));
+  const files = [...loaders("./protocol/"), ...loaders("./probe/")].filter((f) => f.href !== client);
+  assert.ok(files.length > 15, "it reads the contract's files and the probe's");
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    const specifiers = [
+      ...[...source.matchAll(/^\s*(?:import|export)\b(?!\s+type\b)[^;]*?\bfrom\s*["']([^"']+)["']/gm)].map((m) => m[1]!),
+      ...[...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/g)].map((m) => m[1]!),
+    ];
+    for (const specifier of specifiers) assert.notEqual(new URL(specifier, file).href, client, `${file.pathname} loads client.ts`);
+  }
 });
