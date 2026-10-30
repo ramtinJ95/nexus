@@ -5,7 +5,6 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
@@ -18,6 +17,7 @@ import { call as callJson, until } from "../test-kit.ts";
 import { mintJoinToken } from "./join.ts";
 import { parseConfig, startControlPlane } from "./main.ts";
 import { openRegistry } from "./registry.ts";
+import { rewindTo, versionBefore } from "./schema-kit.ts";
 
 const example = await readFile(new URL("../../deploy/control.example.json", import.meta.url), "utf8");
 const probeExample = await readFile(new URL("../../deploy/probe.example.json", import.meta.url), "utf8");
@@ -162,10 +162,7 @@ test("a registry and control.json from before join tokens come up with the same 
     registry.upsertNode({ name: "rj-firebat" as NodeName, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nControlPlaneCNTRL" as TailnetNodeId });
     registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.example.ts.net", tailnetNodeId: "nPeerProbeCNTRL" as TailnetNodeId });
     registry.close();
-    const raw = new DatabaseSync(db);
-    const version = raw.prepare("PRAGMA user_version").get()!.user_version as number;
-    raw.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 4}`);
-    raw.close();
+    rewindTo(db, versionBefore(/CREATE TABLE IF NOT EXISTS join_tokens\b/));
   } });
   assert.deepEqual(plane.followed, [
     ["rj-firebat", "rj-firebat.example.ts.net", "nControlPlaneCNTRL"],

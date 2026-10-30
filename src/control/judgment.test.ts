@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { openHarnessHost, type ConversationId, type HarnessHost } from "../harness/host.ts";
 import { scriptedModel, scriptedModels, type ScriptedRequest } from "../harness/test-fixture.ts";
 import { desiredPhase } from "../reconcile.ts";
@@ -15,6 +14,7 @@ import type { ProjectId } from "../project.ts";
 import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
 import { briefOf, judgmentPass, type Judgment, type JudgmentPass } from "./judgment.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { rewindTo, versionBefore } from "./schema-kit.ts";
 
 const nodeA = "node-a" as NodeName;
 const nodeB = "node-b" as NodeName;
@@ -322,10 +322,7 @@ test("failures from before judgments, projects without the pipeline and threads 
   const old = builder(first.registry, "th-old");
   fail(first.registry, old, brokenWith("retry"));
   await first.close();
-  const db = new DatabaseSync(join(dir, "registry.db"));
-  const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 7}`);
-  db.close();
+  rewindTo(join(dir, "registry.db"), versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/));
 
   const w = await open(t, dir);
   const ids = [
