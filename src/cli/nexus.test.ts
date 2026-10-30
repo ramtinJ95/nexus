@@ -9,7 +9,7 @@ import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpServer, type RequestListener } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -44,6 +44,7 @@ import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-tra
 import { testCertificate } from "../test-certificate.ts";
 import { freePort, testImage, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";
+import { version } from "../version.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const node = "rj-firebat" as NodeName;
@@ -57,6 +58,11 @@ const project: Project = {
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 };
 const image = testImage();
+
+/** A hand-written control plane's handler, which answers its health as one of this CLI's version does. */
+const withHealth = (handler: RequestListener): RequestListener => (req, res) => req.method === "GET" && req.url === "/v1/health"
+  ? void res.writeHead(200, { "content-type": "application/json", connection: "keep-alive" }).end(JSON.stringify({ commit: null, version }))
+  : handler(req, res);
 
 async function listening(t: TestContext, server: Server): Promise<number> {
   server.listen(0, "127.0.0.1");
@@ -517,35 +523,6 @@ test("show reports a published preview whose service is starting as not ready, a
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `8003  web  ${preview.url} (not ready: ${unrouted})\n`);
 });
 
-test("a preview from a control plane older than Preview.failed reads as not failed, a session older than Session.state as running, and a thread older than Thread.working as working while its session turn runs", async (t) => {
-  const s = await setup(t);
-  // That control plane's shapes: a Preview with no `failed`, and a Session with no `id`, `state` or `message`.
-  const web = { pylon: "pylon-th-old", service: "web", httpsPort: 10200, ready: true, url: "https://rj-firebat.tail.ts.net:10200/" };
-  const api = { ...web, service: "api", httpsPort: 10201, ready: false, url: "https://rj-firebat.tail.ts.net:10201/" };
-  const detail = {
-    thread: { id: "th-old", title: "old", project: "acme", status: "active", agentTurnRunning: false, sessionTurnRunning: true },
-    pylon: { id: "pylon-th-old", node, actualState: "running", failed: null, observedAt: null, retryRefused: null },
-    sessions: [{ pylon: "pylon-th-old", herdrPane: "w1:p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan" }], previews: [api, web], ports: [{ port: 3000, service: "web", preview: web }, { port: 4000, service: "api", preview: api }], outputs: [], agent: null,
-  };
-  const old = createHttpServer((req, res) => {
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify(req.method === "POST" ? web : detail));
-  });
-  const overrides = { NEXUS_URL: `http://${apiName}:${await listening(t, old)}` };
-  const run = async (args: string[]) => {
-    const res = await s.nexus(args, overrides);
-    assert.equal(res.code, 0, res.stderr);
-    return res.stdout;
-  };
-  const shown = await run(["show", "th-old"]);
-  assert.match(shown, /^preview: api at https:\/\/rj-firebat\.tail\.ts\.net:10201\/, not ready$/m);
-  assert.match(shown, /^preview: web at https:\/\/rj-firebat\.tail\.ts\.net:10200\/$/m);
-  assert.match(shown, /^session: pi "plan" in pane w1:p1, idle$/m);
-  assert.match(shown, /^status: active, agent working$/m);
-  assert.equal(await run(["ports", "th-old"]), `3000  web  ${web.url}\n4000  api  ${api.url} (not served yet)\n`);
-  assert.equal(await run(["preview", "th-old", "3000"]), `${web.url}\n`);
-});
-
 test("files, changes and diff read the pylon's checkout, and wait for a paused pylon to run", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "checkout"]);
@@ -784,7 +761,7 @@ test("attach gives this terminal to the pylon's Herdr session through the SOCKS 
   assert.ok(s.proxy.connects.length > 0 && s.proxy.connects.every((c) => c === `${apiName}:${s.api.port}`), "through the proxy");
 });
 
-test("attach to an archived thread exits 5, without a terminal 64, and against a control plane without the route says to upgrade it", async (t) => {
+test("attach to an archived thread exits 5, and without a terminal 64", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "attach"]);
   await s.json(["archive", thread.id]);
@@ -795,15 +772,6 @@ test("attach to an archived thread exits 5, without a terminal 64, and against a
   const piped = await s.nexus(["attach", thread.id]);
   assert.equal(piped.code, 64);
   assert.match(piped.stderr, /attach needs a terminal/);
-
-  // As a control plane before the route answers any path it does not know.
-  const old = createHttpServer((req, res) => {
-    res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: `no route ${new URL(req.url!, "http://x").pathname}` }));
-  });
-  const port = await listening(t, old);
-  const upgrade = await inTerminal(s.env({ NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" }), ["attach", thread.id]);
-  assert.equal(upgrade.code, 1, upgrade.screen);
-  assert.match(upgrade.screen, new RegExp(`the control plane at 127\\.0\\.0\\.1:${port} has no attach route\\. Upgrade it, as deploy/README\\.md describes`));
 });
 
 test("attach with a config of only the URL and the proxy prints nothing but its own error", async (t) => {
@@ -1123,23 +1091,6 @@ test("watch's text says a Claude transcript was replaced only when it printed so
   assert.ok(!printed.some((line) => line.includes("replaced")), printed.join("\n"));
 });
 
-test("watch says to use conversation when the control plane is older than the Claude transcript stream", async (t) => {
-  const s = await setup(t);
-  const c = await claudeWatched(t, s);
-  const detail = await s.json(["show", c.thread.id]);
-  const old = createHttpServer((req, res) => {
-    const path = new URL(req.url!, "http://x").pathname;
-    if (path === `/v1/threads/${c.thread.id}`) return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(detail));
-    res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: `no route ${path}` }));
-  });
-  const port = await listening(t, old);
-  const child = spawn(process.execPath, [cli, "watch", c.thread.id, "--interval", "50"], { env: s.env({ NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" }) });
-  t.after(() => { child.kill(); });
-  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-  assert.equal((await lines.next()).value, `-- The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${c.thread.id}`);
-  assert.equal((await lines.next()).value, "-- active, pylon running", "the thread's state still prints");
-});
-
 test("watch ends with the API's exit code when it refuses the stream", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "x"]);
@@ -1218,9 +1169,9 @@ test("connect finds the API on the dashboard's HTTPS port, saves it, and the nex
 test("connect checks an IP address URL's certificate against that address", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "nexus-cli-ip-"));
   t.after(() => rm(dir, { recursive: true }));
-  const server = createHttpsServer(await testCertificate(dir, "127.0.0.1"), (req, res) => {
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/whoami" ? { node: laptop, allowed: true, person: true, deployer: true } : { commit: "a".repeat(40) }));
-  });
+  const server = createHttpsServer(await testCertificate(dir, "127.0.0.1"), withHealth((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ node: laptop, allowed: true, person: true, deployer: true }));
+  }));
   const url = `https://127.0.0.1:${await listening(t, server)}`;
   const env = { PATH: process.env.PATH!, HOME: join(dir, "home"), NODE_EXTRA_CA_CERTS: join(dir, "cert.pem") };
   const res = await new Promise<{ code: number; stderr: string }>((resolve) => execFile(process.execPath, [cli, "connect", url], { env },
@@ -1292,18 +1243,69 @@ test("connect fails without saving when no control plane answers, or one does no
   await assert.rejects(readFile(config), { code: "ENOENT" });
 });
 
-test("connect to a control plane older than whoami saves it and says it cannot tell what this device may do", async (t) => {
-  const old = createHttpServer((req, res) => {
-    const known = req.url === "/v1/health";
-    res.writeHead(known ? 200 : 404, { "content-type": "application/json" }).end(JSON.stringify(known ? { commit: "a".repeat(40) } : { error: `no route ${req.url}` }));
+/** A control plane whose health answers `health`, and every other GET an empty list. Answers the paths it was sent. */
+async function versioned(t: TestContext, health: unknown) {
+  const paths: string[] = [];
+  const server = createHttpServer((req, res) => {
+    paths.push(req.url!);
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/health" ? health : []));
   });
-  const url = `http://127.0.0.1:${await listening(t, old)}`;
+  return { url: `http://127.0.0.1:${await listening(t, server)}`, paths };
+}
+
+/** The CLI with a home of its own and no proxy. */
+async function bare(t: TestContext, args: readonly string[], env: Record<string, string> = {}) {
   const home = await mkdtemp(join(tmpdir(), "nexus-cli-home-"));
   t.after(() => rm(home, { recursive: true }));
-  const res = await new Promise<{ code: number; stdout: string }>((resolve) => execFile(process.execPath, [cli, "connect", url], { env: { PATH: process.env.PATH!, HOME: home } },
-    (err, stdout) => resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout })));
-  assert.equal(res.code, 0);
-  assert.match(res.stdout, /^Connected to http:\/\/127\.0\.0\.1:\d+, saved in .*\nThis control plane allows this device, and is too old to say whether it may start threads or deploy\./);
+  const res = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => execFile(process.execPath, [cli, ...args], { env: { PATH: process.env.PATH!, HOME: home, NEXUS_SOCKS: "none", ...env } },
+    (err, stdout, stderr) => resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout, stderr })));
+  return { ...res, config: join(home, ".config", "nexus", "cli.json") };
+}
+
+test("a command refuses a control plane that reports no version, or one older than the CLI reads, and sends nothing past health", async (t) => {
+  // 0.9.99 is older though it sorts after 0.53.0 as text.
+  for (const [health, runs] of [[{ commit: "a".repeat(40), https: {} }, /older than \d+\.\d+\.\d+/], [{ commit: null, version: "0.9.99" }, /0\.9\.99/]] as const) {
+    // A watch and a follow retry through a failing control plane, but not through one too old.
+    for (const args of [["projects"], ["events", "--follow"], ["watch", "th-0123456789ab"]]) {
+      const old = await versioned(t, health);
+      const res = await bare(t, args, { NEXUS_URL: old.url });
+      assert.equal(res.code, 1, `${args[0]}: ${res.stderr}`);
+      assert.match(res.stderr, new RegExp(`^nexus: the control plane at ${old.url.replaceAll(".", "\\.")} runs Nexus ${runs.source}, and this CLI needs \\d+\\.\\d+\\.\\d+ or later\\. Upgrade it, as deploy/README\\.md describes\n$`), args[0]!);
+      assert.deepEqual(old.paths, ["/v1/health"], args[0]!);
+    }
+  }
+  const current = await versioned(t, { commit: null, version });
+  assert.deepEqual(await bare(t, ["projects"], { NEXUS_URL: current.url }).then((r) => [r.code, r.stdout]), [0, "No projects.\n"]);
+  assert.deepEqual(current.paths, ["/v1/health", "/v1/projects"]);
+});
+
+test("a follow whose first health read fails reads it again, and follows once the control plane answers", { timeout: 30_000 }, async (t) => {
+  const paths: string[] = [];
+  const followed = Promise.withResolvers<void>();
+  let failures = 1;
+  const server = createHttpServer((req, res) => {
+    paths.push(req.url!.split("?")[0]!);
+    if (req.url === "/v1/health" && failures-- > 0) return void res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: "starting" }));
+    withHealth((_req, stream) => {
+      stream.writeHead(200, { "content-type": "text/event-stream" }).write(": connected\n\n");
+      followed.resolve();
+    })(req, res);
+  });
+  const port = await listening(t, server);
+  t.after(() => server.closeAllConnections());
+  const child = spawn(process.execPath, [cli, "events", "--follow", "--url", `http://127.0.0.1:${port}`, "--socks", "none"]);
+  t.after(() => { child.kill(); });
+  await followed.promise;
+  assert.deepEqual(paths, ["/v1/health", "/v1/health", "/v1/events"]);
+});
+
+test("connect refuses a control plane older than the CLI reads, and saves nothing", async (t) => {
+  const old = await versioned(t, { commit: "a".repeat(40), https: {} });
+  const res = await bare(t, ["connect", old.url, "--json"]);
+  assert.equal(res.code, 1);
+  assert.match(JSON.parse(res.stderr).error, /^the control plane at http:\/\/127\.0\.0\.1:\d+ runs Nexus older than [\d.]+, and this CLI needs [\d.]+ or later\. Upgrade it, as deploy\/README\.md describes$/);
+  assert.deepEqual(old.paths, ["/v1/health"], "it asks no whoami");
+  await assert.rejects(readFile(res.config), { code: "ENOENT" });
 });
 
 test("a config file that cannot be read fails as invalid, in JSON under --json", async (t) => {
@@ -1524,7 +1526,7 @@ judgment of failure 814 on ${node}: no verdict yet\n {2}judging since 2026-10-28
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["--version"])).stdout.trim(), "nexus 0.52.0");
+  assert.equal((await s.nexus(["--version"])).stdout.trim(), `nexus ${version}`);
   assert.equal((await s.nexus(["deploy", "bad"])).code, 64);
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
@@ -1682,7 +1684,7 @@ test("concurrent project edits preserve independently changed resources", async 
     s.nexus(["project", "edit", "concurrent", "--memory", "8"]),
   ]);
   for (const result of edits) assert.equal(result.code, 0, result.stderr);
-  assert.equal(s.proxy.connects.length - before, 2, "each edit sends only its PATCH, without reading the project first");
+  assert.equal(s.proxy.connects.length - before, 4, "each edit reads health, then sends only its PATCH, without reading the project first");
   const projects = await s.json(["projects"]);
   assert.deepEqual(projects.find((p: Project) => p.id === "concurrent").resources, { cpus: 4, memoryGiB: 8, diskGiB: 10 });
 });
@@ -1756,12 +1758,12 @@ test("the SSE reader waits for its consumer before delivering more data or a cur
 test("events resumes from an id-only heartbeat without printing it", { timeout: 60_000 }, async (t) => {
   const paths: string[] = [];
   const reconnected = Promise.withResolvers<void>();
-  const server = createHttpServer((req, res) => {
+  const server = createHttpServer(withHealth((req, res) => {
     paths.push(req.url!);
     res.writeHead(200, { "content-type": "text/event-stream" });
     if (paths.length === 1) res.end("id: 12000\n: ping\n\n");
     else { res.write(": connected\n\n"); reconnected.resolve(); }
-  });
+  }));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -1779,10 +1781,10 @@ test("events resumes from an id-only heartbeat without printing it", { timeout: 
 
 test("events bounds stdout buffering when its pipe is not read", { timeout: 60_000 }, async (t) => {
   const event = JSON.stringify({ id: "1", time: 0, thread: null, project: null, kind: "release.changed", payload: { message: "x".repeat(2048) } });
-  const server = createHttpServer((_req, res) => {
+  const server = createHttpServer(withHealth((_req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write(Array.from({ length: 10_000 }, () => `data: ${event}\n\n`).join(""));
-  });
+  }));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -1951,24 +1953,6 @@ test("send to a Claude worker that waits at a prompt in its terminal fails at on
   assert.match(reported.error, /^Claude waits at a prompt in its terminal, so nothing was typed/);
   assert.deepEqual([reported.kind, reported.status, reported.code], ["conflict", 409, "blocked"]);
   assert.equal(s.commands.filter((c) => c.kind === "send-claude").length, 1);
-});
-
-test("send to a Claude worker tries a 409 without a code again, as a control plane older than error codes sends it", async (t) => {
-  const s = await setup(t);
-  let refusals = 2;
-  const sends: string[] = [];
-  const old = createHttpServer((req, res) => {
-    const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
-    if (req.method === "GET") return reply(200, { thread: { status: "active" }, claudeWorker: {} });
-    sends.push(req.url!);
-    if (refusals-- > 0) return reply(409, { error: "pylon pylon-x is not running yet. This request wakes it, so ask again once it runs" });
-    reply(202, { claude: { session: "s1", outcome: "sent", resumed: false } });
-  });
-  const port = await listening(t, old);
-  const sent = await s.nexus(["send", "th-0123456789ab", "deploy"], { NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" });
-  assert.equal(sent.code, 0, sent.stderr);
-  assert.equal(sent.stdout, "Sent to Claude in th-0123456789ab.\n");
-  assert.equal(sends.length, 3);
 });
 
 test("abort interrupts a Claude worker's turn with Esc in its pane, and fails with exit code 5 when Claude was not working", async (t) => {
@@ -2159,20 +2143,6 @@ test("usage backfill starts a run, --dry-run lists what it would read, --stop st
   assert.equal((await s.nexus(["usage", "backfill", "--dry-run"])).stdout, `A start reads 1 archived thread, one pylon at a time:\n${gone.id}  acme  rj-firebat  Gone\n  skipped before: rj-firebat holds no disk for its pylon\n`);
 });
 
-test("a control plane older than the usage backfill reports none, so usage prints no backfill line, and usage backfill fails as for a missing route", async (t) => {
-  const s = await setup(t);
-  const { backfill: _, ...report } = await s.json(["usage", "--since", "all"]);
-  const old = createHttpServer((req, res) => {
-    const path = new URL(req.url!, "http://x").pathname;
-    if (path === "/v1/usage") return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(report));
-    res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: `no route ${path}` }));
-  });
-  const env = { NEXUS_URL: `http://127.0.0.1:${await listening(t, old)}`, NEXUS_SOCKS: "none" };
-  const usage = await s.nexus(["usage"], env);
-  assert.match(usage.stdout, /^Usage of all projects for all time\. Counting started [^\n]*\.\nNo model calls were counted in this period\.\n$/);
-  assert.equal((await s.nexus(["usage", "backfill"], env)).code, 4);
-});
-
 test("usage prints the tokens of the last 7 days in all and by each breakdown, --since, --project and --by narrow it, and --json is the API's report", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Usage"]);
@@ -2304,11 +2274,11 @@ test("preview --wait rides through a restart of the control plane and prints the
 test("send to a Claude worker whose message meets an unreachable control plane fails at once with exit code 2, and is not sent again", { timeout: 30_000 }, async (t) => {
   const s = await setup(t);
   const sends: string[] = [];
-  const dropping = createHttpServer((req, res) => {
+  const dropping = createHttpServer(withHealth((req, res) => {
     if (req.method === "GET") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ thread: { status: "active" }, claudeWorker: {} }));
     sends.push(req.url!);
     req.socket.destroy();
-  });
+  }));
   const port = await listening(t, dropping);
   const started = Date.now();
   const sent = await s.nexus(["send", "th-0123456789ab", "deploy", "--json"], { NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" });
@@ -2371,17 +2341,20 @@ async function closingApi(t: TestContext, close: "idle" | "request") {
   let reads = 0;
   const of = new WeakMap<Socket, string[]>();
   const idle = new WeakMap<Socket, NodeJS.Timeout>();
+  const answer = withHealth((req, res) => {
+    // Without Node's keep-alive hint, which would tell the client when the server closes a connection.
+    const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json", connection: "keep-alive" }).end(JSON.stringify(body));
+    if (!req.url!.includes("/files")) return reply(200, { thread: { status: "active" } });
+    if (++reads === 1) return reply(409, { error: "pylon pylon-x is not running yet", code: "not-running" });
+    reply(200, { path: "", entries: [], truncated: false });
+  });
   const server = createHttpServer((req, res) => {
     const requests = of.get(req.socket)!;
     if (close === "request" && requests.length > 0) return void req.socket.destroy();
     requests.push(req.url!.split("?")[0]!);
     clearTimeout(idle.get(req.socket));
     if (close === "idle") res.on("finish", () => idle.set(req.socket, setTimeout(() => req.socket.destroy(), 200)));
-    // Without Node's keep-alive hint, which would tell the client when the server closes a connection.
-    const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json", connection: "keep-alive" }).end(JSON.stringify(body));
-    if (!req.url!.includes("/files")) return reply(200, { thread: { status: "active" } });
-    if (++reads === 1) return reply(409, { error: "pylon pylon-x is not running yet", code: "not-running" });
-    reply(200, { path: "", entries: [], truncated: false });
+    answer(req, res);
   });
   server.on("connection", (socket) => {
     const requests: string[] = [];
@@ -2393,8 +2366,8 @@ async function closingApi(t: TestContext, close: "idle" | "request") {
 
 test("a GET whose kept connection the server closed, idle or as the GET went out, goes out again on a new one without an error", { timeout: 60_000 }, async (t) => {
   const s = await setup(t);
-  const [files, thread] = ["/v1/threads/th-0123456789ab/files", "/v1/threads/th-0123456789ab"];
-  const expected = { idle: [[files, thread], [files]], request: [[files], [thread], [files]] };
+  const [health, files, thread] = ["/v1/health", "/v1/threads/th-0123456789ab/files", "/v1/threads/th-0123456789ab"];
+  const expected = { idle: [[health, files, thread], [files]], request: [[health], [files], [thread], [files]] };
   for (const close of ["idle", "request"] as const) {
     const api = await closingApi(t, close);
     const res = await s.nexus(["files", "th-0123456789ab"], { NEXUS_URL: `http://127.0.0.1:${api.port}`, NEXUS_SOCKS: "none" });
@@ -2409,10 +2382,10 @@ test("the CLI exits as soon as its command is done, though the server keeps the 
   t.after(() => rm(dir, { recursive: true }));
   const certificate = await testCertificate(dir, apiName);
   let answered = 0;
-  const server = createHttpsServer(certificate, (_req, res) => {
+  const server = createHttpsServer(certificate, withHealth((_req, res) => {
     res.on("finish", () => { answered = Date.now(); });
     res.writeHead(200, { "content-type": "application/json" }).end("[]");
-  });
+  }));
   server.keepAliveTimeout = 60_000;
   const open = new Set<Socket>();
   server.on("secureConnection", (socket) => { open.add(socket); socket.on("close", () => open.delete(socket)); });

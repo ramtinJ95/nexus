@@ -22,7 +22,7 @@ export class CliError extends Error {
   readonly kind: ErrorKind;
   /** The API's HTTP status, or null when the CLI failed before or without a reply. */
   readonly status: number | null;
-  /** The `code` of the API's error reply, or null when it sent none, as a control plane older than codes does. */
+  /** The `code` of the API's error reply, or null when it sent none. */
   readonly code: string | null;
   constructor(kind: ErrorKind, message: string, status: number | null = null, code: string | null = null) {
     super(message);
@@ -31,10 +31,6 @@ export class CliError extends Error {
     this.code = code;
   }
 }
-
-/** Whether the control plane has no such route, which one older than the route says without a code. */
-export const isMissingRoute = (err: unknown): err is CliError => err instanceof CliError && err.status === 404
-  && (err.code === "no-route" || (err.code === null && err.message.startsWith("no route ")));
 
 export interface HostPort { host: string; port: number }
 export interface Endpoint {
@@ -178,7 +174,7 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
 
 /**
  * Opens a WebSocket to the API over the same direct or SOCKS connection as `call`, paused until the caller resumes
- * it. A refused handshake rejects as `call` does. A 404 that names no route is a control plane older than the route.
+ * it. A refused handshake rejects as `call` does.
  * The server's pings keep the idle timeout from firing, so a link that hangs still fails, and the socket's own
  * error, such as that timeout, is what the WebSocket's `error` event carries.
  */
@@ -203,9 +199,7 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
           reply("GET", path, res.statusCode!, text);
           reject(new CliError("failed", `GET ${path} answered ${res.statusCode} rather than a WebSocket`, res.statusCode!));
         } catch (err) {
-          reject(isMissingRoute(err)
-            ? new CliError("failed", `the control plane at ${host} has no attach route. Upgrade it, as deploy/README.md describes`, 404)
-            : err);
+          reject(err);
         }
       });
     });
