@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { startTime } from "./nexus-heartbeat.ts";
 
 /** Where the image installs the hook, which the control plane runs through the probe. */
 export const claudeHook = "/usr/local/bin/nexus-claude-hook";
@@ -148,7 +149,7 @@ export function alive(pid: number): boolean {
 /** When the process started, in clock ticks since boot, or null for none or where there is no /proc. */
 async function startOf(pid: number): Promise<number | null> {
   const stat = await read(`/proc/${pid}/stat`);
-  return stat === null ? null : Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
+  return stat === null ? null : startTime(stat);
 }
 
 /** Renames the file, or answers false when it is not there. */

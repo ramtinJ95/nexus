@@ -58,29 +58,19 @@ export async function holdTurnEnd(
  * newest Stop's reports are not stale. Answers whether it did.
  */
 export async function claimHold(path: string, stamp: number, pid: number): Promise<boolean> {
-  for (let tries = 0; tries < 200; tries++) {
-    const claimed = await locked(path, async () => {
-      const [owner] = (await readFile(path, "utf8").catch(() => "0")).split(" ");
-      if (Number(owner) >= stamp) return false;
-      await writeFile(path, `${stamp} ${pid}`);
-      return true;
-    });
-    if (claimed !== undefined) return claimed;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  return false;
+  return await lockedRetrying(path, async () => {
+    const [owner] = (await readFile(path, "utf8").catch(() => "0")).split(" ");
+    if (Number(owner) >= stamp) return false;
+    await writeFile(path, `${stamp} ${pid}`);
+    return true;
+  }) ?? false;
 }
 
 /** Gives the session up at the end, unless a newer hold has claimed it. */
 export async function releaseHold(path: string, stamp: number, pid: number): Promise<void> {
-  for (let tries = 0; tries < 200; tries++) {
-    const released = await locked(path, async () => {
-      if (!await holdSuperseded(path, stamp, pid)) await rm(path, { force: true });
-      return true;
-    });
-    if (released) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  await lockedRetrying(path, async () => {
+    if (!await holdSuperseded(path, stamp, pid)) await rm(path, { force: true });
+  });
 }
 
 /** Whether another hold has claimed the session since this one did. */
@@ -89,6 +79,13 @@ export async function holdSuperseded(path: string, stamp: number, pid: number): 
 }
 
 type Proc = { pid: number; ppid: number; pgid: number; start: number };
+
+/** The fields of a `/proc/<pid>/stat` after the command's name, which may itself hold spaces and parentheses. */
+const statFields = (stat: string): string[] => stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+
+/** When the process of a `/proc/<pid>/stat` started, in clock ticks since boot. */
+export const startTime = (stat: string): number => Number(statFields(stat)[19]);
+
 /** A process group, with its leader's start time, so a later group that reuses the ID is not taken for it. */
 export type Group = { pgid: number; start: number };
 
@@ -101,8 +98,8 @@ async function processes(proc: string): Promise<Proc[]> {
     stats.push(...await Promise.all(pids.slice(i, i + 256).map((pid) => readFile(`${proc}/${pid}/stat`, "utf8").catch(() => ""))));
   }
   return stats.flatMap((stat) => {
-    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    return stat === "" ? [] : [{ pid: Number(stat.slice(0, stat.indexOf(" "))), ppid: Number(fields[1]), pgid: Number(fields[2]), start: Number(fields[19]) }];
+    const fields = statFields(stat);
+    return stat === "" ? [] : [{ pid: Number(stat.slice(0, stat.indexOf(" "))), ppid: Number(fields[1]), pgid: Number(fields[2]), start: startTime(stat) }];
   });
 }
 
@@ -128,7 +125,7 @@ export function backgroundWatch(session: string, shells: readonly string[], grou
   const known = new Map(groups.map((g) => [g.pgid, new Set([`${g.pgid}@${g.start}`])]));
   let started = since;
   return async () => {
-    started ??= Number((await readFile(`${proc}/self/stat`, "utf8").catch(() => "")).split(") ").at(-1)?.split(" ")[19] ?? 0);
+    started ??= startTime(await readFile(`${proc}/self/stat`, "utf8").catch(() => "")) || 0;
     const all = await processes(proc);
     // The kernel reuses no ID while its group has a process. So a leader that started at another time leads another
     // group, and without its leader the group is the original only while a member already known to be in it lives,
@@ -188,4 +185,14 @@ async function locked<T>(path: string, critical: () => Promise<T>, now = Date.no
   if (held !== null && now - held.mtimeMs > 60_000) await rm(lock, { recursive: true, force: true });
   try { await mkdir(lock); } catch { return undefined; }
   try { return await critical(); } finally { await rm(lock, { recursive: true, force: true }); }
+}
+
+/** Runs `critical` under the path's lock, trying for two seconds, or answers undefined if another process kept it. */
+async function lockedRetrying<T>(path: string, critical: () => Promise<T>): Promise<T | undefined> {
+  for (let tries = 0; tries < 200; tries++) {
+    const done = await locked(path, async () => ({ value: await critical() }));
+    if (done !== undefined) return done.value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return undefined;
 }

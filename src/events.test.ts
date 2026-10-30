@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry } from "./control/registry.ts";
@@ -147,6 +147,21 @@ test("the newest Stop's hold owns the session whatever order the holds start in,
   assert.equal(claims[19], true);
   await releaseHold(owner, 3000, 33);
   assert.equal(await holdSuperseded(owner, 3000, 33), true, "the owner's release frees the session");
+});
+
+test("a hold that cannot take the session's lock while another process holds it gives up and does not own the session", async (t) => {
+  const { claimHold, holdSuperseded } = await import("../images/pylon/nexus-heartbeat.ts");
+  const dir = mkdtempSync(join(tmpdir(), "nexus-hold-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const owner = join(dir, "session");
+  mkdirSync(`${owner}.lock`);
+  assert.equal(await claimHold(owner, 1000, 11), false);
+  assert.equal(await holdSuperseded(owner, 1000, 11), true);
+});
+
+test("a process's start time is read past a command name that holds spaces and a closing parenthesis", async () => {
+  const { startTime } = await import("../images/pylon/nexus-heartbeat.ts");
+  assert.equal(startTime("4242 (a) b (c) d) S 1 4242 4242 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 987654 1000 200 18446744073709551615"), 987654);
 });
 
 test("every background group is found among more processes than a process may hold files open at once", async (t) => {
