@@ -849,6 +849,10 @@ export function openRegistry(path: string, clock = Date.now) {
       return added;
     },
     /** Where each of the source's files or conversations was last read to. */
+    usageCursor(source: string, key: string): UsageCursor | undefined {
+      const r = sql("SELECT * FROM usage_cursors WHERE source = ? AND key = ?").get(source, key);
+      return r && { source, key, position: r.position as number, before: r.before as string };
+    },
     usageCursors: (source: string): Map<string, UsageCursor> =>
       new Map(sql("SELECT * FROM usage_cursors WHERE source = ?").all(source).map((r) => [r.key as string, { source, key: r.key as string, position: r.position as number, before: r.before as string }])),
     /** `since` is a UTC day's start, or null for all. */

@@ -25,6 +25,8 @@ export function singleFlight(run: () => Promise<void>, stopped: () => boolean = 
     join: (): Promise<void> => flight ?? rerun(),
     /** Starts a run, or asks for one more after the one in flight. Settles after the last run. */
     rerun,
+    /** Whether a run is in flight. */
+    busy: (): boolean => flight !== null,
     /** Settles once no run is in flight. */
     async settled(): Promise<void> { await flight; },
   };

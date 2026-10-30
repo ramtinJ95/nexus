@@ -1,9 +1,10 @@
 /**
  * Reads what every thread's agents spent into the registry: the Nexus agent's calls from the harness, and the calls of
- * the agents in its pylon from their transcripts there. A turn's end reads the thread it ended in, and a sweep reads
- * every thread, once at start and then every `sweepMs`, which catches what no event announces, such as a pi session
- * someone runs in a pylon's terminal. As with Claude's transcripts, a pylon is read only while its node's last
- * observation reports it running, so reading never wakes one, and a failed read keeps what is recorded.
+ * the agents in its pylon from their transcripts there. A turn's end reads the thread it ended in, a deleted one's too,
+ * and a sweep reads every thread but the deleted ones, once at start and then every `sweepMs`, which catches what no
+ * event announces, such as a pi session someone runs in a pylon's terminal. As with Claude's transcripts, a pylon is
+ * read only while its node's last observation reports it running, so reading never wakes one, and a failed read keeps
+ * what is recorded.
  */
 import { readAgentUsage, agentLogs, type FileCursor } from "../agent-usage.ts";
 import type { HarnessHost } from "../harness/host.ts";
@@ -15,7 +16,7 @@ import { runningProbe } from "./observed.ts";
 import type { Registry, ThreadId } from "./registry.ts";
 
 export interface UsageCounter {
-  /** Reads every thread now. */
+  /** Reads every thread but the deleted ones now. */
   sweep(): Promise<void>;
   /**
    * Reads every transcript of the thread's running pylon from its start, as the usage backfill does, and records each
@@ -73,7 +74,7 @@ export function usageCounter(options: {
     const agent = t === undefined ? undefined : registry.agent(t);
     if (agent?.kind !== "harness") return;
     const conversation = agent.conversationId;
-    const after = registry.usageCursors("harness").get(conversation)?.position ?? null;
+    const after = registry.usageCursor("harness", conversation)?.position ?? null;
     const { calls, last } = await harness.usage(Number(conversation) as ConversationId, after);
     if (last !== null && last !== after) registry.recordUsage(id, calls, [{ source: "harness", key: conversation, position: last, before: "" }]);
   });
@@ -120,7 +121,14 @@ export function usageCounter(options: {
   }
 
   async function sweep() {
-    await Promise.all(registry.threads().flatMap((t) => [readHarness(t.id), readPylon(t.id)]));
+    const swept = registry.storedThreads({ status: ["active", "idle", "archived"] }).map((t) => t.id);
+    await Promise.all(swept.flatMap((id) => [readHarness(id), readPylon(id)]));
+    const keys = new Set(swept.flatMap((id) => [`${id}/harness`, `${id}/pylon`]));
+    for (const [key, flight] of reads) {
+      if (keys.has(key) || held.has(key) || flight.busy()) continue;
+      reads.delete(key);
+      failures.delete(key);
+    }
   }
 
   // From the newest event, as the sweep at start reads what came before.
