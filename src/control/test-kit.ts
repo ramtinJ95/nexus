@@ -3,12 +3,15 @@
  * git@example.com:acme.git. What needs no registry is in src/test-kit.ts.
  */
 import { randomUUID } from "node:crypto";
+import type { TestContext } from "node:test";
 import { testObservation } from "../test-kit.ts";
-import { newPylonRecord } from "../tick.ts";
+import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
-import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
+import type { PullRequest } from "./github.ts";
+import { openRegistry, type Registry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
+import type { Review } from "./review-model.ts";
 
 export const testNode = "rj-firebat" as NodeName;
 /** The tailnet IDs tests assert for their nodes. Another node gets `n<name>`. */
@@ -19,6 +22,13 @@ export function testProject(over: Partial<RemoteProject> = {}): RemoteProject {
     id: "acme" as ProjectId, repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: testNode,
     resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null, ...over,
   };
+}
+
+/** Opens the registry at `path`, in memory unless a file is named, and closes it once `t` ends. */
+export function testRegistry(t: Pick<TestContext, "after">, path = ":memory:", clock?: () => number): Registry {
+  const registry = openRegistry(path, clock);
+  t.after(() => registry.close());
+  return registry;
 }
 
 /** Adds the nodes, and the project unless the registry has it, so a test may seed one registry more than once. */
@@ -41,10 +51,11 @@ export interface PylonOptions {
   node?: NodeName;
   boot?: Partial<StoredPylon["boot"]>;
   liveHash?: string;
+  firstBoot?: PylonRecord["firstBoot"];
 }
 
 /** The thread's new pylon on `node`, booting fresh from a clone of acme's main. */
-export function testPylon(thread: Pick<Thread, "id" | "pylonId">, { node = testNode, boot = {}, liveHash = "hash-1" }: PylonOptions = {}): StoredPylon {
+export function testPylon(thread: Pick<Thread, "id" | "pylonId">, { node = testNode, boot = {}, liveHash = "hash-1", firstBoot = { kind: "fresh", preSetup: null } }: PylonOptions = {}): StoredPylon {
   const { desired: _, ...pylon } = newPylonRecord({
     thread: thread.id, pylonId: thread.pylonId, node, desired: "running",
     boot: {
@@ -52,7 +63,7 @@ export function testPylon(thread: Pick<Thread, "id" | "pylonId">, { node = testN
       repo: { kind: "clone", url: "git@example.com:acme.git", checkout: { branch: "main", commit: "origin/main" } },
       dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, ...boot,
     },
-    firstBoot: { kind: "fresh", preSetup: null },
+    firstBoot,
     live: { previews: [], overlay: [] },
     liveHash: liveHash as LiveHash,
   });
@@ -71,4 +82,19 @@ export function observeNode(registry: Registry, over: Partial<NodeObservation> =
   const observation = testObservation(over.node ?? testNode, over);
   registry.ingested(observation, [{ record: "node", node: observation.node, state: "online", capacity: observation.capacity }]);
   return observation;
+}
+
+/** Open pull request #1 of acme/repo, with no checks, no review and no conflict. Its URL follows its repo and number. */
+export function testPr(over: Partial<PullRequest> = {}): PullRequest {
+  const { repo = "acme/repo", number = 1 } = over;
+  return { repo, number, title: "Fix", url: `https://github.com/${repo}/pull/${number}`, state: "open", checks: "none", review: "none", conflict: false, ...over };
+}
+
+/** Review rv-1 of acme/repo's PR #7 in its first round, by a harness reviewer on gpt-6-astra of a builder on claude-opus-5-5. */
+export function testReview(over: Partial<Review> = {}): Review {
+  return {
+    id: "rv-1", builder: "th-builder" as ThreadId, reviewer: "th-reviewer" as ThreadId, pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" },
+    reviewerKind: "harness", models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1,
+    outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0, rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, ...over,
+  };
 }
