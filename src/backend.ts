@@ -16,7 +16,7 @@ import type { Readable } from "node:stream";
 import type { BrokenCause, ByteStream, JobErrorCode, NodeName, PausedSession, PylonId, ServiceFact } from "./protocol.ts";
 import { type BootInputs, type LiveSpec, type OverlayFile, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
-import type { HostBridge } from "./probe/pylon-api.ts";
+import type { HostBridge } from "./host-bridge.ts";
 
 export interface VmBackend {
   /**

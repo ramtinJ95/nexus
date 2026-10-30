@@ -24,7 +24,7 @@ import { outputsDir } from "../outputs.ts";
 import { sessionsFile } from "../sessions.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { checkoutReader } from "../checkout-files.ts";
-import type { HostBridge, HostBridgeAnswer } from "./pylon-api.ts";
+import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;
