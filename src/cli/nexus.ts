@@ -759,7 +759,8 @@ function stateText(s: WatchState): string {
 /**
  * Calls `onEnd` once the consumer of a stream is gone: on SIGINT, SIGTERM or SIGHUP, when it closes the pipe, or when
  * the process that started this one exits. A consumer killed outright never closes the pipe, and a quiet stream
- * writes nothing that would find it closed, so the parent is checked every second. Answers what removes the handlers.
+ * writes nothing that would find it closed, so the parent is checked every second. Answers what stops the parent
+ * check and the signal handlers. The pipe's stays, since a closed pipe fails the last write after the stream ends.
  */
 function untilConsumerGone(onEnd: () => void): () => void {
   const parent = process.ppid;
@@ -770,7 +771,6 @@ function untilConsumerGone(onEnd: () => void): () => void {
   for (const signal of signals) process.once(signal, onEnd);
   return () => {
     clearInterval(orphan);
-    process.stdout.removeListener("error", outputError);
     for (const signal of signals) process.removeListener(signal, onEnd);
   };
 }

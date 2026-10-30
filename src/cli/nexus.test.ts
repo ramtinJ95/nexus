@@ -2414,3 +2414,35 @@ test("the CLI exits as soon as its command is done, though the server keeps the 
   // The pool lets go of an idle connection after 4 s, so a socket that held the process would show here.
   assert.ok(Date.now() - answered < 3_000, `the CLI exited ${Date.now() - answered} ms after its answer`);
 });
+
+test("a watch whose reader closed the pipe exits 0 when the thread's deletion ends it", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "closing"]);
+  const watch = watchLines(t, s, [thread.id]);
+  const exited = once(watch.child, "exit");
+  assert.equal((await watch.next()).type, "reset");
+  watch.child.stdout.destroy();
+  await s.json(["delete", thread.id]);
+  assert.deepEqual(await exited, [0, null]);
+});
+
+test("a reused connection takes each request's own idle timeout, and a silence on it is not sent again", { timeout: 60_000 }, async (t) => {
+  const seen: string[] = [];
+  const sockets = new Set<Socket>();
+  const server = createHttpServer((req, res) => {
+    seen.push(req.url!);
+    sockets.add(req.socket);
+    if (req.url === "/slow") return;
+    res.writeHead(200, { "content-type": "application/json" }).end("{}");
+  });
+  const port = await listening(t, server);
+  t.after(() => { for (const socket of sockets) socket.destroy(); });
+  const endpoint = { url: new URL(`http://127.0.0.1:${port}`), socks: null };
+  await call(endpoint, "GET", "/fast", undefined, 100);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual(await call(endpoint, "GET", "/fast", undefined, 60_000), {}, "the first request's 100 ms did not stay on the socket");
+  await assert.rejects(call(endpoint, "GET", "/slow", undefined, 200),
+    (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at 127.0.0.1:${port} sent nothing for 0.2s`);
+  assert.deepEqual(seen, ["/fast", "/fast", "/slow"]);
+  assert.equal(sockets.size, 1, "the three requests shared one connection");
+});
