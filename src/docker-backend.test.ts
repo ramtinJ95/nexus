@@ -97,6 +97,20 @@ test("a container removed between its listing and its inspection is left out, an
   assert.deepEqual((await backend.list()).map((p) => [p.pylonId, p.vm]), [[pylon, "running"]]);
 });
 
+test("a pylon's state reads only its own container, or with none its checkpoints, so a paused pylon is stopped and one with neither absent", async (t) => {
+  const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "" }) });
+  const backend = createDockerBackend({ images });
+  assert.equal(await backend.state(pylon), "running");
+  const checkpoint = { Id: "i1", Created: "2026-10-27T00:00:00Z", Config: { Labels: { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.checkpoint": "ckpt-a-1" } } };
+  await docker.answer({ images: { stdout: "i1\n" }, "image inspect i1": { stdout: JSON.stringify([checkpoint]) } });
+  assert.equal(await backend.state(pylon), "stopped");
+  await docker.answer({});
+  assert.equal(await backend.state(pylon), "absent");
+  for (const argv of (await docker.calls()).filter((argv) => argv[0] === "ps" || argv[0] === "images")) {
+    assert.ok(hasPair(argv, "--filter", `label=nexus.pylon=${pylon}`), argv.join(" "));
+  }
+});
+
 test("a guest exec answers its exit code with stdout then stderr, a nonzero exit as a result, and a timeout as a null exit code with the output so far", async (t) => {
   const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", { "nexus.pylon": pylon }) });
   const guest = createDockerBackend({ images, labels: { "nexus.test": "pin" } }).guest(pylon);

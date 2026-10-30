@@ -74,6 +74,7 @@ function fakeBackend(guest: Guest | null = null) {
       pylons.delete(id);
     },
     async list() { return [...pylons.values()]; },
+    async state(id) { return pylons.get(id)?.vm ?? "absent"; },
     async buildTemplate(id) { calls.push(`build-template ${id}`); },
     async buildImage(id, _recipe, on) { calls.push(`build-image ${id} on ${on}`); },
     guest: () => { if (guest === null) throw new Error("this test has no guest"); return guest; },
@@ -343,6 +344,31 @@ test("a spawn granted a held secret boots before the control plane hands it over
   assert.equal(fake.pylons.get(pylonId)?.vm, "running");
 });
 
+test("jobs that finish together publish fewer snapshots than jobs, and the last shows every one's result", async (t) => {
+  const { client, fake } = await setup(t, { log: () => {}, listeningPollMs: 600_000 });
+  const ids = Array.from({ length: 5 }, (_, i) => `pylon-burst-${i}` as PylonId);
+  fake.hold();
+  const envs = ids.map((id) => envelope({ ...spawnJob, pylonId: id, boot: { ...boot, pylonId: id } } as Job, node, Date.now()));
+  for (const env of envs) await client.submit(env);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  const list = fake.backend.list;
+  fake.backend.list = async () => { await new Promise((resolve) => setTimeout(resolve, 50)); return list(); };
+  const snapshots: string[][] = [];
+  void (async () => {
+    for (let e = await events.next(); !e.done; e = await events.next()) {
+      if (e.value.type === "snapshot") snapshots.push(e.value.observation.pylons.filter((p) => p.phase === "running").map((p) => p.pylonId));
+    }
+  })().catch(() => undefined);
+  fake.release();
+  for (const env of envs) await finished(client, env.jobId);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.ok(snapshots.length > 0 && snapshots.length < ids.length, `${snapshots.length} snapshots`);
+  assert.deepEqual(snapshots.at(-1), ids);
+});
+
 test("a snapshot lists the checkpoints of the stopped pylons it reports, also when a pylon stops while it is read", async (t) => {
   const { client, fake } = await setup(t);
   const down = "pylon-down" as PylonId;
@@ -605,6 +631,24 @@ test("a command for a pylon that is not running is refused as not-running", asyn
   fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: null });
   await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { code: "not-running" });
   assert.deepEqual(guest.execs, []);
+});
+
+test("a command and a stream ask the backend for their own pylon's state and list no pylons", async (t) => {
+  const fake = fakeBackend();
+  const asked: string[] = [];
+  const guest = { ...fakeGuest(() => ({ exitCode: 0, output: "ran" })), stream: async (argv: readonly string[], log: (text: string) => void) => processStream(argv[0]!, argv.slice(1), log) };
+  const backend: VmBackend = {
+    ...fake.backend,
+    guest: () => guest,
+    list: async () => { asked.push("list"); return fake.backend.list(); },
+    state: async (id) => { asked.push(`state ${id}`); return fake.backend.state(id); },
+  };
+  const { client } = await setup(t, { backend });
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  assert.deepEqual(await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { kind: "exec", exitCode: 0, output: "ran", truncated: false });
+  assert.deepEqual(await (await client.stream(pylonId, ["true"])).done, { kind: "exited", code: 0 });
+  await assert.rejects(client.command("pylon-gone" as PylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
+  assert.deepEqual(asked, [`state ${pylonId}`, `state ${pylonId}`, "state pylon-gone"]);
 });
 
 test("a command or job body over a mebibyte is refused and reaches no guest", async (t) => {
@@ -900,18 +944,26 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   t.after(() => abort.abort());
   const events = client.observe(abort.signal)[Symbol.asyncIterator]();
   assert.equal((await events.next()).value?.type, "snapshot");
+  let received = 1;
+  void (async () => {
+    for (let e = await events.next(); !e.done; e = await events.next()) if (e.value.type === "snapshot") received++;
+  })().catch(() => undefined);
+  /** Settles once the observer got a snapshot from every read so far, so no publish waits to read again. */
+  const quiet = async () => { while (received < listed) await new Promise((resolve) => setTimeout(resolve, 5)); };
   /**
    * Whether answering the command queued a snapshot read for the observers. A link runs in the read queue, so the reads
-   * between two sentinel links are the first one's own publish and pylon read, the command's pylon read, any read it
-   * queued, and the second link's pylon read.
+   * between two sentinel links are the first one's own publish and any read the command queued. A command checks its
+   * pylon with the backend's state, which lists nothing.
    */
   const sentinel = () => client.command(pylonId, { kind: "link-port", port: sentinelPort });
   async function publishes(command: PylonCommand): Promise<boolean> {
+    await quiet();
     await sentinel();
     const before = sentinelReads.at(-1)!;
+    await quiet();
     await client.command(pylonId, command);
     await sentinel();
-    return sentinelReads.at(-1)! - before - 3 > 0;
+    return sentinelReads.at(-1)! - before - 1 > 0;
   }
   const published: Record<string, boolean> = {};
   for (const name of ["exec", "open-session", "close-session", "drop-failed-session", "send-claude-outcome", "service", "link-port", "unlink-port"]) published[name] = await publishes(commands[name]!);
@@ -1200,6 +1252,25 @@ test("a count of attached terminals that fails reads as none, is logged once, an
   assert.equal(await attachedClients(), 1, "a count that succeeds again is reported");
 });
 
+test("a count of attached terminals that fails is logged again after its pylon was seen stopped and running again", async (t) => {
+  const logged: string[] = [];
+  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+    : argv[0] === "pgrep" ? { exitCode: 127, output: "sh: pgrep: not found" } : { exitCode: 0, output: "" });
+  const { client, fake } = await setup(t, { log: (line) => logged.push(line) }, guest);
+  await running(client);
+  const phase = async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation.pylons[0]?.phase : assert.fail(e.type);
+  };
+  const failures = () => logged.filter((line) => line.includes("attached terminals")).length;
+  assert.equal(await phase(), "running");
+  assert.equal(failures(), 1);
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: null });
+  assert.equal(await phase(), "stopped");
+  fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: "ckpt-unit-1", image, bootedAt: "2027-01-01T01:00:00Z" });
+  assert.equal(await phase(), "running");
+  assert.equal(failures(), 2, logged.join("\n"));
+});
+
 test("a dropped connection is a lost stream, and the guest process's stdin ends", async (t) => {
   const { client, probe, guestStreams } = await streaming(t);
   const stream = await client.stream(pylonId, ["cat"]);
@@ -1355,6 +1426,26 @@ test("observations carry the ports the guest listens on, and one that starts lis
     assert.deepEqual(listening, [{ port: 3000 }, { port: 5173 }]);
     break;
   }
+});
+
+test("a listening poll reads the ports of the pylons the last snapshot saw running, and lists no pylons", async (t) => {
+  let ports = [5173];
+  const { client, fake } = await setup(t, { listeningPollMs: 20 }, listeningGuest(() => ports));
+  const env = envelope(spawnJob, node, Date.now());
+  await client.submit(env);
+  await finished(client, env.jobId);
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.deepEqual(runningPylon((await events.next()).value)?.listening, [{ port: 5173 }]);
+  let listed = 0;
+  const list = fake.backend.list;
+  fake.backend.list = () => { listed++; return list(); };
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(listed, 0, "about 15 polls listed nothing");
+  ports = [3000, 5173];
+  assert.deepEqual(runningPylon((await events.next()).value)?.listening, [{ port: 3000 }, { port: 5173 }], "a poll still sees the new port");
+  assert.equal(listed, 1, "only the snapshot that the change published listed the pylons");
 });
 
 test("a link-port command links the port in the guest, answers its service, and publishes a snapshot", async (t) => {

@@ -38,6 +38,8 @@ export interface VmBackend {
   buildImage(image: ImageId, recipe: ImageRecipe, node: NodeName, signal: AbortSignal): Promise<void>;
   /** Cheap, with no guest exec. The probe layers guest facts (git, sessions, previews) on top. */
   list(): Promise<readonly BackendPylon[]>;
+  /** One pylon's VM state, as list() would report it. Cheaper than list(): it reads only that pylon, and no more than its state. */
+  state(pylonId: PylonId): Promise<BackendPylon["vm"] | "absent">;
   /** Rejects with not-running unless the pylon is running. */
   guest(pylonId: PylonId): Guest;
   readonly artifacts: ArtifactStore;

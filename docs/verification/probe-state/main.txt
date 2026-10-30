@@ -1,0 +1,4 @@
+POST /v1/pylons/pylon-count-0/commands (not-running) 1 lists
+stream upgrade to pylon-count-0 (HTTP/1.1 409 Conflict) 1 lists
+1000 ms of 50 ms listening polls, one observer       20 lists
+five pauses submitted together                       5 snapshots, 26 lists

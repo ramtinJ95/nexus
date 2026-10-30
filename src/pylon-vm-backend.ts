@@ -272,10 +272,10 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   // The controller writes disk.qcow2 only when a stop completes, so without it the VM booted from no disk and nothing was saved.
   const hasCheckpoint = (pylonId: PylonId) => existsSync(join(instanceDir(pylonId), "disk.qcow2"));
 
-  async function inspect(pylonId: PylonId): Promise<Instance | null> {
+  async function inspect(pylonId: PylonId, signal?: AbortSignal): Promise<Instance | null> {
     const name = instanceName(pylonId);
     if (!existsSync(instanceDir(pylonId))) return null;
-    return instanceSchema.parse(await sandbox({ action: "inspect", name }));
+    return instanceSchema.parse(await sandbox({ action: "inspect", name }, signal));
   }
 
   /** Waits out a controller that is starting or stopping. Never cuts one short: the deadline only ends the wait. */
@@ -504,6 +504,13 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   return {
     artifacts,
     list,
+    async state(pylonId) {
+      // Bounded as list() bounds each inspect. A controller that does not answer in time gets list()'s answer, which
+      // falls back to the instance's files.
+      const instance = await inspect(pylonId, AbortSignal.timeout(1500)).catch(() => undefined);
+      if (instance !== undefined) return instance === null ? "absent" : vmState(instance).vm;
+      return (await list()).find((p) => p.pylonId === pylonId)?.vm ?? "absent";
+    },
     gitSsh: options.gitSsh !== undefined,
     nestedVirtualization: hostNestsKvm(),
     eventJournal: `${stateRoot}/events.sqlite`,
