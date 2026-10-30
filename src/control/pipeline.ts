@@ -17,30 +17,12 @@ import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { liveNote, phaseNote } from "./review-model.ts";
 import type { Registry, ThreadId } from "./registry.ts";
 import { checkStart, startKey, type StartRequest } from "./threads.ts";
+import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 
-declare const brand: unique symbol;
-export type ItemId = string & { readonly [brand]: "ItemId" };
+// Temporary: ItemId moved to pipeline-store.ts, and E1 deletes this re-export.
+export type { ItemId };
+
 export const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
-
-export interface ItemRecord {
-  id: ItemId;
-  project: ProjectId;
-  title: string;
-  /** What its queued thread starts with, as checked when the item was added. */
-  request: StartRequest;
-  /** A harness builder's brief, sent as the person's first message. Null for a Claude worker, whose brief is request.claude. */
-  message: string | null;
-  /** Items of the same project whose threads must merge their pull requests first. Each was added before this one. */
-  after: readonly ItemId[];
-  addedBy: string;
-  addedAt: number;
-  /** The person's go-ahead, which an item needs only in a project whose pipeline waits for one. */
-  approved: { by: string; at: number } | null;
-  /** Cancelled before it became a thread. A queued thread is cancelled by archiving it, as any queued thread is. */
-  cancelled: { by: string; at: number } | null;
-  /** Why the pass could not queue it last time. Cleared once it is queued. */
-  lastError: string | null;
-}
 
 export const phaseKinds = ["planned", "queued", "building", "reviewing", "landing", "landed", "held", "archived", "cancelled"] as const;
 /** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */

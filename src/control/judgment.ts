@@ -28,46 +28,10 @@ import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";
 import { gib, refusals, weighNodes, type Weighed } from "./placement.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
+import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
-const answers = ["retry", "retry-elsewhere", "person"] as const;
-export type Answer = typeof answers[number];
-
-/** What was decided and by whom: the judgment's answer, or the control plane's own rule when no judgment ran or its answer could not stand. */
-export interface Verdict { answer: Answer; why: string; by: "judgment" | "control plane" }
-
-/** What Nexus did, on the verdict or on the person's answer to the question. */
-export type Outcome =
-  | { kind: "retried"; node: NodeName; on: "verdict" | "answer" }
-  | { kind: "moved"; from: NodeName; to: NodeName; on: "verdict" | "answer" }
-  /** Nothing, for `why`. */
-  | { kind: "left"; why: string };
-
-export type Phase =
-  /** The brief is saved, and once it is sent the answer is due at `deadline`. */
-  | { kind: "judging"; deadline: number | null }
-  /** Saved before the control plane acts, so a pass after a crash acts again. Each action converges. */
-  | { kind: "acting"; verdict: Verdict }
-  /** The person decides on question `judgment:<failure>`. */
-  | { kind: "asked"; verdict: Verdict }
-  | { kind: "done"; verdict: Verdict; outcome: Outcome };
-
-export interface Judgment {
-  /** The thread.failed event of the failure. */
-  failure: number;
-  thread: ThreadId;
-  /** Where the pylon failed. */
-  node: NodeName;
-  /** The failure's reason as the registry held it. */
-  failed: string;
-  startedAt: number;
-  /** What the judgment was asked and the token its answer echoes. Null when the control plane decided without one. */
-  request: { brief: string; token: string } | null;
-  /** The judgment's conversation, null until it is created. */
-  conversation: number | null;
-  /** The judgment's reply, its last maxReply characters, once read. */
-  reply: string | null;
-  phase: Phase;
-}
+// Temporary: Judgment moved to judgment-store.ts, and E1 deletes this re-export.
+export type { Judgment };
 
 /** A judgment as `nexus show` and the thread page show it. */
 export interface JudgmentView {

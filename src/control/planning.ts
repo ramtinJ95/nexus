@@ -18,22 +18,10 @@ import { z } from "zod";
 import { mint, planningPrefix, tokenBlocks } from "../agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
-import type { ItemId, ItemRecord, Pipeline } from "./pipeline.ts";
+import type { Pipeline } from "./pipeline.ts";
+import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 import type { Proposal, Question } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-
-export interface PlanningRecord {
-  thread: ThreadId;
-  /** The token a block must echo. Only the thread is told it, so a block quoted from elsewhere is never read. */
-  token: string;
-  /** The thread's lastReplyAt when its replies were last read through. */
-  read: number;
-  /**
-   * Each message composed for the thread, by request ID: whether it carries the guide, the answered proposals it tells
-   * of, and whether the harness took it. Only a taken message counts as telling, so one that failed is told again.
-   */
-  sent: readonly { requestId: string; guide: boolean; told: readonly string[]; delivered: boolean }[];
-}
 
 export const planFence = "nexus-plan";
 export const acceptOption = "accept";

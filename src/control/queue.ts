@@ -16,26 +16,10 @@ import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 import { checkStart, newThreadId, resourcesOf, type StartRequest } from "./threads.ts";
+import type { QueuedRecord } from "./queue-store.ts";
 
-/** What the queue keeps of a thread until it starts. `request` is frozen when queued, its resources filled field by field from the project's. A request that names no node starts on the project's default when it starts, as any start does. */
-export interface QueuedRecord {
-  id: ThreadId;
-  title: string;
-  project: ProjectId;
-  startedBy: string;
-  createdAt: number;
-  after: readonly ThreadId[];
-  request: StartRequest & { resources: BootInputs["resources"] };
-  /** A harness thread's first message, sent as the person's once it starts. Null for a Claude worker, whose prompt is request.claude. */
-  message: string | null;
-  status: "queued" | "archived" | "deleted" | "started";
-  /** `nexus start-queued`: start without waiting for the predecessors. */
-  startNow: { by: string; at: number } | null;
-  /** Why the latest start attempt failed, such as no node with room or a deploy drain. Cleared by the start. */
-  lastError: string | null;
-  startedAt: number | null;
-  firstMessage: "pending" | "sent" | null;
-}
+// Temporary: QueuedRecord moved to queue-store.ts, and E1 deletes this re-export.
+export type { QueuedRecord };
 
 /** What one predecessor means for the queued thread. */
 export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
