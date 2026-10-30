@@ -1,5 +1,7 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import { attachPath, defaultTerm } from "../../attach-route.ts";
 import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing } from "./terminal.js";
 
@@ -261,4 +263,67 @@ test("after 8 failed tries the terminal ends and says to attach again", (t) => {
   assert.equal(k.sockets.length, 9);
   assert.equal(k.statuses.at(-1).over, true);
   assert.match(k.statuses.at(-1).text, /8 times/);
+});
+
+const termView = await readFile(new URL("./term-view.js", import.meta.url), "utf8");
+const adoptSlice = termView.slice(termView.indexOf("function adoptStyles("), termView.indexOf("\nconst ansi ="));
+
+/**
+ * adoptStyles from term-view.js on a screen element shaped as xterm.js 6 builds it: its style elements and its row
+ * container as children. `change(node, kind)` is a DOM mutation of that kind on that node, which wakes the observer
+ * only as the browser would for the options it observes with.
+ */
+function styledScreen() {
+  const node = (name, parent, extra = {}) => ({ name, parent, ...extra });
+  const screen = node("screen", null, { children: [] });
+  const style = (text) => { const s = node("style", screen, { textContent: text }); screen.children.push(s); return s; };
+  const rows = node("rows", screen);
+  screen.children.push(rows);
+  const row = node("row", rows);
+  screen.querySelectorAll = () => screen.children.filter((c) => c.name === "style");
+  const copies = [];
+  const watched = [];
+  class Sheet { replaceSync(text) { copies.push(text); } }
+  class Observer {
+    constructor(callback) { this.callback = callback; this.on = true; watched.push(this); this.targets = new Map(); }
+    observe(target, options) { this.targets.set(target, options); }
+    disconnect() { this.on = false; }
+  }
+  const change = (target, kind) => {
+    for (const observer of watched) {
+      if (!observer.on) continue;
+      for (let at = target; at !== null; at = at.parent) {
+        const options = observer.targets.get(at);
+        if (options?.[kind] && (at === target || options.subtree)) { observer.callback([]); break; }
+      }
+    }
+  };
+  const document = { adoptedStyleSheets: [] };
+  const adoptStyles = runInNewContext(`${adoptSlice}\nadoptStyles`, { CSSStyleSheet: Sheet, MutationObserver: Observer, document });
+  return { screen, style, row, copies, change, document, adoptStyles };
+}
+
+test("the terminal copies each xterm.js style once per change of its text, and a row's change copies nothing", () => {
+  const t = styledScreen();
+  const theme = t.style(".theme { color: red }");
+  const stop = t.adoptStyles(t.screen);
+  assert.deepEqual(t.copies, [".theme { color: red }"], "the style already there is copied as the terminal opens");
+  assert.equal(t.document.adoptedStyleSheets.length, 1);
+
+  t.change(t.row, "childList");
+  t.change(t.row, "characterData");
+  assert.deepEqual(t.copies, [".theme { color: red }"], "rewriting a row wakes nothing");
+  t.change(t.screen, "childList");
+  assert.deepEqual(t.copies, [".theme { color: red }"], "a style whose text is unchanged is not copied again");
+
+  t.style(".cells { height: 17px }");
+  t.change(t.screen, "childList");
+  assert.deepEqual(t.copies, [".theme { color: red }", ".cells { height: 17px }"], "a style xterm.js adds later is copied");
+  theme.textContent = ".theme { color: blue }";
+  t.change(theme, "childList");
+  assert.deepEqual(t.copies.at(-1), ".theme { color: blue }", "a style's new text is copied");
+  assert.equal(t.copies.length, 3);
+
+  stop();
+  assert.equal(t.document.adoptedStyleSheets.length, 0, "closing the terminal drops its sheets");
 });
