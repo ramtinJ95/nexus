@@ -1,0 +1,269 @@
+# branch's code, 934ab03 refactor(deploy): give setup.ts the shared json-file, credentials and host helpers, with the branch's tests
+✔ callers off the allowlist, or unknown to tailscaled, are refused
+✔ a path that does not decode is a 400 to an allowed caller and a 403 to any other, and a Host that does not parse is a 403
+✔ any tailnet node may ask who it is and what it may do, under the API's names only
+✔ a machine joins once with a token, as whois names it, whatever its request says
+✔ an unknown or expired token is refused with nothing recorded
+✔ a caller, the control plane's machine and a node of control.json never join, and a token they send stays unused
+✔ a joined node joins again with a new token, which replaces its deploy key, and reports with it
+✔ a machine neither admitted nor joined reaches only whoami and join, and a joined node only its deployer's routes
+✔ a web page on an allowed machine cannot change state
+✔ projects are created, listed, and checked
+✔ nodes are listed with their state and capacity, without the observation
+✔ a thread cannot start before an image is current
+✔ an image is recorded only with every pin, gh included, each in its pinned format
+✔ an image is recorded exactly when a probe's Docker backend can name it
+✔ starting a thread creates its pylon, boots fresh from the current image, and wakes its node
+✔ --node auto boots the pylon on the node with the most memory left after it, and the thread records why
+✔ --node auto counts the memory of a paused pylon about to wake, and not of one that stays paused
+✔ --node auto counts the memory of an archived thread's paused pylon the usage backfill wakes to read
+✔ --node auto passes over a node whose stored observation is from a probe older than grants
+✔ --node auto counts a crashed pylon a person retried, which boots again, and not one whose VM still holds its memory
+✔ --node auto refuses with each node's reason when none can run the pylon, and starts nothing
+✔ a pylon that asks for nested virtualization goes only to a node whose probe reports it
+✔ --node auto places a thread that needs the ChatGPT token on a node whose probe takes it and has not got it yet
+✔ without --node a thread still boots on its project's default node, and a named node is taken as named
+✔ the first start of a setup builds its template on the node, the next waits for it, and one after it is ready boots from it at the commit read
+✔ a start whose setup cannot be read boots fresh and says why, and only a full commit ID is read
+✔ two overlapping --node auto starts take different rooms, and a start that fails gives its room back
+✔ a project whose default node is auto places each thread that names none, and a named node still pins
+✔ --node auto refuses an overcommitted node with its reason, and places the pylon on one that fits
+✔ a start whose disk differs from its project's boots fresh without a template, and one that changes only CPUs or memory may use one
+✔ a template built before the project's disk size changed is not reused by a start of the new size
+✔ a start's size overrides its project's field by field, its pylon boots that size, and thread detail reads it back
+✔ --node auto weighs a thread's own size, not its project's, and counts it once placed
+✔ an overlapping start's reservation holds the start's own size
+✔ nodes report whether they are overcommitted, and their observed pylons as up, paused, archived, crashed and orphaned
+✔ a scratch project has no repository, and each of its threads starts an empty one on its branch
+✔ a pylon's allowlist reaches its project's HTTPS repo host and the HTTPS dotfiles host
+✔ thread detail derives the actual state from the node's last observation
+✔ thread detail lists the pylon's listening ports with the service and preview of each
+✔ a node whose stored observation is from a probe before routes, grants, counting and listening ports gets no thread, is not overcommitted, and its pylon's ports are unknown
+✔ linking a port goes through the node's probe, gives it an https port at once, and counts as human activity
+✔ linking a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409
+✔ unpublishing a linked port goes through the node's probe, drops its preview at once, counts as human activity, and is safe to repeat
+✔ unpublishing a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409
+✔ opening a session goes through the node's probe, defaults to Claude Code titled by its harness, and counts as human activity
+✔ a thread's files and changes are read from its checkout through its node's probe, and reading counts as human activity
+✔ a thread's checkout images are served while its pylon runs, sniffed, and the file at a base too
+✔ an image is refused with a 409 while the pylon does not run, without waking it, and a caller who may not read files may not read images
+✔ a harness conversation's image part is served by its hash, and a part that changed is gone
+✔ a scratch thread's changes and diff are against the empty tree, before its first commit and after
+✔ a checkout read the pylon refuses answers its status, and a bad request never reaches the probe
+✔ reading the checkout of a pylon that is not running wakes it and is refused with 409, and an archived thread's probe is never asked
+✔ a checkout read whose thread is deleted while it runs answers the delete, not the node's failure
+✔ closing a session goes through the node's probe, and a pane that is not open, such as one from before a wake, is a 404
+✔ focusing a session runs Herdr's focus on its pane in the pylon as an argument, a pane that is not open is a 404, and anything but a pane ID is a 400
+✔ closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open
+✔ an idle-paused or archived thread lists the sessions its wake brings back, as paused
+✔ closing a paused session is refused with 409 without asking the probe or waking the pylon
+✔ closing a failed session in no pane drops it from the pylon, by its ID
+✔ a session of a pylon that is not running, or of an archived or deleted thread, is refused with 409
+✔ a failed pylon shows failed with its reason until its thread is deleted, and then shows the delete
+✔ the thread list leaves deleted threads out when asked, as the dashboard asks and `threads --all` does not
+✔ a follow from the latest event gets a reply's events and none from before it
+✔ retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node
+✔ a pylon whose disk holds a failed setup cannot be retried, and its detail says why
+✔ an archived thread's failed pylon can be retried and stays archived, and a deleted thread's cannot
+✔ archive, delete, and activity update the thread and wake its node
+✔ a message goes to the thread's conversation and counts as human activity
+✔ a thread's event stream sends the whole view, then each part a commit changed, and stops its watch when the client leaves
+✔ a client that reads slowly gets the latest view in fewer events, and never holds the harness up
+✔ a thread's streams end when it is deleted, and a deleted thread, a stranger or one stream too many is refused
+✔ a client that stops reading is dropped after the stall limit, with its watch and its place
+✔ deleting a thread whose client stopped reading frees the stream at once, writes nothing after the end, and drops the client
+✔ a stream whose thread is deleted while its watch opens stops that watch
+✔ unarchiving makes an archived thread active, counts as human activity and wakes its node
+✔ an archived thread takes no messages, and a deleted one has no conversation
+✔ unknown threads, routes and methods get 404 and 405
+✔ the attach route refuses before the 101 with the API's JSON errors, and a page from any other origin is refused
+✔ an attach wakes the pylon, waits for it, and carries keys, resizes and output until Herdr exits
+✔ a Claude worker's attach lands in the pane of its Claude session, one that names a pane lands there, and a Nexus agent thread's where Herdr was
+✔ deleting a thread ends its attach as a conflict, and a closing API ends one with 1001
+✔ a closing API gives up on a terminal whose node stopped answering after its wait, and opens none for an upgrade it was admitting
+✔ a closing API drops an upgrade whose whois never returns after its wait
+✔ a terminal takes a place among the streams
+✔ an upgrade the API serves no WebSocket for is handled as an ordinary request
+✔ attention ranks failure, unwatched parked tasks, unread reply, then work; seen never wakes
+✔ the API reports the attention the event stream last reported, and a deleted thread's run is not parked
+✔ attention takes the first matching state in every combination
+✔ seen is bounded by the rendered reply, not a newer reply discovered by attention polling
+✔ latest-turn API reads include commits and uncommitted work, and refuse missing or stale snapshots
+✔ deploy defaults off, main resolves, and release records the authenticated caller
+✔ the release view shows a deployer report 90 s old as pending, so a wait on that release is pending
+✔ a deployer report may carry every report state
+✔ only a deployer may build, roll out or roll back an image, never the control node itself
+✔ anyone allowed reads the usage backfill and its dry run, only a deployer starts or stops it, and without one its routes answer 409
+✔ a deployer's image operations answer 200 once done and 202 while running, and the image routes show each image, its nodes and the operation
+✔ pylon traffic under its host identity cannot deploy even if that identity is allowed and listed as a deployer
+✔ a body over a mebibyte is refused with 413 and reaches no route
+✔ a root-authenticated drain blocks every turn-entry route and can be released
+✔ drain reads committed live and queued work rather than a lagging activity flag
+✔ drain reads only harness conversations, so Claude worker and bare threads never reach the harness
+✔ expired drain leases no longer block callers
+✔ drain cannot declare idle while a previously admitted message is still entering the harness
+✔ the final idle fence holds across lease expiry until rollback or success releases it
+✔ direct TLS uses TCP whois, ignores forged headers, and renews without disturbing HTTP
+✔ HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry
+✔ closing HTTP while issuance is pending prevents a late HTTPS listener
+✔ project edits validate before saving, flag older grants, and leave checkpoint boots unchanged
+✔ pylon boot inherits the person's identity and a project can override or clear it
+✔ partial resource patches merge atomically without resetting another edit
+✔ grant comparison ignores order and duplicates but detects changed access
+✔ project add and edit refuse a grant of the ChatGPT token, which comes with the chatgpt login
+✔ project add and edit refuse duplicate secret names instead of merging their grants
+✔ the health, release, deployer and event routes answer each caller and method as listed
+✔ an event follower gets each event as an id and its data, then the watermark as a ping, every second, and a plain read gets them as JSON
+✔ an event follower open across a deploy drain gets every event in order, and the drain neither ends nor refuses it
+✔ a slow event follower gets every event once and in order, and one that stops reading is dropped after the stall limit with its place
+✔ event followers share the streams' places with thread streams, past which each is refused with its own error, and a thread's delete leaves them open
+✔ an event cursor older than what the log retains is refused with 409
+✔ event followers replay a disconnect gap with since and filter without losing order
+✔ a Claude worker start stores its first prompt without starting a harness conversation
+✔ a quiet filtered stream scans past unrelated events and survives retention rollover
+✔ a Claude worker's pasted image is served from its transcript while the pylon runs, by the place its entry names
+✔ a Claude worker thread's latest turn is the one its newest turn-started names, and a turn without a snapshot is refused
+✔ a Claude worker thread's message is typed into its session exactly, in either mode, and never reaches the harness
+✔ a Claude worker's message is typed once per request ID, a send that typed nothing can be sent again, and one that may have typed some cannot
+✔ a Claude worker's message whose probe wait ran out is typed once, and a resend under its request ID answers what became of it
+✔ a resend while its first send is still asked waits for it, so a late answer that typed nothing cannot clear a newer send's fence
+✔ a Claude worker thread takes no messages while archived, deleted or before its session starts, and asks no probe
+✔ a Claude worker thread's abort presses Esc in its session's pane through the probe, and says why when nothing was pressed
+✔ a Claude worker stopped on its usage limit lists as limited, with the stop in its row and its conversation
+✔ a Claude worker thread's conversation is its transcript, read from the running pylon after each session event and kept for when it is paused
+✔ a Claude worker thread's page stream shows new entries during a turn, read when its session events say so rather than on a timer
+✔ a poll of a Claude worker's streaming page names the view its stream shows rather than render it, and names a reply's view only once a frame showed the reply
+✔ a Claude worker's page names no reply watermark until the transcript holds a read that started after the reply
+✔ a Claude worker's page names no reply watermark while the reads after the reply have not reached the transcript's end
+✔ a Claude worker's page stream sends nothing while its conversation is unchanged, its pings included, though an age in it changed
+✔ a Claude worker's transcript streams to the CLI as its entries whole, then each read's new entries and the turn's start and end
+✔ a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer
+✔ only a project edit turns on reviews of its own, landing needs a deployer, and the project records who turned it on
+✔ a deployer's land names the holds it waives at the commit it confirmed, and the review loop decides whether they may be waived
+✔ an item is added to a project the pipeline runs for, becomes a queued thread behind the items it is after, and only a person adds, approves or cancels one
+✔ only a person starts a thread, starts a queued one now or messages one, never the control node, an infrastructure node or a pylon
+✔ only a person acts on a thread, its pylon or a project, never the control node, an infrastructure node or a pylon
+✔ a start after other threads is queued with no row or pylon, until start-queued starts it as any start
+✔ a queued start is checked as a start is before it is recorded, and needs the GitHub token
+✔ a start repeated under its request ID answers the same thread and delivers its first message once
+✔ starts repeated at once under one request ID start one thread, and one with another body is refused
+✔ a start that failed under a request ID made nothing, so the ID starts a corrected body
+✔ a start whose first message failed keeps its request ID, and a repeat sends the brief to the same thread once
+✔ a queued start repeated under its request ID answers the same queued thread, then the thread it became
+✔ thread detail lists the judgments of the thread's failed pylon, oldest failure first, with what each decided and did
+✔ a planning thread's proposals become cards only a person answers, an accepted one becomes the person's item and queued thread, and the next message tells the thread
+✔ a person answers a question, a deployer question needs a deployer, and no node or pylon answers one
+✔ without deployment options the control node is unknown, so no one answers a question or starts or messages a thread
+✔ a person answers a Claude worker's AskUserQuestion with a choice per question, which the hook in its pylon hands to Claude before it is recorded
+✔ an answer to an AskUserQuestion nobody waits for any more withdraws it, and one a pylon's image cannot hand to Claude says to answer in its terminal
+✔ a harness, a Claude worker and a bare thread each answer every agent route as their kind does
+✔ only a deployer reads a node's health, which the node's probe answers, and no route under it changes the node
+✔ the shipped example config parses
+✔ a config without the harness, or with a relative harness path, is refused
+✔ no node may be named auto, which start --node auto asks for
+✔ a probe takes a node name exactly when the control plane does
+✔ preview ports default to 10200 to 10999, and a range that ends before it starts is refused
+✔ GitHub watching is opt-in and accepts only a token file path, never a token in config
+✔ HTTPS uses an allowed MagicDNS hostname and reserves 7443 from previews
+✔ git identity is optional and contains only a name and email
+✔ continuing after a usage limit is off unless the config turns it on
+✔ the image build node is optional, and one given must be a configured node
+✔ a registry and control.json from before join tokens come up with the same nodes, callers, deployers and probe peers
+✔ a machine that joins is followed without a restart, every probe learns it as a peer, and a probe that cannot learn peers keeps working
+✔ a node that joined is followed again after a restart, beside control.json's
+✔ the installer's join reaches only the control plane deployer.json names, and says why one is refused
+✔ the host command mints a join token only as root
+✔ a node that joined and was then added to control.json never joins again, and the token it sends stays unused
+✔ a first install asks for each credential, keeps each where Nexus keeps it, and says what the installer does next
+✔ an OpenAI API key signs the harness in the way the harness reads one, under the device ID it had
+✔ a failed ChatGPT login offers the choice again, and an API key then keeps the device ID the login made
+✔ a rerun over credentials already in place asks nothing, runs nothing and changes no file
+✔ a declined or unfinished PR watch is offered again on a rerun, with the GitHub token already in place and nothing rewritten
+✔ without a terminal, the PR watch is turned on for a GitHub token the run was given, never for one an install already had
+✔ a probe.json that names its own secrets file and git key is read where it points, and the defaults are left alone
+✔ a run that fails partway still says what the writes it made need
+✔ root never follows a symlink when it sets a credential's owner and mode
+✔ a skipped credential writes nothing, and the next run asks for it again
+✔ a further node asks for its own Claude token, GitHub token and git key, and nothing that is the control plane's
+✔ host keys for github.com that GitHub does not publish make no git key
+✔ without a terminal the answers come from NEXUS_* variables or the files they name, the rest are skipped, and a bad value fails
+✔ the harness is signed in when its credentials file holds a login, and a file that is not JSON is refused
+✔ node requests verify the control identity before sending the root credential
+✔ health requests bound the whole response, not just connecting
+✔ a refused request carries its status and whole body, and a long join refusal reaches the person as the control plane's words
+✔ a healthy install switches only its role's link and records the full commit
+✔ failed health rolls back, keeps journal tail, and leaves the attempt that quarantines the bad release
+✔ restart failure also restores the previous release
+✔ a failed rollback is not reported as a successful rollback
+✔ a process interrupted around the link swap recovers from its persistent transaction
+✔ an install refuses to run over an unfinished one, which only recovery may settle
+✔ a preparation failure never touches the running release
+✔ git accepts merged commits, refuses a fetched non-main commit, and rejects revisions before running git
+✔ a failed final idle fence never switches or restarts the running release
+✔ deployment child commands include the administrative paths the probe installer needs
+✔ an install leaves its journal as the transaction's JSON, private to its owner, with no temporary file beside it
+✔ a journal that is not JSON is refused rather than read as no deployment
+✔ the deployer's preparation runs both role installers without reading input, and changes no credential
+✔ outside preparation the same stand-ins see the role installers switch and start their services
+✔ the control installer starts its service once the harness is signed in, and leaves it stopped and says why when its credentials are not JSON
+✔ the tailnet is read from tailscale status, with the first label, the host without its dot and the IPv4 address
+✔ a fresh control install writes configs the control plane and probe accept, all for this machine
+✔ a node rerun keeps a control plane URL the person set, since the remote port is not this machine's to know
+✔ a probe.json from before the artifact store keeps its images and gains no artifacts beside them
+✔ a deployer.json that lacks a token gains one, and the report never prints it
+✔ a fresh node install points its probe and deployer at the control machine and writes no control.json
+✔ a rerun keeps the token and every value the person changed, adds what is new, refreshes what follows from the deployer, and says what it left alone
+✔ a rerun over a config without imageBuildNode leaves image builds on the default node
+✔ --add-node adds the node, its deploy key and the probe peer, once
+✔ a git key on disk adds gitSsh to an existing probe.json
+✔ every control-role mistake is reported together
+✔ a first control install needs --dotfiles, and a node cannot become a control plane by accident
+✔ control-only flags and this machine as --node are refused for a node install
+✔ --admit takes the tailnet node ID that nexus connect prints, as well as a name
+✔ --github-watch names the control plane's token file in the control.json on disk, keeps whatever else is there, and never replaces one it names
+✔ a name two devices share is ambiguous, and the full MagicDNS name picks one
+✔ a fresh control machine is left every step: setup, then the agents' credentials, then the first image
+✔ the credentials item names only what is missing, and an Anthropic API key counts as the Claude token
+✔ a host without Docker is told to install Docker with buildx and start it, before joining its group
+✔ a Docker without buildx is told the buildx package of its own package manager and source
+✔ the credentials are printed under their own heading as the next step, and the image after them
+✔ a finished control machine is left only the Mac CLI
+✔ a node is told how to join the control plane, unless this run joined it
+✔ worker config bounds drain and health and rejects credential-bearing endpoints
+✔ wait outcome trusts the view's health from every role, whatever the caller's clock, and detects rollback and supersession
+✔ the bootstrap that install-deployer.sh copies loads without the repo's node_modules
+✔ fixed supervisor falls back after a worker crashes or hangs, and accepts a later worker
+✔ activation failure rolls back through fake service executables in a temporary prefix
+✔ polling reconciles a desired control release, reports rollback and leaves the probe link alone
+✔ a rolled-back install stays quarantined by its journal after its report is cleared, without draining control
+✔ a poll leaves its report as JSON private to its owner, with no temporary file beside it, and a role without its local config is refused
+✔ probe retries when control becomes stale during preparation, without switching or quarantining
+✔ probe retries when control becomes unhealthy during preparation, without switching or quarantining
+✔ probe retries when control becomes unreachable during preparation, without switching or quarantining
+✔ a poll of two idle roles reads the release view once, and an unchanged report leaves its file alone
+✔ a control upgrade makes the probe read the release view again, so both roles upgrade in one poll
+✔ a probe a release behind reads the view again when control's unchanged report was stale there, and upgrades in the same poll
+✔ a save makes the parent when asked and sets the exact mode whatever the umask
+✔ a save replaces a stale file or a symlink at its temp name rather than writing through it
+✔ concurrent saves of one path both succeed and leave one complete value
+✔ a failed save leaves no temp file behind
+✔ converge publishes exactly the assigned ports, warms each through the gateway, and a repeat changes nothing
+✔ converge removes only this pylon's other ports, never another pylon's or a foreign entry
+✔ after a restart, gateway entries no pylon has claimed are swept, and foreign ones are kept
+✔ a port that something else serves fails the job as invalid and changes nothing
+✔ a warm-up that times out is retried until the URL answers
+✔ a URL that never answers stops at the job's deadline
+✔ a slow warm-up for one pylon does not hold up another pylon's publish
+✔ a converge that failed partway converges on retry
+✔ every converge writes the route table, a missing file reads as empty, and a malformed one is refused
+✔ the routes file is a JSON list of { httpsPort, pylonId, service }, with no temporary file beside it
+✔ the routes file is readable by its owner only, whatever the umask
+✔ tailscaleCli resolves with stdout as printed, and a failure names the command and its stderr, or else Node's reason
+✔ withdraw stops routing a service's port at once, and the next converge of any pylon removes its entry
+✔ a spawn that carries a released port another pylon now holds fails, and leaves that pylon's route and entry alone
+✔ two pylons that each want the port the other still routes drop their own first, so both converge on retry
+✔ a withdraw whose write failed writes the table when it is asked again
+✔ an existing Unix target blocks an operator's preview additions and removals
+ℹ tests 265
+ℹ pass 265
+ℹ fail 0
