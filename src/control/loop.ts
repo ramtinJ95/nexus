@@ -319,13 +319,13 @@ export function startLoop(options: LoopOptions): Loop {
   };
 }
 
+/** The events ingest reads `known` and `unlisted` for. */
+const readsKnown: Record<ProbeEvent["type"], boolean> = { snapshot: true, pylon: true, "preview-hit": true, job: false, "session-event": false };
+
 /**
  * The node's current state: a snapshot replaces it, and a pylon event updates its pylon. Job events stay out,
  * because a job listed as finished promises that the pylons already show its result. ingest records them.
  */
-/** The events ingest reads `known` and `unlisted` for. */
-const readsKnown: Record<ProbeEvent["type"], boolean> = { snapshot: true, pylon: true, "preview-hit": true, job: false, "session-event": false };
-
 function merge(last: NodeObservation | null, event: ProbeEvent): NodeObservation {
   if (event.type === "snapshot") return { ...event.observation, pylons: event.observation.pylons.map((p) => keepLastRead(last, p)) };
   if (last === null) throw new Error(`observe sent a ${event.type} event before its first snapshot`);
