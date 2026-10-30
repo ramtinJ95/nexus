@@ -621,7 +621,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async buildImage(image, recipe, node, signal) {
       if (imageIdOf(recipe) !== image) throw new JobFailure("invalid", `the recipe is image ${imageIdOf(recipe)}, not ${image}`);
-      await buildPylonImage(recipe, node, store.path(image), signal);
+      await buildPylonImage(recipe, node, store, signal);
     },
 
     guest(pylonId): Guest {

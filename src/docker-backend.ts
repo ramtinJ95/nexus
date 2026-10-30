@@ -400,11 +400,10 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       } finally {
         await removeContainer(build);
       }
-      await store.publish(
-        { id: template, key: inputs.key, commit: inputs.repo.commit, builtAt: new Date().toISOString() },
-        async (dir) => { await docker(["save", "--output", join(dir, savedImage), templateRef(template)], signal); },
-        signal,
-      );
+      await store.publish(template, async (dir) => {
+        await docker(["save", "--output", join(dir, savedImage), templateRef(template)], signal);
+        return { key: inputs.key, commit: inputs.repo.commit, builtAt: new Date().toISOString() };
+      }, signal);
     },
     buildImage(image) { return Promise.reject(new JobFailure("invalid", `the Docker backend uses configured Docker images and builds none, so it cannot build ${image}`)); },
     guest,

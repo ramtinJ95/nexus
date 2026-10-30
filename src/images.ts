@@ -171,7 +171,7 @@ export function templateIdOf(key: TemplateKey, node: NodeName, startedAt: number
   return `tpl-${canonicalSha256({ project: key.project, image: key.image, setupHash: key.setupHash, node, startedAt }).slice(0, 12)}`;
 }
 
-const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+export const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
 export interface TemplateBuildInputs {
   key: TemplateKey;

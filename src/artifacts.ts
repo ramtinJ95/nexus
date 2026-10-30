@@ -85,8 +85,11 @@ export interface ArtifactDirectory {
   /** Published artifacts only: a directory that has its manifest. */
   list(): Promise<PortableArtifactId[]>;
   manifest<I extends PortableArtifactId>(id: I): Promise<ManifestOf<I> | null>;
-  /** `fill` writes the template's files into an empty directory, which is then hashed, given its manifest and renamed in. */
-  publish(manifest: Omit<TemplateManifest, "sha256">, fill: (dir: string) => Promise<void>, signal: AbortSignal): Promise<TemplateManifest>;
+  /**
+   * `fill` writes the artifact's files into an empty directory and returns its manifest, which the directory's hash
+   * completes. The directory is then given the manifest and renamed in. A fill that fails leaves nothing.
+   */
+  publish<I extends PortableArtifactId>(id: I, fill: (dir: string) => Promise<Omit<ManifestOf<I>, "id" | "sha256">>, signal: AbortSignal): Promise<ManifestOf<I>>;
   export(id: PortableArtifactId): Promise<{ manifest: ArtifactManifest; stream: Readable }>;
   /** Holding the artifact already is a no-op, as long as the sha256 agrees. */
   import(manifest: ArtifactManifest, stream: Readable, signal: AbortSignal): Promise<void>;
@@ -136,15 +139,19 @@ export function artifactDirectory(root: string, codec: ArtifactCodec): ArtifactD
       return names.filter(isPortableArtifactId).filter((id) => existsSync(join(path(id), manifestFileOf(id)))).sort();
     },
 
-    async publish(unhashed, fill, signal) {
-      const partial = partialOf(unhashed.id);
-      await sweep(unhashed.id);
+    async publish(id, fill, signal) {
+      const partial = partialOf(id);
+      await sweep(id);
       await mkdir(partial, { recursive: true, mode: 0o700 });
-      await fill(partial);
-      const published: TemplateManifest = { ...unhashed, sha256: await sha256Of(codec.pack(partial, manifestFiles.template, signal)) };
-      await writeManifest(partial, published);
-      await rename(partial, path(unhashed.id));
-      return published;
+      try {
+        const unhashed = await fill(partial);
+        const published = { ...unhashed, id, sha256: await sha256Of(codec.pack(partial, manifestFileOf(id), signal)) } as ManifestOf<typeof id>;
+        await writeManifest(partial, published);
+        await rename(partial, path(id));
+        return published;
+      } finally {
+        await rm(partial, { recursive: true, force: true });
+      }
     },
 
     async export(id) {
