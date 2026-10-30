@@ -2,8 +2,8 @@ import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
-import { planDeploy, quarantined, type Attempt, type ReleaseHealth, type Role } from "./plan.ts";
-import type { ReleaseReport, ReleaseView } from "./model.ts";
+import { planDeploy, quarantined, type Attempt, type ReleaseHealth } from "./plan.ts";
+import type { ReleaseReport, ReleaseView, Role } from "./model.ts";
 import { jsonRequest, urlHost } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois, tailnetNodeIdPattern } from "../tailscale.ts";

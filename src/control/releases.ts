@@ -1,8 +1,7 @@
 import { z } from "zod";
 import type { TailnetNodeId } from "../protocol.ts";
 import type { Registry } from "./registry.ts";
-import { fullCommit, reportStates, tokenDigest, type ReleaseView } from "../deploy/model.ts";
-import type { Role } from "../deploy/plan.ts";
+import { fullCommit, reportStates, tokenDigest, type ReleaseView, type Role } from "../deploy/model.ts";
 import { command, repository } from "../deploy/install.ts";
 
 export interface DeploymentOptions {

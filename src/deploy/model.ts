@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { DesiredRelease, Role } from "./plan.ts";
 
 export const fullCommit = /^[0-9a-f]{40}$/;
 export const digestPattern = /^[0-9a-f]{64}$/;
@@ -7,6 +6,9 @@ export const tsNet = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/;
 
 /** The deploy key a deployer's token gives: what the control plane keeps and compares a reporter's bearer token against. */
 export const tokenDigest = (token: string): string => createHash("sha256").update(token).digest("hex");
+
+export type Role = "control" | "probe";
+export interface DesiredRelease { commit: string; requestedBy: string; requestedAt: number }
 
 export const reportStates = ["pending", "waiting-for-control", "waiting-for-idle", "installing", "healthy", "rolled-back", "failed"] as const;
 
