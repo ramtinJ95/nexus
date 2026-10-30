@@ -4,7 +4,7 @@
  */
 import { basename, dirname } from "node:path";
 import type { ImageId } from "./images.ts";
-import type { BootInputs, LiveSpec } from "./project.ts";
+import type { BootInputs, LiveSpec } from "./spawn.ts";
 import type { PylonId } from "./ids.ts";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 

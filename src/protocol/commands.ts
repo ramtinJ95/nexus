@@ -5,7 +5,7 @@
  * through `parsePylonCommand`, and the control plane through `parseCommandResult`.
  */
 import { z } from "zod";
-import { reservedPortMessage, reservedPorts } from "../project.ts";
+import { reservedPortMessage, reservedPorts } from "../services-file.ts";
 import { claudeSessionId, claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "../session-harness.ts";
 import { asSent, nonEmpty, parseJson, unchecked } from "../parse.ts";
 import type { ServiceFact, SessionIdentity } from "./observations.ts";

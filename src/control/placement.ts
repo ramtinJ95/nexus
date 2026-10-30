@@ -1,4 +1,4 @@
-import type { BootInputs } from "../project.ts";
+import type { BootInputs } from "../spawn.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";

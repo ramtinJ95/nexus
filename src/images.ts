@@ -6,7 +6,8 @@
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
 import { z } from "zod";
-import { canonicalSha256, effectiveAllowedHosts, type Checkout, type Project, type RemoteProject } from "./project.ts";
+import { canonicalSha256, type Checkout } from "./spawn.ts";
+import { effectiveAllowedHosts, type Project, type RemoteProject } from "./project.ts";
 import type { JobEnvelope } from "./protocol/jobs.ts";
 import { isImageId, isTemplateId, type ArtifactId, type ImageId, type NodeName, type PortableArtifactId, type ProjectId, type TemplateId } from "./ids.ts";
 

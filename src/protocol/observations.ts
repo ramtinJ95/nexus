@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { pylonEventSchema, type ReportedEvent } from "../events.ts";
-import { chatgptTokenGrant } from "../project.ts";
+import { chatgptTokenGrant } from "../secret-grants.ts";
 import type { SessionHarness } from "../session-harness.ts";
 import { asSent, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";

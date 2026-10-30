@@ -3,7 +3,8 @@
  * the agent about its pylon. The API renders it when a thread starts and the loop renders it again on every pass,
  * so a new preview port reaches the pylon, PUBLIC_URL and PYLON.md included, through the next spawn.
  */
-import { loginHosts, renderOverlay, type LiveSpec, type Project } from "../project.ts";
+import { loginHosts, renderOverlay, type Project } from "../project.ts";
+import type { LiveSpec } from "../spawn.ts";
 import type { Preview, StoredPylon } from "./registry.ts";
 
 export function pylonLive(pylon: Pick<StoredPylon, "pylonId" | "thread" | "node" | "boot">, project: Project, previews: readonly Preview[]): LiveSpec {

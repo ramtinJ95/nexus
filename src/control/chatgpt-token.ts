@@ -4,7 +4,7 @@
  * Every poll puts the current token to every probe. That is idempotent, so a pylon that booted while the token was
  * refreshed has the current one by the next poll. A probe that has none, as one that just started, sets a poll off.
  */
-import { chatgptTokenGrant } from "../project.ts";
+import { chatgptTokenGrant } from "../secret-grants.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight } from "../single-flight.ts";

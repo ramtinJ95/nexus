@@ -3,8 +3,8 @@
  * double's (src/docker-services.ts), so the double refuses what a pylon refuses, in the same words. Each keeps
  * its own I/O. The pylon controller loads this file with type stripping, so it imports no values but project.ts's.
  */
-import { linkedName, reservedPorts } from "./project.ts";
-import type { ServiceName } from "./project.ts";
+import { linkedName, reservedPorts } from "./services-file.ts";
+import type { ServiceName } from "./services-file.ts";
 import type { ServiceFact } from "./protocol/observations.ts";
 
 /** A supervised service, as the preview rules see it. `previewed` is whether it publishes a preview. */

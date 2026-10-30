@@ -16,7 +16,8 @@ import type { Readable } from "node:stream";
 import type { NodeName, PylonId } from "./ids.ts";
 import type { BrokenCause, PausedSession, ServiceFact } from "./protocol/observations.ts";
 import type { ByteStream } from "./protocol/streams.ts";
-import { type BootInputs, type LiveSpec, type OverlayFile, type ServiceDecl, type ServiceName } from "./project.ts";
+import type { BootInputs, LiveSpec, OverlayFile } from "./spawn.ts";
+import type { ServiceDecl, ServiceName } from "./services-file.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 import type { HostBridge } from "./host-bridge.ts";
 

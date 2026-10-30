@@ -10,7 +10,8 @@ import {
   encodeProbeEvent, parseProbeEvent, upgradeObservation, type NodeObservation, type OlderObservation, type PausedSession, type ProbeEvent,
   type PylonObservation, type RunningFacts, type SessionFact,
 } from "./protocol/observations.ts";
-import { chatgptTokenGrant, type BootInputs, type PylonSource } from "./project.ts";
+import { chatgptTokenGrant } from "./secret-grants.ts";
+import type { BootInputs, PylonSource } from "./spawn.ts";
 import type { ArtifactId, CheckpointId, ImageId, TemplateId } from "./images.ts";
 
 const now = 1_800_000_000_000;

@@ -25,7 +25,7 @@ import { parsePylonCommand, type CommandResult, type PylonCommand } from "../pro
 import { parseStreamRequest, serveByteStream, streamUpgradeResponse } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { peersSchema, probePort, routeAuth, type ProbeAuthConfig } from "../protocol/routes.ts";
-import { linkedName, type ServiceName } from "../project.ts";
+import { linkedName, type ServiceName } from "../services-file.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import { onePerClaudeSession } from "../session-wake.ts";
 import type { Whois } from "../tailscale.ts";

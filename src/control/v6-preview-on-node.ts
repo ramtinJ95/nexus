@@ -25,7 +25,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { relayPorts } from "../project.ts";
+import { relayPorts } from "../services-file.ts";
 import { relayLog, relayStatus } from "../pylon-vm/relay.ts";
 import type { ThreadDetail } from "./wire.ts";
 import { defaultPreviewPorts } from "./main.ts";

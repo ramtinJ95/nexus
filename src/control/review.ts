@@ -21,7 +21,7 @@ import { randomBytes } from "node:crypto";
 import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "../agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 import { singleFlight } from "../single-flight.ts";
-import type { SecretGrant } from "../project.ts";
+import type { SecretGrant } from "../secret-grants.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";

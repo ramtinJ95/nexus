@@ -16,7 +16,7 @@
 import { z } from "zod";
 import type { VM } from "@earendil-works/gondolin";
 import { checked } from "./guest.ts";
-import { shellQuote as q } from "../project.ts";
+import { shellQuote as q } from "../shell.ts";
 
 export const relayMap = "/var/lib/pi-sandbox/relays.json";
 export const relayStatus = "/var/lib/pi-sandbox/relay-status.json";

@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { previewText, serviceDecl, serviceName } from "../project.ts";
+import { previewText, serviceDecl, serviceName } from "../services-file.ts";
 
 const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
 const guestPath = z

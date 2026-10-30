@@ -27,7 +27,9 @@ import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import {
   upgradeObservation, type HerdrStatus, type NodeObservation, type OlderObservation, type ReportedCapacity,
 } from "../protocol/observations.ts";
-import type { BootInputs, Project, ProjectId } from "../project.ts";
+import type { BootInputs } from "../spawn.ts";
+import type { Project } from "../project.ts";
+import type { ProjectId } from "../ids.ts";
 import type { SessionHarness } from "../sessions.ts";
 import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";

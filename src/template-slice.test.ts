@@ -34,7 +34,8 @@ import type { Job, JobStatus } from "./protocol/jobs.ts";
 import { connectProbe, type ProbeClient } from "./protocol/client.ts";
 import { envelope } from "./reconcile.ts";
 import { templateIdOf, type CheckpointId, type ImageId, type TemplateBuildInputs, type TemplateId, type TemplateManifest } from "./images.ts";
-import type { BootInputs, Checkout, ProjectId } from "./project.ts";
+import type { BootInputs, Checkout } from "./spawn.ts";
+import type { ProjectId } from "./ids.ts";
 import type { Guest, VmBackend } from "./backend.ts";
 
 const execFileAsync = promisify(execFile);

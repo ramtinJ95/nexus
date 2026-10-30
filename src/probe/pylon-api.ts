@@ -1,6 +1,6 @@
 import { pylonEventSchema, type PylonEvent } from "../events.ts";
 /**
- * The probe's answers to the in-pylon `nexus` CLI (PylonApiRequest in project.ts), which a backend's host bridge
+ * The probe's answers to the in-pylon `nexus` CLI (PylonApiRequest below), which a backend's host bridge
  * (host-bridge.ts) delivers. The bridge names the calling pylon from the VM or container the request
  * came through, so the guest holds no token and nothing here takes identity from the request. Everything else
  * in a request is the guest's, so it is parsed here.
@@ -14,7 +14,8 @@ import type { Guest } from "../backend.ts";
 import type { HostBridgeAnswer } from "../host-bridge.ts";
 import type { PortLinks } from "./run.ts";
 import { addOutput, listOutputs, OutputRefused } from "../outputs.ts";
-import { serviceDecl, serviceName, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
+import { serviceDecl, serviceName, type ServiceDecl, type ServiceName } from "../services-file.ts";
+import type { PreviewAssignment } from "../spawn.ts";
 import type { PylonId } from "../ids.ts";
 import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
 import { parseJson } from "../parse.ts";
@@ -37,6 +38,33 @@ export type PylonInfo = z.infer<typeof pylonInfoSchema>;
 /** A service with the preview URL tailscale serves for it, or null while it has none. */
 export type ServiceView = ServiceFact & { url: string | null };
 
+// In-pylon commands. The `nexus` CLI in the image calls the probe at NEXUS_API.
+
+/**
+ * NEXUS_API is http://nexus.pylon. Gondolin's onRequest hook answers that host from the probe on the node
+ * (pi-sandbox change 4), so the call never leaves the machine and needs no tailnet route. The probe knows
+ * which pylon is calling from the VM the request came through, so the guest holds no token.
+ * If change 4 is refused, the fallback is a file pair with one writer each: the CLI writes requests under
+ * /run/nexus/requests/ and the probe polls them through Gondolin's file API and writes the replies.
+ */
+export type PylonApiRequest =
+  | ({ op: "event" } & PylonEvent)
+  | { op: "info" }
+  | { op: "services"; action: "ensure" | "list" | "restart" | "stop"; name?: ServiceName }
+  | { op: "service-logs"; name: ServiceName; lines: number }
+  | { op: "service-start"; name: ServiceName; decl: ServiceDecl } // ad hoc. Rejects declared names
+  | { op: "preview"; port: number; title?: string }
+  | { op: "unpreview"; port: number }
+  | { op: "output-add"; output: { kind: "file"; path: string; title?: string } | { kind: "diff"; title?: string } }
+  | { op: "output-list" };
+
+/**
+ * `services ensure` and `preview` wait up to 30 s for a preview URL. A new preview needs an https port,
+ * which only the control plane allocates. The probe reports the new service, the control plane sends a
+ * spawn with a new LiveSpec, the probe publishes and warms the URL (S4's first request timed out), and only
+ * then does the command return it. Declared outputs are recorded in the guest under /home/user/.nexus/outputs/
+ * and surface through the next observation. Responses are the CLI's --json output.
+ */
 export interface PylonApiReplies {
   event: { accepted: true };
   info: PylonInfo;

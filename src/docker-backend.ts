@@ -21,7 +21,8 @@ import { dockerBridgeRunArgs, dockerHostBridge, labelFilters } from "./docker-ho
 import { docker, dockerExec, label } from "./docker-cli.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
-import { installFileCommand, shellQuote as q, type OverlayFile } from "./project.ts";
+import { installFileCommand, shellQuote as q } from "./shell.ts";
+import type { OverlayFile } from "./spawn.ts";
 import { isImageId, isTemplateId, type PylonId } from "./ids.ts";
 import type { PausedSession } from "./protocol/observations.ts";
 import type { CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";

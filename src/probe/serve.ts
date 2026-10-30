@@ -17,7 +17,7 @@ import { JobFailure } from "../protocol/jobs.ts";
 import type { TailscaleServe } from "./run.ts";
 import { output } from "../exec.ts";
 import { readJson, saveJson } from "../json-file.ts";
-import type { PreviewAssignment } from "../project.ts";
+import type { PreviewAssignment } from "../spawn.ts";
 import type { PylonId } from "../ids.ts";
 import { serialQueue } from "../single-flight.ts";
 import { warmHeader, type PreviewGateway, type PreviewRoute } from "./gateway.ts";

@@ -18,7 +18,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { CheckpointId } from "./images.ts";
-import type { BootInputs } from "./project.ts";
+import type { BootInputs } from "./spawn.ts";
 import type { PylonId } from "./ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 

@@ -3,7 +3,7 @@
  * facts and sessions.
  */
 import { desiredPhase } from "../../reconcile.ts";
-import { linkedPort } from "../../project.ts";
+import { linkedPort } from "../../services-file.ts";
 import { harnessNamed, type SessionHarness } from "../../sessions.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { NodeRecord, Preview, Thread, ThreadAgent, ThreadId } from "../registry.ts";
