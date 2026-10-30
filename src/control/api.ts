@@ -65,6 +65,7 @@ import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } fr
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { listsRunning, observedPylon } from "./observed.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
+import { watchStopped } from "./pr-watch.ts";
 import { judgmentView, type JudgmentView } from "./judgment.ts";
 
 export interface ApiOptions {
@@ -473,7 +474,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       previews,
       ports: portsOf(state.observed, previews),
       outputs: registry.outputs(t.id),
-      prWatch: { enabled: options.prWatchEnabled ?? false, stopped: (watch?.commentWakes ?? 0) >= 10, error: watch?.error ?? null },
+      prWatch: { enabled: options.prWatchEnabled ?? false, stopped: watchStopped(watch), error: watch?.error ?? null },
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
       review: registry.review(t.id),
       questions: registry.questions(t.id),

@@ -13,7 +13,7 @@ import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
 import { agentConversation, harnessView, personWrote } from "./agent-conversation.ts";
-import type { prWatcher } from "./pr-watch.ts";
+import { pushedBranches, type prWatcher } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import { startedByNexus } from "./usage.ts";
 
@@ -83,8 +83,7 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
 
   /** The PR watch links only pull requests it finds open, so GitHub is asked for any on the builder's branches. */
   async function opened(t: Thread, repo: string): Promise<boolean> {
-    const branches = registry.outputs(t.id).flatMap((o) => o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []);
-    for (const branch of branches) if ((await github.find(repo, branch, "all")).length > 0) return true;
+    for (const branch of pushedBranches(registry, t.id)) if ((await github.find(repo, branch, "all")).length > 0) return true;
     return false;
   }
 

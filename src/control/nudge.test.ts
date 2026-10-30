@@ -6,7 +6,7 @@ import { newPylonRecord } from "../tick.ts";
 import { agentInbox, type Inbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { builderNudger, nudgePrefix } from "./nudge.ts";
-import { prWatcher } from "./pr-watch.ts";
+import { prWatcher, pushedBranches } from "./pr-watch.ts";
 import type { GitHub, PullRequest } from "./github.ts";
 import { ingest } from "../reconcile.ts";
 import { gitPollMs } from "../git-facts.ts";
@@ -267,6 +267,20 @@ test("a pull request that merged before the PR watch could link it gets no nudge
   assert.deepEqual(f.nudges(), []);
   assert.deepEqual(f.registry.nudge(id), { state: "opened", turn: f.registry.thread(id)!.lastReplyAt });
   assert.deepEqual(f.finds, [`${repo} nexus/cache all`], "only the branch pushed to origin is searched, in every state, once per turn");
+});
+
+test("the nudge searches the branches the PR watch reads as pushed to origin", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-1");
+  f.push(id, "origin/nexus/cache");
+  f.push(id, "origin/nexus/docs");
+  f.push(id, "fork/nexus/local-only");
+  f.turn(id);
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.equal(f.nudges().length, 1);
+  assert.deepEqual(f.finds.toSorted(), pushedBranches(f.registry, id).map((branch) => `${repo} ${branch} all`).toSorted());
+  assert.ok(f.finds.length >= 2 && !f.finds.some((find) => find.includes("local-only")));
 });
 
 test("a GitHub search that fails sends nothing and logs no error text", async (t) => {

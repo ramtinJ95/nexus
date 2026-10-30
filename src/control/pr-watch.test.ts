@@ -13,7 +13,7 @@ import { gitFacts } from "../git-facts.ts";
 import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, LiveHash, PylonObservation } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
-import { prWatcher, prWatchPrefix, summaryOf } from "./pr-watch.ts";
+import { commentCap, prWatcher, prWatchPrefix, summaryOf } from "./pr-watch.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
@@ -780,4 +780,36 @@ test("a pass reads no archived or deleted thread that no queued thread waits for
   await prWatcher({ ...f.options, registry }).poll();
   assert.deepEqual(asked, [f.id]);
   assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+});
+
+test("a thread's linked open pull requests are read together, and their news comes in link order", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const asked: number[] = [];
+  const pending: (() => void)[] = [];
+  const pr = (number: number): PrSnapshot => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, url: `https://github.com/acme/repo/pull/${number}` }, failures: [{ id: `f${number}`, text: `Check failed on #${number}` }] });
+  const watcher = prWatcher({ ...f.options, github: { find: async () => [1, 2], poll(_repo: string, n: number) {
+    asked.push(n);
+    return new Promise<PrSnapshot>((resolve) => pending.push(() => resolve(pr(n))));
+  } } });
+  const pass = watcher.poll();
+  for (let i = 0; i < 20 && asked.length < 2; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(asked, [1, 2], "both polls are in flight before either answers");
+  pending.reverse().forEach((answer) => answer());
+  await pass;
+  const state = f.registry.prWatch(f.id)!;
+  assert.deepEqual(state.links.map((l) => l.pr.number), [1, 2]);
+  assert.match(String(f.messages.at(-1)![1]), /Check failed on #1[\s\S]*Check failed on #2/);
+});
+
+test("the watch stops after its comment cap of comment-only wakes in a row, and says so", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.savePrWatch(f.id, { links: [{ pr: f.snapshot.pr, seen: [], failed: false }], commentWakes: commentCap - 1, pending: null, error: null });
+  f.snapshot = { ...f.snapshot, comments: [{ id: "issue-comment:1", text: "issue-comment by owner: please rename it" }] };
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)!.commentWakes, commentCap);
+  assert.match(String(f.messages.at(-1)![1]), new RegExp(`PR watching stopped after ${commentCap} consecutive comment-only wakes\\.$`));
+  const calls = f.calls.length;
+  f.snapshot = { ...f.snapshot, comments: [...f.snapshot.comments, { id: "issue-comment:2", text: "issue-comment by owner: and test it" }] };
+  await f.watcher.poll();
+  assert.deepEqual(f.calls.slice(calls), [], "a stopped watch reads GitHub no more");
 });

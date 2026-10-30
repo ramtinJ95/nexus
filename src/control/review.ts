@@ -31,7 +31,7 @@ import { heldBy, landingHolds, legacyHoldCode, reservedNames, unwaived, waivable
 import { checkCaller, verifyCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
-import { prWatchMs } from "./pr-watch.ts";
+import { prWatchMs, watchStopped } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
 import { startedByNexus } from "./usage.ts";
@@ -800,10 +800,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (status === "archived" || status === "deleted") return end(r, { kind: "cancelled", who: "builder", status });
     }
     if (held || r.phase.kind === "approved") {
-      const watch = registry.prWatch(r.builder);
       // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review, as
       // often as the watch would. One that stopped at approval is left to the landing, which reads GitHub before it merges.
-      const capped = (watch?.commentWakes ?? 0) >= 10;
+      const capped = watchStopped(registry.prWatch(r.builder));
       const due = capped && held && now() - (cappedReads.get(r.id) ?? -Infinity) >= prWatchMs;
       const fresh = due ? await read(r) : null;
       if (due) cappedReads.set(r.id, now());
