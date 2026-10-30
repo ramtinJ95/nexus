@@ -8,18 +8,22 @@
  * for a Claude worker thread is followed by a read, a watched thread is read every `workingReadMs` while a turn of
  * its session runs, so its entries show during the turn, and a watch reads once when it starts.
  *
- * A read that reaches the transcript's end then asks the pylon's hook which AskUserQuestion dialogs wait, while a turn
- * of the thread runs or waits or one of its asks is open, and the registry opens and withdraws the worker's asks from
- * that. The transcript cannot say: Claude may write the call to it only once its dialog is answered.
+ * A read that reaches the transcript's end then asks the pylon's hook which AskUserQuestion dialogs wait, and the
+ * registry opens and withdraws the worker's asks from that. The transcript cannot say: Claude may write the call to it
+ * only once its dialog is answered. It asks while one of the thread's asks is open, and while a turn runs or waits it
+ * asks once after each session event or the reader's start, since the hook reports an event once a dialog waits, and
+ * at each read until the hook reports none, once it reported some. The working reads alone do not ask otherwise.
  */
 import { sessionKinds } from "../events.ts";
 import { drained, readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
 import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-ask.ts";
+import { followEvents } from "./follow-events.ts";
 import type { OpenPipe } from "../checkout-files.ts";
 import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import { runningProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Watch } from "./thread-agent.ts";
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
@@ -27,16 +31,8 @@ export interface ClaudeConversations {
   /** Reads what the transcript gained since the last read. It never rejects: a failed read keeps what is stored. */
   refresh(t: Thread): Promise<void>;
   /** The view now, then the view after each read that changed it and whenever a turn starts or ends, until `stop`. */
-  watch(t: Thread): Promise<ClaudeWatch>;
+  watch(t: Thread): Promise<Watch<ClaudeConversation>>;
   close(): void;
-}
-
-export interface ClaudeWatch {
-  readonly value: ClaudeConversation;
-  start(listener: (view: ClaudeConversation) => void | Promise<void>): void;
-  stop(): Promise<void>;
-  /** Settles once the watch is stopped, or the service closed. */
-  readonly closed: Promise<unknown>;
 }
 
 /**
@@ -99,6 +95,13 @@ interface Reader {
   failure: string | null;
   /** The same, for pulls of the asks that wait. */
   askFailure: string | null;
+  /** Whether a pull is due while a turn runs or waits: since the reader started, a session event, or a failed pull. */
+  asksDue: boolean;
+  /**
+   * Whether the last report this reader stored was empty, which storing an empty one again would not change. Until it
+   * is, each read asks while a turn runs or waits, since a withdrawn ask's hook may still wait.
+   */
+  storedNone: boolean;
   /**
    * The newest view while the thread is watched, whose entries the next view reads on from. A read that replaces the
    * transcript drops it, as only these reads write the transcript.
@@ -124,7 +127,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
 
   const readerOf = (id: ThreadId): Reader => {
     let r = readers.get(id);
-    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failure: null, askFailure: null, kept: null });
+    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failure: null, askFailure: null, asksDue: true, storedNone: false, kept: null });
     return r;
   };
 
@@ -211,17 +214,23 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
   }
 
   /**
-   * Stores which asks wait in the pylon, while a turn of the thread runs or waits, and so may show a dialog, or one of
-   * its asks is open and may have closed. A pull that fails keeps the last report, as a failed read keeps the transcript.
+   * Stores which asks wait in the pylon, while one of the thread's asks is open and may have closed, or while a turn
+   * runs or waits, and so may show a dialog, and a pull is due or the last report stored had asks. A delivery that
+   * gave up withdraws its ask while the hook may still wait, and no event follows. A pull that fails keeps the last
+   * report, as a failed read keeps the transcript, and is due again. An empty report after an empty one is not stored
+   * again. A report with asks is, since withdrawing an ask or archiving the thread drops what is stored.
    */
   async function pullAsks(id: ThreadId, r: Reader, pylonId: PylonId, probe: Pick<ProbeClient, "stream">) {
     const t = registry.thread(id);
-    const due = t !== undefined && (t.sessionTurnRunning === true || t.sessionWaiting === true || registry.questions(id).some((q) => q.ask !== undefined && q.answer === null));
-    if (!due) return;
+    if (t === undefined) return;
+    const open = registry.questions(id).some((q) => q.ask !== undefined && q.answer === null);
+    if (!open && !((r.asksDue || !r.storedNone) && (t.sessionTurnRunning === true || t.sessionWaiting === true))) return;
+    r.asksDue = false;
     let asks: WaitingAsk[];
     try {
       asks = await readWaitingAsks((argv) => probe.stream(pylonId, argv));
     } catch (err) {
+      r.asksDue = true;
       const message = (err as Error).message;
       if (r.askFailure !== message) console.error(`${pylonId}: asking which of Claude's questions wait failed, so the last report stands: ${message}`);
       r.askFailure = message;
@@ -229,6 +238,8 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     }
     r.askFailure = null;
     if (closed || registry.thread(id)?.status === "deleted") return;
+    if (asks.length === 0 && r.storedNone) return;
+    r.storedNone = asks.length === 0;
     update(id, r, registry.setWaitingAsks(id, asks));
   }
 
@@ -254,24 +265,19 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
   }
 
   // From the newest event, so a restart reads each thread at its next event or watch rather than every thread at once.
-  let cursor = registry.eventBatch("0", { kinds: sessionKinds }).watermark;
-  const follow = setInterval(() => {
-    let batch: ReturnType<Registry["eventBatch"]>;
-    try {
-      batch = registry.eventBatch(cursor, { kinds: sessionKinds });
-    } catch (err) {
-      console.error(`following session events for Claude transcripts: ${(err as Error).message}. Following from the newest`);
-      cursor = registry.eventBatch("0", { kinds: sessionKinds }).watermark;
-      return;
-    }
-    cursor = batch.watermark;
-    for (const id of new Set(batch.events.flatMap((e) => e.thread === null ? [] : [e.thread as ThreadId]))) {
+  const stopFollowing = followEvents(registry, sessionKinds, followMs, (events) => {
+    for (const id of new Set(events.flatMap((e) => e.thread === null ? [] : [e.thread as ThreadId]))) {
       if (registry.claudeWorker(id) === undefined) continue;
-      update(id, readerOf(id), false);
+      const r = readerOf(id);
+      r.asksDue = true;
+      update(id, r, false);
       void refreshOf(id);
     }
-  }, followMs);
-  follow.unref();
+  }, (err) => {
+    console.error(`following session events for Claude transcripts: ${err.message}. Following from the newest`);
+    // The events skipped may have told a reader that a dialog waits.
+    for (const r of readers.values()) r.asksDue = true;
+  });
 
   return {
     view,
@@ -300,7 +306,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     },
     close() {
       closed = true;
-      clearInterval(follow);
+      stopFollowing();
       for (const r of readers.values()) {
         clearInterval(r.timer ?? undefined);
         r.timer = null;

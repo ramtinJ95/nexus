@@ -221,3 +221,104 @@ test("a read asks the pylon's hook which dialogs wait while a turn runs or waits
   await conversations.refresh(thread);
   assert.equal(pulls, before, "an idle thread with no open ask is not asked");
 });
+
+/**
+ * A Claude thread whose transcript holds a reply, a probe that reads it and answers the hook's `asks` with `report`,
+ * and a reporter of the thread's session events.
+ */
+async function askingThread(t: { after(fn: () => void): void }) {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const thread = claudeThread(registry);
+  const projects = await mkdtemp(join(dir, "projects-"));
+  await mkdir(join(projects, "-home-user-workspace-repo"));
+  const reply = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n")[40]!;
+  await writeFile(join(projects, "-home-user-workspace-repo", `${session}.jsonl`), `${reply}\n`);
+  const state = { report: [] as unknown[], pulls: 0, reads: 0 };
+  const probe: Pick<ProbeClient, "stream"> = {
+    async stream(_, argv) {
+      if (argv[0] !== claudeHook) {
+        state.reads++;
+        return processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {});
+      }
+      state.pulls++;
+      return processStream("sh", ["-c", 'printf "%s\n" "$0"', JSON.stringify(state.report)], () => {});
+    },
+  };
+  let sequence = 0;
+  const event = (kind: "session.turn-started" | "session.heartbeat" | "session.waiting") => registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session, at: Date.now() + sequence } });
+  return { registry, thread, probe, state, event };
+}
+
+const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot" }, { label: "Coffee", description: "Strong" }] };
+
+test("a watched turn's reads ask the pylon's hook which dialogs wait once, and again only after a session event", async (t) => {
+  const { registry, thread, probe, state, event } = await askingThread(t);
+  event("session.turn-started");
+  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), workingReadMs: 10, followMs: 10 });
+  t.after(() => conversations.close());
+  const watch = await conversations.watch(thread);
+  watch.start(() => undefined);
+  await until("the turn is read several times", () => state.reads >= 5);
+  assert.equal(state.pulls, 1, "the reader's first read asks, and the working reads after it do not");
+  event("session.heartbeat");
+  await until("the read after the event asks", () => state.pulls === 2);
+  const reads = state.reads;
+  await until("the turn is read several times more", () => state.reads >= reads + 5);
+  assert.equal(state.pulls, 2);
+  await watch.stop();
+});
+
+test("a report of no waiting asks after one of none is not stored again", async (t) => {
+  const { registry, thread, probe, state, event } = await askingThread(t);
+  let stores = 0;
+  const counted: Registry = { ...registry, setWaitingAsks: (...args) => (stores++, registry.setWaitingAsks(...args)) };
+  event("session.turn-started");
+  const conversations = claudeConversations({ registry: counted, probes: new Map([[node, probe]]), followMs: 10 });
+  t.after(() => conversations.close());
+  await conversations.refresh(thread);
+  event("session.heartbeat");
+  await until("the read after the event asks", () => state.pulls === 2);
+  await conversations.refresh(thread);
+  assert.equal(stores, 1);
+});
+
+test("an ask withdrawn because no hook took its answer is asked again at the next read, with no session event, while the pylon still reports it", async (t) => {
+  const { registry, thread, probe, state, event } = await askingThread(t);
+  event("session.turn-started");
+  event("session.waiting");
+  state.report = [{ session, toolUseId: "toolu_1", at: 5, input: { questions: [drink] } }];
+  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 3_600_000 });
+  t.after(() => conversations.close());
+  const asks = () => registry.questions(thread.id).map((q) => q.id);
+  await conversations.refresh(thread);
+  assert.deepEqual(asks(), ["ask-toolu_1"]);
+  // As a delivery that gave up after 5 seconds does, while the hook may still wait, before the read it asked for.
+  const read = conversations.refresh(thread);
+  registry.withdrawAsk("ask-toolu_1");
+  assert.deepEqual(asks(), []);
+  await read;
+  assert.deepEqual(asks(), ["ask-toolu_1"]);
+  state.report = [];
+  await conversations.refresh(thread);
+  assert.deepEqual(asks(), [], "the hook no longer waits");
+  const pulls = state.pulls;
+  await conversations.refresh(thread);
+  assert.equal(state.pulls, pulls, "a read after an empty report asks no more");
+});
+
+test("a reader whose session events were lost to an expired cursor asks the pylon's hook again at its next read", async (t) => {
+  const { registry, thread, probe, state, event } = await askingThread(t);
+  event("session.turn-started");
+  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 10 });
+  t.after(() => conversations.close());
+  await conversations.refresh(thread);
+  await conversations.refresh(thread);
+  assert.equal(state.pulls, 1, "the reader's first read asks, and the next does not");
+  const error = t.mock.method(console, "error", () => {});
+  for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
+  await until("the follower resets", () => error.mock.callCount() > 0);
+  state.report = [{ session, toolUseId: "toolu_1", at: 5, input: { questions: [drink] } }];
+  await conversations.refresh(thread);
+  assert.deepEqual(registry.questions(thread.id).map((q) => q.id), ["ask-toolu_1"]);
+});

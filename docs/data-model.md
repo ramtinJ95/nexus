@@ -284,7 +284,7 @@ past matching records they have not consumed.
 | `session.turn-started` | Claude submitted a prompt; optional `session` and `message` |
 | `session.heartbeat` | A throttled PostToolUse hook, or a Stop hook while background tasks run, confirms activity; optional `session` and `message` |
 | `session.turn-ended` | Claude's Stop hook ran with no background task running, or after one with only background shells running once they exit or 2 hours pass; optional `session` and `message` |
-| `session.waiting` | Claude showed a permission or input prompt, or a background command still ran after 2 hours; optional `session` and `message` |
+| `session.waiting` | Claude showed a permission or input prompt, its AskUserQuestion hook began waiting for an answer, or a background command still ran after 2 hours; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
 | `thread.turn-ended` | The control-plane harness completed a turn |
 | `thread.failed` | Pylon or worker launch failed; `message` |

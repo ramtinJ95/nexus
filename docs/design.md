@@ -396,7 +396,7 @@ A question is a record the control plane owns, in the registry's `questions` tab
 
 An open question makes its thread's attention `decision`, so it notifies and has a card in Needs you as a held review does. The thread page shows it as a card above the landing card, with the text and a button per option, each asking for a confirmation, and `nexus show` lists it. The answer is a person-only route, `POST /v1/questions/<id>/answer`, which records the option, the device that chose it and when. An answer never changes: the same option again answers with the stored record, so a retried answer is safe, and another option is refused. As the Land button does, the card asks the route's own question, and a device the route would refuse gets disabled buttons that say why. Acting on the answer is the asker's part: the judgment pass reads the answer to its question on its next pass.
 
-A Claude worker's AskUserQuestion call is a question too. It is a question the agent chose to ask, not an approval prompt, so it does not reopen [the decision against approvals](roadmap.md#not-planned): workers still run with permissions bypassed. The pylon's hook says which call waits, because the transcript cannot. Claude Code may write the call to its transcript only once its dialog is answered. In one run on Claude Code 2.1.310, the call's line reached the file 20 seconds after Claude made it, together with its result, so a card opened from the transcript never showed while the dialog waited. So after each transcript read that reaches the transcript's end, while a turn of the thread runs or waits or one of its asks is open, the control plane runs `nexus-claude-hook asks` in the pylon through the probe. The registry stores the asks it prints in `waiting_asks`, in place of the thread's last report, and a run that fails keeps the last report. Each ask the latest report lists for the worker's current session is the question `ask-<call ID>`, unless the stored transcript holds the call's result, and every unanswered ask that is not one is withdrawn. The registry applies that rule after each report, transcript read and worker launch, and archiving or deleting the thread drops its report. The Notification that the dialog waits is a session event, so the read after it opens the card. The PostToolUse heartbeat of a call the terminal answered makes the read that withdraws it, and the hook sends that heartbeat past its five-minute throttle. Another Claude's ask in the pylon, such as the person's own, asks nothing. The thread page shows an open ask as a form: each asked question with its options as radios, or checkboxes for a multi-select one, their previews, an answer of the person's own and notes. Answering stays person-only, through the same route with the person's choices as its body. The control plane hands the answer to Claude in the pylon first, through [the PermissionRequest hook](#event-stream-and-claude-code-thread-workers), and records it only once Claude has it, so a recorded answer is one Claude got. The terminal's dialog stays open meanwhile, and whichever answers first is the answer. An answer that finds no hook waiting, because the terminal answered, the turn ended or a pause stopped Claude, withdraws the ask and drops it from the stored report, so a read before the pylon's next report cannot ask it again. An answered ask leaves the dock, and the conversation shows the call as a card with the choices and the device, or with Claude's result when the terminal answered it.
+A Claude worker's AskUserQuestion call is a question too. It is a question the agent chose to ask, not an approval prompt, so it does not reopen [the decision against approvals](roadmap.md#not-planned): workers still run with permissions bypassed. The pylon's hook says which call waits, because the transcript cannot. Claude Code may write the call to its transcript only once its dialog is answered. In one run on Claude Code 2.1.310, the call's line reached the file 20 seconds after Claude made it, together with its result, so a card opened from the transcript never showed while the dialog waited. So after a transcript read that reaches the transcript's end, the control plane runs `nexus-claude-hook asks` in the pylon through the probe: while one of the thread's asks is open, and otherwise once after each session event of the thread, or the first read since the control plane started, while a turn runs or waits. Once a report listed asks, every read while a turn runs or waits runs it until a report lists none, since an ask withdrawn by a delivery that gave up may still wait with no event to follow. Otherwise the reads every 2 seconds of a watched turn do not run it, so a long turn starts no process in the pylon to learn that nothing waits. A run that fails is due again at the next read. The registry stores the asks it prints in `waiting_asks`, in place of the thread's last report, and a run that fails keeps the last report. An empty report after an empty one is not stored again. One with asks always is, since a withdrawn ask or an archive changes the stored report behind the reader's back. Each ask the latest report lists for the worker's current session is the question `ask-<call ID>`, unless the stored transcript holds the call's result, and every unanswered ask that is not one is withdrawn. The registry applies that rule after each report, transcript read and worker launch, and archiving or deleting the thread drops its report. The Notification that the dialog waits is a session event, but nothing orders it after the hook's waiting file, so the PermissionRequest hook also reports `session.waiting`, with no message, once it has written the file. The read after that event opens the card, and the thread shows "waiting for input" as it does for the Notification. A pylon on an image from before that event gets the card from the read after the Notification, which came 6 seconds after the dialog in `docs/verification/ask-pull-gate/`. The PostToolUse heartbeat of a call the terminal answered makes the read that withdraws it, and the hook sends that heartbeat past its five-minute throttle. Another Claude's ask in the pylon, such as the person's own, asks nothing. The thread page shows an open ask as a form: each asked question with its options as radios, or checkboxes for a multi-select one, their previews, an answer of the person's own and notes. Answering stays person-only, through the same route with the person's choices as its body. The control plane hands the answer to Claude in the pylon first, through [the PermissionRequest hook](#event-stream-and-claude-code-thread-workers), and records it only once Claude has it, so a recorded answer is one Claude got. The terminal's dialog stays open meanwhile, and whichever answers first is the answer. An answer that finds no hook waiting, because the terminal answered, the turn ended or a pause stopped Claude, withdraws the ask and drops it from the stored report, so a read before the pylon's next report cannot ask it again. An answered ask leaves the dock, and the conversation shows the call as a card with the choices and the device, or with Claude's result when the terminal answered it.
 
 ## Planning threads
 
@@ -565,12 +565,15 @@ PreToolUse input has the ID, and Claude finishes its PreToolUse hooks before it
 asks for permission, 35 ms earlier in a spike. So `nexus-claude-hook ask` also
 runs at AskUserQuestion's PreToolUse, with a timeout of 2 seconds, and writes
 `{"toolUseId": ...}` to `~/.nexus/asks/<key>.call`. The PermissionRequest hook
-takes that file and writes `<key>.waiting`, a JSON record
-`{pid, start, session, toolUseId, at, input}`: its pid and the pid's start time
-from `/proc`, the session, the call's ID or null when no PreToolUse recorded
-one, when it started waiting, and the tool's input. The start time keeps a pid
-that a pause or a killed hook freed for another process from passing for the
-hook. The hook then checks every half second for the answer to its call,
+takes that file and writes `<session>.<key>.waiting`, where `<session>` is the
+SHA-256 of the session, a JSON record `{pid, start, at, session, toolUseId, input}`:
+its pid and the pid's start time from `/proc`, when it started waiting, the
+session, the call's ID or null when no PreToolUse recorded one, and the tool's
+input. The start time keeps a pid that a pause or a killed hook freed for
+another process from passing for the hook. Once the file is written, the hook
+queues a `session.waiting` event, so the control plane's pull after it lists the
+ask. The hook then checks every half second that the file still starts with its
+own `pid`, `start` and `at`, reading only those first bytes, and for the answer to its call,
 `<key>.<call>.answer`, where `<call>` is the SHA-256 of the call's ID, so an
 answer meant for one call never reaches another of the same questions.
 
@@ -600,7 +603,8 @@ printed, as it also does once Claude is gone. That PostToolUse sends its
 heartbeat even within five minutes of the last, as no other heartbeat does,
 since only the read after it withdraws the question and ends the session's wait.
 The start and end of a turn and the end of a session remove the session's
-waiting files too, before the hook queues their event. No dialog of the session
+waiting files too, by the session's hash in their names, before the hook queues
+their event. No dialog of the session
 shows then, and a dialog the person interrupted may have closed without a
 PostToolUse. A PreToolUse hook that blocks until the answer would work too, but
 it hides the dialog while it waits, so the terminal could no longer answer. The
@@ -729,8 +733,10 @@ The session events decide when to read rather than a timer. The service follows 
 retained event log, an indexed registry read once a second, and reads a Claude worker
 thread after each `session.*` event for it. Heartbeats are throttled to one per five
 minutes, so while a turn runs and a dashboard watches the thread, it is also read
-every 2 seconds. That is what makes entries appear during a turn. The reads stop at
-the turn's end, so an idle or unwatched thread costs nothing beyond its event reads.
+every 2 seconds. That is what makes entries appear during a turn. These reads do not
+ask the hook which dialogs wait unless an ask is open, as [questions for the
+person](#questions-for-the-person) describes. The reads stop at the turn's end, so an
+idle or unwatched thread costs nothing beyond its event reads.
 The dashboard follows its thread stream as it does for a harness conversation, and
 the conversation pane renders the entries with the same blocks. While a thread is
 watched, its view reads only the entries after the last one it holds, and a read
