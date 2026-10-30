@@ -26,6 +26,7 @@ import { threadStarter } from "./threads.ts";
 import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
+import { digestPattern, tsNet } from "../deploy/model.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { threadQueue } from "./queue.ts";
 import { builderNudger } from "./nudge.ts";
@@ -49,7 +50,7 @@ export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
 const configSchema = z.strictObject({
   db: z.string().min(1),
-  https: z.strictObject({ hostname: z.string().regex(/^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/) }).optional(),
+  https: z.strictObject({ hostname: z.string().regex(tsNet) }).optional(),
   gitIdentity: gitIdentitySchema.optional(),
   github: z.strictObject({ tokenFile: absolutePath }).optional(),
   listen: z.strictObject({
@@ -70,7 +71,7 @@ const configSchema = z.strictObject({
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
   callers: z.array(tailnetNodeIdSchema),
   deployers: z.array(tailnetNodeIdSchema).optional(),
-  deployKeys: z.record(tailnetNodeIdSchema, z.string().regex(/^[0-9a-f]{64}$/)).optional(),
+  deployKeys: z.record(tailnetNodeIdSchema, z.string().regex(digestPattern)).optional(),
   /** The common dotfiles layer every new pylon pulls on boot. */
   dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }),
   harness: z.strictObject({

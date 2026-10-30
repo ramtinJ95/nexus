@@ -6,12 +6,13 @@
  * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins.
  */
 import { execFile } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { access, chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, gitKnownHosts, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
 import { DeployHttpError, jsonRequest } from "./http.ts";
+import { digestPattern, tokenDigest, tsNet } from "./model.ts";
 import { localApiWhois, type Whois } from "../tailscale.ts";
 
 const exec = promisify(execFile);
@@ -152,11 +153,6 @@ export interface FileWrite {
 }
 
 export type Setup = { ok: false; errors: readonly string[] } | { ok: true; files: readonly FileWrite[] };
-
-const digestPattern = /^[0-9a-f]{64}$/;
-const tsNet = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/;
-
-export const tokenDigest = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 function urlHost(host: string): string {
   return host.includes(":") ? `[${host}]` : host;
