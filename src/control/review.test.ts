@@ -3,14 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
-import { agentModelFailure, agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review, type ReviewDeps } from "./review.ts";
+import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
@@ -26,7 +27,8 @@ const head2 = "2".repeat(40);
 const merged = "m".repeat(40);
 const previous = "p".repeat(40);
 
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview } = {}) {
+/** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; agentState?: (registry: Registry) => ReviewDeps["agentState"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -96,8 +98,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       },
     },
     inbox: async (target, message) => { delivering++; if (held !== null) { held.entered(); await held.released; } if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
-    replies: async (target) => replies.get(target.id) ?? [],
-    modelFailure: async (target) => failures.get(target.id) ?? null,
+    agentState: options.agentState?.(registry) ?? (async (target, since) => ({
+      ...heard(target, registry.agent(target).kind === "claude" ? registry.claudeEntries(target.id) : null, since),
+      replies: replies.get(target.id) ?? [], failure: failures.get(target.id) ?? null,
+    })),
     checks: {
       async start() { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); return id; },
       poll: () => check,
@@ -2256,7 +2260,8 @@ test("a model failure is a harness turn's last message that stopped on an error,
   const fake = fakeHarness();
   const harness = f.registry.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
-  const failure = agentModelFailure(f.registry, fake.harness);
+  const read = agentConversation(f.registry, harnessView(fake.harness));
+  const failure = async (th: Thread) => (await read(th)).failure;
   fake.transcript(harness.id).messages.push({ role: "user", content: "review it", timestamp: 1 });
   for (let i = 0; i < 4; i++) fake.transcript(harness.id).messages.push({ role: "assistant", content: [], stopReason: "error", errorMessage: "Request timed out.", timestamp: 2 + i } as never);
   fake.commit(harness.id);
@@ -2268,11 +2273,72 @@ test("a model failure is a harness turn's last message that stopped on an error,
   const claude = f.registry.thread(f.add("th-claude", true))!;
   f.registry.setClaudeWorker(claude.id, "fix it", "started", undefined, "s1");
   const [overloaded] = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").slice(3).map(parseRecord);
-  const read = (entries: ClaudeEntry[], offset: number) => f.registry.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
-  read([{ kind: "prompt", at: 1, text: "fix it", from: "person" }, ...overloaded!, { kind: "turn", at: 5, durationMs: 100 }], 1);
+  const append = (entries: ClaudeEntry[], offset: number) => f.registry.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
+  append([{ kind: "prompt", at: 1, text: "fix it", from: "person" }, ...overloaded!, { kind: "turn", at: 5, durationMs: 100 }], 1);
   assert.match((await failure(claude))!, /^API Error: 529 Overloaded\./);
-  read([{ kind: "prompt", at: 6, text: "fix it", from: "other" }, { kind: "reply", at: 7, text: "Done." }], 2);
+  append([{ kind: "prompt", at: 6, text: "fix it", from: "other" }, { kind: "reply", at: 7, text: "Done." }], 2);
   assert.equal(await failure(claude), null);
+});
+
+test("a conversation's harness watch is stopped when its projection throws", async (t) => {
+  const f = fixture(t, { claudeBuilder: false });
+  const fake = fakeHarness();
+  const harness = f.registry.thread(f.builder)!;
+  await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
+  fake.transcript(harness.id).messages.push({ role: "assistant", content: "not a list of parts", timestamp: 1 } as never);
+  fake.commit(harness.id);
+  await assert.rejects(agentReplies(f.registry, fake.harness)(harness));
+  assert.equal(fake.watching(harness.id), 0);
+});
+
+/** A fake harness behind the loop's real agent reads, whose reads of Claude transcripts `entries` counts. */
+function realReads(t: import("node:test").TestContext) {
+  const fake = fakeHarness();
+  const counted = { entries: 0 };
+  const f = fixture(t, { agentState: (registry) => agentState({ ...registry, claudeEntries: (...args) => { counted.entries++; return registry.claudeEntries(...args); } }, fake.harness) });
+  /** A harness thread's turn that ended with `text`. */
+  const say = (id: ThreadId, text: string) => {
+    fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 1 } as never);
+    fake.commit(id);
+    f.reply(id, text);
+  };
+  return { f, fake, counted, say };
+}
+
+test("a step reads a waiting Claude builder's transcript once", async (t) => {
+  const { f, fake, counted, say } = realReads(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await fake.harness.startThread({ threadId: f.review().reviewer, pylonId: `pylon-${f.review().reviewer}` as PylonId });
+  await loop.poll();
+  say(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]) }, { kind: "turn", at: f.now, durationMs: 1_000 }], []);
+  f.tick(1_000);
+  counted.entries = 0;
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the loop waits for the push the builder says it made");
+  assert.equal(counted.entries, 1);
+});
+
+test("a harness reviewer that ended no turn since the request is not read", async (t) => {
+  const { f, fake, say } = realReads(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  const reviewer = f.review().reviewer;
+  await fake.harness.startThread({ threadId: reviewer, pylonId: `pylon-${reviewer}` as PylonId });
+  for (let i = 0; i < 3; i++) {
+    await loop.poll();
+    f.tick(15_000);
+  }
+  const watches = () => fake.calls.filter(([kind, id]) => kind === "watch" && id === reviewer).length;
+  assert.equal(watches(), 0);
+  say(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(watches(), 1, "the turn that ended is read");
+  assert.deepEqual(f.review().phase, { kind: "approved" });
 });
 
 /** A push of `head` to the PR's branch, as GitHub and then the PR watch's next read see it. */

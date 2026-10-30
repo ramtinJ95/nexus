@@ -11,7 +11,8 @@ import type { HarnessHost } from "../harness/host.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
-import { promptSenders, type Inbox } from "./inbox.ts";
+import type { Inbox } from "./inbox.ts";
+import { agentConversation, harnessView, personWrote } from "./agent-conversation.ts";
 import type { prWatcher } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import { startedByNexus } from "./usage.ts";
@@ -56,28 +57,9 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     return project?.autoReview == null ? null : githubRepo(project.repoUrl);
   }
 
+  const conversation = agentConversation(registry, harnessView(harness));
   /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
-  async function personWrote(t: Thread): Promise<boolean> {
-    switch (registry.agent(t).kind) {
-      case "claude": {
-        const entries = registry.claudeEntries(t.id);
-        const first = entries.findIndex((e) => e.kind === "reply");
-        const sender = promptSenders(registry, t.id);
-        return first !== -1 && entries.slice(first).some((e) => e.kind === "prompt" && e.from === "person" && sender(e.text) === null);
-      }
-      case "none": throw new Error(`thread ${t.id} has no agent, so no one wrote to it`);
-      case "harness": {
-        const watch = await harness.watch(t.id);
-        try {
-          const messages = watch.value.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })));
-          const first = messages.findIndex(({ message }) => message.role === "assistant");
-          return first !== -1 && messages.slice(first).some(({ entry, message }) => message.role === "user" && !entry.kind.startsWith("nexus."));
-        } finally {
-          await watch.stop();
-        }
-      }
-    }
-  }
+  const personWroteTo = async (t: Thread) => personWrote(await conversation(t));
 
   /**
    * Whether the registry's outputs hold every branch the thread pushed before `turn` ended. The probe takes a snapshot's
@@ -119,22 +101,22 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     if (t.usageLimit !== undefined) return;
     const turn = t.lastReplyAt;
     // The turn the person's message starts may outlast the transcript's hold on that message, so look while it runs.
-    if (t.working && t.lastHumanActivityAt > (turn ?? 0) && await personWrote(t)) return leaveAlone();
+    if (t.working && t.lastHumanActivityAt > (turn ?? 0) && await personWroteTo(t)) return leaveAlone();
     if (record?.state === "sending") {
       // It may never have gone out, so it waits for an ended turn and goes only to a thread that is not the person's.
       if (t.working) return;
-      if (await personWrote(t)) return leaveAlone();
+      if (await personWroteTo(t)) return leaveAlone();
       const fresh = registry.thread(t.id);
       if (fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.working) return;
       return deliver(fresh, record);
     }
     if (record?.state === "person") {
       // The person's message starts a turn, so only a thread that worked since the hold can have one.
-      if ((t.working || (turn ?? 0) > record.turn) && await personWrote(t)) leaveAlone();
+      if ((t.working || (turn ?? 0) > record.turn) && await personWroteTo(t)) leaveAlone();
       return;
     }
     if (t.working || turn === null || (record !== null && record.turn >= turn) || !watched(t, turn)) return;
-    if (await personWrote(t)) return leaveAlone();
+    if (await personWroteTo(t)) return leaveAlone();
     try {
       if (await opened(t, repo)) return registry.saveNudge(t.id, { state: "opened", turn });
     } catch (err) {
