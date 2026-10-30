@@ -4,20 +4,10 @@
  * transcript again, a restart, or two readers that see the same call never count it twice.
  */
 import type { ProjectId } from "../project.ts";
+import type { AgentCall, AgentKind, Tokens } from "../agent-usage.ts";
 import type { NodeName } from "../protocol.ts";
 import { HttpError } from "./http-error.ts";
 import type { ThreadId } from "./registry.ts";
-
-export type AgentKind = "claude" | "pi";
-export interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
-
-/**
- * One model call as an agent recorded it. `id` names the call wherever it is read from: `claude:<message ID>` for
- * Claude Code, `pi:<response ID>` for pi, or `pi:<entry>@<entry's time>` for a pi entry without one, and
- * `harness:<conversation>/<entry>` for the Nexus agent.
- */
-export interface AgentCall extends Tokens { id: string; agent: AgentKind; model: string; at: number }
-
 
 export interface UsageTotals extends Tokens { total: number; calls: number }
 export const breakdowns = ["model", "project", "kind", "role", "day"] as const;

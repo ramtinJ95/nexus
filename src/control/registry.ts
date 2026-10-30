@@ -34,7 +34,8 @@ import { reviewerCaller, roleOf } from "../agent-protocol.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
-import type { AgentCall, BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
+import type { AgentCall } from "../agent-usage.ts";
+import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
 
 declare const brand: unique symbol;
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
