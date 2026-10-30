@@ -78,6 +78,7 @@ Planned for later, as one wave of interface work. The person scopes it and start
 - **Named pylons that outlive a thread.**
 - **Deleting a thread's conversation from the harness.** pi-durable can't delete one yet, so a deleted thread's transcript stays in the harness's storage.
 - **A Firecracker backend.**
+- **A Kubernetes branch, as a side quest.** Try Nexus on Kubernetes on a branch of its own, with custom resources, deployments and controllers in place of the control plane's own loops: a thread or pylon as a custom resource, the planner's reconciliation as a controller, and placement as the scheduler. Nexus already borrows Kubernetes's ideas: desired and actual state reconciled by a pure planner (`src/reconcile.ts`), a probe on each node much as a kubelet, and placement by the room each node reports. It is not a focus any time soon, and nothing is built for it yet.
 - **Phone steering through Claude Code Remote Control.** This is low priority, because Nexus is rarely used from a phone.
 
 ## Not planned
