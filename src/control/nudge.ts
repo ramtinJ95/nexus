@@ -7,6 +7,7 @@
  * thread to the person through its `decision` attention. A pull request ends it, and the person writing to the thread
  * leaves the thread alone for good.
  */
+import { nudgePrefix, startedByNexus } from "../agent-protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { singleFlight } from "../single-flight.ts";
@@ -15,9 +16,7 @@ import type { Inbox } from "./inbox.ts";
 import { agentConversation, harnessView, personWrote } from "./agent-conversation.ts";
 import { pushedBranches, type prWatcher } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-import { startedByNexus } from "./usage.ts";
 
-export const nudgePrefix = "[Nexus nudge — automated, not a message from the person]";
 const text = `${nudgePrefix}
 Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you are blocked or the task needs no pull request, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
 

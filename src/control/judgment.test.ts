@@ -10,10 +10,9 @@ import { desiredPhase } from "../reconcile.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeHealth, NodeName, PylonId, PylonObservation, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
-import { checkCaller, verifyCaller } from "./gate.ts";
+import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
 import { briefOf, judgmentPass, type Judgment, type JudgmentPass } from "./judgment.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { reviewerCaller } from "./review.ts";
 
 const nodeA = "node-a" as NodeName;
 const nodeB = "node-b" as NodeName;

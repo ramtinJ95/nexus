@@ -8,13 +8,13 @@
  * so it starts once whatever crashes, restarts or concurrent passes come between. What blocks it is derived on every
  * pass and read rather than stored, so a reopened or later-merged pull request unblocks it.
  */
+import { startedByNexus } from "../agent-protocol.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs, ProjectId } from "../project.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 import { checkStart, newThreadId, resourcesOf, type StartRequest } from "./threads.ts";
-import { startedByNexus } from "./usage.ts";
 
 /** What the queue keeps of a thread until it starts. `request` is frozen when queued, its resources filled field by field from the project's. A request that names no node starts on the project's default when it starts, as any start does. */
 export interface QueuedRecord {

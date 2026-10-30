@@ -6,9 +6,18 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { claudeProjects } from "./claude-transcript.ts";
-import type { AgentCall } from "./control/usage.ts";
 import { parseJson } from "./parse.ts";
 import { openPython, pipeOutput, type OpenPipe } from "./pipe.ts";
+
+export type AgentKind = "claude" | "pi";
+export interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
+
+/**
+ * One model call as an agent recorded it. `id` names the call wherever it is read from: `claude:<message ID>` for
+ * Claude Code, `pi:<response ID>` for pi, or `pi:<entry>@<entry's time>` for a pi entry without one, and
+ * `harness:<conversation>/<entry>` for the Nexus agent.
+ */
+export interface AgentCall extends Tokens { id: string; agent: AgentKind; model: string; at: number }
 
 const helper = readFileSync(new URL("./agent-usage.py", import.meta.url));
 

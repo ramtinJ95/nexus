@@ -32,7 +32,7 @@ import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, Thread
 import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource, type TranscriptImage } from "../claude-transcript.ts";
-import type { Sender } from "../harness/host.ts";
+import type { Sender } from "../agent-protocol.ts";
 import { promptSenders, type PromptSenders } from "./inbox.ts";
 import { queuedOf } from "./claude-conversation.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";

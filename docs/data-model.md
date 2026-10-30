@@ -189,7 +189,7 @@ An item's thread is not stored. It is the thread the start request ID `pipeline:
 
 ## Token usage records
 
-`usage_records` holds one row per model call an agent made, keyed by `id`, the call's own ID in the agent's record. A row is an `AgentCall` from `src/control/usage.ts` with the `thread` it was read from, and that thread's `project` and `role`.
+`usage_records` holds one row per model call an agent made, keyed by `id`, the call's own ID in the agent's record. A row is an `AgentCall` from `src/agent-usage.ts` with the `thread` it was read from, and that thread's `project` and `role`.
 
 | Source | `id` | `agent` | Read from |
 |---|---|---|---|

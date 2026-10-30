@@ -19,6 +19,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "../agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../project.ts";
@@ -28,17 +29,13 @@ import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
 import { isDraining } from "./drain.ts";
 import { heldBy, landingHolds, legacyHoldCode, reservedNames, unwaived, waivable, type Hold, type HoldCode } from "./policy.ts";
-import { checkCaller, verifyCaller, type CheckRuns } from "./gate.ts";
+import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, watchStopped } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
-import { startedByNexus } from "./usage.ts";
 
-/** Who starts a reviewer thread, as its `startedBy`. */
-export const reviewerCaller = "nexus-review";
-export const reviewPrefix = "[Nexus review — automated, not a message from the person]";
 /** The most rounds a review runs, and how many it runs unless asked for fewer. */
 export const maxRounds = 5;
 export const humanLabel = "needs human review";
@@ -264,26 +261,6 @@ export interface ReviewDeps {
 }
 
 /**
- * The text of each block fenced as `fence` in the replies, oldest first. The closing fence starts a line, which no
- * JSON string can, so a brief or a finding that quotes fenced code stays in its block.
- */
-const fencedBlocks = (replies: readonly string[], fence: string): string[] =>
-  replies.flatMap((text) => [...text.matchAll(new RegExp("```" + fence + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```", "g"))].map((m) => m[1]!));
-
-/** Every fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, oldest first. */
-export const tokenBlocks = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T[] =>
-  fencedBlocks(replies, fence).flatMap((block) => {
-    let value: unknown;
-    try { value = JSON.parse(block); } catch { return []; }
-    const parsed = schema.safeParse(value);
-    return parsed.success && parsed.data.token === token ? [parsed.data] : [];
-  });
-
-/** The newest fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, or null when none does. */
-export const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null =>
-  tokenBlocks(replies, fence, schema, token).at(-1) ?? null;
-
-/**
  * A gate that stopped an approval: the P0 `finding` the builder answers, what `failed`, the `verdict` its findings
  * message gives, the hold's `code` and its text once the builder `pushedNothing` for it, and the gate's `output`.
  */
@@ -387,9 +364,6 @@ const failedNodes = (view: ReleaseView, commit: string) => view.nodes.filter((n)
 const checkOutput = (output: string) => `The check's output:\n${output}`;
 const liveOutput = (output: string) => `The live check's output:\n${output}`;
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
-
-/** A token of `id` and random hex, which only the recipient of the request it is in is told. */
-export const mint = (id: string) => `${id}:${randomBytes(6).toString("hex")}`;
 
 function reviewerRequest(r: Review, detail: PrSnapshot["detail"], token: string): string {
   return `${reviewPrefix}

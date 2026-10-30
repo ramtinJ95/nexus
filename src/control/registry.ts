@@ -12,7 +12,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  * the control plane reads them, always whole, so they need no columns of their own.
  */
 import type { PrWatchState } from "./pr-watch.ts";
-import type { Sender } from "../harness/host.ts";
+import type { Sender } from "../agent-protocol.ts";
 import type { PlanningRecord } from "./planning.ts";
 import { askQuestionId, askRecord, type Question, type WaitingAsk } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
@@ -29,11 +29,13 @@ import type { SessionHarness } from "../sessions.ts";
 import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
-import { needsPerson, reviewerCaller, storedReview, type Review } from "./review.ts";
+import { needsPerson, storedReview, type Review } from "./review.ts";
+import { reviewerCaller, roleOf } from "../agent-protocol.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
-import { roleOf, type AgentCall, type BackfillThread, type Breakdown, type UsageBackfill, type UsageReport, type UsageTotals } from "./usage.ts";
+import type { AgentCall } from "../agent-usage.ts";
+import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
 
 declare const brand: unique symbol;
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */

@@ -17,7 +17,7 @@ import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { personPhase, type Review, type ReviewLoop } from "./review.ts";
 import type { Judgment } from "./judgment.ts";
-import type { AgentCall } from "./usage.ts";
+import type { AgentCall } from "../agent-usage.ts";
 import type { JobId, NodeHealth, NodeName, PylonId, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
 import { defaultProjectResources, githubTokenGrant } from "../project.ts";
@@ -26,7 +26,7 @@ import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry
 import { testImage } from "../test-kit.ts";
 import { imagePaths, liveFrames, liveStreams } from "./dashboard.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
-import { usageLimitPrefix } from "./usage-limit.ts";
+import { usageLimitPrefix } from "../agent-protocol.ts";
 import { startHint, type HintPart } from "./dashboard/start-hint.ts";
 import { agoText, clock } from "./dashboard/elapsed.ts";
 import { imageTypes } from "../image-types.ts";
