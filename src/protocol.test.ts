@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import type { NodeName, PylonId, TailnetNodeId } from "./ids.ts";
+import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
 import { parseJobEnvelope, parseSubmitReply } from "./protocol/jobs.ts";
 import { brokenCauses, parseProbeEvent, upgradeObservation, type BrokenCause } from "./protocol/observations.ts";
 import {
@@ -13,6 +13,7 @@ import { parseStreamRequest } from "./protocol/streams.ts";
 import { probeErrorCodes, ProbeHttpError, type ProbeError } from "./protocol/http.ts";
 import { parseArtifactManifest } from "./protocol/artifacts.ts";
 import { connectProbe } from "./protocol/client.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "./test-kit.ts";
 
 const node = "test-node";
 const pylonId = "pylon-th-1";
@@ -201,10 +202,9 @@ test("a submit reply is read by its status, without the fields the control plane
 });
 
 const observation = {
-  events: [{ sequence: 1, pylon: pylonId, event: { kind: "session.turn-ended" }, time: 2 }], node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b",
-  capacity: { cpus: 8, committedCpus: 2, memoryGiB: 32, committedMemoryGiB: 4, diskFreeGiB: 100, committedDiskGiB: 20 }, artifacts: [image], jobs: [running, failed],
-  pylons: [{ pylonId, phase: "booting", ...unknown }, { pylonId: "pylon-t2", phase: "stopped", checkpoint: null, sessions: null }], previewRoutes: [{ httpsPort: 8443, pylonId, service: "web" }],
-  grants: { secrets: [], gitSsh: false }, heldSecrets: [], ...unknown,
+  ...testObservation(node as NodeName, { observedAt: "2027-01-01T00:00:00Z", capacity: testCapacity({ cpus: 8, committedCpus: 2, memoryGiB: 32, committedMemoryGiB: 4, committedDiskGiB: 20 }) }),
+  events: [{ sequence: 1, pylon: pylonId, event: { kind: "session.turn-ended" }, time: 2 }], artifacts: [image], jobs: [running, failed],
+  pylons: [{ pylonId, phase: "booting", ...unknown }, stoppedPylon("pylon-t2" as PylonId, { sessions: null })], previewRoutes: [{ httpsPort: 8443, pylonId, service: "web" }], ...unknown,
 };
 
 test("a probe event keeps the fields the control plane does not know inside its payload, and only there for a snapshot or a pylon", () => {
@@ -218,10 +218,7 @@ test("a probe event keeps the fields the control plane does not know inside its 
 });
 
 test("a running pylon's previews from an older probe, which marked each ready, parse without the mark", () => {
-  const pylon = {
-    pylonId, phase: "running", liveHash: "hash-1", bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image, checkpoint: null }, services: [], listening: [],
-    previews: [{ service: "web", httpsPort: 10000 }], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-  };
+  const pylon = runningPylon(pylonId as PylonId, { liveHash: "hash-1" as LiveHash, bootedFrom: { image, checkpoint: null }, previews: [{ service: "web", httpsPort: 10000 }] });
   const older = { ...pylon, previews: [{ service: "web", httpsPort: 10000, ready: true }] };
   assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "pylon", pylon: older })), { type: "pylon", pylon });
   assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "pylon", pylon })), { type: "pylon", pylon });
