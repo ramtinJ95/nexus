@@ -174,6 +174,7 @@ async function roleInstallers(t: TestContext) {
   for (const name of ["install-control.sh", "install-probe.sh", "secrets.example.env", "nexus-control.service", "nexus-probe.service"]) {
     await copyFile(join(real, "deploy", name), join(checkout, "deploy", name));
   }
+  await symlink(join(real, "src"), join(checkout, "src"));
   await writeFile(join(checkout, "deploy", "release.sh"), `. "${real}/deploy/release.sh"
 prefix="${root}/opt/nexus"
 etc="${etc}"
@@ -213,7 +214,7 @@ make_state() { echo "make_state $1" >>"${log}"; }
       done({ code, timedOut: code === null, stderr });
     });
   });
-  return { root, etc, run, ran: async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n") };
+  return { root, etc, harness, run, ran: async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n") };
 }
 
 test("the deployer's preparation runs both role installers without reading input, and changes no credential", async (t) => {
@@ -237,4 +238,20 @@ test("outside preparation the same stand-ins see the role installers switch and 
   const ran = await m.ran();
   assert.ok(ran.includes(`link_release ${m.root}/opt/nexus/current`), ran.join("\n"));
   assert.ok(ran.includes("start_unit nexus-probe.service"), ran.join("\n"));
+});
+
+test("the control installer starts its service once the harness is signed in, and leaves it stopped and says why when its credentials are not JSON", async (t) => {
+  const m = await roleInstallers(t);
+  const started = await m.run("control", false);
+  assert.equal(started.code, 0, started.stderr);
+  assert.ok((await m.ran()).includes("start_unit nexus-control.service"));
+  for (const [credentials, why] of [[{ deviceId: "d", credentials: {} }, ""], ["{ not json", "is not valid JSON"]] as const) {
+    const n = await roleInstallers(t);
+    await writeFile(n.harness, typeof credentials === "string" ? credentials : JSON.stringify(credentials));
+    const result = await n.run("control", false);
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(!(await n.ran()).includes("start_unit nexus-control.service"));
+    if (why === "") assert.doesNotMatch(result.stderr, /install:/);
+    else assert.match(result.stderr, new RegExp(`install: .*${why}`));
+  }
 });

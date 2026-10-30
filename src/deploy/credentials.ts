@@ -32,7 +32,6 @@ export interface Store {
 export const stores = {
   harness: { scope: "install", machines: "control", file: "/var/lib/nexus-control/harness-credentials.json", owner: "nexus-control:nexus-control", mode: 0o600 },
   claude: { scope: "install", machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
-  github: { scope: "install", machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
   githubWatch: { scope: "install", machines: "control", file: "/etc/nexus/github-token", owner: "root:nexus-control", mode: 0o640 },
   gitKey: { scope: "install", machines: "every", file: "/etc/nexus/git_ed25519", owner: "nexus:nexus", mode: 0o400 },
 } as const satisfies Record<string, Store>;
@@ -49,6 +48,11 @@ const githubFingerprints: ReadonlySet<string> = new Set([
   "SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM",
   "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU",
 ]);
+
+/** Whether a harness credentials file holds a login. Throws when it is not JSON. */
+export function harnessSignedIn(text: string): boolean {
+  return Object.keys((JSON.parse(text) as { credentials?: object }).credentials ?? {}).length > 0;
+}
 
 /** The names in a secrets.env, never their values. */
 export function secretNames(text: string): string[] {
@@ -260,8 +264,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
 
   if (here(stores.harness)) {
     const file = at.harness;
-    const current = JSON.parse(await host.read(file) ?? "{}") as { deviceId?: string; credentials?: Record<string, unknown> };
-    if (Object.keys(current.credentials ?? {}).length > 0) say(`Left the harness's login in ${file} alone.`);
+    if (harnessSignedIn(await host.read(file) ?? "{}")) say(`Left the harness's login in ${file} alone.`);
     else {
       let how: string;
       for (;;) {

@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { planDeploy, quarantined, type Attempt, type ReleaseHealth, type Role } from "./plan.ts";
 import type { ReleaseReport, ReleaseView } from "./model.ts";
-import { jsonRequest } from "./http.ts";
+import { jsonRequest, urlHost } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois, tailnetNodeIdPattern } from "../tailscale.ts";
 
@@ -81,7 +81,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const reportPath = join(prefix, `${role}-deploy-report.json`);
   const repo = join(prefix, "deployer", "repo");
   const local = await readJson(join(etc, `${role}.json`), null) as { listen: { host: string; port: number } };
-  const healthUrl = new URL(`http://${local.listen.host.includes(":") ? `[${local.listen.host}]` : local.listen.host}:${local.listen.port}/v1/health`);
+  const healthUrl = new URL(`http://${urlHost(local.listen.host)}:${local.listen.port}/v1/health`);
   const healthy = async () => {
     const expected = await commitAt(link);
     const until = Date.now() + config.healthTimeoutMs;

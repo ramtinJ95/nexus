@@ -13,6 +13,9 @@ export class DeployHttpError extends Error {
   }
 }
 
+/** A host as a URL names it, with an IPv6 address in brackets. */
+export const urlHost = (host: string): string => host.includes(":") ? `[${host}]` : host;
+
 export async function jsonRequest(url: URL, method: string, body: unknown, token: string | null, peer?: { id: string; whois: Whois }, timeoutMs = 10_000): Promise<any> {
   if (url.protocol !== "http:") throw new Error("deployment endpoint must be tailnet HTTP");
   return new Promise((resolve, reject) => {
