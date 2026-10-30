@@ -13,6 +13,7 @@ import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { CommandResult, ProbeClient, ProbeError, PylonId } from "../protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { claudeTextProblem } from "../sessions.ts";
+import { harnessView } from "./agent-conversation.ts";
 import type { ClaudeConversations } from "./claude-conversation.ts";
 import { claudeFrames, viewFrames, type Frames, type Watch } from "./conversation-view.ts";
 import { HttpError } from "./http-error.ts";
@@ -73,19 +74,12 @@ export function threadAgents(options: {
   const refuse = (t: Thread): never => { throw new HttpError(409, noConversation(t)); };
   const worker = (t: Thread) => registry.claudeWorker(t.id)!;
 
-  const harnessView = async (t: Pick<Thread, "id">) => {
-    const watch = await harness.watch(t.id);
-    try {
-      return watch.value;
-    } finally {
-      await watch.stop();
-    }
-  };
+  const view = harnessView(harness);
 
   return {
     harness: {
-      view: harnessView,
-      read: harnessView,
+      view,
+      read: view,
       watch: (t) => harness.watch(t.id),
       frames: viewFrames,
       /** A message is human activity, so the pylon wakes while the model answers. */

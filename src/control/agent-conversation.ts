@@ -8,7 +8,6 @@ import { errorStop, type ClaudeEntry } from "../claude-transcript.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { promptSenders, type PromptSenders } from "./inbox.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-import type { Agent } from "./thread-agent.ts";
 
 /** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
 export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };
@@ -19,7 +18,7 @@ export interface Conversation {
 }
 
 /** A harness conversation's view now, from a watch opened for the read and stopped after it. */
-export function harnessView(harness: Pick<HarnessHost, "watch">): Agent<ConversationView>["view"] {
+export function harnessView(harness: Pick<HarnessHost, "watch">): (t: Pick<Thread, "id">) => Promise<ConversationView> {
   return async (t) => {
     const watch = await harness.watch(t.id);
     try {
@@ -51,7 +50,7 @@ function claudeConversation(registry: Registry, thread: ThreadId, entries: reado
 }
 
 /** Reads a thread's conversation. A bare thread has none. */
-export function agentConversation(registry: Registry, view: Agent<ConversationView>["view"]): (t: Thread) => Promise<Conversation> {
+export function agentConversation(registry: Registry, view: (t: Pick<Thread, "id">) => Promise<ConversationView>): (t: Thread) => Promise<Conversation> {
   return async (t) => {
     switch (registry.agent(t).kind) {
       case "claude": return claudeConversation(registry, t.id, registry.claudeEntries(t.id));
@@ -67,12 +66,6 @@ export const repliesOf = (c: Conversation): string[] => c.messages.flatMap((m) =
 export function personWrote(c: Conversation): boolean {
   const first = c.messages.findIndex((m) => m.role === "assistant");
   return first !== -1 && c.messages.slice(first).some((m) => m.role === "user" && m.person);
-}
-
-/** An agent's replies, oldest first. */
-export function agentReplies(registry: Registry, harness: Pick<HarnessHost, "watch">): (t: Thread) => Promise<string[]> {
-  const read = agentConversation(registry, harnessView(harness));
-  return async (t) => repliesOf(await read(t));
 }
 
 /**
@@ -91,21 +84,26 @@ export function heard(t: Pick<Thread, "lastReplyAt" | "working">, entries: reado
 /** What the review loop learns of an agent since `since` in one read: its replies and model failure, and `heard`'s turn facts. */
 export type AgentState = ReturnType<typeof heard> & { replies: string[]; failure: string | null };
 
-/**
- * A harness thread's conversation is opened only once a turn ended after `since`. Until then it can hold no answer,
- * and the state has no replies and no failure.
- */
-export function agentState(registry: Registry, harness: Pick<HarnessHost, "watch">): (t: Thread, since: number) => Promise<AgentState> {
+export function agentReader(registry: Registry, harness: Pick<HarnessHost, "watch">) {
   const read = agentConversation(registry, harnessView(harness));
-  return async (t, since) => {
-    if (registry.agent(t).kind === "claude") {
-      const entries = registry.claudeEntries(t.id);
-      const c = claudeConversation(registry, t.id, entries);
-      return { ...heard(t, entries, since), replies: repliesOf(c), failure: c.failure };
-    }
-    const turn = heard(t, null, since);
-    if (turn.ended === null) return { ...turn, replies: [], failure: null };
-    const c = await read(t);
-    return { ...turn, replies: repliesOf(c), failure: c.failure };
+  return {
+    /**
+     * A harness thread's conversation is opened only once a turn ended after `since`. Until then it can hold no answer,
+     * and the state has no replies and no failure.
+     */
+    async state(t: Thread, since: number): Promise<AgentState> {
+      if (registry.agent(t).kind === "claude") {
+        const entries = registry.claudeEntries(t.id);
+        const c = claudeConversation(registry, t.id, entries);
+        return { ...heard(t, entries, since), replies: repliesOf(c), failure: c.failure };
+      }
+      const turn = heard(t, null, since);
+      if (turn.ended === null) return { ...turn, replies: [], failure: null };
+      const c = await read(t);
+      return { ...turn, replies: repliesOf(c), failure: c.failure };
+    },
+    /** An agent's replies, oldest first. */
+    replies: async (t: Thread): Promise<string[]> => repliesOf(await read(t)),
+    personWrote: async (t: Thread): Promise<boolean> => personWrote(await read(t)),
   };
 }

@@ -21,7 +21,7 @@ import { openRegistry, type NodeRecord, type Thread, type ThreadId } from "./reg
 import { peerHandoff } from "./peers.ts";
 import { githubClient, githubRepo } from "./github.ts";
 import { reviewLoop } from "./review.ts";
-import { agentReplies, agentState } from "./agent-conversation.ts";
+import { agentReader } from "./agent-conversation.ts";
 import { threadStarter } from "./threads.ts";
 import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
@@ -196,6 +196,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, probes: probeMap, buildNode: (config.imageBuildNode ?? "infra-testbench") as NodeName, recipe: () => loadImageRecipe(), release: runningCommit,
   });
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
+  const agents = agentReader(registry, harness);
   const usage = usageCounter({ registry, probes: probeMap, harness });
   const github = token === null ? null : githubClient(token);
   every(60_000, () => handoff?.poll());
@@ -208,7 +209,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
-    agentState: agentState(registry, harness),
+    agentState: agents.state,
     checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
     live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
@@ -227,9 +228,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   every(15_000, () => queue?.poll());
   const items = queue === null ? null : pipeline({ registry, queue, log });
   every(15_000, () => items?.poll());
-  const plans = planning({ registry, pipeline: items, replies: agentReplies(registry, harness), log });
+  const plans = planning({ registry, pipeline: items, replies: agents.replies, log });
   every(15_000, () => plans.poll());
-  const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, watch });
+  const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });
   every(15_000, () => nudges?.poll());
   // Judgments need no GitHub, so they run without a token too.
   const judgments = judgmentPass({ registry, harness, probes: probeMap, wake });

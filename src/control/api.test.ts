@@ -32,7 +32,7 @@ import { threadQueue, type QueuedThread } from "./queue.ts";
 import { turnGate, type TurnGate } from "./drain.ts";
 import type { AttachTiming } from "./attach.ts";
 import type { ReviewLoop } from "./review.ts";
-import { agentReplies } from "./agent-conversation.ts";
+import { agentReader } from "./agent-conversation.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type JoinedNode, type Registry, type Thread, type ThreadId } from "./registry.ts";
@@ -112,7 +112,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
   const startThread = threadStarter({ registry, harness, mirror, dotfiles: options.dotfiles ?? dotfiles, gitIdentity: options.gitIdentity, wake });
   const queue = options.queue === true || options.pipeline === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => harness.send(id, text, requestId, "followUp") }) : null;
   const items = options.pipeline === true ? pipeline({ registry, queue: queue! }) : null;
-  const plans = items === null ? null : planning({ registry, pipeline: items, replies: agentReplies(registry, harness) });
+  const plans = items === null ? null : planning({ registry, pipeline: items, replies: agentReader(registry, harness).replies });
   const api = await startApi({
     registry, host: "127.0.0.1", port: 0,
     ...(options.https ? { https: options.https } : {}),
