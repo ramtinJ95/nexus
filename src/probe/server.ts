@@ -374,37 +374,29 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return routeAuth[route] === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);
   }
 
-  async function handle(req: IncomingMessage, res: ServerResponse) {
-    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
-      return;
-    }
-    const path = new URL(req.url ?? "/", "http://probe").pathname;
-    const route = (Object.keys(routeAuth) as (keyof typeof routeAuth)[]).find((prefix) => path === prefix || path.startsWith(`${prefix}/`));
-    if (route === undefined) return send(res, 404, `no route ${path}`);
-    if (!await authorized(req, route)) return send(res, 403, "caller is not the tailnet node this route allows");
-
-    const jobMatch = /^\/v1\/jobs\/([^/]+)$/.exec(path);
-    if (jobMatch) {
-      const jobId = decodeURIComponent(jobMatch[1]!) as JobId;
-      if (req.method === "PUT") {
-        const reply = submit(jobId, await readBody(req));
-        return send(res, reply.status, reply.body, "application/json");
-      }
-      if (req.method === "GET") {
-        const job = jobs.get(jobId);
-        return job ? send(res, 200, JSON.stringify(job.status), "application/json") : send(res, 404, `no job ${jobId}`);
-      }
-      return send(res, 405, `${req.method} is not allowed on ${path}`);
-    }
-    if (path === "/v1/observe" && req.method === "GET") {
+  const routes: readonly ProbeRoute[] = [{
+    path: /^\/v1\/jobs\/([^/]+)$/, notAllowed: "",
+    async PUT(req, res, match) {
+      const jobId = decodeURIComponent(match[1]!) as JobId;
+      const reply = submit(jobId, await readBody(req));
+      return send(res, reply.status, reply.body, "application/json");
+    },
+    GET(_req, res, match) {
+      const jobId = decodeURIComponent(match[1]!) as JobId;
+      const job = jobs.get(jobId);
+      return job ? send(res, 200, JSON.stringify(job.status), "application/json") : send(res, 404, `no job ${jobId}`);
+    },
+  }, {
+    path: /^\/v1\/observe$/,
+    GET(req, res) {
       // whois is async, so the caller or the probe may be gone by now, and nothing would remove the observer.
       if (req.socket.destroyed || shutdown.signal.aborted) return;
       return observe(res);
-    }
-    const commandMatch = /^\/v1\/pylons\/([^/]+)\/commands$/.exec(path);
-    if (commandMatch && req.method === "POST") {
-      const pylonId = decodeURIComponent(commandMatch[1]!) as PylonId;
+    },
+  }, {
+    path: /^\/v1\/pylons\/([^/]+)\/commands$/,
+    async POST(req, res, match) {
+      const pylonId = decodeURIComponent(match[1]!) as PylonId;
       let command: PylonCommand;
       try {
         command = parsePylonCommand(await readBody(req));
@@ -423,18 +415,19 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const result = await running;
       if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
-    }
-    const manifestMatch = /^\/v1\/manifests\/([^/]+)$/.exec(path);
-    if (manifestMatch && req.method === "GET") {
-      const id = decodeURIComponent(manifestMatch[1]!);
+    },
+  }, {
+    path: /^\/v1\/manifests\/([^/]+)$/,
+    async GET(_req, res, match) {
+      const id = decodeURIComponent(match[1]!);
       if (!isPortableArtifactId(id)) return send(res, 400, `${JSON.stringify(id)} is not an image or template ID`);
       const manifest = await backend.artifacts.manifest(id);
       return manifest === null ? send(res, 404, `this node holds no ${id}`) : send(res, 200, JSON.stringify(manifest), "application/json");
-    }
-    const secretMatch = /^\/v1\/secrets\/([^/]+)$/.exec(path);
-    if (secretMatch) {
-      if (req.method !== "PUT") return send(res, 405, `${req.method} is not allowed on ${path}`);
-      const name = decodeURIComponent(secretMatch[1]!);
+    },
+  }, {
+    path: /^\/v1\/secrets\/([^/]+)$/, notAllowed: "",
+    async PUT(req, res, match) {
+      const name = decodeURIComponent(match[1]!);
       if (!heldSecrets.includes(name)) return send(res, 404, `${name} is not a secret the control plane hands over`);
       // No reply or log carries the value, so a refusal says what a value must be, never what this one was.
       let value: string;
@@ -451,9 +444,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // Boots that need it wait for a snapshot that lists it.
       if (first) void publishSnapshot();
       return;
-    }
-    if (path === "/v1/peers") {
-      if (req.method !== "PUT") return send(res, 405, `${req.method} is not allowed on ${path}`);
+    },
+  }, {
+    path: /^\/v1\/peers$/, notAllowed: "",
+    async PUT(req, res) {
       let next: readonly TailnetNodeId[];
       try {
         next = peersSchema.parse(JSON.parse(await readBody(req)));
@@ -463,10 +457,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       if (next.join() !== peers.join()) log(`peers: ${next.join(", ") || "none"}, from the control plane`);
       peers = next;
       return void res.writeHead(204).end();
-    }
-    const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
-    if (artifactMatch && req.method === "GET") {
-      const id = decodeURIComponent(artifactMatch[1]!);
+    },
+  }, {
+    path: /^\/v1\/artifacts\/([^/]+)$/,
+    async GET(req, res, match) {
+      const id = decodeURIComponent(match[1]!);
       const wanted = new URL(req.url ?? "/", "http://probe").searchParams.get("sha256");
       if (wanted === null) return send(res, 400, "name the sha256 the copy must have, as ?sha256=");
       if (!isPortableArtifactId(id) || !await backend.artifacts.has(id)) return send(res, 404, `this node holds no image or template ${id}. A checkpoint never leaves its node`);
@@ -480,11 +475,32 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       res.writeHead(200, artifactHeaders(manifest));
       // A failed archive destroys the response, so the peer's copy breaks off instead of ending as if complete.
       return pipeline(stream, res).catch((err: Error) => log(`artifact ${id}: ${err.message}`));
-    }
-    if (path === "/v1/node-health") {
-      if (req.method !== "GET") return send(res, 405, `${req.method} is not allowed on ${path}: node health is read-only`);
+    },
+  }, {
+    path: /^\/v1\/node-health$/, notAllowed: ": node health is read-only",
+    async GET(_req, res) {
       const health = await readNodeHealth(node, { root: "/", storage, pylons: await backend.processes?.() ?? null, sampleMs: healthSampleMs });
       return send(res, 200, JSON.stringify(health), "application/json");
+    },
+  }];
+
+  async function handle(req: IncomingMessage, res: ServerResponse) {
+    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
+      return;
+    }
+    const path = new URL(req.url ?? "/", "http://probe").pathname;
+    const route = (Object.keys(routeAuth) as (keyof typeof routeAuth)[]).find((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+    if (route === undefined) return send(res, 404, `no route ${path}`);
+    if (!await authorized(req, route)) return send(res, 403, "caller is not the tailnet node this route allows");
+
+    for (const entry of routes) {
+      const match = entry.path.exec(path);
+      if (match === null) continue;
+      const handler = req.method === "GET" || req.method === "PUT" || req.method === "POST" ? entry[req.method] : undefined;
+      if (handler !== undefined) return handler(req, res, match);
+      if (entry.notAllowed !== undefined) return send(res, 405, `${req.method} is not allowed on ${path}${entry.notAllowed}`);
+      break;
     }
     if (route === "/v1/pylons") return send(res, 501, `${route} is not implemented in this slice`);
     return send(res, 404, `no route ${req.method} ${path}`);
@@ -561,6 +577,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 function refuse(socket: Duplex, status: number, body: string) {
   if (!socket.destroyed) socket.end(rawResponse(status, { "content-type": "text/plain; charset=utf-8", connection: "close" }, body));
 }
+
+type RouteHandler = (req: IncomingMessage, res: ServerResponse, match: RegExpExecArray) => Promise<unknown> | void;
+/**
+ * A route under routeAuth: its whole path and a handler per method. With `notAllowed`, any other method answers 405
+ * with it after the reason. Without it, another method falls through to the 501 or 404 below.
+ */
+interface ProbeRoute { path: RegExp; GET?: RouteHandler; PUT?: RouteHandler; POST?: RouteHandler; notAllowed?: string }
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, { "content-type": contentType }).end(body);
