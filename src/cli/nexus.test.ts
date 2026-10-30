@@ -49,6 +49,7 @@ import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-tra
 import { testCertificate } from "../test-certificate.ts";
 import { freePort, testImage, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";
+import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
@@ -262,9 +263,8 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
 test("--help or -h after a command prints its lines of nexus --help and exits 0 without a request", async (t) => {
   const s = await setup(t);
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));
-  const names = ["events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close",
-    "attach", "start", "start-queued", "items", "item add", "item show", "item approve", "item cancel", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project edit",
-    "project add", "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes", "usage", "usage backfill"];
+  const names = Object.keys(commands);
+  assert.equal(names.length, commandGroups.reduce((n, group) => n + Object.keys(group).length, 0), "no two command groups share a name");
   for (const name of names) {
     for (const flag of ["--help", "-h"]) {
       const res = await s.nexus([...name.split(" "), flag]);
