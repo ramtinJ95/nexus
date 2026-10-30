@@ -26,7 +26,7 @@ import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ArtifactId, ArtifactManifest, ImageId, ImageManifest, PortableArtifactId, TemplateId, TemplateManifest } from "../images.ts";
-import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
+import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
 import { outputsDir } from "../outputs.ts";
 import { sessionsFile } from "../sessions.ts";
 import { gitPollMs } from "../git-facts.ts";
@@ -644,7 +644,7 @@ async function running(client: ReturnType<typeof connectProbe>) {
 test("commands run in a running pylon's guest and return its result", async (t) => {
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr) return { exitCode: 0, output: `ran ${argv.join(" ")}` };
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
     if (sub === "agent start") return herdrOk({ type: "agent_started", agent: {}, argv: [] });
@@ -657,8 +657,8 @@ test("commands run in a running pylon's guest and return its result", async (t) 
   assert.deepEqual(await client.command(pylonId, { kind: "exec", argv: ["git", "status"], cwd: "/home/user/workspace/repo", timeoutMs: 5000 }),
     { kind: "exec", exitCode: 0, output: "ran git status", truncated: false });
   assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "w1:p1" });
-  const create = guest.execs.find((a) => a[4] === "create")!;
-  assert.deepEqual(create.slice(5, 9), ["--cwd", "/home/user/workspace/repo", "--label", "review"], "sessions open in the checkout");
+  const create = guest.execs.map(herdrCall).find((c) => c?.command === "workspace create")!;
+  assert.deepEqual([create.flags["--cwd"], create.flags["--label"]], ["/home/user/workspace/repo", "review"], "sessions open in the checkout");
   assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { kind: "close-session", outcome: "not-open" }, "a pane that is not open is not reported closed");
 });
 
@@ -727,7 +727,7 @@ test("a message that resumes its Claude session publishes the session's new pane
   let panes: ReturnType<typeof herdrPane>[] = [];
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr) return argv[3] === "claude-type" || argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
@@ -754,7 +754,7 @@ test("a message for a Claude session is typed into its pane, and the result says
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr) return argv[3] === "claude-type" ? { exitCode: 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })]));
     if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
     throw new Error(`unscripted ${sub}`);
@@ -772,7 +772,7 @@ test("two messages for one Claude session run one after the other, so the sessio
   let panes: ReturnType<typeof herdrPane>[] = [];
   const base = fakeGuest((argv, herdr) => {
     if (!herdr) return argv[3] === "claude-type" || argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
@@ -808,7 +808,7 @@ test("the outcome of a Claude send waits for one queued behind a slow send, type
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
   const base = fakeGuest((argv, herdr) => {
     if (!herdr) return argv[3] === "claude-type" ? { exitCode: 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })]));
     if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
     throw new Error(`unscripted ${sub}`);
@@ -882,7 +882,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
       if (argv[0] === "sh" && argv[2]?.includes("/opened")) return { exitCode: 1, output: "no launch records in this guest" };
       return { exitCode: 0, output: "" };
     }
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
@@ -1510,7 +1510,7 @@ test("opening or closing a session publishes a snapshot that lists the change", 
   const guest = fakeGuest((argv, herdr) => {
     if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return { exitCode: 0, output: "" };
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], panes));
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "workspace create") {

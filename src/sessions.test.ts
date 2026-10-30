@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { attachedTerminals, attachScript, claudeTextProblem, focusScript, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
-import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type FakeGuest } from "./fake-guest.ts";
+import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type FakeGuest, type HerdrArgs } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
 const agentStarted = herdrOk({ type: "agent_started", agent: {}, argv: [] });
 /** `herdr pane process-info`: the pane's shell, plus whatever runs in its foreground, keyed by pane. */
-const processInfo = (foreground: Record<string, readonly string[]>) => (argv: readonly string[]) => {
-  const pane = argv[3]!;
+const processInfo = (foreground: Record<string, readonly string[]>) => (call: HerdrArgs) => {
+  const pane = call.flags["--pane"]!;
   const fg = foreground[pane] ?? ["-bash"];
   return herdrOk({ type: "pane_process_info", process_info: { pane_id: pane, shell_pid: 100, foreground_processes: [{ pid: fg[0] === "-bash" ? 100 : 101, name: fg[0]!, argv: fg }] } });
 };
@@ -21,42 +21,59 @@ const processInfo = (foreground: Record<string, readonly string[]>) => (argv: re
 const transcriptLookup = (argv: readonly string[], exists: boolean): ExecReply | undefined =>
   argv[0] === "sh" && argv.at(-1) === "/home/user/.claude/projects" ? { exitCode: exists ? 0 : 1, output: "" } : undefined;
 
+/** The Herdr calls among `execs`, read by name. */
+const herdrExecs = (execs: readonly (readonly string[])[]) => execs.flatMap((argv) => herdrCall(argv) ?? []);
+
 /** A Herdr server that is up, with `overrides` keyed by subcommand such as "agent start". Claude Code transcripts exist unless `transcripts` is false. */
-function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecReply> = {}, transcripts = true) {
+function herdrUp(overrides: Record<string, (call: HerdrArgs) => ExecReply> = {}, transcripts = true) {
   return fakeGuest((argv, herdr) => {
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return transcriptLookup(argv, transcripts) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = argv.slice(0, 2).join(" ");
-    const override = overrides[sub];
-    if (override) return override(argv);
-    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
-    if (sub === "workspace create") return created("w1", "w1:p1");
-    if (sub === "agent start") return agentStarted;
-    if (sub === "workspace close") return herdrOk({ type: "ok" });
-    if (sub === "pane process-info") return processInfo({})(argv);
-    if (sub === "pane read") return { exitCode: 0, output: "user@pylon:~$ \n" };
+    const call = herdrArgs(argv);
+    const override = overrides[call.command];
+    if (override) return override(call);
+    if (call.command === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (call.command === "workspace create") return created("w1", "w1:p1");
+    if (call.command === "agent start") return agentStarted;
+    if (call.command === "workspace close") return herdrOk({ type: "ok" });
+    if (call.command === "pane process-info") return processInfo({})(call);
+    if (call.command === "pane read") return { exitCode: 0, output: "user@pylon:~$ \n" };
     throw new Error(`unscripted herdr ${argv.join(" ")}`);
   });
 }
+
+test("a Herdr call reads the same by name, plain, claimed first or with its words reordered, and the pi argv after `--` keeps its own --session", () => {
+  const flags = { "--kind": "pi", "--pane": "w1:p1", "--no-focus": "" };
+  const start = { command: "agent start", operands: ["nx-1"], rest: ["--session", "/s.jsonl"] };
+  const plain = ["herdr", "--session", "nexus", "agent", "start", "nx-1", "--kind", "pi", "--pane", "w1:p1", "--no-focus", "--", "--session", "/s.jsonl"];
+  const reordered = ["herdr", "agent", "--pane", "w1:p1", "start", "--no-focus", "--session", "nexus", "nx-1", "--kind", "pi", "--", "--session", "/s.jsonl"];
+  for (const [argv, marker] of [[plain, null], [["sh", "-c", "mkdir \"$0\" && exec \"$@\"", "/launch/typed", ...plain], "/launch/typed"], [reordered, null]] as const) {
+    const { args, ...call } = herdrCall(argv)!;
+    assert.deepEqual(call, { ...start, flags: { "--session": "nexus", ...flags }, marker }, argv.join(" "));
+    assert.deepEqual(herdrArgs(args), { ...start, flags }, "fakeGuest's script gets the call without its session");
+  }
+  assert.equal(herdrCall(["sh", "-c", "setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1"]), null);
+  assert.equal(herdrCall(["herdr", "--version"]), null);
+});
 
 test("a Claude Code session opens in its own workspace in the checkout and resumes the given session", async () => {
   const guest = herdrUp();
   const pane = await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", resume: "bd2c2d6b" });
   assert.equal(pane, "w1:p1");
-  const [create, start] = guest.execs.filter((a) => (a[3] === "workspace" && a[4] === "create") || a[3] === "agent");
-  assert.deepEqual(create, ["herdr", "--session", "nexus", "workspace", "create", "--cwd", "/home/user/workspace/repo", "--label", "review", "--no-focus"]);
+  const [create, start] = herdrExecs(guest.execs).filter((c) => c.command === "workspace create" || c.command.startsWith("agent "));
+  assert.deepEqual([create!.command, create!.operands, create!.flags, create!.rest], ["workspace create", [], { "--session": "nexus", "--cwd": "/home/user/workspace/repo", "--label": "review", "--no-focus": "" }, []]);
   assert.ok(start, "an agent start ran");
-  assert.deepEqual(start.slice(3, 5), ["agent", "start"]);
-  assert.match(start[5]!, /^[a-z][a-z0-9_-]{0,31}$/, "the agent name is one Herdr accepts");
-  assert.deepEqual(start.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]);
+  assert.equal(start.command, "agent start");
+  assert.match(start.operands[0]!, /^[a-z][a-z0-9_-]{0,31}$/, "the agent name is one Herdr accepts");
+  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
 });
 
 test("a pi session resumes from its session file, and a shell starts no agent", async () => {
   const pi = herdrUp();
   await openSession(pi, { harness: "pi", title: "plan", cwd: "/home/user", resume: "/home/user/.pi/agent/sessions/s.jsonl" });
-  const start = pi.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(6), ["--kind", "pi", "--pane", "w1:p1", "--timeout", "30000", "--", "--session", "/home/user/.pi/agent/sessions/s.jsonl"]);
+  const start = herdrExecs(pi.execs).find((c) => c.command === "agent start")!;
+  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "pi", "--pane": "w1:p1", "--timeout": "30000" }, ["--session", "/home/user/.pi/agent/sessions/s.jsonl"]]);
 
   const shell = herdrUp();
   assert.equal(await openSession(shell, { harness: "shell", title: "sh", cwd: "/home/user" }), "w1:p1");
@@ -68,22 +85,23 @@ test("a Claude Code session never prompted has no transcript, so it starts fresh
   await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user", resume: "d778fc1b" });
   const lookup = guest.execs.find((a) => a[0] === "sh")!;
   assert.deepEqual(lookup.slice(3), ["d778fc1b", "/home/user/.claude/projects"], "the guest looks for that ID's transcript under every project");
-  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(-4), ["--session-id", "d778fc1b", "--permission-mode", "bypassPermissions"]);
+  assert.deepEqual(herdrExecs(guest.execs).find((c) => c.command === "agent start")!.rest, ["--session-id", "d778fc1b", "--permission-mode", "bypassPermissions"]);
 });
 
 test("a fresh Claude Code session starts under an ID of its own, and a fresh pi or resumed session gets no extra arguments", async () => {
   const claude = herdrUp();
   await openSession(claude, { harness: "claude-code", title: "review", cwd: "/home/user" });
-  const start = claude.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(-5, -3), ["--", "--session-id"]);
-  assert.match(start.at(-3)!, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  const start = herdrExecs(claude.execs).find((c) => c.command === "agent start")!;
+  assert.deepEqual([start.rest.length, start.rest[0]], [4, "--session-id"]);
+  assert.match(start.rest[1]!, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   const again = herdrUp();
   await openSession(again, { harness: "claude-code", title: "review", cwd: "/home/user" });
-  assert.notEqual(again.execs.find((a) => a[3] === "agent")!.at(-3), start.at(-3), "each start names a new ID");
+  assert.notEqual(herdrExecs(again.execs).find((c) => c.command === "agent start")!.rest[1], start.rest[1], "each start names a new ID");
 
   const pi = herdrUp();
   await openSession(pi, { harness: "pi", title: "plan", cwd: "/home/user" });
-  assert.deepEqual(pi.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "pi", "--pane", "w1:p1", "--timeout", "30000"]);
+  const piStart = herdrExecs(pi.execs).find((c) => c.command === "agent start")!;
+  assert.deepEqual([piStart.flags, piStart.rest], [{ "--session": "nexus", "--kind": "pi", "--pane": "w1:p1", "--timeout": "30000" }, []]);
 });
 
 test("a harness that fails to start rolls its workspace back, and the failure shows the pane's screen", async () => {
@@ -92,8 +110,8 @@ test("a harness that fails to start rolls its workspace back, and the failure sh
     "pane read": () => ({ exitCode: 0, output: "No conversation found with session ID: d778fc1b\nuser@pylon:~$ \n" }),
   });
   await assert.rejects(openSession(guest, { harness: "claude-code", title: "t", cwd: "/home/user" }), /timed out waiting for agent.*No conversation found with session ID: d778fc1b/s);
-  const close = guest.execs.at(-1)!;
-  assert.deepEqual(close.slice(3), ["workspace", "close", "w1"]);
+  const close = herdrCall(guest.execs.at(-1)!)!;
+  assert.deepEqual([close.command, close.operands, close.flags, close.rest], ["workspace close", ["w1"], { "--session": "nexus" }, []]);
 });
 
 test("a failed rollback is reported with the start failure", async () => {
@@ -143,7 +161,7 @@ test("opening a session starts a detached Herdr server when none runs", async ()
       return { exitCode: 0, output: "" };
     }
     if (!running) return herdrError("server_not_running");
-    if (argv[0] === "workspace" && argv[1] === "list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (herdrArgs(argv).command === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     return created("w1", "w1:p1");
   });
   assert.equal(await openSession(guest, { harness: "shell", title: "sh", cwd: "/home/user" }), "w1:p1");
@@ -155,7 +173,8 @@ test("closing a pane that is gone, or with no server, closes nothing and says so
   assert.equal(await closeSession(herdrUp({ "pane close": () => herdrError("server_not_running") }), "w1:p1"), "not-open");
   const closed = herdrUp({ "pane close": () => herdrOk({ type: "ok" }) });
   assert.equal(await closeSession(closed, "w2:p1"), "closed");
-  assert.deepEqual(closed.execs[0]!.slice(3), ["pane", "close", "w2:p1"]);
+  const close = herdrCall(closed.execs[0]!)!;
+  assert.deepEqual([close.command, close.operands, close.flags, close.rest], ["pane close", ["w2:p1"], { "--session": "nexus" }, []]);
   await assert.rejects(closeSession(herdrUp({ "pane close": () => herdrError("invalid_params", "bad pane") }), "x"), /bad pane/);
 });
 
@@ -214,12 +233,12 @@ test("a Claude Code pane Herdr has no ID for, such as one logged in after its st
   );
   const guest = herdrUp({
     "api snapshot": () => herdrOk(snapshot),
-    "pane process-info": (argv) => argv[3] === "w4:p1" ? herdrError("pane_not_found") : processInfo({
+    "pane process-info": (call) => call.flags["--pane"] === "w4:p1" ? herdrError("pane_not_found") : processInfo({
       "w1:p1": ["claude", "--session-id", "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90"],
       // An npm install runs Claude Code's script under node.
       "w2:p1": ["node", "/usr/local/bin/claude", "--resume", "bd2c2d6b"],
       "w3:p1": ["claude"],
-    })(argv),
+    })(call),
   });
   const records = await recordSessions(guest);
   assert.deepEqual(records!.map((r) => [r.title, r.harnessSessionId]), [
@@ -248,7 +267,7 @@ test("recording reads the session ID and model back from one read of a Claude Co
     { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", model: "opus", harnessSessionId: "bd2c2d6b" },
     { herdrPane: "w2:p1", harness: "pi", title: "plan", cwd: "/home/user/workspace/repo", harnessSessionId: null },
   ]);
-  assert.deepEqual(guest.execs.filter((a) => a[4] === "process-info").map((a) => a.at(-1)), ["w1:p1"], "Claude's pane is read once, and pi's never");
+  assert.deepEqual(herdrExecs(guest.execs).filter((c) => c.command === "pane process-info").map((c) => c.flags["--pane"]), ["w1:p1"], "Claude's pane is read once, and pi's never");
 });
 
 test("recording with no Herdr server leaves the last sessions file in place", async () => {
@@ -257,10 +276,10 @@ test("recording with no Herdr server leaves the last sessions file in place", as
   assert.deepEqual(guest.written, []);
 });
 
-function withSessionsFile(records: readonly SessionRecord[] | null, herdr: (argv: readonly string[]) => ExecReply) {
+function withSessionsFile(records: readonly SessionRecord[] | null, herdr: (call: HerdrArgs) => ExecReply) {
   return fakeGuest((argv, isHerdr) => {
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
-    if (isHerdr) return herdr(argv);
+    if (isHerdr) return herdr(herdrArgs(argv));
     const lookup = transcriptLookup(argv, true);
     if (lookup) return lookup;
     assert.equal(argv.at(-1), sessionsFile);
@@ -274,11 +293,11 @@ test("a relaunch seeds Claude state once for every Claude session it starts, in 
     { herdrPane: "w2:p1", harness: "claude-code", title: "plan", cwd: "/home/user/workspace/repo", harnessSessionId: "d778fc1b" },
   ];
   const live = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", null, "unknown")]);
-  const guest = withSessionsFile(records, (argv) => {
-    const sub = argv.slice(0, 2).join(" ");
+  const guest = withSessionsFile(records, (call) => {
+    const sub = call.command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "api snapshot") return herdrOk(live);
-    if (sub === "pane process-info") return processInfo({})(argv);
+    if (sub === "pane process-info") return processInfo({})(call);
     if (sub === "workspace create") return created("w3", "w3:p1");
     if (sub === "agent start") return agentStarted;
     throw new Error(`unscripted ${sub}`);
@@ -297,7 +316,7 @@ test("a relaunch whose Claude seed fails fails only its Claude sessions", async 
   const guest = fakeGuest((argv, isHerdr) => {
     if (argv[2] === seedClaudeState) return { exitCode: 1, output: "invalid JSON" };
     if (!isHerdr) return sessionsFileReply(records);
-    const sub = argv.slice(0, 2).join(" ");
+    const sub = herdrArgs(argv).command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "api snapshot") return herdrOk(herdrSnapshot([], []));
     if (sub === "workspace create") return created("w3", "w3:p1");
@@ -318,15 +337,15 @@ test("relaunch opens only the recorded sessions that are not already live, into 
     [{ id: "w9", label: "review" }, { id: "w3", label: "sh" }],
     [herdrPane("w9:p1", "w9", "claude", "idle", { kind: "id", value: "bd2c2d6b" }), herdrPane("w3:p1", "w3", null, "unknown")],
   );
-  const creates: string[][] = [];
-  const guest = withSessionsFile(records, (argv) => {
-    const sub = argv.slice(0, 2).join(" ");
+  const creates: HerdrArgs[] = [];
+  const guest = withSessionsFile(records, (call) => {
+    const sub = call.command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "api snapshot") return herdrOk(live);
-    if (sub === "pane process-info") return processInfo({ "w9:p1": ["claude", "--resume", "bd2c2d6b"] })(argv);
+    if (sub === "pane process-info") return processInfo({ "w9:p1": ["claude", "--resume", "bd2c2d6b"] })(call);
     if (sub === "workspace create") {
-      creates.push([...argv]);
-      return argv.includes("/gone") ? herdrError("invalid_params", "no such directory") : created("w10", "w10:p1");
+      creates.push(call);
+      return call.flags["--cwd"] === "/gone" ? herdrError("invalid_params", "no such directory") : created("w10", "w10:p1");
     }
     if (sub === "agent start") return agentStarted;
     throw new Error(`unscripted ${sub}`);
@@ -339,9 +358,9 @@ test("relaunch opens only the recorded sessions that are not already live, into 
     ["plan", "relaunched", "w10:p1"],
     ["broken", "failed", null],
   ]);
-  assert.deepEqual(creates.map((a) => a.slice(2, 6)), [["--cwd", "/home/user/app", "--label", "plan"], ["--cwd", "/gone", "--label", "broken"]]);
-  const start = guest.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(6), ["--kind", "pi", "--pane", "w10:p1", "--timeout", "30000", "--", "--session", "/home/user/.pi/agent/sessions/old.jsonl"]);
+  assert.deepEqual(creates.map((c) => c.flags), [{ "--cwd": "/home/user/app", "--label": "plan", "--no-focus": "" }, { "--cwd": "/gone", "--label": "broken", "--no-focus": "" }]);
+  const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
+  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "pi", "--pane": "w10:p1", "--timeout": "30000" }, ["--session", "/home/user/.pi/agent/sessions/old.jsonl"]]);
 });
 
 test("a pylon that never paused has nothing to relaunch and starts no Herdr server", async () => {
@@ -353,16 +372,17 @@ test("a pylon that never paused has nothing to relaunch and starts no Herdr serv
 test("a pane Herdr restored without its agent gets the agent started in place", async () => {
   const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" }];
   const live = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", null, "unknown")]);
-  const guest = withSessionsFile(records, (argv) => {
-    const sub = argv.slice(0, 2).join(" ");
+  const guest = withSessionsFile(records, (call) => {
+    const sub = call.command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "api snapshot") return herdrOk(live);
-    if (sub === "pane process-info") return processInfo({})(argv);
+    if (sub === "pane process-info") return processInfo({})(call);
     if (sub === "agent start") return agentStarted;
     throw new Error(`unscripted ${sub}`);
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => [o.result, "herdrPane" in o ? o.herdrPane : null]), [["relaunched", "w1:p1"]]);
-  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]);
+  const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
+  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
 });
 
 test("a Claude session whose pane cannot be inspected is neither started again nor closed in any of its panes", async () => {
@@ -374,11 +394,11 @@ test("a Claude session whose pane cannot be inspected is neither started again n
     herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" }),
     herdrPane("w2:p1", "w2", null, "unknown"),
   ]);
-  const guest = withSessionsFile(records, (argv) => {
-    const sub = argv.slice(0, 2).join(" ");
+  const guest = withSessionsFile(records, (call) => {
+    const sub = call.command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "api snapshot") return herdrOk(live);
-    if (sub === "pane process-info") return argv[3] === "w1:p1" ? herdrError("timeout", "process-info timed out") : processInfo({})(argv);
+    if (sub === "pane process-info") return call.flags["--pane"] === "w1:p1" ? herdrError("timeout", "process-info timed out") : processInfo({})(call);
     throw new Error(`unscripted ${sub}`);
   });
   const outcomes = await relaunchSessions(guest);
@@ -390,26 +410,27 @@ test("a Claude session whose pane cannot be inspected is neither started again n
 test("a pane Herdr still reports as Claude, but that runs only its shell, gets Claude started in place", async () => {
   const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "bd2c2d6b" }];
   const live = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "bd2c2d6b" })]);
-  const guest = withSessionsFile(records, (argv) => {
-    const sub = argv.slice(0, 2).join(" ");
+  const guest = withSessionsFile(records, (call) => {
+    const sub = call.command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "api snapshot") return herdrOk(live);
-    if (sub === "pane process-info") return processInfo({})(argv);
+    if (sub === "pane process-info") return processInfo({})(call);
     if (sub === "agent start") return agentStarted;
     throw new Error(`unscripted ${sub}`);
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => [o.result, "herdrPane" in o ? o.herdrPane : null]), [["relaunched", "w1:p1"]]);
-  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6), ["--kind", "claude", "--pane", "w1:p1", "--timeout", "30000", "--", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]);
+  const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
+  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
 });
 
 test("pi run by node counts as running from its script's name", async () => {
   const records: SessionRecord[] = [{ herdrPane: "w2:p1", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/home/user/.pi/agent/sessions/s.jsonl" }];
   const live = herdrSnapshot([{ id: "w2", label: "plan" }], [herdrPane("w2:p1", "w2", "pi", "idle", { kind: "path", value: "/home/user/.pi/agent/sessions/s.jsonl" })]);
-  const guest = withSessionsFile(records, (argv) => {
-    const sub = argv.slice(0, 2).join(" ");
+  const guest = withSessionsFile(records, (call) => {
+    const sub = call.command;
     if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
     if (sub === "api snapshot") return herdrOk(live);
-    if (sub === "pane process-info") return processInfo({ "w2:p1": ["node", "/usr/local/bin/pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"] })(argv);
+    if (sub === "pane process-info") return processInfo({ "w2:p1": ["node", "/usr/local/bin/pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"] })(call);
     throw new Error(`unscripted ${sub}`);
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => o.result), ["present"]);
@@ -430,7 +451,7 @@ test("pi records of one session each come back in a pane of their own, and only 
   });
   assert.deepEqual(held, [["bd2c2d6b"]]);
   assert.deepEqual(placed(outcomes), [["plan", "relaunched", "w20:p1"], ["plan again", "relaunched", "w21:p1"], ["review", "relaunched", "w22:p1"], ["sh", "relaunched", "w23:p1"]]);
-  assert.deepEqual(guest.execs.filter((a) => a[3] === "agent").map((a) => [a[a.indexOf("--kind") + 1], ...a.slice(a.indexOf("--") + 1)]), [
+  assert.deepEqual(herdrExecs(guest.execs).filter((c) => c.command === "agent start").map((c) => [c.flags["--kind"], ...c.rest]), [
     ["pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"],
     ["pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"],
     ["claude", "--resume", "bd2c2d6b", "--model", "opus", "--permission-mode", "bypassPermissions"],
@@ -446,7 +467,6 @@ interface FakePane { workspace: string; label: string; pane: string; cwd: string
  */
 function pylon(records: readonly SessionRecord[], panes: FakePane[], refuse: (argv: readonly string[]) => ExecReply | undefined = () => undefined) {
   let next = 20;
-  const flag = (argv: readonly string[], name: string) => argv[argv.indexOf(name) + 1]!;
   const guest = fakeGuest((argv, herdr) => {
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) {
@@ -454,35 +474,34 @@ function pylon(records: readonly SessionRecord[], panes: FakePane[], refuse: (ar
       return last === undefined ? sessionsFileReply(records) : { exitCode: 0, output: last };
     }
     if (!herdr) return transcriptLookup(argv, true) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = argv.slice(0, 2).join(" ");
+    const call = herdrArgs(argv);
     const pane = (id: string) => panes.find((p) => p.pane === id) ?? assert.fail(`no pane ${id}`);
-    switch (sub) {
+    switch (call.command) {
       case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
       case "api snapshot": return herdrOk(herdrSnapshot(
         panes.map((p) => ({ id: p.workspace, label: p.label })),
         panes.map((p) => herdrPane(p.pane, p.workspace, p.agent, p.agent === null ? "unknown" : "idle", p.session, p.cwd)),
       ));
-      case "pane process-info": return processInfo({ [argv[3]!]: pane(argv[3]!).argv })(argv);
+      case "pane process-info": return processInfo({ [call.flags["--pane"]!]: pane(call.flags["--pane"]!).argv })(call);
       case "workspace create": {
         const workspace = `w${next++}`;
-        panes.push({ workspace, label: flag(argv, "--label"), pane: `${workspace}:p1`, cwd: flag(argv, "--cwd"), argv: ["-bash"], agent: null, session: null });
+        panes.push({ workspace, label: call.flags["--label"]!, pane: `${workspace}:p1`, cwd: call.flags["--cwd"]!, argv: ["-bash"], agent: null, session: null });
         return created(workspace, `${workspace}:p1`);
       }
       case "agent start": {
         const refused = refuse(argv);
         if (refused) return refused;
-        const p = pane(flag(argv, "--pane"));
-        const args = argv.slice(argv.indexOf("--") + 1);
-        p.agent = flag(argv, "--kind");
-        p.argv = [p.agent, ...args];
-        p.session = { kind: args[0] === "--session" ? "path" : "id", value: args[1]! };
+        const p = pane(call.flags["--pane"]!);
+        p.agent = call.flags["--kind"]!;
+        p.argv = [p.agent, ...call.rest];
+        p.session = { kind: call.rest[0] === "--session" ? "path" : "id", value: call.rest[1]! };
         return agentStarted;
       }
       case "workspace close":
-        panes.splice(0, panes.length, ...panes.filter((p) => p.workspace !== argv[2]));
+        panes.splice(0, panes.length, ...panes.filter((p) => p.workspace !== call.operands[0]));
         return herdrOk({ type: "ok" });
       case "pane close":
-        panes.splice(0, panes.length, ...panes.filter((p) => p.pane !== argv[2]));
+        panes.splice(0, panes.length, ...panes.filter((p) => p.pane !== call.operands[0]));
         return herdrOk({ type: "ok" });
       case "pane read": return { exitCode: 0, output: "user@pylon:~$ \n" };
     }
@@ -512,7 +531,8 @@ test("an agent reporting another session is not the recorded one, even under the
   const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
   const guest = pylon(records, [claudePane("w5", "review", "bbbb")]);
   assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "relaunched", "w20:p1"]]);
-  assert.deepEqual(guest.execs.find((a) => a[3] === "agent")!.slice(6, 10), ["--kind", "claude", "--pane", "w20:p1"]);
+  const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
+  assert.deepEqual([start.flags["--kind"], start.flags["--pane"]], ["claude", "w20:p1"]);
 });
 
 test("shells that share a title are told apart by their cwd", async () => {
@@ -523,7 +543,7 @@ test("shells that share a title are told apart by their cwd", async () => {
   // An earlier relaunch brought back /b under a new pane, and /a failed.
   const guest = pylon(records, [shellPane("w8", "sh", "/b")]);
   assert.deepEqual(placed(await relaunchSessions(guest)), [["sh", "relaunched", "w20:p1"], ["sh", "present", "w8:p1"]]);
-  assert.deepEqual(guest.execs.filter((a) => a[4] === "create").map((a) => a[6]), ["/a"]);
+  assert.deepEqual(herdrExecs(guest.execs).filter((c) => c.command === "workspace create").map((c) => c.flags["--cwd"]), ["/a"]);
 });
 
 test("a session whose relaunch failed is recorded until a relaunch brings it back", async () => {
@@ -657,46 +677,47 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
   let workspaces = 0;
   let typed = 0;
   const words = (line: string) => [...line.matchAll(/\$'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]!.replace(/\\x([0-9a-f]{2})|\\(.)/g, (_, hex: string | undefined, c: string) => hex ? String.fromCharCode(parseInt(hex, 16)) : c));
-  function herdrCall(argv: readonly string[]): ExecReply {
-    const sub = argv.slice(0, 2).join(" ");
+  function herdrServer(call: HerdrArgs): ExecReply {
     const pane = (id: string) => panes.get(id) ?? assert.fail(`no pane ${id}`);
-    switch (sub) {
+    switch (call.command) {
       case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
       case "workspace create": {
         const workspace = `w${++workspaces}`;
-        panes.set(`${workspace}:p1`, { workspace, label: argv[argv.indexOf("--label") + 1]!, foreground: ["-bash"] });
+        panes.set(`${workspace}:p1`, { workspace, label: call.flags["--label"]!, foreground: ["-bash"] });
         return created(workspace, `${workspace}:p1`);
       }
       case "workspace close":
-        for (const [id, p] of panes) if (p.workspace === argv[2]) panes.delete(id);
+        for (const [id, p] of panes) if (p.workspace === call.operands[0]) panes.delete(id);
         return herdrOk({ type: "ok" });
       case "api snapshot":
         return herdrOk(herdrSnapshot([...panes.values()].map((p) => ({ id: p.workspace, label: p.label })), [...panes].map(([id, p]) =>
           p.foreground[0] === "claude" ? herdrPane(id, p.workspace, "claude", "working") : herdrPane(id, p.workspace, null, "unknown"))));
-      case "pane process-info": return processInfo(Object.fromEntries([...panes].map(([id, p]) => [id, p.foreground])))(argv);
+      case "pane process-info": return processInfo(Object.fromEntries([...panes].map(([id, p]) => [id, p.foreground])))(call);
       case "pane run": {
-        const argvTyped = words(argv[3]!);
+        const [target, command] = call.operands as [string, string];
+        const argvTyped = words(command);
         typed++;
-        if (argvTyped[0] !== "claude" || pane(argv[2]!).foreground[0] !== "-bash") return assert.fail(`typed ${argv[3]} into a pane running ${pane(argv[2]!).foreground[0]}`);
-        if (options.starts !== false) panes.set(argv[2]!, { ...pane(argv[2]!), foreground: argvTyped });
+        if (argvTyped[0] !== "claude" || pane(target).foreground[0] !== "-bash") return assert.fail(`typed ${command} into a pane running ${pane(target).foreground[0]}`);
+        if (options.starts !== false) panes.set(target, { ...pane(target), foreground: argvTyped });
         const hook = JSON.parse(argvTyped[argvTyped.indexOf("--settings") + 1]!).hooks.UserPromptSubmit[0].hooks[0].command as string;
         if (options.starts !== false && options.submits !== false) files.set(/touch (\S+)$/.exec(hook)![1]!, "");
         return options.typeReply ?? { exitCode: 0, output: "" };
       }
       case "pane read": return { exitCode: 0, output: `${options.screen ?? "user@pylon:~$ "}\n` };
     }
-    throw new Error(`unscripted herdr ${argv.join(" ")}`);
+    throw new Error(`unscripted herdr ${call.command} ${call.operands.join(" ")}`);
   }
   function run(argv: readonly string[]): ExecReply {
     execs.push(argv);
-    if (argv[0] === "herdr") return herdrCall(argv.slice(3));
+    const call = herdrCall(argv);
+    if (call?.marker === null) return herdrServer(call);
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (argv[3] === "shell-ready") return { exitCode: options.shellReady === false ? 1 : 0, output: "" };
     if (argv[3] === "claude-submitted") return { exitCode: files.has(argv[4]!) ? 0 : 1, output: "" };
-    if (typedExec(argv)) {
-      if (argv[2]!.startsWith("mkdir") && files.has(argv[3]!)) return { exitCode: 75, output: "" };
-      files.set(argv[3]!, "");
-      return herdrCall(argv.slice(7));
+    if (call?.marker != null && call.command === "pane run") {
+      if (files.has(call.marker)) return { exitCode: 75, output: "" };
+      files.set(call.marker, "");
+      return herdrServer(call);
     }
     if (argv[3]?.startsWith("/home/user/.nexus/claude-launches/")) {
       const opened = files.get(`${argv[3]}/opened`);
@@ -736,19 +757,20 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
 
 const launched = "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30";
 const prompted = { harness: "claude-code" as const, title: "worker", cwd: "/home/user/workspace/repo", resume: launched, prompt: "work" };
-const typedExec = (argv: readonly string[]) => argv[0] === "sh" && argv[4] === "herdr" && argv.includes("run");
+const typedExec = (argv: readonly string[]) => herdrCall(argv)?.command === "pane run";
 
 test("a worker's first prompt reaches Claude as one exact argument through the pane's interactive bash", async () => {
   const { execFileSync } = await import("node:child_process");
   const pylon = launchPylon();
   const prompt = "/poteto-mode fix \"quotes\" and 'single' and `ticks` and $(not-a-shell-command) $HOME !! \\n\nthen\ttest\r\n\n  ünïcode\n";
   await openSession(pylon.probe(), { harness: "claude-code", title: "worker", cwd: "/home/user/workspace/repo", prompt, model: "claude-opus-5-5" });
-  assert.equal(pylon.execs.some((a) => a[3] === "agent"), false);
+  assert.equal(herdrExecs(pylon.execs).some((c) => c.command.startsWith("agent ")), false);
   const typedAt = pylon.execs.findIndex(typedExec);
   const readyAt = pylon.execs.findIndex((a) => a[3] === "shell-ready");
   assert.ok(readyAt !== -1 && readyAt < typedAt, "the launch is typed only once the pane's shell is at its prompt");
   assert.deepEqual(pylon.execs[readyAt]!.slice(4), ["100"], "the wait watches the pane's shell");
-  const command = pylon.execs[typedAt]!.at(-1)!;
+  const typedCall = herdrCall(pylon.execs[typedAt]!)!;
+  const command = typedCall.operands[1]!;
   assert.doesNotMatch(command, /[\x00-\x1f\x7f]/, "nothing in the typed line is a key the terminal or readline acts on");
   const typed = `claude() { printf '%s\\0' "$@"; }\n${command}\n`;
   const argv = execFileSync("bash", ["--norc", "--noprofile", "-i"], { input: typed, encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).split("\0").slice(0, -1);
@@ -758,7 +780,7 @@ test("a worker's first prompt reaches Claude as one exact argument through the p
   assert.equal(JSON.parse(argv[7]!).hooks.UserPromptSubmit[0].hooks[0].command, `mkdir -p ${launch} && touch ${launch}/submitted`);
   assert.equal(argv[8], prompt);
   assert.equal(argv.length, 9);
-  assert.equal(pylon.execs[typedAt]![3], `${launch}/typed`, "the exec that types the launch claims it first");
+  assert.equal(typedCall.marker, `${launch}/typed`, "the exec that types the launch claims it first");
   assert.equal(pylon.files.get(`${launch}/opened`), "w1 w1:p1\n");
 });
 
@@ -781,7 +803,7 @@ test("an error typing the launch is uncertain, so its receipt starts the worker 
   assert.equal(await openSession(pylon.probe(), { ...prompted, model: "custom-model" }), "w1:p1");
   assert.equal(pylon.panes.size, 1);
   assert.equal(pylon.typings(), 1);
-  assert.match(pylon.execs.find(typedExec)!.at(-1)!, / \$'--model' \$'custom-model' /);
+  assert.match(herdrCall(pylon.execs.find(typedExec)!)!.operands[1]!, / \$'--model' \$'custom-model' /);
 });
 
 test("a lost receipt with a running busy Claude also preserves the launch", async () => {
@@ -801,7 +823,7 @@ test("a launch whose probe died before typing is sent again into the same pane a
   await assert.rejects(openSession(pylon.probe({ exec: (a) => a[3] === "shell-ready", ran: false }), prompted));
   assert.equal(pylon.typings(), 0);
   assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
-  assert.equal(pylon.execs.filter((a) => a[4] === "create").length, 1, "the second launch took the first one's pane");
+  assert.equal(herdrExecs(pylon.execs).filter((c) => c.command === "workspace create").length, 1, "the second launch took the first one's pane");
   assert.equal(pylon.typings(), 1);
   assert.deepEqual(pylon.claudes().map((p) => p.foreground.slice(0, 3)), [["claude", "--session-id", launched]]);
 });
@@ -859,7 +881,7 @@ test("a launch an older probe typed records nothing, and its running Claude answ
   pylon.panes.set("w1:p1", { workspace: "w1", label: "worker", foreground: ["claude", "--session-id", launched, "--permission-mode", "bypassPermissions"] });
   assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
   assert.equal(pylon.typings(), 0);
-  assert.equal(pylon.execs.some((a) => a[4] === "create"), false);
+  assert.equal(herdrExecs(pylon.execs).some((c) => c.command === "workspace create"), false);
 });
 
 test("a launch an older probe lost before typing starts Claude once, beside the shell it left", async () => {
@@ -967,8 +989,8 @@ test("an explicit Claude model is recorded and passed on checkpoint relaunch", a
   const records: SessionRecord[] = [{ herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa", model: "custom-model" }];
   const guest = pylon(records, []);
   await relaunchSessions(guest);
-  const start = guest.execs.find((a) => a[3] === "agent" && a[4] === "start")!;
-  assert.equal(start[start.indexOf("--model") + 1], "custom-model");
+  const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
+  assert.equal(start.rest[start.rest.indexOf("--model") + 1], "custom-model");
   const recorded = await recordSessions(guest);
   assert.equal(recorded![0]!.model, "custom-model");
 });
@@ -980,9 +1002,9 @@ test("a stalled relaunch keeps its new pane attached to the failure across recor
   const exec = guest.exec;
   let unavailable = true;
   guest.exec = async (argv, options) => {
-    if (unavailable && argv[3] === "pane" && argv[4] === "process-info") throw new Error("process info unavailable");
+    if (unavailable && herdrCall(argv)?.command === "pane process-info") throw new Error("process info unavailable");
     const reply = await exec(argv, options);
-    if (unavailable && argv[3] === "agent" && argv[4] === "start") return { ...herdrError("timeout", "timed out waiting for agent startup"), truncated: false };
+    if (unavailable && herdrCall(argv)?.command === "agent start") return { ...herdrError("timeout", "timed out waiting for agent startup"), truncated: false };
     return reply;
   };
   assert.deepEqual(placed(await relaunchSessions(guest)), [["review", "failed", "w20:p1"]]);
@@ -1021,28 +1043,26 @@ echo '{"id":"cli:test","result":{"type":"ok"}}'
     }
     if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (!herdr) return transcriptLookup(argv, true) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = argv.slice(0, 2).join(" ");
-    const flag = (name: string) => argv[argv.indexOf(name) + 1]!;
-    switch (sub) {
+    const call = herdrArgs(argv);
+    switch (call.command) {
       case "api snapshot":
         onSnapshot(++reads);
         return herdrOk(herdrSnapshot([...new Set(panes.map((p) => p.workspace_id))].map((id) => ({ id, label: "Claude Code" })), panes));
-      case "pane process-info": return processInfo(foreground)(argv);
+      case "pane process-info": return processInfo(foreground)(call);
       // Herdr 0.9.5 prints nothing for a key it pressed.
-      case "pane send-keys": return panes.some((p) => p.pane_id === argv[2]) ? { exitCode: 0, output: "" } : herdrError("pane_not_found");
+      case "pane send-keys": return panes.some((p) => p.pane_id === call.operands[0]) ? { exitCode: 0, output: "" } : herdrError("pane_not_found");
       case "workspace list": return herdrOk({ type: "workspace_list", workspaces: [] });
       case "workspace create": return created("w5", "w5:p1");
       case "agent start": {
-        const pane = flag("--pane");
-        const args = argv.slice(argv.indexOf("--") + 1);
-        panes.splice(0, panes.length, ...panes.filter((p) => p.pane_id !== pane), herdrPane(pane, pane.split(":")[0]!, "claude", "idle", { kind: "id", value: args[1]! }));
-        foreground[pane] = ["claude", ...args];
+        const pane = call.flags["--pane"]!;
+        panes.splice(0, panes.length, ...panes.filter((p) => p.pane_id !== pane), herdrPane(pane, pane.split(":")[0]!, "claude", "idle", { kind: "id", value: call.rest[1]! }));
+        foreground[pane] = ["claude", ...call.rest];
         return agentStarted;
       }
     }
     throw new Error(`unscripted herdr ${argv.join(" ")}`);
   });
-  const herdrCalls = () => existsSync(log) ? readFileSync(log, "utf8").split("\x01").slice(0, -1).map((call) => call.split("\0").slice(0, -1)) : [];
+  const herdrCalls = () => existsSync(log) ? readFileSync(log, "utf8").split("\x01").slice(0, -1).map((call) => herdrArgs(call.split("\0").slice(0, -1))) : [];
   return { guest, herdrCalls, typed: () => guest.execs.some((a) => a[3] === "claude-type") };
 }
 
@@ -1058,9 +1078,9 @@ test("a message reaches Claude's prompt exactly, typed in chunks of at most 64 c
   const calls = w.herdrCalls();
   const chunks = calls.slice(0, -1).map((call) => {
     // Herdr types every argument after the pane, so a chunk is the only one.
-    assert.deepEqual(call.slice(0, 5), ["--session", "nexus", "pane", "send-text", "w1:p1"]);
-    assert.equal(call.length, 6);
-    return call[5]!;
+    assert.deepEqual([call.command, call.flags, call.operands[0], call.rest], ["pane send-text", { "--session": "nexus" }, "w1:p1", []]);
+    assert.equal(call.operands.length, 2);
+    return call.operands[1]!;
   });
   assert.equal(chunks.join(""), text, "the chunks put together are the message");
   assert.ok(chunks.length > 2);
@@ -1069,13 +1089,13 @@ test("a message reaches Claude's prompt exactly, typed in chunks of at most 64 c
     assert.ok(chunk.isWellFormed(), "no chunk splits a surrogate pair");
   }
   assert.ok(chunks[1]!.startsWith("-n"));
-  assert.deepEqual(calls.at(-1), ["--session", "nexus", "pane", "send-keys", "w1:p1", "Enter"]);
+  assert.deepEqual(calls.at(-1), { command: "pane send-keys", operands: ["w1:p1", "Enter"], flags: { "--session": "nexus" }, rest: [] });
 });
 
 test("a message to a working Claude is typed and queued, and one to a blocked Claude types nothing", async (t) => {
   const working = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })], { ...runningClaude });
   assert.deepEqual(await sendToClaude(working.guest, { session, text: "also check the tests" }), { outcome: "queued", herdrPane: "w1:p1", resumed: false });
-  assert.equal(working.herdrCalls().at(-1)?.[3], "send-keys");
+  assert.equal(working.herdrCalls().at(-1)?.command, "pane send-keys");
 
   const blocked = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "blocked", { kind: "id", value: session })], { ...runningClaude });
   assert.deepEqual(await sendToClaude(blocked.guest, { session, text: "yes" }), { outcome: "blocked", herdrPane: "w1:p1", resumed: false });
@@ -1121,35 +1141,36 @@ test("a Claude pane Herdr reports no session for is found by the session its com
     herdrPane("w3:p1", "w3", "claude", "idle"),
   ], { "w1:p1": ["claude", "--session-id", "another-one"], "w2:p1": ["claude", "--resume", session], "w3:p1": ["node", "/usr/local/bin/claude", "--resume", session] });
   assert.deepEqual(await sendToClaude(w.guest, { session, text: "hi" }), { outcome: "sent", herdrPane: "w3:p1", resumed: false });
-  assert.ok(w.herdrCalls().every((call) => call[4] === "w3:p1"));
+  assert.ok(w.herdrCalls().every((call) => call.operands[0] === "w3:p1"));
 });
 
 test("a session in no live pane is resumed in a new workspace in the checkout, then given the message", async (t) => {
   const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: "another-session" })], { "w1:p1": ["claude", "--resume", "another-session"] });
   assert.deepEqual(await sendToClaude(w.guest, { session, text: "pick it back up", model: "claude-opus-5-5" }), { outcome: "sent", herdrPane: "w5:p1", resumed: true });
-  assert.deepEqual(w.guest.execs.find((a) => a[4] === "create")!.slice(5, 9), ["--cwd", "/home/user/workspace/repo", "--label", "Claude Code"]);
-  const start = w.guest.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(start.indexOf("--") + 1, -2), ["--resume", session, "--model", "claude-opus-5-5"]);
-  assert.ok(w.guest.execs.indexOf(start) < w.guest.execs.findIndex((a) => a[3] === "claude-type"), "the message is typed once Claude runs");
-  assert.deepEqual(w.herdrCalls().map((call) => call.slice(3, 5)), [["send-text", "w5:p1"], ["send-keys", "w5:p1"]]);
+  const create = herdrExecs(w.guest.execs).find((c) => c.command === "workspace create")!;
+  assert.deepEqual([create.flags["--cwd"], create.flags["--label"]], ["/home/user/workspace/repo", "Claude Code"]);
+  const startAt = w.guest.execs.findIndex((a) => herdrCall(a)?.command === "agent start");
+  assert.deepEqual(herdrCall(w.guest.execs[startAt]!)!.rest.slice(0, -2), ["--resume", session, "--model", "claude-opus-5-5"]);
+  assert.ok(startAt < w.guest.execs.findIndex((a) => a[3] === "claude-type"), "the message is typed once Claude runs");
+  assert.deepEqual(w.herdrCalls().map((call) => [call.command, call.operands[0]]), [["pane send-text", "w5:p1"], ["pane send-keys", "w5:p1"]]);
 });
 
 test("a pane that reports the session but whose Claude exited to its shell gets Claude resumed in place", async (t) => {
   const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })]);
   assert.deepEqual(await sendToClaude(w.guest, { session, text: "ls" }), { outcome: "sent", herdrPane: "w1:p1", resumed: true });
   assert.equal(w.guest.herdrCalls().includes("workspace create"), false);
-  const start = w.guest.execs.find((a) => a[3] === "agent")!;
-  assert.deepEqual(start.slice(start.indexOf("--pane"), start.indexOf("--pane") + 2), ["--pane", "w1:p1"]);
-  assert.deepEqual(start.slice(start.indexOf("--") + 1, start.indexOf("--") + 3), ["--resume", session]);
+  const start = herdrExecs(w.guest.execs).find((c) => c.command === "agent start")!;
+  assert.equal(start.flags["--pane"], "w1:p1");
+  assert.deepEqual(start.rest.slice(0, 2), ["--resume", session]);
 });
 
 test("a failed chunk stops the typing before Enter, and the error says how far it got", async (t) => {
   const w = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })], { ...runningClaude });
   await assert.rejects(sendToClaude(w.guest, { session, text: "a".repeat(64) + "FAILME" + "b".repeat(64) }), /part of the message may sit unsent.*typed 1 of 3 chunks/s);
-  assert.deepEqual(w.herdrCalls().map((call) => call[3]), ["send-text", "send-text"]);
+  assert.deepEqual(w.herdrCalls().map((call) => call.command), ["pane send-text", "pane send-text"]);
 });
 
-const pressed = (w: ReturnType<typeof claudeWorkers>) => w.guest.execs.filter((a) => a[3] === "pane" && a[4] === "send-keys").map((a) => a.slice(5));
+const pressed = (w: ReturnType<typeof claudeWorkers>) => herdrExecs(w.guest.execs).filter((c) => c.command === "pane send-keys").map((c) => c.operands);
 
 test("an interrupt presses Esc, and only Esc, in the pane of a working Claude, and nothing for an idle Claude, a dialog or a state Herdr cannot tell", async (t) => {
   const working = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })], { ...runningClaude });
@@ -1260,7 +1281,7 @@ test("a prompted launch waits on the shell_pid Herdr gave, whatever number it is
   const exec = guest.exec.bind(guest);
   guest.exec = async (argv, options) => {
     const reply = await exec(argv, options);
-    return argv[3] === "pane" && argv[4] === "process-info" ? { ...reply, output: reply.output.replace('"shell_pid":100', '"shell_pid":1e400') } : reply;
+    return herdrCall(argv)?.command === "pane process-info" ? { ...reply, output: reply.output.replace('"shell_pid":100', '"shell_pid":1e400') } : reply;
   };
   assert.equal(await openSession(guest, prompted), "w1:p1");
   assert.ok(pylon.execs.some((argv) => argv[3] === "shell-ready" && argv[4] === "Infinity"));
