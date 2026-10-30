@@ -6,8 +6,7 @@
 import { z } from "zod";
 import type { AskAnswer } from "../../images/pylon/nexus-contract.ts";
 import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
-import type { TailnetNodeId } from "../ids.ts";
-import type { ThreadId } from "./registry.ts";
+import type { TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ReservedCase } from "./holds.ts";
 
 export interface Question {

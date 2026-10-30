@@ -13,11 +13,13 @@ import type { DesiredRelease, Drain, ReleaseReport } from "../deploy/model.ts";
 import type { Sender } from "../agent-protocol.ts";
 import { planningStore } from "./planning-store.ts";
 import { prWatchStore } from "./pr-watch-store.ts";
-import { askQuestionId, askRecord, type Question, type WaitingAsk } from "./questions.ts";
 import { nudgeStore } from "./nudge-store.ts";
 import { judgmentStore } from "./judgment-store.ts";
 import { pipelineStore } from "./pipeline-store.ts";
 import { queueStore } from "./queue-store.ts";
+import { reviewStore } from "./review-store.ts";
+import { questionStore } from "./question-store.ts";
+import { usageStore } from "./usage-store.ts";
 import type { StartKey } from "./start-request.ts";
 import type { Placement } from "./placement.ts";
 import { HttpError } from "./http-error.ts";
@@ -36,13 +38,10 @@ import type { BuildingTemplate, TemplateRecord, ThreadSetup } from "./templates.
 import type { ImageId, ImageManifest, TemplateId } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
-import { needsPerson, storedReview, type Review } from "./review-model.ts";
-import { reviewerCaller, roleOf } from "../agent-protocol.ts";
+import { needsPerson, type Review } from "./review-model.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
-import type { AgentCall } from "../agent-usage.ts";
-import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
 
 // Temporary: ThreadId moved to ids.ts and StartKey to start-request.ts, and E1 deletes these re-exports.
 export type { StartKey, ThreadId };
@@ -130,11 +129,6 @@ export interface Preview { pylon: PylonId; service: string; httpsPort: number; r
 export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
 
-/**
- * How far a source of usage was read: a pylon's transcript, by its path, to a byte offset with the SHA-256 of the up
- * to 4 KiB before it, or a harness conversation to an entry, with no hash.
- */
-export interface UsageCursor { source: string; key: string; position: number; before: string }
 /** Where the reader of a Claude worker's transcript is in its session's file, how many entries it dropped to keep maxEntries, and when it last read. */
 export interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
 /** What one read of a Claude worker's transcript found, from `from` to `cursor`. `reset` says the file was replaced, so `entries` start it over. */
@@ -303,12 +297,6 @@ export function openRegistry(path: string, clock = Date.now) {
     });
   }
 
-  const storedReviewOf = (builder: ThreadId): Review | null => {
-    const record = recordOf<Review>("reviews", "builder", builder);
-    return record === null ? null : storedReview(record);
-  };
-  const isCurrentReview = (review: Review) => JSON.stringify(storedReviewOf(review.builder)) === JSON.stringify(review);
-
   function saveStartKey(key: StartKey, thread: ThreadId) {
     sql("INSERT INTO start_requests (request_id, thread, body) VALUES (?, ?, ?)").run(key.requestId, thread, key.body);
   }
@@ -376,32 +364,7 @@ export function openRegistry(path: string, clock = Date.now) {
 
   const threadStatus = (id: ThreadId) => sql("SELECT status FROM threads WHERE id = ?").get(id)?.status as ThreadStatus | undefined;
 
-  function questionRecord(id: string): Question | null {
-    return recordOf<Question>("questions", "id", id);
-  }
-
-  function waitingAsks(thread: ThreadId): WaitingAsk[] {
-    return jsonOrNull<WaitingAsk[]>(sql("SELECT report FROM waiting_asks WHERE thread = ?").get(thread)?.report ?? null) ?? [];
-  }
-
-  /**
-   * Asks a question for each ask the thread's pylon last reported waiting for its Claude worker's current session, and
-   * withdraws each unanswered ask that is not one. The transcript only closes one, once it holds the call's result,
-   * since Claude may write the call itself only once the dialog is answered. Other sessions' asks, such as the
-   * person's own Claude's in the pylon, ask nothing. Answers whether it asked or withdrew any.
-   */
-  function reconcileAsks(thread: ThreadId): boolean {
-    const session = sql("SELECT session FROM claude_workers WHERE thread = ?").get(thread)?.session;
-    const answered = sql("SELECT 1 FROM claude_entries WHERE thread = ? AND json_extract(entry, '$.kind') = 'result' AND json_extract(entry, '$.toolUseId') = ?");
-    const open = waitingAsks(thread).filter(({ ask }) => ask.session === session && answered.get(thread, ask.toolUseId) === undefined).map(({ ask, at }) => askRecord(thread, ask, at));
-    let changes = 0;
-    for (const question of open) {
-      changes += Number(sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, thread, JSON.stringify({ ...question, answer: null })).changes);
-    }
-    changes += Number(sql(`DELETE FROM questions WHERE thread = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL
-      AND id NOT IN (SELECT value FROM json_each(?))`).run(thread, JSON.stringify(open.map((q) => q.id))).changes);
-    return changes > 0;
-  }
+  const { reconcileAsks, ...questions } = questionStore(kernel, threadStatus, updateAttention);
 
   function updateAttention(id: ThreadId) {
     const t = thread(id);
@@ -499,157 +462,9 @@ export function openRegistry(path: string, clock = Date.now) {
     for (const { id } of sql("SELECT id FROM threads").all()) updateAttention(id as ThreadId);
   });
 
-  /**
-   * Each breakdown's grouping, and its order: biggest first, or newest day first. A report over threads reads the
-   * calls, and any other the sums per day, which stay few however many calls there are.
-   */
-  const groupings: Readonly<Record<Breakdown, { key: string; order: string }>> = {
-    model: { key: "model", order: "total DESC, key" },
-    project: { key: "project", order: "total DESC, key" },
-    kind: { key: "agent", order: "total DESC, key" },
-    role: { key: "role", order: "total DESC, key" },
-    day: { key: "day", order: "key DESC" },
-  };
-  const day = (at: number) => new Date(at).toISOString().slice(0, 10);
-  const totalsOf = (r: Row): UsageTotals => {
-    const [input, output, cacheWrite, cacheRead] = [r.input, r.output, r.cache_write, r.cache_read] as number[];
-    return { input: input!, output: output!, cacheWrite: cacheWrite!, cacheRead: cacheRead!, total: input! + output! + cacheWrite! + cacheRead!, calls: r.calls as number };
-  };
-  function usageBackfillThreads(): BackfillThread[] {
-    return sql("SELECT b.*, t.title FROM usage_backfill_threads b JOIN threads t ON t.id = b.thread ORDER BY t.created_at, t.id").all().map((r) => ({
-      thread: r.thread as ThreadId, title: r.title as string, state: r.state as BackfillThread["state"], reason: r.reason as string | null,
-      calls: r.calls as number, tokens: r.tokens as number, at: r.at as number | null,
-    }));
-  }
-
-  function usageBackfill(): UsageBackfill {
-    const run = sql("SELECT * FROM usage_backfill").get();
-    if (run === undefined) return { state: "never" };
-    const count = sql("SELECT count(*) AS of, coalesce(sum(state <> 'pending'), 0) AS read, coalesce(sum(calls), 0) AS calls, coalesce(sum(tokens), 0) AS tokens FROM usage_backfill_threads").get()!;
-    return {
-      state: run.state as "running" | "stopped" | "done", startedAt: run.started_at as number, finishedAt: run.finished_at as number | null,
-      current: run.thread === null ? null : { thread: run.thread as ThreadId, phase: run.phase as "reading" | "pausing", since: run.since as number },
-      waiting: run.waiting as string | null, read: count.read as number, of: count.of as number,
-      recovered: { calls: count.calls as number, tokens: count.tokens as number }, skipped: usageBackfillThreads().filter((t) => t.state === "skipped"),
-    };
-  }
-
-  function endUsageBackfill(state: "stopped" | "done", now: number) {
-    sql("UPDATE usage_backfill SET state = ?, finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(state, now);
-  }
-
-  const sums = (calls: string) => `coalesce(sum(input), 0) AS input, coalesce(sum(output), 0) AS output, coalesce(sum(cache_write), 0) AS cache_write,
-    coalesce(sum(cache_read), 0) AS cache_read, ${calls} AS calls, coalesce(sum(input + output + cache_write + cache_read), 0) AS total`;
-
   return {
     close() { db.close(); },
-    /**
-     * Records each call under the thread it was read from, with the thread's project and role, and moves each cursor
-     * to where its read ended. A call recorded before keeps its thread and time, and each count the larger of the two
-     * reads, since every record of one call carries the same usage. Returns how many calls were new, and the tokens
-     * the recorded counts grew by. `backfill` adds them to the thread's usage backfill row in the same transaction.
-     */
-    recordUsage(thread: ThreadId, calls: readonly AgentCall[], cursors: readonly UsageCursor[] = [], backfill = false): { calls: number; tokens: number } {
-      const t = threadRecord(thread);
-      if (t === undefined) throw new Error(`no thread ${thread} to record usage under`);
-      const role = roleOf(t.started_by as string);
-      const added = { calls: 0, tokens: 0 };
-      transaction(() => {
-        for (const c of calls) {
-          const stored = sql("SELECT * FROM usage_records WHERE id = ?").get(c.id);
-          // Another thread's read of a call, as of a session copied into its pylon, changes nothing.
-          if (stored !== undefined && stored.thread !== thread) continue;
-          const was = stored === undefined ? { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } : totalsOf({ ...stored, calls: 1 });
-          const now = { input: Math.max(was.input, c.input), output: Math.max(was.output, c.output), cacheWrite: Math.max(was.cacheWrite, c.cacheWrite), cacheRead: Math.max(was.cacheRead, c.cacheRead) };
-          const at = (stored?.at as number | undefined) ?? c.at;
-          const key = stored === undefined ? [thread, t.project as string, role, c.agent, c.model] : [thread, stored.project, stored.role, stored.agent, stored.model] as string[];
-          sql("INSERT OR REPLACE INTO usage_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(c.id, ...key, at, now.input, now.output, now.cacheWrite, now.cacheRead);
-          sql(`INSERT INTO usage_days VALUES ($day, $project, $role, $agent, $model, $input, $output, $cacheWrite, $cacheRead, $calls)
-            ON CONFLICT DO UPDATE SET input = input + $input, output = output + $output, cache_write = cache_write + $cacheWrite, cache_read = cache_read + $cacheRead, calls = calls + $calls`).run({
-            $day: day(at), $project: key[1]!, $role: key[2]!, $agent: key[3]!, $model: key[4]!, $calls: stored === undefined ? 1 : 0,
-            $input: now.input - was.input, $output: now.output - was.output, $cacheWrite: now.cacheWrite - was.cacheWrite, $cacheRead: now.cacheRead - was.cacheRead,
-          });
-          if (stored === undefined) added.calls++;
-          added.tokens += now.input - was.input + now.output - was.output + now.cacheWrite - was.cacheWrite + now.cacheRead - was.cacheRead;
-        }
-        for (const { source, key, position, before } of cursors) {
-          sql("INSERT INTO usage_cursors VALUES (?, ?, ?, ?) ON CONFLICT (source, key) DO UPDATE SET position = excluded.position, before = excluded.before").run(source, key, position, before);
-        }
-        if (backfill) sql("UPDATE usage_backfill_threads SET calls = calls + ?, tokens = tokens + ? WHERE thread = ?").run(added.calls, added.tokens, thread);
-      });
-      return added;
-    },
-    /** Where each of the source's files or conversations was last read to. */
-    usageCursor(source: string, key: string): UsageCursor | undefined {
-      const r = sql("SELECT * FROM usage_cursors WHERE source = ? AND key = ?").get(source, key);
-      return r && { source, key, position: r.position as number, before: r.before as string };
-    },
-    usageCursors: (source: string): Map<string, UsageCursor> =>
-      new Map(sql("SELECT * FROM usage_cursors WHERE source = ?").all(source).map((r) => [r.key as string, { source, key: r.key as string, position: r.position as number, before: r.before as string }])),
-    /** `since` is a UTC day's start, or null for all. */
-    usageReport(filter: { since: number | null; project?: ProjectId | null; thread?: ThreadId | null; by?: readonly Breakdown[] }): UsageReport {
-      const params = { $since: filter.since === null ? null : day(filter.since), $project: filter.project ?? null, $thread: filter.thread ?? null };
-      const [from, calls, dayOf] = params.$thread === null ? ["usage_days", "coalesce(sum(calls), 0)", "day"] : ["usage_records", "count(*)", "date(at / 1000, 'unixepoch')"];
-      const where = `WHERE ($since IS NULL OR ${dayOf} >= $since) AND ($project IS NULL OR project = $project)${params.$thread === null ? " AND $thread IS NULL" : " AND thread = $thread"}`;
-      const by: UsageReport["by"] = {};
-      for (const breakdown of filter.by ?? []) {
-        const { key, order } = groupings[breakdown];
-        by[breakdown] = sql(`SELECT ${key === "day" ? dayOf : key} AS key, ${sums(calls)} FROM ${from} ${where} GROUP BY 1 ORDER BY ${order}`)
-          .all(params).map((r) => ({ key: r.key as string, ...totalsOf(r) }));
-      }
-      return {
-        since: filter.since, countingSince: sql("SELECT at FROM usage_since").get()!.at as number, project: params.$project, thread: params.$thread,
-        total: totalsOf(sql(`SELECT ${sums(calls)} FROM ${from} ${where}`).get(params)!), by, backfill: usageBackfill(),
-      };
-    },
-    usageBackfill,
-    /** Every thread a run of the backfill listed, oldest thread first. */
-    usageBackfillThreads,
-    /**
-     * Starts a run that reads `threads`, unless one runs. Each listed thread with no row gets a pending one, and a
-     * skipped one is pending again. A done thread is never read again.
-     */
-    startUsageBackfill(threads: readonly ThreadId[], now: number): UsageBackfill {
-      transaction(() => {
-        if (sql("SELECT state FROM usage_backfill").get()?.state === "running") return;
-        for (const thread of threads) {
-          sql(`INSERT INTO usage_backfill_threads (thread, state, calls, tokens) VALUES (?, 'pending', 0, 0)
-            ON CONFLICT (thread) DO UPDATE SET state = 'pending', reason = NULL, at = NULL WHERE state = 'skipped'`).run(thread);
-        }
-        sql(`INSERT INTO usage_backfill (id, state, started_at) VALUES (1, 'running', ?) ON CONFLICT (id) DO UPDATE SET state = 'running',
-          started_at = excluded.started_at, finished_at = NULL, thread = NULL, phase = NULL, since = NULL, waiting = NULL`).run(now);
-      });
-      return usageBackfill();
-    },
-    /** A running run stops, and lets go of its pylon, whose desired phase is then paused again. */
-    stopUsageBackfill(now: number): UsageBackfill {
-      endUsageBackfill("stopped", now);
-      return usageBackfill();
-    },
-    /** A running run has read every thread it listed. */
-    finishUsageBackfill(now: number) { endUsageBackfill("done", now); },
-    /** Why a running run waits before its next pylon, or null when it does not. */
-    waitUsageBackfill(waiting: string | null) {
-      sql("UPDATE usage_backfill SET waiting = ? WHERE state = 'running' AND waiting IS NOT ?").run(waiting, waiting);
-    },
-    /** A running run holds the thread's pylon, which it wants woken to read. */
-    holdUsageBackfill(thread: ThreadId, now: number) {
-      sql("UPDATE usage_backfill SET thread = ?, phase = 'reading', since = ?, waiting = NULL WHERE state = 'running'").run(thread, now);
-    },
-    /** The run lets go of the pylon it holds, once it is paused. */
-    releaseUsageBackfill() {
-      sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run();
-    },
-    /**
-     * The thread was read, or skipped for `reason`, and keeps what its reads recovered. A run that holds its pylon now
-     * waits for its pause.
-     */
-    finishUsageBackfillThread(thread: ThreadId, state: "done" | "skipped", reason: string | null, now: number) {
-      transaction(() => {
-        sql("UPDATE usage_backfill_threads SET state = ?, reason = ?, at = ? WHERE thread = ?").run(state, reason, now, thread);
-        sql("UPDATE usage_backfill SET phase = 'pausing', since = ? WHERE state = 'running' AND thread = ?").run(now, thread);
-      });
-    },
+    ...usageStore(kernel, threadRecord),
     appendEvent,
     pruneSessions,
     attention: (id: ThreadId): Attention => (sql("SELECT attention FROM thread_attention WHERE thread = ?").get(id)?.attention ?? null) as Attention,
@@ -797,96 +612,8 @@ export function openRegistry(path: string, clock = Date.now) {
     /** The newest event's ID, a cursor that follows only the events after it. */
     newestEvent: () => String(sql("SELECT max(id) AS id FROM events").get()?.id ?? 0),
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
-    review: storedReviewOf,
-    /** Whether `review` is the builder's review as stored, so no other save came since it was read. */
-    isCurrentReview,
-    reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
-    /** The reviews but those whose phase is one of `settled` with no message left to send. */
-    reviewsToStep: (settled: readonly string[]): Review[] => sql(`SELECT record FROM reviews WHERE json_extract(record, '$.phase.kind') NOT IN (SELECT value FROM json_each(?))
-      OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(JSON.stringify(settled)).map((r) => storedReview(json<Review>(r.record))),
-    /** A thread a review started, whether or not a later review replaced the record that names it. */
-    isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
-    /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
-    prReviewed: (repo: string, number: number) => sql("SELECT 1 FROM reviewed_prs WHERE repo = ? AND number = ?").get(repo, number) !== undefined,
-    /**
-     * Replaces the builder's review, and tells the event log when its phase, round or label changed, or the person waived
-     * holds. The threads in `archive` are archived in the same transaction. Given `previous`, the review as it was read,
-     * false, with nothing written, when the stored review is no longer that: another save came first.
-     */
-    saveReview(review: Review, archive: readonly ThreadId[] = [], previous?: Review): boolean {
-      return transaction(() => {
-        if (previous !== undefined && !isCurrentReview(previous)) return false;
-        const before = storedReviewOf(review.builder);
-        for (const id of archive) setThreadStatus(id, "archived");
-        sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
-          .run(review.builder, review.reviewer, JSON.stringify(review));
-        sql("INSERT OR IGNORE INTO reviewed_prs (repo, number) VALUES (?, ?)").run(review.pr.repo, review.pr.number);
-        const label = (r: Review | null) => r?.phase.kind === "needs-person" ? r.phase.label?.state : undefined;
-        if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
-          appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, phase: review.phase, round: review.rounds.length });
-        }
-        if (review.waiver != null && JSON.stringify(before?.waiver ?? null) !== JSON.stringify(review.waiver)) {
-          appendEvent("review.waived", review.builder, { review: review.id, repo: review.pr.repo, pr: review.pr.number, ...review.waiver });
-        }
-        updateAttention(review.builder);
-        return true;
-      });
-    },
-    /** Stores the question unless one with its ID exists, and answers the stored one either way. */
-    askQuestion(question: Omit<Question, "answer">): Question {
-      return transaction(() => {
-        sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, question.thread, JSON.stringify({ ...question, answer: null }));
-        updateAttention(question.thread);
-        return questionRecord(question.id)!;
-      });
-    },
-    question: (id: string): Question | null => questionRecord(id),
-    /**
-     * Stores the asks the thread's pylon reports waiting, in place of its last report, and asks or withdraws its Claude
-     * worker's questions to match. An archived or deleted thread's pylon is paused, so its report is dropped. Answers
-     * whether a question was asked or withdrawn.
-     */
-    setWaitingAsks(thread: ThreadId, asks: readonly WaitingAsk[]): boolean {
-      return transaction(() => {
-        const status = threadStatus(thread);
-        if (status === undefined || status === "archived" || status === "deleted") return false;
-        sql("INSERT INTO waiting_asks (thread, report) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET report = excluded.report").run(thread, JSON.stringify(asks));
-        const changed = reconcileAsks(thread);
-        updateAttention(thread);
-        return changed;
-      });
-    },
-    /**
-     * Withdraws an ask whose dialog no hook waits on any more, such as one its terminal answered, and drops it from the
-     * stored report, so nothing before the pylon's next report asks it again. An answered one stays.
-     */
-    withdrawAsk(id: string) {
-      transaction(() => {
-        const thread = sql("SELECT thread FROM questions WHERE id = ?").get(id)?.thread as ThreadId | undefined;
-        if (thread === undefined) return;
-        const report = waitingAsks(thread).filter(({ ask }) => askQuestionId(ask.toolUseId) !== id);
-        sql("UPDATE waiting_asks SET report = ? WHERE thread = ?").run(JSON.stringify(report), thread);
-        reconcileAsks(thread);
-        updateAttention(thread);
-      });
-    },
-    questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), id").all(thread).map((r) => json<Question>(r.record)),
-    /**
-     * Records the answer to an open question. An answered one keeps its first answer, which this returns. `then` runs
-     * in the same transaction once the answer is recorded, and a throw from it records nothing.
-     */
-    answerQuestion(id: string, answer: NonNullable<Question["answer"]>, then?: (answered: Question) => void): Question {
-      return transaction(() => {
-        const stored = questionRecord(id);
-        if (stored === null) throw new Error(`no question ${id}`);
-        if (stored.answer !== null) return stored;
-        const answered = { ...stored, answer };
-        sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(answered), id);
-        then?.(answered);
-        updateAttention(stored.thread);
-        return answered;
-      });
-    },
+    ...reviewStore(kernel, { setThreadStatus, appendEvent, updateAttention }),
+    ...questions,
     ...planningStore(kernel),
     ...prWatches,
     ...judgmentStore(kernel),
