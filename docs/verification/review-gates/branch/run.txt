@@ -1,0 +1,8 @@
+PR watch pass 1: 2 PR reads, at most 2 in flight at once, in 333 ms
+links (number, read): [[186,true],[185,true]]
+held: {"kind":"needs-person","cause":"policy","reasons":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"rounds":["103598e"]}
+the builder pushed b3ee8a6 to #185
+after the push: {"kind":"reviewing","rounds":["103598e","b3ee8a6"]}
+the builder force-pushed back to 103598e
+the old head's check-runs read after the force-push: without If-None-Match
+prWatch.stopped: false
