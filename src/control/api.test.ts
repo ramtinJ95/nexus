@@ -26,7 +26,7 @@ import { threadStarter } from "./threads.ts";
 import { pipeline, type PipelineItem } from "./pipeline.ts";
 import { planning, planningPrefix } from "./planning.ts";
 import { threadQueue, type QueuedThread } from "./queue.ts";
-import { turnGate } from "./drain.ts";
+import { turnGate, type TurnGate } from "./drain.ts";
 import type { AttachTiming } from "./attach.ts";
 import type { ReviewLoop } from "./review.ts";
 import { agentReplies } from "./agent-conversation.ts";
@@ -71,7 +71,7 @@ const claudeSession = "11111111-2222-4333-8444-555555555501";
 const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
-async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions | null; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean; pipeline?: boolean; usageBackfill?: (registry: Registry) => UsageBackfillJob } = {}) {
+async function setup(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; https?: import("./api.ts").ApiOptions["https"]; whois?: import("../tailscale.ts").Whois; deployment?: DeploymentOptions | null; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; reviews?: ReviewLoop; images?: (registry: Registry) => ImageRollout; queue?: boolean; pipeline?: boolean; usageBackfill?: (registry: Registry) => UsageBackfillJob; gate?: TurnGate } = {}) {
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = options.images?.(registry);
   const backfill = options.usageBackfill?.(registry);
@@ -130,6 +130,7 @@ async function setup(t: import("node:test").TestContext, options: { gitIdentity?
     ...(plans === null ? {} : { planning: plans }),
     ...(images === undefined ? {} : { images }),
     ...(backfill === undefined ? {} : { usageBackfill: backfill }),
+    ...(options.gate === undefined ? {} : { gate: options.gate }),
     hostnames: new Set(["127.0.0.1"]),
     harness,
     startThread,
@@ -982,6 +983,23 @@ test("linking a port goes through the node's probe, gives it an https port at on
   assert.match(reserved.body.error, /is Nexus's own/);
   assert.equal(s.commands.length, commands, "a reserved port never reaches the probe");
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000, title: "App" })).status, 400, "a preview has no title");
+});
+
+test("a preview that finds no free port answers 503, and any other allocation fault 500", async (t) => {
+  const s = await withThread(t);
+  const allocate = s.registry.allocatePreviews;
+  s.registry.allocatePreviews = (pylon, services) => allocate(pylon, services, { first: 10200, last: 10199 });
+  const full = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
+  assert.equal(full.status, 503);
+  assert.match(full.body.error, /no https port is free for the preview of port-3000/);
+  s.registry.allocatePreviews = () => { throw new Error("database is locked"); };
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 500, body: { error: "database is locked" } });
+});
+
+test("a node's probe that refuses the control plane answers 502", async (t) => {
+  const s = await withThread(t);
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat refused this caller"), { code: "forbidden" }); });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 502, body: { error: "rj-firebat refused this caller" } });
 });
 
 test("linking a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {
@@ -2296,6 +2314,19 @@ test("drain reads only harness conversations, so Claude worker and bare threads 
   assert.deepEqual(s.calls, [["watch", s.thread.id], ["unwatch", s.thread.id]]);
 });
 
+test("drain waits for a turn entering through the gate it was given, which the API shares with the harness", async (t) => {
+  const gate = turnGate(() => false);
+  const s = await setup(t, { deployment, gate });
+  await s.call("PUT", "/v1/release", { commit: deployCommit });
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  let end = () => {};
+  const held = gate.run(() => new Promise<void>((resolve) => { end = resolve; }));
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, false);
+  end();
+  await held;
+  assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders)).body.idle, true);
+});
+
 test("expired drain leases no longer block callers", async (t) => {
   const s = await withThread(t, { deployment });
   s.registry.setDrain({ commit: deployCommit, expiresAt: Date.now() - 1 });
@@ -2870,6 +2901,12 @@ test("an event cursor older than what the log retains is refused with 409", asyn
   for (const path of ["/v1/events?since=1", "/v1/events?since=1&follow=true"]) {
     assert.deepEqual(await s.call("GET", path), { status: 409, body: { error: "event cursor expired; retained events cannot fill the gap" } });
   }
+});
+
+test("an event read that fails for any other reason answers 500, not the expired cursor's 409", async (t) => {
+  const s = await setup(t);
+  s.registry.eventBatch = () => { throw new Error("database disk image is malformed"); };
+  assert.deepEqual(await s.call("GET", "/v1/events?since=0"), { status: 500, body: { error: "database disk image is malformed" } });
 });
 
 test("event followers replay a disconnect gap with since and filter without losing order", async (t) => {

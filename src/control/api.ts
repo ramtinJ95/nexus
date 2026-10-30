@@ -1,5 +1,5 @@
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
-import { DeployDraining, isDraining, turnGate } from "./drain.ts";
+import { DeployDraining, isDraining, turnGate, type TurnGate } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
@@ -79,7 +79,8 @@ export interface ApiOptions {
   /** Marks planning threads, writes what their messages start with, and adds the items the person accepts from them. */
   planning?: Planning | null;
   deployment?: DeploymentOptions;
-  turnsStarting?: () => boolean;
+  /** The drain gate every turn start passes. Omitted: the API builds one over the registry's drain. */
+  gate?: TurnGate;
   registry: Registry;
   host: string;
   /** 0 picks a free port. */
@@ -496,12 +497,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons");
     const probe = registry.node(name) === undefined ? undefined : probes.get(name);
     if (probe === undefined) throw new HttpError(404, `no node ${name}`);
-    try {
-      return await probe.health();
-    } catch (err) {
-      if ((err as Partial<ProbeError>).code === "unreachable") throw new HttpError(503, (err as Error).message);
-      throw err;
-    }
+    return probe.health();
   }
 
   /**
@@ -744,9 +740,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     } catch (err) {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
       guard(current(t), { status: "pylon" });
-      const code = (err as Partial<ProbeError>).code;
-      if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
-      if (code === "unreachable") throw new HttpError(503, (err as Error).message);
+      if ((err as Partial<ProbeError>).code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
       if (err instanceof CheckoutRefused) throw new HttpError(refusalStatus[err.kind], err.message);
       throw err;
     }
@@ -867,11 +861,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   async function linkPort(t: Thread, body: unknown): Promise<Preview> {
     const { port } = parse(previewSchema, body);
     const { service } = await pylonCommand(t, { kind: "link-port", port });
-    try {
-      registry.allocatePreviews(t.pylonId, [service], previewPorts);
-    } catch (err) {
-      throw new HttpError(503, (err as Error).message);
-    }
+    registry.allocatePreviews(t.pylonId, [service], previewPorts);
     wakeThread(t);
     return registry.previews(t.pylonId).find((p) => p.service === service)!;
   }
@@ -982,9 +972,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const noContent: Reply = { status: 204 };
 
   const draining = () => isDraining(registry.drain());
-  const turnRequests = turnGate(draining);
+  const gate = options.gate ?? turnGate(draining);
   async function turnsRunning(): Promise<boolean> {
-    if (turnRequests.busy() || options.turnsStarting?.()) return true;
+    if (gate.busy()) return true;
     for (const t of registry.harnessThreads()) {
       if (t.status === "deleted") continue;
       const { docs } = await agents.harness.view(t);
@@ -992,7 +982,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const inbox = docs["pi.inbox"];
       if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
     }
-    return turnRequests.busy() || (options.turnsStarting?.() ?? false);
+    return gate.busy();
   }
 
   const routes: readonly RouteEntry[] = [
@@ -1009,7 +999,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // admit lets only a node with its deployer key reach these.
     ["GET", /^\/v1\/deployer\/release$/, () => ok(releaseView(registry, options.deployment?.self))],
     ["POST", /^\/v1\/deployer\/report$/, { open: "admit lets only a reporter reach a deployer route" }, async (_, r) => {
-      const node = registry.nodes().find((n) => n.tailnetNodeId === r.caller)!;
+      const node = registry.nodeByTailnetId(r.caller)!;
       const report = parse(reportSchema, await r.body());
       if (report.role === "control" && r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node reports control health");
       registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
@@ -1031,10 +1021,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const kinds = r.query.getAll("kind");
       if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
       const filter: EventFilter = { kinds, ...(r.query.has("thread") ? { thread: r.query.get("thread")! } : {}), ...(r.query.has("project") ? { project: r.query.get("project")! } : {}) };
-      const read = (from: string) => {
-        try { return registry.eventBatch(from, filter); }
-        catch (err) { throw new HttpError(409, (err as Error).message); }
-      };
+      const read = (from: string) => registry.eventBatch(from, filter);
       const first = read(since);
       if (r.query.get("follow") !== "true") return ok(first.events);
       return { stream: (res) => followEvents(res, first, read) };
@@ -1339,7 +1326,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
     if (match.policy !== undefined && "person" in match.policy) personOnly(caller, match.policy.person);
     const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
-    const reply = match.policy?.startsTurn ? await turnRequests.run(async () => route()) : await route();
+    const reply = match.policy?.startsTurn ? await gate.run(async () => route()) : await route();
     if (reply.stream !== undefined) return reply.stream(res);
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
@@ -1436,7 +1423,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
-        send(res, errorStatus(err), errorBody(err));
+        const reply = errorReply(err);
+        send(res, reply.status, reply.body);
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -1444,7 +1432,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       socket.on("error", () => undefined);
       upgraded.add(socket);
       socket.once("close", () => upgraded.delete(socket));
-      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), errorBody(err)));
+      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorReply(err)));
     });
     return server;
   }
@@ -1580,12 +1568,22 @@ function pathOf(url: string | undefined): string | null {
   }
 }
 
-const errorBody = (err: unknown): { error: string; code?: ApiErrorCode } =>
-  err instanceof HttpError && err.code !== undefined ? { error: err.message, code: err.code } : { error: (err as Error).message };
-const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : err instanceof BodyTooLarge ? 413 : 500;
+/** A node's probe refusing the control plane is a bad gateway, not a refusal of the caller. */
+const probeStatus: Record<ProbeError["code"], number> = { unreachable: 503, "not-running": 409, forbidden: 502 };
+type ErrorReply = { status: number; body: { error: string; code?: ApiErrorCode } };
+
+function errorReply(err: unknown): ErrorReply {
+  const error = (err as Error).message;
+  if (err instanceof HttpError) return { status: err.status, body: err.code === undefined ? { error } : { error, code: err.code } };
+  if (err instanceof DeployDraining) return { status: 409, body: { error } };
+  if (err instanceof BodyTooLarge) return { status: 413, body: { error } };
+  const code = (err as Partial<ProbeError>).code;
+  if (code !== undefined && Object.hasOwn(probeStatus, code)) return { status: probeStatus[code], body: code === "not-running" ? { error, code } : { error } };
+  return { status: 500, body: { error } };
+}
 
 /** An API error reply written on a socket that never upgraded. */
-function refuseUpgrade(socket: Duplex, status: number, error: ReturnType<typeof errorBody>) {
+function refuseUpgrade(socket: Duplex, { status, body: error }: ErrorReply) {
   if (socket.destroyed) return;
   const body = JSON.stringify(error);
   socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncache-control: no-store\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);

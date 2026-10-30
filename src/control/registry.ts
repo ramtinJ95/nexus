@@ -20,6 +20,7 @@ import type { Judgment } from "./judgment.ts";
 import type { ItemId, ItemRecord } from "./pipeline.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { Placement } from "./placement.ts";
+import { HttpError } from "./http-error.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
 import { upgradeObservation, type HerdrStatus, type JobStatus, type NodeName, type NodeObservation, type OlderObservation, type PylonId, type ReportedCapacity, type Subject, type TailnetNodeId } from "../protocol.ts";
@@ -739,7 +740,7 @@ export function openRegistry(path: string, clock = Date.now) {
     const cursor = eventCursor(since);
     const oldest = sql("SELECT min(id) AS id FROM events").get()?.id as number | null;
     const newest = sql("SELECT max(id) AS id FROM events").get()?.id as number | null;
-    if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new Error("event cursor expired; retained events cannot fill the gap");
+    if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new HttpError(409, "event cursor expired; retained events cannot fill the gap");
     const clauses = ["id > ?"];
     const params: (string | number)[] = [cursor];
     for (const column of ["thread", "project"] as const) {
@@ -1258,6 +1259,11 @@ export function openRegistry(path: string, clock = Date.now) {
     node,
     /** Each node's tailnet node ID, without reading its observation. */
     nodeIds: (): Map<NodeName, TailnetNodeId> => new Map(sql("SELECT name, tailnet_node_id FROM nodes").all().map((r) => [r.name as NodeName, r.tailnet_node_id as TailnetNodeId])),
+    /** The node with this tailnet ID and the deploy key it joined with, null for a configured node, without reading its observation. */
+    nodeByTailnetId(id: TailnetNodeId): { name: NodeName; deployKey: string | null } | undefined {
+      const row = sql("SELECT name, deploy_key FROM nodes LEFT JOIN joined_nodes USING (name) WHERE tailnet_node_id = ?").get(id);
+      return row === undefined ? undefined : { name: row.name as NodeName, deployKey: row.deploy_key as string | null };
+    },
     /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
     markOffline(name: NodeName) { sql("UPDATE nodes SET state = ? WHERE name = ?").run("offline", name); },
     addJoinToken(hash: string, expiresAt: number) { sql("INSERT INTO join_tokens (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt); },
@@ -1455,7 +1461,7 @@ export function openRegistry(path: string, clock = Date.now) {
         const taken = new Set([...routed, ...(sql("SELECT https_port FROM previews WHERE node = ?").all(on) as Row[]).map((r) => r.https_port as number)]);
         let port = range.first;
         while (port <= range.last && taken.has(port)) port++;
-        if (port > range.last) throw new Error(`no https port is free for the preview of ${service}: pylons on ${on} hold or ${on} serves every port from ${range.first} to ${range.last}`);
+        if (port > range.last) throw new HttpError(503, `no https port is free for the preview of ${service}: pylons on ${on} hold or ${on} serves every port from ${range.first} to ${range.last}`);
         sql("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?").run(service, port, pylonId);
         held.add(service);
       }

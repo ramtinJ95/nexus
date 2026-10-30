@@ -1,4 +1,3 @@
-import { isDraining, turnGate } from "./drain.ts";
 /**
  * The control plane process: `node src/control/main.ts <config.json>`, run by deploy/nexus-control.service.
  * It opens the registry, follows every configured node's probe, runs every thread's agent in the harness, and
@@ -42,6 +41,7 @@ import { startImageRollout } from "./image-rollout.ts";
 import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
+import { isDraining, turnGate } from "./drain.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
@@ -133,24 +133,29 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   for (const node of config.nodes) {
     registry.upsertNode({ name: node.name, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId });
   }
-  // Both grow when a node joins, and everything handed them reads them when it acts.
-  const probes: ProbeClient[] = [];
+  // It grows when a node joins, and everything handed it reads it when it acts.
   const probeMap = new Map<NodeName, ProbeClient>();
   const connect = (node: NodeAddress) => {
     const client = probe?.(node) ?? connectProbe(node.name, node.tailnetHost, node.tailnetNodeId, { whois });
-    probes.push(client);
     probeMap.set(node.name, client);
     return client;
   };
   for (const node of [...config.nodes, ...registry.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
-  const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes, token: chatgptToken });
+  const log = (message: string) => console.error(message);
+  const timers: NodeJS.Timeout[] = [];
+  /** Runs the pass now and every `ms` after. The API's server keeps the process alive, so no timer does. */
+  const every = (ms: number, pass: () => unknown) => {
+    void pass();
+    timers.push(setInterval(() => { void pass(); }, ms).unref());
+  };
+  const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken });
   const peers = peerHandoff({ registry, probes: probeMap });
   const loop = startLoop({
-    registry, probes: [...probes], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
+    registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
     ingest: (event, node, ...rest) => {
       if (event.type === "snapshot") {
         handoff?.observed(event.observation);
-        peers.observed(node);
+        peers.observed(node, event.observation.probeBootId);
       }
       return ingest(event, node, ...rest);
     },
@@ -175,7 +180,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       registry.recordActivity(t.id, { agent: facts.lastAgentActivityAt, agentTurnRunning: facts.agentTurnRunning });
       wakeThread(t);
     },
-    log: (message) => console.error(message),
+    log,
   });
 
   const gate = turnGate(() => isDraining(registry.drain()));
@@ -193,13 +198,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
   const usage = usageCounter({ registry, probes: probeMap, harness });
   const github = token === null ? null : githubClient(token);
-  const handoffTimer = setInterval(() => { void handoff?.poll(); }, 60_000);
-  handoffTimer.unref();
-  void handoff?.poll();
+  every(60_000, () => handoff?.poll());
   const resumer = config.resumeAfterUsageLimit ? usageLimitResumer({ registry, inbox }) : null;
-  const resumeTimer = setInterval(() => { void resumer?.poll(); }, 30_000);
-  resumeTimer.unref();
-  void resumer?.poll();
+  every(30_000, () => resumer?.poll());
   const mirror = projectMirror({ githubToken: token });
   const wake = (node: NodeName) => { void loop.wake(node); };
   const backfill = usageBackfill({ registry, counter: usage, wake });
@@ -213,33 +214,26 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => canDeploy(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,
-    log: (message) => console.error(message),
+    log,
   });
   const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto });
-  const watchTimer = setInterval(() => { void watch.poll(); }, prWatchMs);
-  void watch.poll();
-  const reviewTimer = setInterval(() => { void reviews?.poll(); }, 15_000);
-  void reviews?.poll();
+  every(prWatchMs, () => watch.poll());
+  every(15_000, () => reviews?.poll());
   // Its starts pass the drain gate, so a deploy's drain refuses them, which leaves them queued, and waits for one in flight.
   const queue = github === null ? null : threadQueue({
-    registry, startThread, gate, log: (message) => console.error(message),
+    registry, startThread, gate, log,
     send: (id, text, requestId) => harness.send(id, text, requestId, "followUp"),
   });
-  const queueTimer = setInterval(() => { void queue?.poll(); }, 15_000);
-  void queue?.poll();
-  const items = queue === null ? null : pipeline({ registry, queue, log: (message) => console.error(message) });
-  const itemTimer = setInterval(() => { void items?.poll(); }, 15_000);
-  void items?.poll();
-  const plans = planning({ registry, pipeline: items, replies: agentReplies(registry, harness), log: (message) => console.error(message) });
-  const planTimer = setInterval(() => { void plans.poll(); }, 15_000);
-  void plans.poll();
-  const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, watch, log: (message) => console.error(message) });
-  const nudgeTimer = setInterval(() => { void nudges?.poll(); }, 15_000);
-  void nudges?.poll();
+  every(15_000, () => queue?.poll());
+  const items = queue === null ? null : pipeline({ registry, queue, log });
+  every(15_000, () => items?.poll());
+  const plans = planning({ registry, pipeline: items, replies: agentReplies(registry, harness), log });
+  every(15_000, () => plans.poll());
+  const nudges = github === null ? null : builderNudger({ registry, github, inbox, harness, watch });
+  every(15_000, () => nudges?.poll());
   // Judgments need no GitHub, so they run without a token too.
-  const judgments = judgmentPass({ registry, harness, probes: probeMap, wake, log: (message) => console.error(message) });
-  const judgmentTimer = setInterval(() => { void judgments.poll(); }, 15_000);
-  void judgments.poll();
+  const judgments = judgmentPass({ registry, harness, probes: probeMap, wake });
+  every(15_000, () => judgments.poll());
   const api = await startApi({
     ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
@@ -247,7 +241,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     queue,
     pipeline: items,
     planning: plans,
-    turnsStarting: gate.busy,
+    gate,
     deployment,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
@@ -274,31 +268,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   return {
     port: api.port,
     async close() {
-      clearInterval(watchTimer);
-      clearInterval(reviewTimer);
-      clearInterval(queueTimer);
-      clearInterval(itemTimer);
-      clearInterval(planTimer);
-      clearInterval(nudgeTimer);
-      clearInterval(judgmentTimer);
-      clearInterval(resumeTimer);
-      clearInterval(handoffTimer);
-      await watch.close();
-      await handoff?.close();
-      await peers.close();
-      await resumer?.close();
-      await reviews?.close();
-      await plans.close();
-      await items?.close();
-      await queue?.close();
-      await nudges?.close();
-      await judgments.close();
-      await api.close();
-      await backfill.close();
-      await usage.close();
-      await harness.close();
-      await loop.close();
-      await images.close();
+      for (const timer of timers) clearInterval(timer);
+      for (const service of [watch, handoff, peers, resumer, reviews, plans, items, queue, nudges, judgments, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };

@@ -1,0 +1,340 @@
+# main's code, fdbc058 refactor(dashboard): give the dashboard one copy of each shared formatter, wire shape and constant (#335), with the branch's tests
+✔ callers off the allowlist, or unknown to tailscaled, are refused
+✔ a path that does not decode is a 400 to an allowed caller and a 403 to any other, and a Host that does not parse is a 403
+✔ any tailnet node may ask who it is and what it may do, under the API's names only
+✔ a machine joins once with a token, as whois names it, whatever its request says
+✔ an unknown or expired token is refused with nothing recorded
+✔ a caller, the control plane's machine and a node of control.json never join, and a token they send stays unused
+✔ a joined node joins again with a new token, which replaces its deploy key, and reports with it
+✔ a machine neither admitted nor joined reaches only whoami and join, and a joined node only its deployer's routes
+✔ a web page on an allowed machine cannot change state
+✔ projects are created, listed, and checked
+✔ nodes are listed with their state and capacity, without the observation
+✔ a thread cannot start before an image is current
+✔ an image is recorded only with every pin, gh included, each in its pinned format
+✔ an image is recorded exactly when a probe's Docker backend can name it
+✔ starting a thread creates its pylon, boots fresh from the current image, and wakes its node
+✔ --node auto boots the pylon on the node with the most memory left after it, and the thread records why
+✔ --node auto counts the memory of a paused pylon about to wake, and not of one that stays paused
+✔ --node auto counts the memory of an archived thread's paused pylon the usage backfill wakes to read
+✔ --node auto passes over a node whose stored observation is from a probe older than grants
+✔ --node auto counts a crashed pylon a person retried, which boots again, and not one whose VM still holds its memory
+✔ --node auto refuses with each node's reason when none can run the pylon, and starts nothing
+✔ a pylon that asks for nested virtualization goes only to a node whose probe reports it
+✔ --node auto places a thread that needs the ChatGPT token on a node whose probe takes it and has not got it yet
+✔ without --node a thread still boots on its project's default node, and a named node is taken as named
+✔ the first start of a setup builds its template on the node, the next waits for it, and one after it is ready boots from it at the commit read
+✔ a start whose setup cannot be read boots fresh and says why, and only a full commit ID is read
+✔ two overlapping --node auto starts take different rooms, and a start that fails gives its room back
+✔ a project whose default node is auto places each thread that names none, and a named node still pins
+✔ --node auto refuses an overcommitted node with its reason, and places the pylon on one that fits
+✔ a start whose disk differs from its project's boots fresh without a template, and one that changes only CPUs or memory may use one
+✔ a template built before the project's disk size changed is not reused by a start of the new size
+✔ a start's size overrides its project's field by field, its pylon boots that size, and thread detail reads it back
+✔ --node auto weighs a thread's own size, not its project's, and counts it once placed
+✔ an overlapping start's reservation holds the start's own size
+✔ nodes report whether they are overcommitted, and their observed pylons as up, paused, archived, crashed and orphaned
+✔ a scratch project has no repository, and each of its threads starts an empty one on its branch
+✔ a pylon's allowlist reaches its project's HTTPS repo host and the HTTPS dotfiles host
+✔ thread detail derives the actual state from the node's last observation
+✔ thread detail lists the pylon's listening ports with the service and preview of each
+✔ a node whose stored observation is from a probe before routes, grants, counting and listening ports gets no thread, is not overcommitted, and its pylon's ports are unknown
+✔ linking a port goes through the node's probe, gives it an https port at once, and counts as human activity
+✖ a preview that finds no free port answers 503, and any other allocation fault 500
+✖ a node's probe that refuses the control plane answers 502
+✔ linking a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409
+✔ unpublishing a linked port goes through the node's probe, drops its preview at once, counts as human activity, and is safe to repeat
+✔ unpublishing a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409
+✔ opening a session goes through the node's probe, defaults to Claude Code titled by its harness, and counts as human activity
+✔ a thread's files and changes are read from its checkout through its node's probe, and reading counts as human activity
+✔ a thread's checkout images are served while its pylon runs, sniffed, and the file at a base too
+✔ an image is refused with a 409 while the pylon does not run, without waking it, and a caller who may not read files may not read images
+✔ a harness conversation's image part is served by its hash, and a part that changed is gone
+✔ a scratch thread's changes and diff are against the empty tree, before its first commit and after
+✔ a checkout read the pylon refuses answers its status, and a bad request never reaches the probe
+✔ reading the checkout of a pylon that is not running wakes it and is refused with 409, and an archived thread's probe is never asked
+✔ a checkout read whose thread is deleted while it runs answers the delete, not the node's failure
+✔ closing a session goes through the node's probe, and a pane that is not open, such as one from before a wake, is a 404
+✔ focusing a session runs Herdr's focus on its pane in the pylon as an argument, a pane that is not open is a 404, and anything but a pane ID is a 400
+✔ closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open
+✔ an idle-paused or archived thread lists the sessions its wake brings back, as paused
+✔ closing a paused session is refused with 409 without asking the probe or waking the pylon
+✔ closing a failed session in no pane drops it from the pylon, by its ID
+✔ a session of a pylon that is not running, or of an archived or deleted thread, is refused with 409
+✔ a failed pylon shows failed with its reason until its thread is deleted, and then shows the delete
+✔ the thread list leaves deleted threads out when asked, as the dashboard asks and `threads --all` does not
+✔ a follow from the latest event gets a reply's events and none from before it
+✔ retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node
+✔ a pylon whose disk holds a failed setup cannot be retried, and its detail says why
+✔ an archived thread's failed pylon can be retried and stays archived, and a deleted thread's cannot
+✔ archive, delete, and activity update the thread and wake its node
+✔ a message goes to the thread's conversation and counts as human activity
+✔ a thread's event stream sends the whole view, then each part a commit changed, and stops its watch when the client leaves
+✔ a client that reads slowly gets the latest view in fewer events, and never holds the harness up
+✔ a thread's streams end when it is deleted, and a deleted thread, a stranger or one stream too many is refused
+✔ a client that stops reading is dropped after the stall limit, with its watch and its place
+✔ deleting a thread whose client stopped reading frees the stream at once, writes nothing after the end, and drops the client
+✔ a stream whose thread is deleted while its watch opens stops that watch
+✔ unarchiving makes an archived thread active, counts as human activity and wakes its node
+✔ an archived thread takes no messages, and a deleted one has no conversation
+✔ unknown threads, routes and methods get 404 and 405
+✔ the attach route refuses before the 101 with the API's JSON errors, and a page from any other origin is refused
+✔ an attach wakes the pylon, waits for it, and carries keys, resizes and output until Herdr exits
+✔ a Claude worker's attach lands in the pane of its Claude session, one that names a pane lands there, and a Nexus agent thread's where Herdr was
+✔ deleting a thread ends its attach as a conflict, and a closing API ends one with 1001
+✔ a closing API gives up on a terminal whose node stopped answering after its wait, and opens none for an upgrade it was admitting
+✔ a closing API drops an upgrade whose whois never returns after its wait
+✔ a terminal takes a place among the streams
+✔ an upgrade the API serves no WebSocket for is handled as an ordinary request
+✔ attention ranks failure, unwatched parked tasks, unread reply, then work; seen never wakes
+✔ the API reports the attention the event stream last reported, and a deleted thread's run is not parked
+✔ attention takes the first matching state in every combination
+✔ seen is bounded by the rendered reply, not a newer reply discovered by attention polling
+✔ latest-turn API reads include commits and uncommitted work, and refuse missing or stale snapshots
+✔ deploy defaults off, main resolves, and release records the authenticated caller
+✔ the release view shows a deployer report 90 s old as pending, so a wait on that release is pending
+✔ a deployer report may carry every report state
+✔ only a deployer may build, roll out or roll back an image, never the control node itself
+✔ anyone allowed reads the usage backfill and its dry run, only a deployer starts or stops it, and without one its routes answer 409
+✔ a deployer's image operations answer 200 once done and 202 while running, and the image routes show each image, its nodes and the operation
+✔ pylon traffic under its host identity cannot deploy even if that identity is allowed and listed as a deployer
+✔ a body over a mebibyte is refused with 413 and reaches no route
+✔ a root-authenticated drain blocks every turn-entry route and can be released
+✔ drain reads committed live and queued work rather than a lagging activity flag
+✔ drain reads only harness conversations, so Claude worker and bare threads never reach the harness
+✖ drain waits for a turn entering through the gate it was given, which the API shares with the harness
+✔ expired drain leases no longer block callers
+✔ drain cannot declare idle while a previously admitted message is still entering the harness
+✔ the final idle fence holds across lease expiry until rollback or success releases it
+✔ direct TLS uses TCP whois, ignores forged headers, and renews without disturbing HTTP
+✔ HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry
+✔ closing HTTP while issuance is pending prevents a late HTTPS listener
+✔ project edits validate before saving, flag older grants, and leave checkpoint boots unchanged
+✔ a thread started with HTTPS dotfiles shows its grants current until its project's hosts change
+✔ pylon boot inherits the person's identity and a project can override or clear it
+✔ partial resource patches merge atomically without resetting another edit
+✔ grant comparison ignores order and duplicates but detects changed access
+✔ project add and edit refuse a grant of the ChatGPT token, which comes with the chatgpt login
+✔ project add and edit refuse duplicate secret names instead of merging their grants
+✔ the health, release, deployer and event routes answer each caller and method as listed
+✔ an event follower gets each event as an id and its data, then the watermark as a ping, every second, and a plain read gets them as JSON
+✔ an event follower open across a deploy drain gets every event in order, and the drain neither ends nor refuses it
+✔ a slow event follower gets every event once and in order, and one that stops reading is dropped after the stall limit with its place
+✔ event followers share the streams' places with thread streams, past which each is refused with its own error, and a thread's delete leaves them open
+✔ an event cursor older than what the log retains is refused with 409
+✖ an event read that fails for any other reason answers 500, not the expired cursor's 409
+✔ event followers replay a disconnect gap with since and filter without losing order
+✔ a Claude worker start stores its first prompt without starting a harness conversation
+✔ a quiet filtered stream scans past unrelated events and survives retention rollover
+✔ a Claude worker's pasted image is served from its transcript while the pylon runs, by the place its entry names
+✔ a Claude worker thread's latest turn is the one its newest turn-started names, and a turn without a snapshot is refused
+✔ a Claude worker thread's message is typed into its session exactly, in either mode, and never reaches the harness
+✔ a Claude worker's message is typed once per request ID, a send that typed nothing can be sent again, and one that may have typed some cannot
+✔ a Claude worker's message whose probe wait ran out is typed once, and a resend under its request ID answers what became of it
+✔ a resend while its first send is still asked waits for it, so a late answer that typed nothing cannot clear a newer send's fence
+✔ a Claude worker thread takes no messages while archived, deleted or before its session starts, and asks no probe
+✔ a Claude worker thread's abort presses Esc in its session's pane through the probe, and says why when nothing was pressed
+✔ a Claude worker stopped on its usage limit lists as limited, with the stop in its row and its conversation
+✔ a Claude worker thread's conversation is its transcript, read from the running pylon after each session event and kept for when it is paused
+✔ a Claude worker thread's page stream shows new entries during a turn, read when its session events say so rather than on a timer
+✔ a poll of a Claude worker's streaming page names the view its stream shows rather than render it, and names a reply's view only once a frame showed the reply
+✔ a Claude worker's page names no reply watermark until the transcript holds a read that started after the reply
+✔ a Claude worker's page names no reply watermark while the reads after the reply have not reached the transcript's end
+✔ a Claude worker's page stream sends nothing while its conversation is unchanged, its pings included, though an age in it changed
+✔ two page streams of one Claude worker render each new view once between them
+✔ a Claude worker's transcript streams to the CLI as its entries whole, then each read's new entries and the turn's start and end
+✔ a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer
+✔ only a project edit turns on reviews of its own, landing needs a deployer, and the project records who turned it on
+✔ a deployer's land names the holds it waives at the commit it confirmed, and the review loop decides whether they may be waived
+✔ an item is added to a project the pipeline runs for, becomes a queued thread behind the items it is after, and only a person adds, approves or cancels one
+✔ only a person starts a thread, starts a queued one now or messages one, never the control node, an infrastructure node or a pylon
+✔ only a person acts on a thread, its pylon or a project, never the control node, an infrastructure node or a pylon
+✔ a start after other threads is queued with no row or pylon, until start-queued starts it as any start
+✔ a queued start is checked as a start is before it is recorded, and needs the GitHub token
+✔ a start repeated under its request ID answers the same thread and delivers its first message once
+✔ starts repeated at once under one request ID start one thread, and one with another body is refused
+✔ a start that failed under a request ID made nothing, so the ID starts a corrected body
+✔ a start whose first message failed keeps its request ID, and a repeat sends the brief to the same thread once
+✔ a queued start repeated under its request ID answers the same queued thread, then the thread it became
+✔ thread detail lists the judgments of the thread's failed pylon, oldest failure first, with what each decided and did
+✔ a planning thread's proposals become cards only a person answers, an accepted one becomes the person's item and queued thread, and the next message tells the thread
+✔ a person answers a question, a deployer question needs a deployer, and no node or pylon answers one
+✔ without deployment options the control node is unknown, so no one answers a question or starts or messages a thread
+✔ a person answers a Claude worker's AskUserQuestion with a choice per question, which the hook in its pylon hands to Claude before it is recorded
+✔ an answer to an AskUserQuestion nobody waits for any more withdraws it, and one a pylon's image cannot hand to Claude says to answer in its terminal
+✔ a harness, a Claude worker and a bare thread each answer every agent route as their kind does
+✔ only a deployer reads a node's health, which the node's probe answers, and no route under it changes the node
+✖ every poll puts the current token to every probe, so a probe that missed one gets the next
+✖ a node that joins after the handoff starts gets the token at the next poll
+✔ without a ChatGPT login the handoff puts nothing
+✖ a probe that fails is logged by node and the others still get the token, and no log line carries it
+✖ a poll while one runs joins it instead of reading the token twice
+✖ a probe that takes the token and has not got it, as one that just started, gets it at once
+✖ a probe that shows up without the token while a poll runs gets it from one more poll
+✖ probes that show up without the token during one poll cause one more poll, not one each
+✖ a poll while one more poll is due resolves only after that one
+✔ drain counts submissions already entering, and refuses all new callers including background work
+✔ a thread's pylon follows its thread: spawn, pause on archive, resume on activity, delete
+✔ each pass sends the template builds recorded for its node, before its pylons
+✔ a job that fails for good gives up with the probe's message and the end of its log
+✔ a wake for reading that fails after the backfill let go of its pylon fails nothing, and the thread's next wake boots at once
+✔ a record from before failed wakes for reading were kept apart, whose last failure is one, plans the thread's next wake at once
+✔ a wake for reading the planner gives up on, as for an image no online node holds, is an attempt the backfill skips, never a failed pylon
+✔ a fetch of its image for a wake for reading that fails after the backfill let go of the pylon fails nothing, and the thread's next wake has every try
+✔ a human retry of a pylon whose fresh setup failed spawns it fresh again, and the new setup's failure is the verdict
+✔ a retry and a wake boot the size the thread started with, though its project's size changed since
+✔ a human retry of a pylon broken after a resume pauses it onto its newest disk and resumes that
+✔ a broken pylon nobody retried is never replaced, even after an earlier retry
+✔ a retry never deletes a pylon whose checkpoint the registry did not count
+✔ a retry of a pylon left broken by a fresh setup, as an older backend left it, removes it with a pause and spawns it fresh
+✔ an idle pylon whose fresh setup failed is removed by its pause, so its wake runs setup again
+✔ a retry of a pylon whose checkpoint holds a failed setup boots nothing again, and says to start again
+✔ a retry made while a pass waits on the probe for another pylon is not undone by that pass
+✔ a pylon moved to another node while a pass waits on the probe for another pylon gets no job from its old node
+✔ a pass over several running pylons reads its node's record at most once
+✔ a pylon pauses once its agent turn ends and nobody has used it for a while
+✔ an unreachable node gets no jobs, is recorded offline after the grace period, and catches up when it returns
+✔ with the real ingest, a pylon's sessions reach the registry and a working one keeps the pylon up
+✔ with the real ingest, a paused pylon lists its sessions as paused, and once it runs again they run, with the status each read gives
+✔ a restarted control plane writes each pylon's session list on its first observation, though the stored one has the same list
+✔ with the real ingest, sessions the probe could not read record no agent activity
+✔ services the probe could not read change nothing: the next diff sees the last list read
+✔ listening ports the probe could not read are stored as unknown, not as the ports read before
+✔ a node that goes quiet, as a sleeping one does, is treated as unreachable
+✔ each snapshot is ingested against the last observation ingested for each known pylon
+✔ a snapshot's journal applies each report past the node's receipt in order, and the reports before it change nothing
+✔ session, job and preview-hit events apply their writes and leave the stored observation as the last snapshot stored it
+✔ a job in flight survives a control-plane restart: the new process asks the probe and sends nothing twice
+✔ an envelope saved by a control plane that died mid-submit holds the pylon until it expires
+✔ wakes of a node during its pass give exactly one more pass after it, and resolve once that pass has finished
+✔ a wake of one node does not wait for another node's pass, and a wake of an unknown node resolves at once
+✔ a wake after close resolves at once and runs no pass
+✔ close waits for the pass in flight, and a wake asked for during that pass runs no other
+✔ a service that wants a preview gets a port, and the next spawn publishes it with an overlay that names its URL
+✔ a linked port's preview goes once a read of the pylon's services leaves it out, and a read that failed changes nothing
+✔ preview ports are unique on a node and keep their port across pause, a control-plane restart and wake
+✔ a deleted thread's ports go back only once its node no longer has the pylon
+✔ a port the node still serves for a pylon the registry lost goes to no new preview, and its route is left alone
+✔ a deleted thread whose pylon was removed by hand gets a delete that unpublishes its previews, and only then its ports back
+✔ a deleted thread's pylon that is gone is torn down again whenever its node lists or routes it again
+✔ follow leaves out a deleted thread's pylon its node no longer lists, and diffs it afresh when the node lists it again
+✔ a deleted thread's pylon removed by hand while the control plane was down has its sessions cleared
+✔ a deleted thread's ports go back after a restart between its delete and their release
+✔ a deleted thread whose pylon was retried just before the delete settles the retry, though its pylon is gone
+✔ a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone
+✔ a probe that reports no routes still gets planned for, with ports allocated by the registry alone
+✔ a used-up port range is logged, and the services that got a port are still published
+✔ a node the loop starts following while it runs comes online and runs its threads' pylons
+✔ a node reporting a pylon the registry places on another node gets no ports for it
+✔ a boot asking for a held secret waits for a probe older than it, and boots once the upgraded probe has it
+✖ a boot asking for the ChatGPT token right after a probe restart boots once the handoff the restart set off arrives
+✔ every new boot takes the configured git identity, but a checkpoint keeps its original grants
+✔ a queued Claude worker launches once after its pylon runs
+✔ a stalled Claude launch reports its screen and failed attention without resubmitting
+✔ a submission receipt wins over a late launch error without a contradictory failed event
+✔ a failed launch persists the same diagnostic it publishes and never resubmits
+✔ a Claude launch whose probe restarts mid-way is sent again under its session once the probe is back, and starts once
+✔ a Claude launch whose probe stays away fails once the wait is over
+✔ a Claude launch a control plane restart cut off goes again under its session
+✔ a control plane that opens on an observation stored from a probe older than routes, grants, held secrets and counting boots its pylon from the probe's first snapshot
+✔ a Claude launch a control plane restart cut off before it recorded a session fails, sent never
+✔ the shipped example config parses
+✔ a config without the harness, or with a relative harness path, is refused
+✔ no node may be named auto, which start --node auto asks for
+✔ a probe takes a node name exactly when the control plane does
+✔ preview ports default to 10200 to 10999, and a range that ends before it starts is refused
+✔ GitHub watching is opt-in and accepts only a token file path, never a token in config
+✔ HTTPS uses an allowed MagicDNS hostname and reserves 7443 from previews
+✔ git identity is optional and contains only a name and email
+✔ continuing after a usage limit is off unless the config turns it on
+✔ the image build node is optional, and one given must be a configured node
+✔ a registry and control.json from before join tokens come up with the same nodes, callers, deployers and probe peers
+✔ a machine that joins is followed without a restart, every probe learns it as a peer, and a probe that cannot learn peers keeps working
+✔ a node that joined is followed again after a restart, beside control.json's
+✔ the installer's join reaches only the control plane deployer.json names, and says why one is refused
+✔ the host command mints a join token only as root
+✔ a node that joined and was then added to control.json never joins again, and the token it sends stays unused
+✖ each put reads the nodes' tailnet IDs once, without their records, and a snapshot puts the list again only to a restarted probe
+✔ a probe that answers 404 is told once that it cannot learn its peers yet, and any other failure is logged each time
+✖ a put that failed is not remembered, so the next snapshot of the same probe boot puts the list again
+✔ records survive closing and reopening the file
+✔ a thread and its pylon must match
+✔ only a recorded image can become current
+✔ the image a new current one replaces becomes previous, and making it current again swaps them
+✔ a Claude message recorded before senders were reads as unknown, and only its thread tells Nexus's prompts by their prefix
+✔ an image recorded before images carried their release reads as of no known release
+✔ activity timestamps only move forward
+✔ ingest writes fold into records, and applying one twice changes nothing
+✔ an observation is stored only together with the writes derived from it
+✔ a paused pylon's sessions keep their rows and last status, and the first list after its wake replaces them
+✔ a job's result is not undone by an older report of it running
+✔ a registry from before failure messages keeps its pylons' attempts
+✔ a registry from before pylon retries opens with no retry under way, and a retry marks only a failed pylon
+✔ a registry from a newer control plane is refused
+✔ preview ports are unique on a node, survive reopening the file, and asking again changes nothing
+✔ a used-up port range fails naming the range, after allocating the services that fit
+✔ releasing one service's preview frees only its port, which the next service that asks gets
+✔ released ports go to the next pylon that asks, and readiness marks only the port a pylon holds
+✔ a published preview is ready only while its running pylon reports its service ready, or does not list it
+✔ a port the node routes is never handed out, though no row holds it
+✔ previews and allocatePreviews answer the same with the node's observation passed, and use the routes of the one passed
+✔ an observation stored from a probe older than route reporting routes no port
+✔ a registry from before session titles keeps its sessions, untitled until they are observed again
+✔ a registry from before repository kinds reads every stored repo, booted or submitted, as a clone
+✔ a registry from before session states keeps its sessions as running in their panes, and holds each state to its fields
+✔ a registry from before node-unique preview ports keeps its previews
+✔ seen and reply timestamps migrate from null and persist without activity
+✔ a reply recorded after seen in the same millisecond is unread and has a new identity
+✔ adding PR watches preserves the shared seen and reply markers from schema 8
+✔ a PR watch's save fires pull-request.linked once for each PR it has read, with the PR
+✔ asking a question twice keeps one, its thread needs a decision until it is answered, and an answer is never replaced
+✔ desired release, reports and drain survive reopening the registry
+✔ Claude turn events keep a pylon awake until it ends, independently of harness activity and seen
+✔ a lost turn end expires while heartbeats keep a long turn awake
+✔ session state is capped at sixteen, removed at end and pruned with event retention
+✔ waiting survives a day without activity, and clears on end, archive or delete
+✔ ended sessions reject late heartbeats and starts, including after registry restart
+✔ an outbox event sent again under its ID has no effect, even after another event at its stamp
+✔ distinct reports at the same stamp all apply, with or without IDs
+✔ a newer heartbeat resumes waiting with a fresh lease, while older or equal stamps do not
+✔ a repeated parked report changes nothing, and a later process's report clears a stale one
+✔ opening the registry stores the attention of a thread whose attention was never stored
+✔ opening the registry clears the parked flag a thread deleted while parked kept
+✔ a parked harness run that is retried is working since the retry, as the tracker reports it
+✔ a thread is working since the earliest start of its running harness turn and live session turns
+✔ a thread works while its harness turn or a live session turn runs, such as a Claude worker's
+✔ a turn running before turn starts were recorded has no known start
+✔ a main turn that ends while a background subagent runs stays working until the turn its finish starts ends
+✔ a background subagent that never reports its finish expires with the session's lease, without a reply
+✔ a late background subagent report after its session ended changes nothing
+✔ a main turn that ends while a background command runs stays working until the turn its finish starts ends
+✔ a background command still running at the cap, such as a dev server, ends its turn and waits, saying why
+✔ only the stalled worker's launch session restores normal reply and seen attention
+✔ a Claude worker's transcript survives reopening, keeps its newest entries, and starts over for a new session or a replaced file
+✔ a Claude worker's messages answer their resends, and its transcript and messages outlive an archive but not a delete
+✔ a Claude worker whose transcript ends on a usage limit is limited until a turn starts or a prompt follows, whichever arrives first
+✔ a read that ends on a usage limit ends the turn that ran into it, though Claude Code reported no end, and not a later turn
+✔ a Claude worker's AskUserQuestion is a question while its pylon reports the dialog waiting, though the transcript holds no call yet, and is withdrawn once a report leaves it out or the transcript holds its result
+✔ an answered ask stays answered whatever the pylon reports, and a withdrawn one is not asked again before the next report
+✔ archiving or deleting a Claude worker's thread withdraws its asks, and a report that lands after asks nothing
+✔ a write waits while another process, such as a second open of the registry, holds its write lock
+✔ a registry made when landing asked for a passkey keeps neither passkey table
+✔ a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing
+✔ the migration that adds pipeline items turns the pipeline on for project nexus once, and never back on once it is off
+✔ judgments begin at the newest event, so failures from before are never judged, and a rewound registry keeps that watermark
+✔ a pylon's failure is the thread.failed event its pylon appended, until a retry clears it
+✔ a judgment is saved only over the record as it was read, with what it does in the same transaction
+✔ a move takes a failed pylon to another node with a fresh boot, and its thread's placement and setup with it
+✔ a registry from before join tokens keeps its nodes as they were, with none joined
+✔ a join token records one node, once, before it expires
+✖ a node by its tailnet ID carries the key it joined with, and a configured node none
+✔ threads() reads each thread's session facts as thread() does, whichever facts it has
+✔ storedThreads reads only the threads' own rows, by status and by who started them
+✔ a deploy drain set to null reads back as null, as does one never set
+✔ the harness threads at start are those whose agent is a conversation, less deleted ones whose abort is recorded
+✔ a node's tallies and room count each of its pylons by what it holds, and a pylon placed elsewhere as an orphan
+✔ a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()
+ℹ tests 335
+ℹ pass 319
+ℹ fail 16
+✖ failing tests:

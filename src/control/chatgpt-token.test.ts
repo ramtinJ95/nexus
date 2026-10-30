@@ -24,7 +24,7 @@ function probes(...nodes: string[]) {
 test("every poll puts the current token to every probe, so a probe that missed one gets the next", async () => {
   const p = probes("rj-firebat", "infra-testbench");
   let current = token;
-  const handoff = chatgptTokenHandoff({ probes: p.clients, token: async () => current, log: () => {} });
+  const handoff = chatgptTokenHandoff({ probes: () => p.clients, token: async () => current, log: () => {} });
   await handoff.poll();
   current = `${token}-refreshed`;
   await handoff.poll();
@@ -34,10 +34,20 @@ test("every poll puts the current token to every probe, so a probe that missed o
   ]);
 });
 
+test("a node that joins after the handoff starts gets the token at the next poll", async () => {
+  const p = probes("rj-firebat", "infra-2");
+  const following = p.clients.slice(0, 1);
+  const handoff = chatgptTokenHandoff({ probes: () => following, token: async () => token, log: () => {} });
+  await handoff.poll();
+  following.push(p.clients[1]!);
+  await handoff.poll();
+  assert.deepEqual(p.put.map(([node]) => node), ["rj-firebat", "rj-firebat", "infra-2"]);
+});
+
 test("without a ChatGPT login the handoff puts nothing", async () => {
   const p = probes("rj-firebat");
   const logged: string[] = [];
-  await chatgptTokenHandoff({ probes: p.clients, token: async () => undefined, log: (line) => logged.push(line) }).poll();
+  await chatgptTokenHandoff({ probes: () => p.clients, token: async () => undefined, log: (line) => logged.push(line) }).poll();
   assert.deepEqual(p.put, []);
   assert.deepEqual(logged, []);
 });
@@ -46,12 +56,12 @@ test("a probe that fails is logged by node and the others still get the token, a
   const p = probes("rj-firebat", "infra-testbench");
   p.down.add("rj-firebat");
   const logged: string[] = [];
-  const handoff = chatgptTokenHandoff({ probes: p.clients, token: async () => token, log: (line) => logged.push(line) });
+  const handoff = chatgptTokenHandoff({ probes: () => p.clients, token: async () => token, log: (line) => logged.push(line) });
   await handoff.poll();
   assert.deepEqual(p.put, [["infra-testbench", "NEXUS_CHATGPT_TOKEN", token]]);
   assert.deepEqual(logged, ["handing NEXUS_CHATGPT_TOKEN to rj-firebat failed: rj-firebat: connect ECONNREFUSED 100.64.0.2:7480"]);
 
-  await chatgptTokenHandoff({ probes: p.clients, token: () => Promise.reject(new Error("OAuth refresh failed for openai")), log: (line) => logged.push(line) }).poll();
+  await chatgptTokenHandoff({ probes: () => p.clients, token: () => Promise.reject(new Error("OAuth refresh failed for openai")), log: (line) => logged.push(line) }).poll();
   assert.equal(logged.at(-1), "the harness's ChatGPT token could not be read: OAuth refresh failed for openai");
   assert.ok(logged.every((line) => !line.includes(token)));
 });
@@ -60,7 +70,7 @@ test("a poll while one runs joins it instead of reading the token twice", async 
   const p = probes("rj-firebat");
   let reads = 0;
   const gate = Promise.withResolvers<void>();
-  const handoff = chatgptTokenHandoff({ probes: p.clients, token: async () => { reads++; await gate.promise; return token; }, log: () => {} });
+  const handoff = chatgptTokenHandoff({ probes: () => p.clients, token: async () => { reads++; await gate.promise; return token; }, log: () => {} });
   const first = handoff.poll();
   const second = handoff.poll();
   gate.resolve();
@@ -71,7 +81,7 @@ test("a poll while one runs joins it instead of reading the token twice", async 
 
 test("a probe that takes the token and has not got it, as one that just started, gets it at once", async () => {
   const p = probes("rj-firebat", "infra-testbench");
-  const handoff = chatgptTokenHandoff({ probes: p.clients, token: async () => token, log: () => {} });
+  const handoff = chatgptTokenHandoff({ probes: () => p.clients, token: async () => token, log: () => {} });
   const seen = (node: string, holds: readonly string[], takes: readonly string[] = []) => ({ node: node as NodeName, grants: { secrets: holds, gitSsh: false }, heldSecrets: takes });
   handoff.observed(seen("rj-firebat", ["GH_TOKEN", "NEXUS_CHATGPT_TOKEN"], ["NEXUS_CHATGPT_TOKEN"]));
   handoff.observed(seen("rj-firebat", [], []));
@@ -90,7 +100,7 @@ test("a probe that shows up without the token while a poll runs gets it from one
   const slow = Promise.withResolvers<void>();
   const putting = Promise.withResolvers<void>();
   const clients = p.clients.map((c) => c.node === "infra-testbench" ? { ...c, putSecret: async (name: string, value: string) => { putting.resolve(); await slow.promise; return c.putSecret(name, value); } } : c);
-  const handoff = chatgptTokenHandoff({ probes: clients, token: async () => token, log: () => {} });
+  const handoff = chatgptTokenHandoff({ probes: () => clients, token: async () => token, log: () => {} });
   const first = handoff.poll();
   await putting.promise;
   p.down.delete("rj-firebat");
@@ -121,7 +131,7 @@ const missing = { grants: { secrets: [], gitSsh: false }, heldSecrets: ["NEXUS_C
 test("probes that show up without the token during one poll cause one more poll, not one each", async () => {
   const p = probes("rj-firebat");
   const reads = heldReads();
-  const handoff = chatgptTokenHandoff({ probes: p.clients, token: () => reads.token(), log: () => {} });
+  const handoff = chatgptTokenHandoff({ probes: () => p.clients, token: () => reads.token(), log: () => {} });
   void handoff.poll();
   await reads.began(0);
   handoff.observed(missing);
@@ -135,7 +145,7 @@ test("probes that show up without the token during one poll cause one more poll,
 test("a poll while one more poll is due resolves only after that one", async () => {
   const p = probes("rj-firebat");
   const reads = heldReads();
-  const handoff = chatgptTokenHandoff({ probes: p.clients, token: () => reads.token(), log: () => {} });
+  const handoff = chatgptTokenHandoff({ probes: () => p.clients, token: () => reads.token(), log: () => {} });
   void handoff.poll();
   await reads.began(0);
   handoff.observed(missing);

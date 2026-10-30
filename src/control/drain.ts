@@ -6,7 +6,11 @@ export class DeployDraining extends Error {
 
 export const isDraining = (drain: Drain | null) => drain?.locked === true || (drain?.expiresAt ?? 0) > Date.now();
 
-/** Shared by human requests and background PR-watch submissions. */
+/**
+ * One per control plane, shared by the API's turn-starting routes, the harness methods main wraps and the queue's
+ * starts, so a deploy's drain refuses them all and `busy` counts every turn still entering.
+ */
+export type TurnGate = ReturnType<typeof turnGate>;
 export function turnGate(draining: () => boolean) {
   let entering = 0;
   return {
