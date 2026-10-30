@@ -269,7 +269,7 @@ export type ProbeEvent =
 // Synchronous guest operations. They are not reconciled and not queued behind lifecycle jobs.
 // Everything runs as `user`. pi-sandbox fixes the shell user for the life of an instance, and `user`
 // has passwordless sudo, so a root command is `["sudo", ...]`. What each kind waits for, whether it publishes a
-// snapshot and whether a caller may send it again is commandPolicies in backend.ts.
+// snapshot and whether a caller may send it again is commandPolicies in probe/run.ts.
 
 export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
@@ -529,7 +529,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
     },
-    /** Never retried here. commandPolicies in backend.ts says which kinds a caller may send again. */
+    /** Never retried here. commandPolicies in probe/run.ts says which kinds a caller may send again. */
     async command(pylonId, command) {
       const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
       const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);
