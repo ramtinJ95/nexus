@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Inbox } from "./inbox.ts";
 import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./github.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry, StoredThread, Thread, ThreadId } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
 
+/** How often the watch reads GitHub. */
+export const prWatchMs = 120_000;
 export const prWatchPrefix = "[Nexus PR watch — automated, not a message from the person]";
 export interface PrLink {
   pr: PullRequest;
@@ -24,7 +26,7 @@ export function summaryOf(body: string): string {
   return line.length > 400 ? `${line.slice(0, 399)}…` : line;
 }
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
-const active = (t: Thread | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
+const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
 /**
  * `linked` hears of each PR the watch links that is open at its first read, before the link is saved, so a failed
@@ -51,7 +53,7 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
       if (!polls.has(key)) polls.set(key, github.poll(repo, number));
       return polls.get(key)!;
     };
-    const branches = (t: Thread, repo: string) => registry.outputs(t.id).flatMap((o) =>
+    const branches = (t: Pick<Thread, "id">, repo: string) => registry.outputs(t.id).flatMap((o) =>
       // pushedAs is a remote-tracking name, not a URL. Only origin belongs to the project's repository.
       o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []).map((branch) => ({ branch, key: `${repo}:${branch}` }));
     // A queued thread starts when these threads' pull requests merge, which the watch must see even where it sends nothing.
@@ -61,7 +63,7 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
      * archive, the comment cap, a message it cannot deliver yet, a PR it last saw closed, or a PR that opened and merged
      * between two reads, which a search of open PRs never finds.
      */
-    async function settle(t: Thread) {
+    async function settle(t: StoredThread) {
       const repo = githubRepo(registry.project(t.project)?.repoUrl ?? null);
       if (repo === null) return;
       const known = (registry.prWatch(t.id)?.links ?? []).filter((l) => l.pr.repo === repo);
@@ -93,7 +95,9 @@ export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "f
       saved.error = error;
       registry.savePrWatch(id, saved);
     };
-    for (const t of registry.threads()) {
+    const watched = registry.storedThreads({ status: ["active", "idle"] });
+    const waitedOn = [...awaited].filter((id) => !watched.some((t) => t.id === id)).flatMap((id) => registry.thread(id) ?? []);
+    for (const t of [...watched, ...waitedOn]) {
       // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
       if (registry.isReviewer(t.id)) continue;
       // Before the state is read, so the watch's own save keeps what it records.

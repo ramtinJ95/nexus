@@ -3,14 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
-import { agentModelFailure, agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
+import { humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review, type ReviewDeps } from "./review.ts";
+import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
@@ -26,7 +27,8 @@ const head2 = "2".repeat(40);
 const merged = "m".repeat(40);
 const previous = "p".repeat(40);
 
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview } = {}) {
+/** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; agentState?: (registry: Registry) => ReviewDeps["agentState"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -74,14 +76,16 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let delivering = 0;
   let held: { entered: () => void; released: Promise<void> } | null = null;
   let heldPoll: { skip: number; entered: () => void; released: Promise<void> } | null = null;
+  let polls = 0;
+  let onFiles = () => {};
   const deployers = new Set(["nLAPTOP"]);
   const woken: ThreadId[] = [];
   const loop = () => reviewLoop({
     registry, harnessModel: "gpt-6-astra",
     github: {
       find: async () => [7],
-      async poll(_, n) { if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
-      files: async () => files,
+      async poll(_, n) { polls++; if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
+      files: async () => { onFiles(); return files; },
       has: async (_, __, path) => path === ".nexus/verify" && verifies,
       async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
       async merge(_, n, sha) {
@@ -96,8 +100,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       },
     },
     inbox: async (target, message) => { delivering++; if (held !== null) { held.entered(); await held.released; } if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
-    replies: async (target) => replies.get(target.id) ?? [],
-    modelFailure: async (target) => failures.get(target.id) ?? null,
+    agentState: options.agentState?.(registry) ?? (async (target, since) => ({
+      ...heard(target, registry.agent(target).kind === "claude" ? registry.claudeEntries(target.id) : null, since),
+      replies: replies.get(target.id) ?? [], failure: failures.get(target.id) ?? null,
+    })),
     checks: {
       async start() { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); return id; },
       poll: () => check,
@@ -135,7 +141,11 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   return {
     registry, builder, pr, loop, add, sent, started, merges, replies, reply, failedTurn, deployers, woken, others,
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
+    /** How many times the loop has read the PR from GitHub. */
+    get polls() { return polls; },
     set files(f: ChangedFile[]) { files = f; },
+    /** Runs while the loop reads the PR's changed files. */
+    set onFiles(hook: () => void) { onFiles = hook; },
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
     labels, labelCalls, set labelAnswer(a: (name: string) => LabelResult) { labelAnswer = a; },
     set check(c: CheckState) { check = c; },
@@ -1769,9 +1779,15 @@ test("a check thread or verify pylon a pass starts as the person cancels the rev
     const loop = f.loop();
     await loop.start(f.builder, { land: "nLAPTOP" });
     await loop.poll();
+    // A check's first step reads GitHub before it starts its thread, and so does a live check's. A pass reads a PR from
+    // GitHub once, so the live check starts in a later pass than the check.
+    if (verifies) f.check = { kind: "running" };
     f.reply(f.review().reviewer, verdict(f.review(), {}));
-    // A check's first step reads GitHub before it starts its thread, and so does a live check's, after the check's read.
-    const held = f.holdPolls(verifies ? 1 : 0);
+    if (verifies) {
+      await loop.poll();
+      f.check = { kind: "done", passed: true, output: "ok" };
+    }
+    const held = f.holdPolls(0);
     const pass = loop.poll();
     await held.entered;
     assert.equal(f.review().phase.kind, verifies ? "verifying" : "checking");
@@ -1791,8 +1807,8 @@ test("a message a pass was about to send when the person cancelled the review is
   await loop.start(f.builder, { land: null });
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
-  // The first read is before the send's attempt is saved, the second right before the send.
-  const held = f.holdPolls(1);
+  // The pass reads GitHub once, after the send's attempt is saved and right before the send.
+  const held = f.holdPolls(0);
   const pass = loop.poll();
   await held.entered;
   assert.notEqual(f.review().outbox?.attempted ?? null, null, "the findings' send is under way while the pass reads GitHub");
@@ -1942,6 +1958,15 @@ test("a builder that cannot rebase, or a conflict after the last round, goes to 
   await capped.poll();
   assert.deepEqual(shown(last.review().phase), { kind: "needs-person", label: { state: "added" }, reasons: ["The branch conflicts with main, and round 1 was the last this review allows, so a rebase could not be reviewed."] });
   assert.deepEqual(last.sent.filter((s) => s.to === last.builder), [], "the builder is not asked for a rebase no round can review");
+});
+
+test("a landing reads the PR again before the merge it authorized, so checks that fail meanwhile hold it", async (t) => {
+  const f = fixture(t);
+  let reads = 0;
+  f.onFiles = () => { if (++reads === 1) f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "failed" } }; };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "needs-person");
 });
 
 test("a merge GitHub refuses for a conflict it only now reports goes to the builder to rebase", async (t) => {
@@ -2256,7 +2281,8 @@ test("a model failure is a harness turn's last message that stopped on an error,
   const fake = fakeHarness();
   const harness = f.registry.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
-  const failure = agentModelFailure(f.registry, fake.harness);
+  const read = agentConversation(f.registry, harnessView(fake.harness));
+  const failure = async (th: Thread) => (await read(th)).failure;
   fake.transcript(harness.id).messages.push({ role: "user", content: "review it", timestamp: 1 });
   for (let i = 0; i < 4; i++) fake.transcript(harness.id).messages.push({ role: "assistant", content: [], stopReason: "error", errorMessage: "Request timed out.", timestamp: 2 + i } as never);
   fake.commit(harness.id);
@@ -2268,11 +2294,110 @@ test("a model failure is a harness turn's last message that stopped on an error,
   const claude = f.registry.thread(f.add("th-claude", true))!;
   f.registry.setClaudeWorker(claude.id, "fix it", "started", undefined, "s1");
   const [overloaded] = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").slice(3).map(parseRecord);
-  const read = (entries: ClaudeEntry[], offset: number) => f.registry.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
-  read([{ kind: "prompt", at: 1, text: "fix it", from: "person" }, ...overloaded!, { kind: "turn", at: 5, durationMs: 100 }], 1);
+  const append = (entries: ClaudeEntry[], offset: number) => f.registry.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
+  append([{ kind: "prompt", at: 1, text: "fix it", from: "person" }, ...overloaded!, { kind: "turn", at: 5, durationMs: 100 }], 1);
   assert.match((await failure(claude))!, /^API Error: 529 Overloaded\./);
-  read([{ kind: "prompt", at: 6, text: "fix it", from: "other" }, { kind: "reply", at: 7, text: "Done." }], 2);
+  append([{ kind: "prompt", at: 6, text: "fix it", from: "other" }, { kind: "reply", at: 7, text: "Done." }], 2);
   assert.equal(await failure(claude), null);
+});
+
+test("a conversation's harness watch is stopped when its projection throws", async (t) => {
+  const f = fixture(t, { claudeBuilder: false });
+  const fake = fakeHarness();
+  const harness = f.registry.thread(f.builder)!;
+  await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
+  fake.transcript(harness.id).messages.push({ role: "assistant", content: "not a list of parts", timestamp: 1 } as never);
+  fake.commit(harness.id);
+  await assert.rejects(agentReplies(f.registry, fake.harness)(harness));
+  assert.equal(fake.watching(harness.id), 0);
+});
+
+/** A fake harness behind the loop's real agent reads, whose reads of Claude transcripts `entries` counts. */
+function realReads(t: import("node:test").TestContext) {
+  const fake = fakeHarness();
+  const counted = { entries: 0 };
+  const f = fixture(t, { agentState: (registry) => agentState({ ...registry, claudeEntries: (...args) => { counted.entries++; return registry.claudeEntries(...args); } }, fake.harness) });
+  /** A harness thread's turn that ended with `text`. */
+  const say = (id: ThreadId, text: string) => {
+    fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 1 } as never);
+    fake.commit(id);
+    f.reply(id, text);
+  };
+  return { f, fake, counted, say };
+}
+
+test("a step reads a waiting Claude builder's transcript once", async (t) => {
+  const { f, fake, counted, say } = realReads(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await fake.harness.startThread({ threadId: f.review().reviewer, pylonId: `pylon-${f.review().reviewer}` as PylonId });
+  await loop.poll();
+  say(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]) }, { kind: "turn", at: f.now, durationMs: 1_000 }], []);
+  f.tick(1_000);
+  counted.entries = 0;
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the loop waits for the push the builder says it made");
+  assert.equal(counted.entries, 1);
+});
+
+test("a harness reviewer that ended no turn since the request is not read", async (t) => {
+  const { f, fake, say } = realReads(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  const reviewer = f.review().reviewer;
+  await fake.harness.startThread({ threadId: reviewer, pylonId: `pylon-${reviewer}` as PylonId });
+  for (let i = 0; i < 3; i++) {
+    await loop.poll();
+    f.tick(15_000);
+  }
+  const watches = () => fake.calls.filter(([kind, id]) => kind === "watch" && id === reviewer).length;
+  assert.equal(watches(), 0);
+  say(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(watches(), 1, "the turn that ended is read");
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+test("a message a step queued after it read the PR is stamped and sent with no other read in that pass", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  const before = f.polls;
+  await loop.poll();
+  assert.equal(f.sent.at(-1)!.to, f.review().reviewer, "the next round went to the reviewer");
+  assert.equal(f.review().outbox, null);
+  assert.equal(f.polls - before, 1);
+});
+
+test("a held review whose PR watch hit its comment cap reads the PR once per PR watch interval", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  const before = f.polls;
+  for (let i = 0; i < 7; i++) {
+    await loop.poll();
+    f.tick(15_000);
+  }
+  assert.equal(f.polls - before, 1, "seven passes within two minutes read GitHub once");
+  f.tick(15_000);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  await loop.poll();
+  assert.equal(f.polls - before, 2);
+  assert.deepEqual(f.review().phase, { kind: "closed" });
 });
 
 /** A push of `head` to the PR's branch, as GitHub and then the PR watch's next read see it. */

@@ -768,3 +768,16 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   assert.deepEqual(f.registry.prWatch(builder)?.links.map((l) => [l.pr.number, l.pr.state]), [[181, "merged"]]);
   assert.deepEqual(starts, ["th-after"], "the queued thread starts once the builder's own PR merges");
 });
+
+test("a pass reads no archived or deleted thread that no queued thread waits for", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const archived = f.add("th-archived");
+  const deleted = f.add("th-deleted");
+  f.registry.setThreadStatus(archived, "archived");
+  f.registry.setThreadStatus(deleted, "deleted");
+  const asked: ThreadId[] = [];
+  const registry = { ...f.registry, isReviewer: (id: ThreadId) => { asked.push(id); return f.registry.isReviewer(id); } };
+  await prWatcher({ ...f.options, registry }).poll();
+  assert.deepEqual(asked, [f.id]);
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+});

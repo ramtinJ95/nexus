@@ -62,7 +62,8 @@ interface World {
 }
 
 /** The control plane's registry and harness on files in `dir`, with the judgment pass over them, as main.ts wires them. */
-async function open(t: TestContext, dir: string, options: { held?: () => Promise<void> | null; clock?: () => number } = {}): Promise<World> {
+/** `pass` is the registry the judgment pass reads through. */
+async function open(t: TestContext, dir: string, options: { held?: () => Promise<void> | null; clock?: () => number; pass?: (registry: Registry) => Registry } = {}): Promise<World> {
   const registry = openRegistry(join(dir, "registry.db"));
   if (registry.nodes().length === 0) seed(registry);
   const seen: ScriptedRequest[] = [];
@@ -75,7 +76,7 @@ async function open(t: TestContext, dir: string, options: { held?: () => Promise
   const wakes: NodeName[] = [];
   const logs: string[] = [];
   const probes = new Map([nodeA, nodeB].map((node) => [node, { health: async () => health(node) }]));
-  const judge = judgmentPass({ registry, harness: host, probes, wake: (node) => wakes.push(node), log: (m) => logs.push(m), ...(options.clock ? { now: options.clock } : {}) });
+  const judge = judgmentPass({ registry: options.pass?.(registry) ?? registry, harness: host, probes, wake: (node) => wakes.push(node), log: (m) => logs.push(m), ...(options.clock ? { now: options.clock } : {}) });
   let closed = false;
   const close = async () => {
     if (closed) return;
@@ -403,4 +404,20 @@ test("an answer to a judgment whose failure Nexus can no longer tell from a late
   const j = only(w.registry, id);
   assert.deepEqual(j.phase.kind === "done" && j.phase.outcome, { kind: "left", why: "the event of this failure is gone from the registry's event log, so Nexus cannot tell it from a later failure" });
   assert.notEqual(w.registry.pylon(`pylon-${id}` as PylonId)!.failed, null, "the later failure stays for the person");
+});
+
+test("a pass reads no archived thread, and steps a judgment of a thread archived while it waits to its end", async (t) => {
+  const read: ThreadId[] = [];
+  const w = await world(t, { held: () => new Promise(() => {}), pass: (registry) => ({ ...registry, thread: (id) => { read.push(id); return registry.thread(id); } }) });
+  const idle = builder(w.registry, "th-idle");
+  const waiting = builder(w.registry, "th-waiting");
+  fail(w.registry, waiting, brokenWith("retry"));
+  await w.until(() => w.seen.length === 1);
+  w.registry.setThreadStatus(idle, "archived");
+  w.registry.setThreadStatus(waiting, "archived");
+  read.length = 0;
+  await w.until(() => phaseOf(w, waiting) === "done");
+  assert.deepEqual(only(w.registry, waiting).phase, { kind: "done", verdict: { answer: "person", why: "the thread was archived before the judgment answered", by: "control plane" }, outcome: { kind: "left", why: "the thread is archived" } });
+  assert.ok(read.includes(waiting));
+  assert.ok(!read.includes(idle), "an archived thread with no judgment is not read");
 });

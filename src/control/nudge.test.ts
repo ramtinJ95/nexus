@@ -577,3 +577,23 @@ test("a nudge the drain held goes to neither a running turn nor a thread the per
   await gated.poll();
   assert.deepEqual(f.nudges().map((n) => n.thread), [running], "it goes out once the turn ended");
 });
+
+test("a pass reads no archived or deleted thread, except to clear a nudge it left", async (t) => {
+  const f = fixture(t);
+  const active = await f.add("th-active");
+  const archived = await f.add("th-archived");
+  const deleted = await f.add("th-deleted");
+  const nudged = await f.add("th-nudged");
+  f.registry.saveNudge(nudged, { state: "nudged", turn: 1, count: 1 });
+  for (const id of [archived, nudged]) f.registry.setThreadStatus(id, "archived");
+  f.registry.setThreadStatus(deleted, "deleted");
+  const read: ThreadId[] = [];
+  const registry = { ...f.registry, thread: (id: ThreadId) => { read.push(id); return f.registry.thread(id); } };
+  const nudger = builderNudger({ registry, inbox: async () => "delivered", harness: f.fake.harness, watch: f.watch, log: () => {}, github: f.github });
+  await nudger.poll();
+  assert.deepEqual(read, [active, nudged]);
+  assert.equal(f.registry.nudge(nudged), null, "an archived thread's nudge is cleared, so its count starts over if it comes back");
+  read.length = 0;
+  await nudger.poll();
+  assert.deepEqual(read, [active]);
+});

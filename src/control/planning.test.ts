@@ -9,7 +9,7 @@ import { pipeline } from "./pipeline.ts";
 import { planBlocks, planning, planningPrefix, proposalItem } from "./planning.ts";
 import { threadQueue } from "./queue.ts";
 import { openRegistry, type Thread } from "./registry.ts";
-import { agentReplies } from "./review.ts";
+import { agentReplies } from "./agent-conversation.ts";
 import { threadStarter } from "./threads.ts";
 import type { NodeName, TailnetNodeId } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";

@@ -21,10 +21,8 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 import { singleFlight } from "../single-flight.ts";
-import type { HarnessHost } from "../harness/host.ts";
 import type { SecretGrant } from "../project.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
-import { errorStop } from "../claude-transcript.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
@@ -32,6 +30,8 @@ import { isDraining } from "./drain.ts";
 import { heldBy, landingHolds, legacyHoldCode, reservedNames, unwaived, waivable, type Hold, type HoldCode } from "./policy.ts";
 import { checkCaller, verifyCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
+import type { AgentState } from "./agent-conversation.ts";
+import { prWatchMs } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
 import { startedByNexus } from "./usage.ts";
@@ -196,6 +196,8 @@ export interface Review {
 }
 
 const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "cancelled"] as const;
+/** The ended phases a step does nothing more for once the review has no message left to send, which a pass skips. */
+export const settledKinds = ["landed", "merged", "closed", "cancelled"] as const satisfies readonly PhaseKind[];
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
@@ -233,10 +235,8 @@ export interface ReviewDeps {
   registry: Registry;
   github: GitHub;
   inbox: Inbox;
-  /** The agent's replies, oldest first: a Claude worker's transcript as last read, or the harness conversation. */
-  replies(t: Thread): Promise<string[]>;
-  /** The error the agent's latest turn ended on because its model failed, or null when it did not. */
-  modelFailure(t: Thread): Promise<string | null>;
+  /** What the agent did since the loop's last message to it, read once per step (agent-conversation.ts). */
+  agentState(t: Thread, since: number): Promise<AgentState>;
   checks: CheckRuns;
   /** The live check's runs, in verify pylons. */
   live: CheckRuns;
@@ -430,43 +430,6 @@ ${missing ?? `Your last reply had no ${block} block with the token "${token}", s
 }
 
 /** The reviewer's kind and model: another model family than the builder's where one can run. */
-/** An agent's replies, oldest first: a Claude worker's transcript as last read, or its harness conversation's answers. */
-export function agentReplies(registry: Registry, harness: Pick<HarnessHost, "watch">): (t: Thread) => Promise<string[]> {
-  return async (t) => {
-    switch (registry.agent(t).kind) {
-      case "claude": return registry.claudeEntries(t.id).flatMap((e) => e.kind === "reply" ? [e.text] : []);
-      case "none": throw new Error(`thread ${t.id} has no agent, so it has no replies`);
-      case "harness": {
-        const watch = await harness.watch(t.id);
-        try {
-          return watch.value.entries.flatMap((entry) => entry.model ?? []).flatMap((m) => m.role === "assistant" ? [m.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("")] : []);
-        } finally {
-          await watch.stop();
-        }
-      }
-    }
-  };
-}
-
-/** The error an agent's latest turn ended on because its model failed: a Claude worker's API error, or a harness model call's. */
-export function agentModelFailure(registry: Registry, harness: Pick<HarnessHost, "watch">): (t: Thread) => Promise<string | null> {
-  return async (t) => {
-    switch (registry.agent(t).kind) {
-      case "claude": return errorStop(registry.claudeEntries(t.id))?.text ?? null;
-      case "none": throw new Error(`thread ${t.id} has no agent, so it has no model`);
-      case "harness": {
-        const watch = await harness.watch(t.id);
-        try {
-          const last = watch.value.entries.flatMap((entry) => entry.model ?? []).findLast((m) => m.role === "assistant");
-          return last?.stopReason === "error" ? last.errorMessage ?? "no reason given" : null;
-        } finally {
-          await watch.stop();
-        }
-      }
-    }
-  };
-}
-
 export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } {
   if (builder.claude) return { claude: false, model: harnessModel };
   // A Claude worker logs in from a granted token. Interactive /login needs a person, so it cannot serve a reviewer.
@@ -475,29 +438,22 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
 }
 
 export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
-  const { registry, github, inbox, replies, modelFailure, checks, live, release, log } = deps;
+  const { registry, github, inbox, agentState, checks, live, release, log } = deps;
   const now = deps.now ?? Date.now;
   const passes = singleFlight(pass);
   const poll = passes.join;
 
-  /**
-   * When the newest turn of `t` that ended after `since` ended, or null when none has, whether a newer turn runs, and
-   * whether a Claude worker replied since. A Claude turn that ends with a background shell or subagent running reports
-   * heartbeats rather than its end, for up to hours, and stays `working`, so a Claude worker's turn also ends where its
-   * transcript says, and a newer one runs once a prompt or a finished task follows that end there.
-   */
-  const heard = (t: Thread, since: number) => {
-    const claude = registry.agent(t).kind === "claude";
-    const entries = claude ? registry.claudeEntries(t.id) : [];
-    const ended = Math.max(t.lastReplyAt ?? -Infinity, ...entries.flatMap((e) => e.kind === "turn" ? [e.at] : []));
-    const running = t.working && (!claude || entries.some((e) => (e.kind === "prompt" || e.kind === "task") && e.at > ended));
-    return { ended: ended > since ? ended : null, running, replied: entries.some((e) => e.kind === "reply" && e.at > since) };
+  /** Whether the agent replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
+  const answeredSince = (state: AgentState) => state.ended !== null || state.replied;
+  /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
+  let reads = new Map<string, Promise<PrSnapshot>>();
+  const prKey = (r: Pick<Review, "pr">) => `${r.pr.repo}:${r.pr.number}`;
+  const read = (r: Pick<Review, "pr">) => {
+    if (!reads.has(prKey(r))) reads.set(prKey(r), github.poll(r.pr.repo, r.pr.number));
+    return reads.get(prKey(r))!;
   };
-  /** Whether `t` replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
-  const answeredSince = (r: Review, t: Thread) => {
-    const { ended, replied } = heard(t, r.since);
-    return ended !== null || replied;
-  };
+  /** When the loop last read each capped held review's PR itself, in place of the PR watch. A restart reads it again. */
+  const cappedReads = new Map<string, number>();
   const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
     if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
     if (r.phase.kind === "verifying" && r.phase.thread !== null) live.discard(r.phase.thread);
@@ -515,7 +471,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
     state === "closed" || (state === "merged" && r.land === null) ? end(r, { kind: state }) : null;
   /** The PR watch reads GitHub only every two minutes, so the loop asks GitHub itself before it acts on an open PR. */
-  const endedOnGitHub = async (r: Review) => outside(r, (await github.poll(r.pr.repo, r.pr.number)).pr.state);
+  const endedOnGitHub = async (r: Review) => outside(r, (await read(r)).pr.state);
   /** The rounds ran out without an approval the checks passed, so the PR gets the label that asks for the person. */
   const ranOut = (r: Review, ...items: (Hold | string)[]): Review => end(r, { ...personPhase(...items), label: { state: "adding" } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
@@ -571,15 +527,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * turn that ended because its model failed is no reminder: the same message goes again once the failure's wait is
    * over, and after the last wait the loop asks the person.
    */
-  async function waitOn(r: Review, phase: Extract<Phase, { kind: "reviewing" | "fixing" }>, t: Thread, missing: string | null = null): Promise<Review> {
+  async function waitOn(r: Review, phase: Extract<Phase, { kind: "reviewing" | "fixing" }>, state: AgentState, missing: string | null = null): Promise<Review> {
     const who = phase.kind === "reviewing" ? "reviewer" : "builder";
     if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
     // Until the request goes again, `since` is before `retryAt`, and the turn that ended is the failure already counted,
     // whose end a Claude worker's transcript and its hook may each report at another time.
     if (phase.failing !== undefined && r.since < phase.failing.retryAt) return now() < phase.failing.retryAt ? r : resend(r, who);
-    const { ended, running } = heard(t, r.since);
+    const { ended, running, failure: failed } = state;
     if (ended === null || running || now() - ended <= replyGraceMs) return r;
-    const failed = await modelFailure(t);
     if (failed !== null) {
       const count = (phase.failing?.count ?? 0) + 1;
       if (count > retryMs.length) return toPerson(r, `The ${who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
@@ -592,8 +547,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   const steps: { [K in Exclude<PhaseKind, typeof endedKinds[number]>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
     async reviewing(r, phase, __, reviewer) {
-      const verdict = answeredSince(r, reviewer) ? latest(await replies(reviewer), "nexus-review", verdictSchema, r.expect) : null;
-      if (verdict === null) return waitOn(r, phase, reviewer);
+      const state = await agentState(reviewer, r.since);
+      const verdict = answeredSince(state) ? latest(state.replies, "nexus-review", verdictSchema, r.expect) : null;
+      if (verdict === null) return waitOn(r, phase, state);
       const next = withRound(r, { verdict });
       const round = next.rounds.at(-1)!;
       const n = roundsSpent(next);
@@ -604,23 +560,24 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async fixing(r, phase, builder) {
       const n = roundsSpent(r);
       const round = r.rounds.at(-1)!;
-      const found = answeredSince(r, builder) ? latest(await replies(builder), "nexus-review-answers", answersSchema, r.expect) : null;
-      if (found === null) return waitOn(r, phase, builder);
+      const state = await agentState(builder, r.since);
+      const found = answeredSince(state) ? latest(state.replies, "nexus-review-answers", answersSchema, r.expect) : null;
+      if (found === null) return waitOn(r, phase, state);
       // A turn after the request went again that did not fail ends the model's failures in a row, though the loop may
       // still wait for the push its answer promises. An answer from before, or from the failed turn itself, does not.
-      if (phase.failing !== undefined && r.since >= phase.failing.retryAt && heard(builder, r.since).ended !== null && await modelFailure(builder) === null) return { ...r, phase: { kind: "fixing" } };
+      if (phase.failing !== undefined && r.since >= phase.failing.retryAt && state.ended !== null && state.failure === null) return { ...r, phase: { kind: "fixing" } };
       const unanswered = findingsOf(round).filter(blocks).filter((f) => !answered(f, found.answers));
-      if (unanswered.length) return waitOn(r, phase, builder, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
+      if (unanswered.length) return waitOn(r, phase, state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
       const withAnswers = withRound(r, { answers: found.answers });
       const fixed = found.answers.some((a) => a.action === "fixed");
-      const snapshot = await github.poll(r.pr.repo, r.pr.number);
+      const snapshot = await read(r);
       if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
-        const { ended, running } = heard(builder, r.since);
-        if (ended === null || running) return waitOn(r, phase, builder);
+        const { ended, running } = state;
+        if (ended === null || running) return waitOn(r, phase, state);
         if (now() - ended < pushGraceMs) return r;
-        if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, phase, builder, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
+        if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, phase, state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a check's result, so a failed check at an unmoved head is the person's.
       if (round.check?.passed === false && snapshot.detail.head === round.head) {
@@ -690,7 +647,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
     async merging(r, phase, builder) {
       const head = r.rounds.at(-1)!.head;
-      const snapshot = await github.poll(r.pr.repo, r.pr.number);
+      // The policy is checked again with what GitHub says now, before every attempt, so the step that merges does not
+      // act on the read of the step that authorized it.
+      reads.delete(prKey(r));
+      const snapshot = await read(r);
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
       // Landings deploy one at a time, so each deploy's rollback target is a release that was healthy. One that has
       // authorized its merge holds the turn, which every other waits for.
@@ -723,9 +683,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (left.length) return toPerson(r, ...all);
         if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
+        reads.delete(prKey(r));
         if (merged.kind !== "merged") {
           // GitHub may learn of a conflict only when asked to merge.
-          if (merged.kind === "refused" && (await github.poll(r.pr.repo, r.pr.number)).pr.conflict === true) return rebase(r, snapshot.detail.base);
+          if (merged.kind === "refused" && (await read(r)).pr.conflict === true) return rebase(r, snapshot.detail.base);
           return toPerson(r, merged.kind === "denied"
             ? `The control plane's GitHub token cannot merge (${merged.message}). Merging needs a token with write access to ${r.pr.repo}'s contents and pull requests, which only the person can grant.`
             : `GitHub refused the merge: ${merged.message}`);
@@ -805,14 +766,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
     if (held || r.phase.kind === "approved") {
       const watch = registry.prWatch(r.builder);
-      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review. One
-      // that stopped at approval is left to the landing, which reads GitHub before it merges.
+      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review, as
+      // often as the watch would. One that stopped at approval is left to the landing, which reads GitHub before it merges.
       const capped = (watch?.commentWakes ?? 0) >= 10;
-      const read = capped && held ? await github.poll(r.pr.repo, r.pr.number) : null;
-      const pr = read !== null ? { ...read.pr, head: read.detail.head } : capped ? undefined : watchedPr(r);
+      const due = capped && held && now() - (cappedReads.get(r.id) ?? -Infinity) >= prWatchMs;
+      const fresh = due ? await read(r) : null;
+      if (due) cappedReads.set(r.id, now());
+      const pr = fresh !== null ? { ...fresh.pr, head: fresh.detail.head } : capped ? undefined : watchedPr(r);
       if (held && pr?.state === "closed") return end(r, { kind: "closed" });
       // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
-      const moved = pushedHead(r, pr) === null ? null : pushedAfter(r, read ?? await github.poll(r.pr.repo, r.pr.number));
+      const moved = pushedHead(r, pr) === null ? null : pushedAfter(r, fresh ?? await read(r));
       if (moved !== null) return moved;
     }
     // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.
@@ -839,9 +802,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
     if (r.outbox !== null) {
+      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
       const gone = live ? await endedOnGitHub(r) : null;
       if (gone !== null) return gone;
-      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
       // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
       if (!registry.isCurrentReview(r)) return r;
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
@@ -863,14 +826,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
 
   async function pass() {
-    const reviews = registry.reviews();
+    reads = new Map();
+    const reviews = registry.reviewsToStep(settledKinds);
     // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
     // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.
     const held = new Set(reviews.flatMap((r) => (r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread !== null ? [r.phase.thread] : []));
-    for (const t of registry.threads()) {
-      if (t.startedBy === checkCaller && t.status !== "deleted" && !held.has(t.id)) checks.discard(t.id);
-      if (t.startedBy === verifyCaller && t.status === "active" && t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
-    }
+    for (const t of registry.storedThreads({ status: ["active", "idle", "archived"], startedBy: checkCaller })) if (!held.has(t.id)) checks.discard(t.id);
+    for (const t of registry.storedThreads({ status: ["active"], startedBy: verifyCaller })) if (t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
     for (const stored of reviews) {
       let r = stored;
       try {
