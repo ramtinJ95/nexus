@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
-import type { NodeName, ProbeClient, TailnetNodeId } from "../protocol.ts";
+import { ProbeHttpError, type NodeName, type ProbeClient, type TailnetNodeId } from "../protocol.ts";
 import { tokenDigest } from "../deploy/model.ts";
 import { joinControlPlane } from "../deploy/setup.ts";
 import { call as callJson, until } from "../test-kit.ts";
@@ -121,7 +121,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
     return {
       node: node.name, submit: unused, job: unused, command: unused, stream: unused, manifest: unused, putSecret: unused, health: unused,
       async putPeers(list) {
-        if (unaware.has(node.name)) throw new Error(`${node.name}: PUT /v1/peers: HTTP 404: no route /v1/peers`);
+        if (unaware.has(node.name)) throw new ProbeHttpError(`${node.name}: PUT /v1/peers: HTTP 404: no route /v1/peers`, 404);
         peers.set(node.name, list);
       },
       async *observe(signal) {
