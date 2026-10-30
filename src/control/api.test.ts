@@ -2462,6 +2462,15 @@ test("project edits validate before saving, flag older grants, and leave checkpo
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { secrets: [] })).status, 403);
 });
 
+test("a thread started with HTTPS dotfiles shows its grants current until its project's hosts change", async (t) => {
+  const s = await withThread(t, { dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" } });
+  assert.ok(s.registry.pylon(s.thread.pylonId)!.boot.network.allowedHosts.includes("github.com"), "the dotfiles host is in the boot's allowlist");
+  const outdated = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body.pylon.grantsOutdated;
+  assert.equal(await outdated(), false);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { allowedHosts: [...project.allowedHosts, "another.example.com"] })).status, 200);
+  assert.equal(await outdated(), true);
+});
+
 test("pylon boot inherits the person's identity and a project can override or clear it", async (t) => {
   const gitIdentity = { name: "Example Person", email: "person@example.com" };
   const s = await withThread(t, { gitIdentity });

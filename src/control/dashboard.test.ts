@@ -2347,6 +2347,20 @@ test("a harness tool result's image part and a written image file show as linked
   ]);
 });
 
+test("the harness image link a thread page renders serves the image", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString("base64");
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push({ role: "toolResult", toolCallId: "c1", toolName: "screenshot", content: [{ type: "text", text: "taken" }, { type: "image", data: png, mimeType: "image/png" }], isError: false, timestamp: 0 });
+  s.fake.commit(fix.id);
+  const [shot] = shotsOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.equal(shot?.query.source, "harness");
+  const served = await s.call("GET", `${shot!.route}?${new URLSearchParams(shot!.query)}`);
+  assert.equal(served.status, 200, served.text);
+  assert.equal(served.headers["content-type"], "image/png");
+});
+
 test("image paths in prose are the checkout's, each once, at most six", () => {
   assert.deepEqual(imagePaths("Saved `shots/home.png`, see ![home](./docs/a.JPG) and /home/user/workspace/repo/out/b.webp. Again: shots/home.png"),
     ["shots/home.png", "docs/a.JPG", "out/b.webp"]);
