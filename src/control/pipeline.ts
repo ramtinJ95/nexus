@@ -19,9 +19,6 @@ import type { Registry, ThreadId } from "./registry.ts";
 import { checkStart, startKey, type StartRequest } from "./threads.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 
-// Temporary: ItemId moved to pipeline-store.ts, and E1 deletes this re-export.
-export type { ItemId };
-
 export const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
 
 export const phaseKinds = ["planned", "queued", "building", "reviewing", "landing", "landed", "held", "archived", "cancelled"] as const;
