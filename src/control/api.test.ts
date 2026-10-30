@@ -19,7 +19,8 @@ import { fileURLToPath } from "node:url";
 import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
-import { startApi } from "./api.ts";
+import { featureRoutes, startApi, type ApiOptions } from "./api.ts";
+import type { ApiKit } from "./api/kit.ts";
 import { maxStreams } from "./api/sse.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import { version } from "../version.ts";
@@ -4224,4 +4225,81 @@ test("only a deployer reads a node's health, which the node's probe answers, and
   assert.equal(reads, 1, "a refused caller reaches no probe");
   const off = await setup(t);
   assert.equal((await off.call("GET", `/v1/nodes/${node}/health`)).status, 403, "with no deployers configured, nobody reads it");
+});
+
+test("the route table holds the routes it always has, and each path matches one route of its method, so their order is free", () => {
+  const table = featureRoutes({} as ApiKit, {} as ApiOptions, async () => { throw new Error("unused"); });
+  const described = table.map((entry) => {
+    if (entry[0] === "GET") return `GET ${entry[1].source}`;
+    const policy = entry[2];
+    const declared = "person" in policy ? `person: ${policy.person}` : `open: ${policy.open}`;
+    return `${entry[0]} ${entry[1].source} ${declared}${policy.startsTurn ? ", startsTurn" : ""}`;
+  });
+  assert.deepEqual(described.sort(), [
+    "DELETE ^\\/v1\\/threads\\/([^/]+)$ person: delete a thread",
+    "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ person: unpublish a preview",
+    "DELETE ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)$ person: close a session in a thread's pylon",
+    "DELETE ^\\/v1\\/usage\\/backfill$ open: deployers only, which steerUsageBackfill checks",
+    "GET ^\\/threads\\/([^/]+)\\/stream$",
+    "GET ^\\/v1\\/deployer\\/release$",
+    "GET ^\\/v1\\/events$",
+    "GET ^\\/v1\\/images$",
+    "GET ^\\/v1\\/images\\/current$",
+    "GET ^\\/v1\\/items$",
+    "GET ^\\/v1\\/items\\/([^/]+)$",
+    "GET ^\\/v1\\/nodes$",
+    "GET ^\\/v1\\/nodes\\/([^/]+)\\/health$",
+    "GET ^\\/v1\\/projects$",
+    "GET ^\\/v1\\/queued$",
+    "GET ^\\/v1\\/queued\\/([^/]+)$",
+    "GET ^\\/v1\\/release$",
+    "GET ^\\/v1\\/threads$",
+    "GET ^\\/v1\\/threads\\/([^/]+)$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/changes$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/claude\\/events$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/conversation$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/diff$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/events$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/files$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/files\\/content$",
+    "GET ^\\/v1\\/threads\\/([^/]+)\\/image$",
+    "GET ^\\/v1\\/usage$",
+    "GET ^\\/v1\\/usage\\/backfill$",
+    "PATCH ^\\/v1\\/projects\\/([^/]+)$ person: edit a project",
+    "POST ^\\/v1\\/deployer\\/drain$ open: admit lets only a reporter reach a deployer route, and the route only the control node",
+    "POST ^\\/v1\\/deployer\\/report$ open: admit lets only a reporter reach a deployer route",
+    "POST ^\\/v1\\/images$ open: recording an image boots nothing until a deployer rolls it out",
+    "POST ^\\/v1\\/images\\/build$ open: deployers only, which imageRollout checks",
+    "POST ^\\/v1\\/images\\/rollback$ open: deployers only, which imageRollout checks",
+    "POST ^\\/v1\\/images\\/rollout$ open: deployers only, which imageRollout checks",
+    "POST ^\\/v1\\/items$ person: add an item",
+    "POST ^\\/v1\\/items\\/([^/]+)\\/approve$ person: approve an item",
+    "POST ^\\/v1\\/items\\/([^/]+)\\/cancel$ person: cancel an item",
+    "POST ^\\/v1\\/projects$ open: adding a project changes no thread, pylon or project there is",
+    "POST ^\\/v1\\/questions\\/([^/]+)\\/answer$ open: each question says who may answer it, which refusalOf checks",
+    "POST ^\\/v1\\/threads$ person: start a thread, startsTurn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/(seen|unseen)$ open: what the person has read changes no thread or pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/abort$ person: abort a thread's turn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/activity$ open: a page open on the thread only keeps its pylon awake",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/archive$ person: archive a thread",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/land$ open: deployers only, which mayLand checks",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/messages$ person: message a thread, startsTurn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/previews$ person: publish a preview",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/pylon\\/retry$ person: retry a thread's pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/retry$ person: retry a thread's turn, startsTurn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/review$ person: start a review",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/review\\/cancel$ person: cancel a review",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/sessions$ person: open a session in a thread's pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)\\/focus$ person: focus a session in a thread's pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/start$ person: start a queued thread, startsTurn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/unarchive$ person: unarchive a thread",
+    "POST ^\\/v1\\/usage\\/backfill$ open: deployers only, which steerUsageBackfill checks",
+    "PUT ^\\/v1\\/release$ open: deployers only, which the route checks with its own refusal",
+  ]);
+  const routes = [["GET", /^\/v1\/health$/] as const, ...table];
+  for (const [method, regex] of routes) {
+    const path = regex.source.slice(1, -1).replaceAll("\\/", "/").replaceAll("(seen|unseen)", "seen").replaceAll("([^/]+)", "x");
+    const matching = routes.filter((other) => other[0] === method && other[1].test(path));
+    assert.equal(matching.length, 1, `${method} ${path} matches ${matching.length} routes of its method`);
+  }
 });
