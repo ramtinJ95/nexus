@@ -3,14 +3,15 @@ import type { NodeName, PylonId } from "../ids.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
-import type { NodeRecord, Placement, Registry, Room, StoredPylon, Weighed } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { NodeRecord } from "./node-store.ts";
+import type { Placement, Room, StoredPylon, Weighed } from "./thread-store.ts";
 
-// Temporary: Placement, Room and Weighed moved to registry.ts, and E1 deletes this re-export.
-export type { Placement, Room, Weighed } from "./registry.ts";
+type PlacementRegistry = Pick<Registry, "nodes" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved">;
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
-export function placeAuto(registry: Registry, need: Need): Placement {
+export function placeAuto(registry: PlacementRegistry, need: Need): Placement {
   const { best, weighed } = weighNodes(registry, need);
   if (best === null) throw new HttpError(409, `no node can run this pylon: ${refusals(weighed)}`);
   return { how: "auto", node: best, weighed };
@@ -20,14 +21,14 @@ export function placeAuto(registry: Registry, need: Need): Placement {
  * On `near` while it can run the pylon, as the review loop starts a builder's reviewer and checks beside it. Otherwise on
  * the node with the most room left, and on `near` all the same when no node has room, so a review never waits for one.
  */
-export function placeNear(registry: Registry, need: Need, near: NodeName): Placement {
+export function placeNear(registry: PlacementRegistry, need: Need, near: NodeName): Placement {
   const { best, weighed } = weighNodes(registry, need);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
 
 /** Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run it. */
-export function weighNodes(registry: Registry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
+export function weighNodes(registry: PlacementRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
   const weighed = registry.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
   const fits = weighed.flatMap((w) => "left" in w ? [w] : [])
     .sort((a, b) => b.left.memoryGiB - a.left.memoryGiB || b.left.cpus - a.left.cpus || b.left.diskGiB - a.left.diskGiB);
@@ -36,7 +37,7 @@ export function weighNodes(registry: Registry, need: Need, except?: NodeName): {
 
 export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
 
-function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
+function weigh(registry: PlacementRegistry, node: NodeRecord, need: Need): Weighed {
   const refused = (why: string): Weighed => ({ node: node.name, refused: why });
   const o = node.observation;
   if (node.state !== "online" || o === null) return refused("is offline");
@@ -62,7 +63,7 @@ function weigh(registry: Registry, node: NodeRecord, need: Need): Weighed {
  * The room the node has left once a pylon that holds `need` more boots there: what its observation does not count as
  * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`).
  */
-export function roomLeft(registry: Registry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
+export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
   const now = Date.now();
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
   const pending = [...registry.pylonsWithThreadsOn(node)
@@ -107,7 +108,7 @@ export interface Tally { pylons: number; cpus: number; memoryGiB: number }
  */
 export interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[] }
 
-export function nodePylons(registry: Registry, node: NodeRecord): NodePylons | null {
+export function nodePylons(registry: PlacementRegistry, node: NodeRecord): NodePylons | null {
   if (node.observation === null) return null;
   const zero = (): Tally => ({ pylons: 0, cpus: 0, memoryGiB: 0 });
   const tallies = { up: zero(), paused: zero(), archived: zero(), crashed: zero() };

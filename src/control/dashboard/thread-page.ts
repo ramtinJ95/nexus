@@ -4,9 +4,11 @@
  */
 import { desiredPhase } from "../../reconcile.ts";
 import { linkedPort } from "../../services-file.ts";
-import { harnessNamed, type SessionHarness } from "../../sessions.ts";
+import { harnessNamed, type SessionHarness } from "../../session-harness.ts";
 import type { ThreadDetail } from "../wire.ts";
-import type { NodeRecord, Preview, Thread, ThreadAgent, ThreadId } from "../registry.ts";
+import type { NodeRecord } from "../node-store.ts";
+import type { Preview, Thread, ThreadAgent } from "../thread-store.ts";
+import type { ThreadId } from "../../ids.ts";
 import { promptSenders } from "../inbox.ts";
 import type { AgentView } from "../conversation-view.ts";
 import { liveNote, phaseNote, roundNote, roundsSpent } from "../review-model.ts";

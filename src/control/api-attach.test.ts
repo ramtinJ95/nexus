@@ -5,7 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { PassThrough } from "node:stream";
 import { maxStreams } from "./api/sse.ts";
 import type { AttachTiming } from "./attach.ts";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { processStream } from "../process-stream.ts";
 import { attachScript } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";

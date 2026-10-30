@@ -7,12 +7,15 @@
 import { createHash } from "node:crypto";
 import { senderPrefixes, type Sender } from "../agent-protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./observed.ts";
-import type { ClaudeSent, Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { ClaudeSent, Thread } from "./thread-store.ts";
+
+type InboxRegistry = Pick<Registry, "agent" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "setClaudeMessage">;
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
 export interface AutomatedMessage { id: string; text: string; sender: Sender }
@@ -35,7 +38,7 @@ export type ClaudeTyped =
  * only a pylon found not running, which typed nothing, forgets it. A fenced ID is asked after, never typed: its first
  * answer may only have been lost, as when the wait for it ran out while the probe still had it queued.
  */
-export function typeIntoClaude(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>, sender: Sender | "person" = "person"): Promise<ClaudeTyped> {
+export function typeIntoClaude(registry: InboxRegistry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>, sender: Sender | "person" = "person"): Promise<ClaudeTyped> {
   const held = attempts.get(registry) ?? new Map<string, Promise<unknown>>();
   attempts.set(registry, held);
   const key = `${thread} ${requestId}`;
@@ -50,9 +53,9 @@ export function typeIntoClaude(registry: Registry, thread: ThreadId, session: st
  * One send per thread and request ID at a time. A resend asked while its first send waits on the probe would get the
  * same answer, and if that typed nothing, whichever came later would clear the fence a newer send had set meanwhile.
  */
-const attempts = new WeakMap<Registry, Map<string, Promise<unknown>>>();
+const attempts = new WeakMap<InboxRegistry, Map<string, Promise<unknown>>>();
 
-async function typeOnce(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>, sender: Sender | "person"): Promise<ClaudeTyped> {
+async function typeOnce(registry: InboxRegistry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>, sender: Sender | "person"): Promise<ClaudeTyped> {
   const stored = registry.claudeMessage(thread, requestId);
   if (stored?.state === "sent") return { kind: "sent", sent: stored.result };
   let result: Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">;
@@ -96,7 +99,7 @@ export type PromptSenders = (text: string) => Sender | null;
  * thread. A thread with sends recorded before the record kept senders may show a prompt Nexus typed then, which only
  * its prefix tells apart.
  */
-export function promptSenders(registry: Registry, thread: ThreadId): PromptSenders {
+export function promptSenders(registry: InboxRegistry, thread: ThreadId): PromptSenders {
   const typed = new Map<string, Sender | "person">();
   let before = false;
   for (const { sender, sha256 } of registry.claudeMessageSenders(thread)) {
@@ -119,7 +122,7 @@ export function typeable(text: string): string {
   return text.toWellFormed().replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "").trim();
 }
 
-export function agentInbox(options: { registry: Registry; harness: Pick<HarnessHost, "send">; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>; wake(t: Thread): void }): Inbox {
+export function agentInbox(options: { registry: InboxRegistry; harness: Pick<HarnessHost, "send">; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>; wake(t: Thread): void }): Inbox {
   const { registry, harness, probes, wake } = options;
   return async (t, message) => {
     const agent = registry.agent(t);

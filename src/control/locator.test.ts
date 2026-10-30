@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { registryLocator } from "./locator.ts";
-import type { ThreadId } from "./registry.ts";
 import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
-import type { NodeName, PylonId } from "../ids.ts";
+import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { probePort } from "../protocol/routes.ts";
 import { runningPylon, tempDir, testCapacity } from "../test-kit.ts";
 

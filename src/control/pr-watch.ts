@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { Inbox } from "./inbox.ts";
 import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./github.ts";
-import type { Registry, StoredThread, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { StoredThread, Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 import type { PrWatchState } from "./pr-watch-store.ts";
 import { singleFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "../agent-protocol.ts";
 import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
+
+type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;
 
 /** A description's first paragraph past its headings, images and comments, on one line and at most 400 characters. */
 export function summaryOf(body: string): string {
@@ -25,7 +29,7 @@ const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.s
  * `linked` hears of each PR the watch links that is open at its first read, before the link is saved, so a failed
  * call is made again on the next pass.
  */
-export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox; linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined }) {
+export function prWatcher(options: { registry: PrWatchRegistry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox; linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined }) {
   const { registry, github, inbox } = options;
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);

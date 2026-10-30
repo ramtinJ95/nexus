@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { fakeGuest } from "./fake-guest.ts";
 import { gitFacts } from "./git-facts.ts";
-import { checkoutDir } from "./sessions.ts";
+import { checkoutDir } from "./session-harness.ts";
 import { tempDir } from "./test-kit.ts";
 
 const exec = promisify(execFile);

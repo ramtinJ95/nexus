@@ -2,7 +2,8 @@
 import { desiredPhase } from "../../reconcile.ts";
 import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
-import type { Registry, Thread } from "../registry.ts";
+import type { Registry } from "../registry.ts";
+import type { Thread } from "../thread-store.ts";
 import { cannotLand, type Review } from "../review-model.ts";
 import { heldBy } from "../policy.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";

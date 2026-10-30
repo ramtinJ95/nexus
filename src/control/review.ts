@@ -33,13 +33,17 @@ import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, watchStopped } from "./pr-watch-model.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, checkOutput, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
   landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, roundsSpent, settledKinds, verdictSchema,
   type Finding, type HoldCause, type Phase, type PhaseKind, type Review, type Round, type Waiver,
 } from "./review-model.ts";
-import type { StartRequest } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
+
+type ReviewRegistry = Pick<Registry, "agent" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "releaseReports" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "storedThreads" | "thread">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
@@ -54,7 +58,7 @@ const checkMs = 60 * 60_000;
 const deployMs = 30 * 60_000;
 
 export interface ReviewDeps {
-  registry: Registry;
+  registry: ReviewRegistry;
   github: GitHub;
   inbox: Inbox;
   /** What the agent did since the loop's last message to it, read once per step (agent-conversation.ts). */

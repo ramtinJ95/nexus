@@ -4,9 +4,10 @@
 import { z } from "zod";
 import { HttpError } from "../http-error.ts";
 import { canDeploy, type DeploymentOptions } from "../releases.ts";
-import { imagesView, type ImageOperation, type ImageRollout } from "../image-rollout.ts";
-import { isImageId, type NodeName, type TailnetNodeId } from "../../ids.ts";
-import { pinsSchema, type ImageId, type ImageManifest } from "../../images.ts";
+import { imagesView, type ImageRollout } from "../image-rollout.ts";
+import type { ImageOperation } from "../image-store.ts";
+import { type ImageId, isImageId, type NodeName, type TailnetNodeId } from "../../ids.ts";
+import { pinsSchema, type ImageManifest } from "../../images.ts";
 import { ok, created, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
 
 const imageSchema = z.strictObject({

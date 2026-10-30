@@ -2,7 +2,8 @@
 import type { TailnetNodeId } from "../../ids.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import type { Attention } from "../attention.ts";
-import type { Registry, Thread } from "../registry.ts";
+import type { Registry } from "../registry.ts";
+import type { Thread } from "../thread-store.ts";
 import type { Review } from "../review-model.ts";
 import type { AnswerRefusal, Question } from "../questions.ts";
 import type { QueuedThread } from "../queue.ts";

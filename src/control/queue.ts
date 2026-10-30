@@ -11,15 +11,16 @@
 import { startedByNexus } from "../agent-protocol.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs } from "../spawn.ts";
-import type { ProjectId } from "../ids.ts";
+import type { ProjectId, ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
-import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
-import { checkStart, newThreadId, resourcesOf, type StartRequest } from "./threads.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import { checkStart, newThreadId, resourcesOf } from "./threads.ts";
+import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 
-// Temporary: QueuedRecord moved to queue-store.ts, and E1 deletes this re-export.
-export type { QueuedRecord };
+type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
 /** What one predecessor means for the queued thread. */
 export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
@@ -73,7 +74,7 @@ const blocked = (thread: ThreadId, why: string): Wait => ({ thread, state: "bloc
  * A merge wins over an archive, so a predecessor archived after its pull request merged still landed. A review that
  * saw its PR merged outside it counts as the merge it is.
  */
-export function waitOf(registry: Registry, id: ThreadId): Wait {
+export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const t = registry.thread(id);
   if (t === undefined) {
     switch (registry.queuedThread(id)?.status) {
@@ -95,7 +96,7 @@ export function waitOf(registry: Registry, id: ThreadId): Wait {
   return open !== undefined ? waiting(id, `PR #${open.number} is open`) : waiting(id, "has no pull request yet");
 }
 
-export function queuedView(registry: Registry, record: QueuedRecord): QueuedThread {
+export function queuedView(registry: QueueRegistry, record: QueuedRecord): QueuedThread {
   if (record.status === "started") throw new Error(`thread ${record.id} has started, so it is no longer queued`);
   const { request } = record;
   const waits = record.after.map((id) => waitOf(registry, id));
@@ -112,7 +113,7 @@ export function queuedView(registry: Registry, record: QueuedRecord): QueuedThre
 const statusName = (status: QueuedRecord["status"]) => status === "archived" ? "cancelled" : status;
 
 export function threadQueue(options: {
-  registry: Registry;
+  registry: QueueRegistry;
   startThread: (request: StartRequest, caller: string, id?: ThreadId) => Promise<Thread>;
   /** A human message, the harness's followUp. A repeated request ID answers with the first submission. */
   send: (thread: ThreadId, text: string, requestId: string) => Promise<unknown>;

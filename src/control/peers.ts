@@ -10,7 +10,9 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { Registry } from "./registry.ts";
 
-export function peerHandoff(options: { registry: Registry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "putPeers">>; log?: (message: string) => void }) {
+type PeersRegistry = Pick<Registry, "nodeIds">;
+
+export function peerHandoff(options: { registry: PeersRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "putPeers">>; log?: (message: string) => void }) {
   const { registry, probes, log = (message: string) => console.error(message) } = options;
   const unaware = new Set<NodeName>();
   const boots = new Map<NodeName, string>();

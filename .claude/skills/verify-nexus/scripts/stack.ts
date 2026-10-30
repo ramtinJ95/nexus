@@ -30,9 +30,9 @@ import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
-import type { NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
+import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
-import type { ImageId, ImageManifest } from "../../../../src/images.ts";
+import type { ImageManifest } from "../../../../src/images.ts";
 import type { Project } from "../../../../src/control/project.ts";
 
 const exec = promisify(execFile);

@@ -17,7 +17,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { checkoutReader } from "../checkout-files.ts";
-import { checkoutDir } from "../sessions.ts";
+import { checkoutDir } from "../session-harness.ts";
 import { localApiWhois } from "../tailscale.ts";
 import type { PylonId } from "../ids.ts";
 import { jobDeadlineMs } from "../protocol/jobs.ts";

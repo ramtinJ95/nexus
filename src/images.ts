@@ -9,9 +9,6 @@ import { z } from "zod";
 import { canonicalSha256, type PylonResources } from "./spawn.ts";
 import type { ImageId, NodeName, ProjectId, TemplateId } from "./ids.ts";
 
-// Temporary: the artifact IDs moved to ids.ts, and E1 deletes this re-export.
-export type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./ids.ts";
-
 // The base image.
 
 /**

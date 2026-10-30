@@ -5,15 +5,15 @@ import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promise
 import { join } from "node:path";
 import { queryObjects } from "node:v8";
 import { claudeConversations } from "./claude-conversation.ts";
-import { openRegistry, type Registry, type Thread } from "./registry.ts";
+import { openRegistry, type Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
 import { claudeHook } from "../../images/pylon/nexus-contract.ts";
-import type { LiveHash, NodeName } from "../ids.ts";
+import type { ImageId, LiveHash, NodeName } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import type { ImageId } from "../images.ts";
 import { runningPylon, tempDir, until } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;

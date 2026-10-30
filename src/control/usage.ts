@@ -3,9 +3,8 @@
  * outlive the pylon and the thread. Each record is keyed by an ID the agent's own record gives the call, so reading a
  * transcript again, a restart, or two readers that see the same call never count it twice.
  */
-import type { ProjectId } from "../project.ts";
 import type { AgentCall, AgentKind, Tokens } from "../agent-usage.ts";
-import type { NodeName, ThreadId } from "../ids.ts";
+import type { NodeName, ProjectId, ThreadId } from "../ids.ts";
 import { HttpError } from "./http-error.ts";
 
 export interface UsageTotals extends Tokens { total: number; calls: number }

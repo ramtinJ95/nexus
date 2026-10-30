@@ -9,7 +9,7 @@ import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ThreadRow } from "./wire.ts";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { processStream } from "../process-stream.ts";
 import { stoppedPylon, testObservation, until } from "../test-kit.ts";
 import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";

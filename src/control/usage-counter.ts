@@ -9,13 +9,15 @@
 import { readAgentUsage, agentLogs, type FileCursor } from "../agent-usage.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ConversationId } from "../harness/host.ts";
-import type { NodeName, PylonId } from "../ids.ts";
+import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { EventKind } from "../events.ts";
 import { followEvents } from "./follow-events.ts";
 import { runningProbe } from "./observed.ts";
-import type { Registry, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+
+type UsageCounterRegistry = Pick<Registry, "agent" | "eventBatch" | "newestEvent" | "node" | "pylon" | "recordUsage" | "storedThreads" | "thread" | "usageCursor" | "usageCursors">;
 
 export interface UsageCounter {
   /** Reads every thread but the deleted ones now. */
@@ -39,7 +41,7 @@ const maxReadsPerPylon = 16;
 const maxWholeReads = 1_000;
 
 export function usageCounter(options: {
-  registry: Registry;
+  registry: UsageCounterRegistry;
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>;
   harness: Pick<HarnessHost, "usage">;
   sweepMs?: number;

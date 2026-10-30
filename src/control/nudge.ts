@@ -13,8 +13,12 @@ import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
 import { pushedBranches } from "./pr-watch-model.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 import type { Nudge } from "./nudge-store.ts";
+
+type NudgeRegistry = Pick<Registry, "isReviewer" | "node" | "nudge" | "nudgedThreads" | "outputs" | "planning" | "prWatch" | "project" | "pylon" | "review" | "saveNudge" | "storedThreads" | "thread">;
 
 const text = `${nudgePrefix}
 Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you are blocked or the task needs no pull request, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
@@ -22,7 +26,7 @@ Your turn ended, and Nexus finds no pull request from this thread. This project 
 const maxNudges = 2;
 
 export function builderNudger(options: {
-  registry: Registry; github: Pick<GitHub, "find">; inbox: Inbox;
+  registry: NudgeRegistry; github: Pick<GitHub, "find">; inbox: Inbox;
   /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
   personWroteTo(t: Thread): Promise<boolean>;
   watch: { passes(): { started: number; finished: number } }; log?: (message: string) => void;

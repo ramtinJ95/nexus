@@ -14,9 +14,8 @@ import assert from "node:assert/strict";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { output } from "./exec.ts";
-import type { CheckpointId } from "./images.ts";
 import type { BootInputs } from "./spawn.ts";
-import type { PylonId } from "./ids.ts";
+import type { CheckpointId, PylonId } from "./ids.ts";
 import { parseMeminfo } from "./probe/host.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 

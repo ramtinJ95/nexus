@@ -5,11 +5,11 @@ import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { planBlocks, planning, proposalItem } from "./planning.ts";
 import { planningPrefix } from "../agent-protocol.ts";
-import { openRegistry, type Thread } from "./registry.ts";
+import { openRegistry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { threadServices } from "./thread-services.ts";
-import type { NodeName, TailnetNodeId } from "../ids.ts";
-import type { ProjectId } from "../project.ts";
+import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
 import { tempDir, testImage } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;

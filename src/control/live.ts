@@ -6,7 +6,7 @@
 import { loginHosts, type Project } from "./project.ts";
 import { renderOverlay } from "./overlay.ts";
 import type { LiveSpec } from "../spawn.ts";
-import type { Preview, StoredPylon } from "./registry.ts";
+import type { Preview, StoredPylon } from "./thread-store.ts";
 
 export function pylonLive(pylon: Pick<StoredPylon, "pylonId" | "thread" | "node" | "boot">, project: Project, previews: readonly Preview[]): LiveSpec {
   return {

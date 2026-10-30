@@ -1,7 +1,8 @@
 /** What a pylon's node last reported about it, read the one way every reader of the registry asks. */
 import type { NodeName, PylonId } from "../ids.ts";
 import type { NodeObservation, PylonObservation } from "../protocol/observations.ts";
-import type { Registry, StoredPylon } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { StoredPylon } from "./thread-store.ts";
 
 export const listsRunning = (observation: NodeObservation | null, pylonId: PylonId): boolean =>
   observation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;

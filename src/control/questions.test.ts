@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
 import { askAnswer, askedIn, askRecord, choicesSchema, choicesSummary, reportedAsks, type ClaudeAsk } from "./questions.ts";
-import type { ThreadId } from "./registry.ts";
+import type { ThreadId } from "../ids.ts";
 
 const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };
 const extras = { question: "What goes in it?", header: "Extras", multiSelect: true, options: [{ label: "Milk", description: "" }, { label: "Sugar", description: "" }, { label: "Honey", description: "" }] };

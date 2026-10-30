@@ -21,15 +21,17 @@ import { linkedPort } from "../services-file.ts";
 import { liveHashOf, type GitIdentity } from "../spawn.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import { tick, type TickContext } from "../tick.ts";
-import { isImageId, type NodeName, type PylonId } from "../ids.ts";
+import { type ArtifactId, isImageId, type NodeName, type PylonId } from "../ids.ts";
 import type { NodeObservation, ProbeEvent, PylonObservation } from "../protocol/observations.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import type { ArtifactId } from "../images.ts";
 import { pylonLive } from "./live.ts";
 import { claudeLaunch } from "./claude-launch.ts";
-import type { PortRange, Registry, StoredPylon, Thread } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
+
+type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "reportSession" | "savePylon" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -39,7 +41,7 @@ import { tickTemplateBuild } from "./template-builds.ts";
 export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId>) => readonly RegistryWrite[];
 
 export interface LoopOptions {
-  registry: Registry;
+  registry: LoopRegistry;
   gitIdentity?: GitIdentity | undefined;
   /** One client per registry node. */
   probes: readonly ProbeClient[];

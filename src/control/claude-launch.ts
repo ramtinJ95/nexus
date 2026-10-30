@@ -15,7 +15,10 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { listsRunning } from "./observed.ts";
-import type { ClaudeWorker, Registry, Thread } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { ClaudeWorker, Thread } from "./thread-store.ts";
+
+type ClaudeLaunchRegistry = Pick<Registry, "appendEvent" | "claudeWorker" | "setClaudeWorker">;
 
 /** What the launch reads of the node's observe link, live: loop.ts's `Link` satisfies it. */
 export interface LaunchLink {
@@ -24,7 +27,7 @@ export interface LaunchLink {
   readonly snapshots: number;
 }
 
-export function claudeLaunch(options: { registry: Registry; log: (message: string) => void; retryMs: number; shutdown: AbortSignal }): {
+export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (message: string) => void; retryMs: number; shutdown: AbortSignal }): {
   /**
    * Moves the thread's Claude launch along before its pylon's tick. "skip" means this pass does not tick the pylon.
    * It answers at once unless it sends a launch, so a pass that sends none reaches the probe without yielding first.

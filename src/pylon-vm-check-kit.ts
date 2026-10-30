@@ -3,9 +3,8 @@
  * pylon-guest.check.ts. Each runs the backend in its own process, over an image directory in an artifact store.
  */
 import { basename, dirname } from "node:path";
-import type { ImageId } from "./images.ts";
 import type { BootInputs, LiveSpec } from "./spawn.ts";
-import type { PylonId } from "./ids.ts";
+import type { ImageId, PylonId } from "./ids.ts";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 
 /** The backend over `imageDir`'s artifact store, holding no secrets, and the ID of the image in `imageDir`. */

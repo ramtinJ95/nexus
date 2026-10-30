@@ -20,9 +20,9 @@ import { z } from "zod";
 import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../images/pylon/agent-setup/manifest.ts";
 import { artifactDirectory, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "./protocol/jobs.ts";
-import { compare, imageIdOf, pinsSchema, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
+import { compare, imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "./images.ts";
 import { shellQuote } from "./shell.ts";
-import type { NodeName } from "./ids.ts";
+import type { ImageId, NodeName } from "./ids.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));

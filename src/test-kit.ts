@@ -8,8 +8,8 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, type TestContext } from "node:test";
-import type { ImageId, ImageManifest } from "./images.ts";
-import type { NodeName, PylonId } from "./ids.ts";
+import type { ImageManifest } from "./images.ts";
+import type { ImageId, NodeName, PylonId } from "./ids.ts";
 import type { NodeCapacity, NodeObservation, PylonObservation } from "./protocol/observations.ts";
 
 /** Waits for the check. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */

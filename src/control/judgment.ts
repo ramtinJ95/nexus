@@ -19,19 +19,19 @@ import { judgmentPrefix, latest, mint, roleOf } from "../agent-protocol.ts";
 import type { ConversationId, HarnessHost } from "../harness/host.ts";
 import type { ThreadSetup } from "./templates.ts";
 import { liveHashOf } from "../spawn.ts";
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import { retryRefusal } from "../reconcile.ts";
 import { singleFlight } from "../single-flight.ts";
 import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";
-import { gib, refusals, weighNodes, type Weighed } from "./placement.ts";
-import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
+import { gib, refusals, weighNodes } from "./placement.ts";
+import type { StoredPylon, Thread, Weighed } from "./thread-store.ts";
+import type { Registry } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
-// Temporary: Judgment moved to judgment-store.ts, and E1 deletes this re-export.
-export type { Judgment };
+type JudgmentRegistry = Pick<Registry, "agent" | "askQuestion" | "failure" | "judgment" | "judgmentSince" | "judgments" | "movePylon" | "node" | "nodes" | "previews" | "project" | "pylon" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "question" | "recordActivity" | "recordUsage" | "reserved" | "retryPylon" | "saveJudgment" | "storedThreads" | "thread" | "unfinishedJudgments">;
 
 /** A judgment as `nexus show` and the thread page show it. */
 export interface JudgmentView {
@@ -166,7 +166,7 @@ End your reply with exactly one block like this, with JSON in it:
 export type JudgmentPass = ReturnType<typeof judgmentPass>;
 
 export function judgmentPass(options: {
-  registry: Registry;
+  registry: JudgmentRegistry;
   harness: Pick<HarnessHost, "startJudgment" | "sendJudgment" | "judgmentReplies" | "abortJudgment" | "usage">;
   /** For each node's health, which the brief states. */
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "health">>;

@@ -17,9 +17,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { CheckpointId } from "./images.ts";
 import type { BootInputs } from "./spawn.ts";
-import type { PylonId } from "./ids.ts";
+import type { CheckpointId, PylonId } from "./ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 
 const [imageArg, stateArg, roundsArg, readersArg] = process.argv.slice(2);

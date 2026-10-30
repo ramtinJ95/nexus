@@ -21,7 +21,11 @@ import { HttpError } from "./http-error.ts";
 import type { Pipeline } from "./pipeline.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 import type { Proposal, Question } from "./questions.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
+
+type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
 
 export const planFence = "nexus-plan";
 export const acceptOption = "accept";
@@ -93,7 +97,7 @@ The person's message follows.`;
 
 export type Planning = ReturnType<typeof planning>;
 
-export function planning(options: { registry: Registry; pipeline: Pick<Pipeline, "add"> | null; replies(t: Thread): Promise<string[]>; log?: (message: string) => void; now?: () => number }) {
+export function planning(options: { registry: PlanningRegistry; pipeline: Pick<Pipeline, "add"> | null; replies(t: Thread): Promise<string[]>; log?: (message: string) => void; now?: () => number }) {
   const { registry, replies, log = () => {} } = options;
   const now = options.now ?? Date.now;
 

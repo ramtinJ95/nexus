@@ -7,10 +7,12 @@ import type { TurnGate } from "./drain.ts";
 import { pipeline } from "./pipeline.ts";
 import { planning } from "./planning.ts";
 import { threadQueue } from "./queue.ts";
-import type { Thread } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { threadStarter } from "./threads.ts";
 
 export function threadServices(options: Parameters<typeof threadStarter>[0] & {
+  registry: Registry;
   harness: Pick<HarnessHost, "startThread" | "send">;
   gate: TurnGate;
   log?: (message: string) => void;

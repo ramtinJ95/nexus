@@ -8,7 +8,8 @@
 import type { Guest } from "./backend.ts";
 import type { PylonId } from "./ids.ts";
 import type { PausedSession } from "./protocol/observations.ts";
-import { harnesses, recordSessions, relaunchSessions, toPaused, type RelaunchOutcome } from "./sessions.ts";
+import { recordSessions, relaunchSessions, toPaused, type RelaunchOutcome } from "./sessions.ts";
+import { harnesses } from "./session-harness.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
 export type PylonLog = (line: string) => Promise<void>;

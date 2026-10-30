@@ -1,7 +1,8 @@
 /** Landing and releasing: `release`, `review`, `land`, `deploy` and the image commands. */
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../deploy/model.ts";
 import type { ImagesCurrent } from "../../control/wire.ts";
-import type { ImageEntry, ImageOperation, ImagesView } from "../../control/image-rollout.ts";
+import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
+import type { ImageOperation } from "../../control/image-store.ts";
 import type { Review } from "../../control/review-model.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, thread, int, table, pollUntil } from "../kit.ts";
