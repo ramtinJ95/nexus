@@ -15,17 +15,15 @@
  * A deleted thread's pylon that is gone, with nothing left to settle, is skipped, so passes do not grow with every
  * thread ever deleted. It is ticked again if its node lists or routes it again.
  */
-import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
 import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import { tick, type TickContext } from "../tick.ts";
-import { isImageId, type CommandResult, type NodeName, type NodeObservation, type ProbeClient, type ProbeError, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation } from "../protocol.ts";
+import { isImageId, type NodeName, type NodeObservation, type ProbeClient, type ProbeError, type ProbeEvent, type PylonId, type PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
-import { defaultClaudeModel } from "../claude-state.ts";
 import { pylonLive } from "./live.ts";
-import { listsRunning } from "./observed.ts";
+import { claudeLaunch } from "./claude-launch.ts";
 import type { PortRange, Registry, StoredPylon, Thread } from "./registry.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
@@ -86,6 +84,7 @@ export function startLoop(options: LoopOptions): Loop {
   const claudeLaunchRetryMs = options.claudeLaunchRetryMs ?? 3 * 60_000;
   const log = options.log ?? ((message: string) => console.error(message));
   const shutdown = new AbortController();
+  const launches = claudeLaunch({ registry, log, retryMs: claudeLaunchRetryMs, shutdown: shutdown.signal });
 
   const links = new Map<NodeName, Link>();
   const followers: Promise<void>[] = [];
@@ -186,64 +185,14 @@ export function startLoop(options: LoopOptions): Loop {
         save: (p) => registry.savePylon(p),
       };
       try {
-        const worker = registry.claudeWorker(thread.id);
-        const running = listsRunning(nodeObservation, pylonId);
-        // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
-        // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
-        if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
-          const message = "Claude launch was interrupted; attach to check before starting another session";
-          registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
-          registry.appendEvent("thread.failed", thread.id, { message });
-        } else if ((worker?.state === "pending" || worker?.state === "starting") && thread.status === "active" && running) {
-          // Fence the launch under its session before sending: a launch sent again must name the same session, or it could submit the task twice.
-          const session = worker.state === "starting" ? worker.session! : randomUUID();
-          registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
-          // Neither a worker its session's turn started meanwhile nor a launch a shutdown cut off has failed.
-          const unfinished = (state: "stalled" | "failed", why: string) => {
-            if (registry.claudeWorker(thread.id)?.state === "started" || shutdown.signal.aborted) return false;
-            const message = `Claude launch did not complete; attach to check before starting another session: ${why}`;
-            registry.setClaudeWorker(thread.id, worker.prompt, state, message);
-            registry.appendEvent("thread.failed", thread.id, { message });
-            return true;
-          };
-          try {
-            const { stalled } = await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
-            if (stalled === undefined) registry.setClaudeWorker(thread.id, worker.prompt, "started");
-            else unfinished("stalled", stalled);
-          } catch (err) {
-            if (!unfinished("failed", (err as Error).message)) continue;
-            throw err;
-          }
-        }
+        const launch = launches.step(thread, pylonId, nodeObservation, link);
+        if (launch !== "tick" && await launch === "skip") continue;
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
         if (pylon.desired === "deleted" && step.kind === "done") registry.releasePreviews(pylon.pylonId);
       } catch (err) {
         log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);
-      }
-    }
-  }
-
-  /**
-   * Sends a prompted Claude launch, and sends it again, under the same session ID, each time the probe connection is
-   * lost before it answers, as when a deploy restarts the probe. It waits for a snapshot from after the loss, so the
-   * probe that answers it is one that came back. Sending it again is safe, because the probe reads from the pylon how
-   * far the launch got (sessions.ts openSession).
-   */
-  async function launchClaude(node: NodeName, link: Link, pylonId: PylonId, command: Extract<PylonCommand, { kind: "open-session" }>): Promise<Extract<CommandResult, { kind: "open-session" }>> {
-    const until = Date.now() + claudeLaunchRetryMs;
-    for (;;) {
-      try {
-        return await link.probe.command(pylonId, command) as Extract<CommandResult, { kind: "open-session" }>;
-      } catch (err) {
-        if ((err as Partial<ProbeError>).code !== "unreachable") throw err;
-        const seen = link.snapshots;
-        while (!link.up || link.snapshots === seen) {
-          if (Date.now() >= until) throw new Error(`${(err as Error).message}, and the probe did not come back within ${claudeLaunchRetryMs / 1000} seconds`);
-          await delay(250, undefined, { signal: shutdown.signal });
-        }
-        log(`${pylonId}: the Claude launch lost its probe (${(err as Error).message}). Sending it again`);
       }
     }
   }
