@@ -15,10 +15,10 @@
  * at each read until the hook reports none, once it reported some. The working reads alone do not ask otherwise.
  */
 import { sessionKinds } from "../events.ts";
-import { drained, readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
+import { readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
 import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-ask.ts";
 import { followEvents } from "./follow-events.ts";
-import type { OpenPipe } from "../checkout-files.ts";
+import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import { runningProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
@@ -111,9 +111,7 @@ interface Reader {
 
 /** The asks whose dialogs wait in the pylon, as its hook reports them. */
 async function readWaitingAsks(open: OpenPipe): Promise<WaitingAsk[]> {
-  const { end, out } = await drained(await open([claudeHook, "asks"]), transcriptDeadlineMs, maxAsksBytes, "its waiting asks");
-  if (end.kind === "lost") throw new Error("the pipe to the pylon was lost before its waiting asks were read");
-  if (end.code !== 0) throw new Error(`nexus-claude-hook asks exited ${end.code}`);
+  const { out } = await pipeOutput(await open([claudeHook, "asks"]), { deadlineMs: transcriptDeadlineMs, maxBytes: maxAsksBytes, what: "its waiting asks" });
   return reportedAsks(out.toString("utf8"));
 }
 

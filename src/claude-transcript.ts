@@ -11,8 +11,8 @@
  * Claude Code version shows something rather than nothing.
  */
 import { createHash } from "node:crypto";
-import type { OpenPipe } from "./checkout-files.ts";
-import type { ByteStream, StreamEnd } from "./protocol.ts";
+import { pipeOutput, type OpenPipe } from "./pipe.ts";
+import { claudeSessionId } from "./sessions.ts";
 
 /**
  * Who a prompt came from: the person, a slash command, or something else, such as a plugin. A finished background
@@ -122,14 +122,17 @@ const maxReplyBytes = 64 + beforeBytes + maxRecordBytes;
 /** One read's result. `reset` means the file was replaced, so `entries` start from its beginning and replace any read before. */
 export interface TranscriptRead { entries: ClaudeEntry[]; cursor: TranscriptCursor; more: boolean; reset: boolean }
 
+/** Runs `body` on "$f", the session $0's transcript under whichever project in $1 holds it. Exits 3 when none does. */
+const onTranscript = (body: string) => `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; ${body}; exit 0; done; exit 3`;
+
 /**
  * Prints the transcript's size, the offset this read starts at and how many bytes before it follow, then those bytes
  * and at most $3 bytes from the offset. A file smaller than the cursor's offset, or whose $5 bytes before it do not
- * hash to $4, was replaced, so the read starts over at 0. Exits 3 when no project holds the session's transcript.
+ * hash to $4, was replaced, so the read starts over at 0.
  */
-const readScript = `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5))
+const readScript = onTranscript(`size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5))
 { [ "$size" -lt "$start" ] || [ "$(tail -c +$((start - n + 1)) "$f" | head -c $n | sha256sum)" != "$4  -" ]; } && start=0 n=0
-echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3)); exit 0; done; exit 3`;
+echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3))`);
 
 /**
  * Reads the session's transcript from `cursor` over one raw pipe and parses the complete lines it gets. Null when the
@@ -137,11 +140,10 @@ echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3)); 
  * bytes past what this read took, so the caller reads again.
  */
 export async function readTranscript(open: OpenPipe, session: string, cursor: TranscriptCursor, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<TranscriptRead | null> {
-  if (!/^[A-Za-z0-9-]{1,200}$/.test(session)) throw new Error(`${JSON.stringify(session.slice(0, 200))} is not a Claude Code session ID`);
-  const { end, out } = await drained(await open(["sh", "-c", readScript, session, projects, String(cursor.offset), String(maxRecordBytes), cursor.before, String(beforeBytes)]), deadlineMs);
-  if (end.kind === "lost") throw new Error("the pipe to the pylon was lost before the transcript was read");
-  if (end.code === 3) return null;
-  if (end.code !== 0) throw new Error(`reading the Claude Code transcript exited ${end.code}`);
+  checkSession(session);
+  const stream = await open(["sh", "-c", readScript, session, projects, String(cursor.offset), String(maxRecordBytes), cursor.before, String(beforeBytes)]);
+  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "the transcript", okCodes: [0, 3] });
+  if (code === 3) return null;
   const newline = out.indexOf(0x0a);
   const header = newline < 0 ? null : /^(\d{1,15}) (\d{1,15}) (\d{1,15})$/.exec(out.subarray(0, newline).toString("latin1"));
   const size = Number(header?.[1]);
@@ -157,20 +159,23 @@ export async function readTranscript(open: OpenPipe, session: string, cursor: Tr
   return { entries: next.entries, cursor: { ...next.cursor, before }, more: size > start + body.length, reset };
 }
 
-/** Prints at most $3 bytes of the session's transcript from offset $2. Exits 3 when no project holds it. */
-const imageScript = `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; tail -c +$(($2 + 1)) "$f" | head -c $3; exit 0; done; exit 3`;
+/** Prints at most $3 bytes of the session's transcript from offset $2. */
+const imageScript = onTranscript(`tail -c +$(($2 + 1)) "$f" | head -c $3`);
+
+function checkSession(session: string): void {
+  if (!claudeSessionId.test(session)) throw new Error(`${JSON.stringify(session.slice(0, 200))} is not a Claude Code session ID`);
+}
 
 /**
  * The bytes of an image block in the session's transcript, read over one raw pipe, or null when the record there is
  * no longer the one `image` names, as after the file was replaced, or holds no such block.
  */
 export async function readTranscriptImage(open: OpenPipe, session: string, image: TranscriptImage, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<Buffer | null> {
-  if (!/^[A-Za-z0-9-]{1,200}$/.test(session)) throw new Error(`${JSON.stringify(session.slice(0, 200))} is not a Claude Code session ID`);
+  checkSession(session);
   if (image.bytes > maxRecordBytes) return null;
-  const { end, out } = await drained(await open(["sh", "-c", imageScript, session, projects, String(image.offset), String(image.bytes)]), deadlineMs, image.bytes, "the transcript's image");
-  if (end.kind === "lost") throw new Error("the pipe to the pylon was lost before the transcript's image was read");
-  if (end.code === 3) return null;
-  if (end.code !== 0) throw new Error(`reading the Claude Code transcript's image exited ${end.code}`);
+  const stream = await open(["sh", "-c", imageScript, session, projects, String(image.offset), String(image.bytes)]);
+  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: image.bytes, what: "the transcript's image", okCodes: [0, 3] });
+  if (code === 3) return null;
   if (out.length !== image.bytes || sha256(out) !== image.sha256) return null;
   let record: unknown;
   try {
@@ -201,35 +206,6 @@ function recordImages(record: unknown): { item: number; block: Fields }[] {
   }).slice(0, maxRecordImages);
 }
 
-/** The pipe's whole output, as it reads `what`. A pipe that passes the deadline or prints past the cap is dropped. */
-export async function drained(stream: ByteStream, deadlineMs: number, maxBytes = maxReplyBytes, what = "the transcript"): Promise<{ end: StreamEnd; out: Buffer }> {
-  const reply = (async () => {
-    await stream.close();
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
-    for await (const chunk of stream) {
-      bytes += chunk.length;
-      if (bytes > maxBytes) throw new Error(`reading ${what} printed over ${maxBytes} bytes`);
-      chunks.push(chunk);
-    }
-    return { end: await stream.done, out: Buffer.concat(chunks) };
-  })();
-  // A reply that loses the race fails unwatched.
-  reply.catch(() => undefined);
-  let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`the pylon did not read ${what} within ${deadlineMs / 1000} s`)), deadlineMs);
-  });
-  try {
-    return await Promise.race([reply, late]);
-  } catch (err) {
-    stream.abort();
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * The entries of the complete lines in `body`, which starts at `cursor`, and the cursor just past them. A trailing
  * partial line waits for the next read. A full read with no newline is the middle of a record too long to read, so
@@ -249,7 +225,7 @@ function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">): { ent
     const bytes = body.subarray(start, end);
     const line = bytes.toString("utf8");
     if (line.trim() !== "") {
-      const read = entriesOf(line, at, { offset: cursor.offset + start, bytes: bytes.length, sha256: sha256(bytes) });
+      const read = entriesOf(line, at, { offset: cursor.offset + start, line: bytes });
       entries.push(...read.entries);
       at = read.at ?? at;
     }
@@ -263,8 +239,7 @@ function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">): { ent
  * images are located as if the line were the file's first.
  */
 export function parseRecord(line: string): ClaudeEntry[] {
-  const bytes = Buffer.from(line);
-  return entriesOf(line, 0, { offset: 0, bytes: bytes.length, sha256: sha256(bytes) }).entries;
+  return entriesOf(line, 0, { offset: 0, line: Buffer.from(line) }).entries;
 }
 
 /**
@@ -290,8 +265,8 @@ function entriesOf(line: string, lastAt: number, where: Where): { entries: Claud
 }
 
 type Fields = Readonly<Record<string, unknown>>;
-/** Where a record's line is in the file. */
-type Where = Omit<TranscriptImage, "index">;
+/** Where a record's line starts in the file, and its bytes, which only a record with images hashes. */
+interface Where { offset: number; line: Uint8Array }
 type Parse = (r: Fields, at: number, where: Where) => ClaudeEntry[];
 /** Parses a string-content form, keyed in `forms` by its leading tag. */
 type Form = (text: string, r: Fields, at: number) => ClaudeEntry[];
@@ -409,7 +384,9 @@ function userRecord(r: Fields, at: number, where: Where): ClaudeEntry[] {
   }
   // Claude's metadata for a subagent it started in the background, which tells Claude not to show it.
   const background = isFields(r.toolUseResult) && r.toolUseResult.status === "async_launched";
-  const located = Map.groupBy(recordImages(r).map(({ item }, index) => ({ item, image: { ...where, index } })), ({ item }) => item);
+  const images = recordImages(r);
+  const hash = images.length === 0 ? "" : sha256(where.line);
+  const located = Map.groupBy(images.map(({ item }, index) => ({ item, image: { offset: where.offset, bytes: where.line.length, sha256: hash, index } })), ({ item }) => item);
   const imagesOf = (item: number): TranscriptImage[] => located.get(item)?.map(({ image }) => image) ?? [];
   const entries: ClaudeEntry[] = [];
   const words: string[] = [];
