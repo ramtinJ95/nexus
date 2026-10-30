@@ -5,6 +5,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { startApi, type ApiOptions } from "./api.ts";
 import { threadStarter } from "./threads.ts";
 import { itemThread, pipeline, type PipelineItem } from "./pipeline.ts";
@@ -24,6 +25,7 @@ import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai"
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { testImage } from "../test-kit.ts";
 import { imagePaths, liveFrames } from "./dashboard.ts";
+import { startHint, type HintPart } from "./dashboard/start-hint.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -1601,7 +1603,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
   const dialog = page.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( data-scratch)?( checked)?><span class="seg-name">[^<]*<\/span><span class="seg-repo">([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[4]]),
     [["acme", false, "git@example.com:acme.git"], ["beta", false, "git@example.com:beta.git"], ["sketch", true, "scratch"]]);
-  assert.match(textOf(dialog), new RegExp(`Boots a pylon on rj-firebat from image ${image.id} and starts an empty repository on main \\.`));
+  assert.match(dialog, /name="project" required value="sketch" data-node="rj-firebat" data-branch="main"[^>]* data-scratch[ >]/, "client.js says the thread starts an empty repository from these");
   assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote New thread/);
 });
 
@@ -1631,18 +1633,20 @@ test("every page carries the start dialog, which offers every project and node a
   assert.match(dialog, /^[^>]* data-autoopen>/, "/threads/new opens the dialog");
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["acme", false], ["beta", true]]);
   assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)">([^<]*)</g)].map((m) => [m[1], m[2]]), [["", "rj-firebat (project default)"], ["auto", "auto, where it fits best"], [node, `${node}, offline`]]);
-  assert.match(textOf(dialog), /No image is current yet.* Boots a pylon on rj-firebat and checks out main \./);
+  assert.match(textOf(dialog), /No image is current yet/);
+  assert.match(dialog, /<p class="hint" id="start-hint" data-image=""><\/p>/, "client.js writes the hint, here naming no image");
 
   await s.call("POST", "/v1/projects", { ...project("spread"), defaultNode: "auto" });
   const spread = (await s.call("GET", "/threads/new?project=spread")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
   assert.match(spread, /<option value="">auto \(project default\)<\/option>/);
-  assert.match(textOf(spread), /Boots a pylon on the node with the most room left and checks out main \./, "a project whose default node is auto names no node");
+  assert.match(spread, /name="project" required value="spread" data-node="auto" data-branch="main"/, "client.js names no node for a project whose default node is auto");
 
   await s.call("POST", "/v1/images", image);
   s.registry.setCurrentImage(image.id as ImageId);
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
-  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Worker Claude Code .* Title \\(optional\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
+  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), /^Start a thread ✕ Worker Claude Code .* Title \(optional\) Project acme /);
+  assert.match(home, new RegExp(`<p class="hint" id="start-hint" data-image="${image.id}"></p>`), "client.js writes the hint with the current image");
 });
 
 test("the start dialog offers the thread's size, with the chosen project's as placeholders, and each project radio carries its own", async (t) => {
@@ -2424,4 +2428,66 @@ test("a finished text renders as it did uncached, and a streaming answer keeps i
   assert.equal(carets(harness(null, streamed)), 1);
   assert.equal(carets(harness(streamed, null)), 0, "the finished text is not the streaming render");
   assert.equal(carets(harness(streamed, streamed)), 1, "nor the streaming render the finished one");
+});
+
+test("the start dialog's hint says where the pylon boots, from what image, and what it checks out", () => {
+  const said = (parts: HintPart[]) => parts.map(({ text, look }) => look === undefined ? text : `<${look}>${text}</${look}>`).join("");
+  assert.equal(said(startHint({ node: "rj-firebat", image: "img-1", branch: "main", scratch: false })), "Boots a pylon on <b>rj-firebat</b> from image <code>img-1</code> and checks out <code>main</code>.");
+  assert.equal(said(startHint({ node: "rj-firebat", image: "img-1", branch: "main", scratch: true })), "Boots a pylon on <b>rj-firebat</b> from image <code>img-1</code> and starts an empty repository on <code>main</code>.");
+  assert.equal(said(startHint({ node: "rj-firebat", image: null, branch: "main", scratch: false })), "Boots a pylon on <b>rj-firebat</b> and checks out <code>main</code>.", "no image is current");
+  assert.equal(said(startHint({ node: "auto", image: "img-1", branch: "dev", scratch: false })), "Boots a pylon on the node with the most room left from image <code>img-1</code> and checks out <code>dev</code>.");
+});
+
+test("a swap keeps what the reader filled in on each form it replaces, and the start dialog says a project no longer offered is gone", async () => {
+  const client = await readFile(new URL("./dashboard/client.js", import.meta.url), "utf8");
+  const code = client.slice(client.indexOf("const projectRadios = "), client.indexOf("\nasync function openStart("));
+  const field = (name: string, type: string, value: string, checked = false, extra: object = {}) => ({ name, type, value, checked, ...extra });
+  const form = (id: string, fields: ReturnType<typeof field>[], question?: string) => {
+    const submit = { disabled: false };
+    return { id, dataset: question === undefined ? {} : { question }, elements: fields, submit, querySelector: (selector: string) => selector === "button[type=submit]" ? submit : null };
+  };
+  const options = (...values: string[]) => ({ options: values.map((value) => ({ value })) });
+  const start = (projects: string[], nodes: string[]) => form("start", [
+    field("worker", "radio", "claude", true), field("worker", "radio", "harness"), field("title", "text", ""), field("claude", "textarea", ""),
+    field("node", "select-one", "", false, options("", "auto", ...nodes)), ...projects.map((p, i) => field("project", "radio", p, i === 0)),
+  ]);
+  const ask = () => form("", [field("picked-0", "radio", "A"), field("picked-0", "radio", "B"), field("own-0", "text", "")], "q1");
+  const prompt = () => form("prompt", [field("text", "textarea", "")]);
+
+  const before = [start(["acme", "beta"], ["tower"]), ask(), prompt()];
+  const [oldStart, oldAsk, oldPrompt] = before;
+  oldStart!.elements[0]!.checked = false;
+  oldStart!.elements[1]!.checked = true;
+  oldStart!.elements[2]!.value = "Ship it";
+  oldStart!.elements[4]!.value = "tower";
+  oldStart!.elements[5]!.checked = false;
+  oldStart!.elements[6]!.checked = true;
+  oldAsk!.elements[0]!.checked = true;
+  oldAsk!.elements[2]!.value = "my own";
+  oldPrompt!.elements[0]!.value = "a draft the composer keeps itself";
+
+  let forms = before;
+  const errors: (string | null)[] = [];
+  const synced: unknown[] = [];
+  const document = {
+    querySelectorAll: (selector: string) => selector === "form" ? forms : forms[0]!.elements.filter((f) => f.name === "project"),
+    getElementById: (id: string) => forms.find((f) => f.id === id) ?? null,
+  };
+  const { formDrafts, restoreDrafts, restoreStart } = runInNewContext(`${code}\n({ formDrafts, restoreDrafts, restoreStart })`, {
+    document, starting: true, syncWorker: (f: unknown) => synced.push(f), updateStartHint: () => {},
+    showError: (_: string, err: Error | null) => errors.push(err === null ? null : err.message),
+  });
+  const drafts = formDrafts([{ querySelectorAll: () => before }]);
+  forms = [start(["acme"], []), ask(), prompt()];
+  restoreDrafts(drafts);
+  restoreStart(drafts);
+  const [newStart, newAsk, newPrompt] = forms;
+  const values = (f: ReturnType<typeof form>) => f.elements.map((e) => e.type === "radio" ? `${e.name}=${e.value}:${e.checked}` : `${e.name}=${e.value}`);
+  assert.deepEqual(values(newStart!), ["worker=claude:false", "worker=harness:true", "title=Ship it", "claude=", "node=", "project=acme:false"],
+    "the typed title and picked worker are kept, the node whose option is gone is not, and no project is picked in place of the one gone");
+  assert.deepEqual(errors, ["Project beta is not offered here yet. Reload the page to see it."]);
+  assert.deepEqual(synced, [newStart], "the worker's fields follow the worker picked, once");
+  assert.equal(newStart!.submit.disabled, true, "a start in flight stays unsendable");
+  assert.deepEqual(values(newAsk!), ["picked-0=A:true", "picked-0=B:false", "own-0=my own"]);
+  assert.deepEqual(values(newPrompt!), ["text="], "the composer restores its own draft");
 });

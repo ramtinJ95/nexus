@@ -470,7 +470,7 @@ ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offlin
 <div><label for="start-memory">Memory (GiB)</label><input id="start-memory" name="memoryGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.memoryGiB}"></div>
 <div><label for="start-disk">Disk (GiB)</label><input id="start-disk" name="diskGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.diskGiB}"></div>
 </div>
-<p class="hint" id="start-hint" data-image="${image ?? ""}">Boots a pylon on ${chosen.defaultNode === "auto" ? "the node with the most room left" : html`<b>${chosen.defaultNode}</b>`}${image !== null && html` from image <code>${image}</code>`} and ${chosen.repoUrl === null ? "starts an empty repository on" : "checks out"} <code>${chosen.defaultBranch}</code>.</p>
+<p class="hint" id="start-hint" data-image="${image ?? ""}"></p>
 <p id="start-error" class="error" role="alert" hidden></p>
 <footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread<kbd>⌘↵</kbd></button></footer>
 </form>`}
