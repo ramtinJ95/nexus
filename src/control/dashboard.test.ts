@@ -28,6 +28,7 @@ import { imagePaths, liveFrames, liveStreams } from "./dashboard.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { usageLimitPrefix } from "./usage-limit.ts";
 import { startHint, type HintPart } from "./dashboard/start-hint.ts";
+import { agoText, clock } from "./dashboard/elapsed.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -1728,20 +1729,16 @@ test("the page streams of one thread render each view once between them, and the
   assert.equal(renders, 4, "once every reader left, a new one renders afresh rather than reusing a dropped render");
 });
 
-test("an age the client ticks reads as a render of the page at the same time would", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-27T12:00:00Z") });
-  const s = await seeded(t);
-  const thread = await claudeThread(s, []);
-  const { agoText } = await import(new URL("./dashboard/ago.js", import.meta.url).href);
-  const ages: string[] = [];
-  for (const after of [0, 44_499, 44_500, 89_000, 44 * 60_000 + 29_000, 44 * 60_000 + 30_000, 45 * 60_000, 36 * 3_600_000 - 1_000, 36 * 3_600_000, 30 * 86_400_000]) {
-    t.mock.timers.setTime(thread.createdAt + after);
-    const html = (await s.call("GET", `/threads/${thread.id}`)).text;
-    const [, datetime, age] = /<p class="convo-meta">.*? · started <time datetime="([^"]+)" title="[^"]+" data-ago>([^<]*)<\/time>/.exec(html)!;
-    assert.equal(agoText(Date.parse(datetime!), Date.now()), age, `${after} ms after the thread started`);
-    ages.push(age!);
-  }
+test("an age reads as just now under 45 seconds, then in minutes, hours and days", () => {
+  const at = Date.parse("2026-10-27T12:00:00Z");
+  const ages = [0, 44_499, 44_500, 89_000, 44 * 60_000 + 29_000, 44 * 60_000 + 30_000, 45 * 60_000, 36 * 3_600_000 - 1_000, 36 * 3_600_000, 30 * 86_400_000]
+    .map((after) => agoText(at, at + after));
   assert.deepEqual(ages, ["just now", "just now", "1 min ago", "1 min ago", "44 min ago", "45 min ago", "1 h ago", "36 h ago", "2 d ago", "30 d ago"]);
+});
+
+test("a run's length reads as a clock across the minute and the hour", () => {
+  assert.deepEqual([0, 999, 59_999, 60_000, 61_000, 3_599_999, 3_600_000, 3_660_000, 25 * 3_600_000].map(clock),
+    ["0s", "0s", "59s", "1m 00s", "1m 01s", "59m 59s", "1h 00m", "1h 01m", "25h 00m"]);
 });
 
 test("a Claude worker's transcript reads as its conversation: prompts by who sent them, replies, folded calls with their results and a subagent's finish, notes, unknown records and what Claude queued", async (t) => {
