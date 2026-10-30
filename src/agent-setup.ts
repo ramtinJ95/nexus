@@ -19,8 +19,10 @@ import {
   agentSetupManifest, asCommit, asDotfilesPath, asHttpsUrl, formatAgentSetup, parseAgentSetup,
   type AgentSetup, type Commit, type DotfilesPath, type Harness, type HttpsUrl, type PiPackage, type PluginId,
 } from "../images/pylon/agent-setup/manifest.ts";
+import { output as execOutput } from "./exec.ts";
 import { loadImageRecipe, pylonRecipeDir } from "./image-build.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
+import { parseJson } from "./parse.ts";
 
 /** Git blob IDs by POSIX path inside a plugin's directory, as `git ls-tree` prints them. */
 export type PluginFiles = ReadonlyMap<string, string>;
@@ -357,14 +359,7 @@ function samePluginFiles(installed: PluginFiles, atHead: PluginFiles): boolean {
 const gitEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" };
 const execFileAsync = promisify(execFile);
 
-async function output(command: string, args: readonly string[], cwd?: string): Promise<string> {
-  try {
-    return (await execFileAsync(command, args, { cwd, env: { ...gitEnv, PI_OFFLINE: "1" }, maxBuffer: 256 * 1024 * 1024 })).stdout;
-  } catch (err) {
-    const { stderr = "", message } = err as { stderr?: string; message: string };
-    throw new Error(`${command} ${args.join(" ")}: ${message}${stderr === "" ? "" : `\n${stderr}`}`);
-  }
-}
+const output = (command: string, args: readonly string[], cwd?: string) => execOutput(command, args, { cwd, env: { ...gitEnv, PI_OFFLINE: "1" }, maxBuffer: 256 * 1024 * 1024 });
 
 async function succeeds(command: string, args: readonly string[]): Promise<boolean> {
   return output(command, args).then(() => true, () => false);
@@ -446,7 +441,7 @@ const claudeSettingsSchema = z.object({
 });
 const piSettingsSchema = z.object({ packages: z.array(z.string()).default([]), skills: z.array(z.string()).default([]) });
 
-const readJson = async <T>(path: string, schema: z.ZodType<T>): Promise<T> => schema.parse(JSON.parse(await readFile(path, "utf8")));
+const readConfig = async <T>(path: string, schema: z.ZodType<T>): Promise<T> => parseJson(schema, await readFile(path, "utf8"), path);
 
 /** Entries of `dir` that hold a SKILL.md, by name, sorted. */
 async function skillsIn(dir: string): Promise<{ name: string; realPath: string }[]> {
@@ -487,13 +482,13 @@ export async function readMacSetup(home: string): Promise<MacSetup> {
     if (/^[RC]/.test(record)) changed.add(status[++i]!);
   }
 
-  const claudeSettings = await readJson(join(claudeDir, "settings.json"), claudeSettingsSchema);
-  const installed = await readJson(join(claudeDir, "plugins", "installed_plugins.json"), installedPluginsSchema);
+  const claudeSettings = await readConfig(join(claudeDir, "settings.json"), claudeSettingsSchema);
+  const installed = await readConfig(join(claudeDir, "plugins", "installed_plugins.json"), installedPluginsSchema);
   const plugins = await Promise.all(Object.entries(installed.plugins).flatMap(([id, installs]) =>
     installs.filter((i) => i.scope === "user").map(async (i) => ({
       id, version: i.version, enabled: claudeSettings.enabledPlugins[id] === true, files: await hashTree(i.installPath),
     }))));
-  const known = await readJson(join(claudeDir, "plugins", "known_marketplaces.json"), knownMarketplacesSchema);
+  const known = await readConfig(join(claudeDir, "plugins", "known_marketplaces.json"), knownMarketplacesSchema);
   const marketplaceNames = [...new Set(plugins.map((p) => p.id.slice(p.id.lastIndexOf("@") + 1)))].sort();
   const marketplaces = await Promise.all(marketplaceNames.flatMap((name): Promise<MacMarketplace>[] => {
     const entry = known[name];
@@ -539,7 +534,7 @@ async function directoryLoads(dir: string): Promise<boolean> {
 /** The pi part of the reader. It reads only files under `home`: pi's settings, its npm installs and what it discovers. */
 export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
   const piAgent = join(home, ".pi", "agent");
-  const piSettings = await readJson(join(piAgent, "settings.json"), piSettingsSchema);
+  const piSettings = await readConfig(join(piAgent, "settings.json"), piSettingsSchema);
   /** A settings path as pi resolves it: ~ is the home, and a relative path is under ~/.pi/agent. */
   const settingPath = (path: string) => resolve(piAgent, path.trim().replace(/^~(?=\/|$)/, home));
   const npmVersions = new Map<string, string>();
@@ -548,7 +543,7 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     const name = npmName(entry);
     if (name !== null) {
       const packageJson = join(piAgent, "npm", "node_modules", name, "package.json");
-      if (existsSync(packageJson)) npmVersions.set(name, (await readJson(packageJson, z.object({ version: z.string() }))).version);
+      if (existsSync(packageJson)) npmVersions.set(name, (await readConfig(packageJson, z.object({ version: z.string() }))).version);
     } else if (!/^[a-z+]+:/.test(entry) && existsSync(settingPath(entry))) {
       localPackages.set(entry, await realpath(settingPath(entry)));
     }

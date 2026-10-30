@@ -53,6 +53,16 @@ test("a published template is listed with the sha256 of the archive it exports",
   await assert.rejects(store.export("tpl-000000000000"), (err) => err instanceof JobFailure && err.code === "artifact-missing");
 });
 
+test("a manifest file that is not a manifest fails, even one that says null, and only a missing one is no artifact", async (t) => {
+  const { store } = await published(t);
+  for (const text of ["null", "{}", "not JSON"]) {
+    await writeFile(join(store.path(template), "template.json"), text);
+    await assert.rejects(store.manifest(template));
+  }
+  await rm(join(store.path(template), "template.json"));
+  assert.equal(await store.manifest(template), null);
+});
+
 test("an import verifies the copy, then holds the same artifact as the exporter", async (t) => {
   const { root, store, manifest } = await published(t);
   const peer = artifactDirectory(join(root, "b"), fileCodec("image.tar"));
