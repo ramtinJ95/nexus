@@ -153,6 +153,18 @@ test("a preview origin is unavailable before a spawn reaches the container and f
   assert.throws(() => services.origin(pylon, "docs"), /Docker published no loopback port for docs's port 8001 in pylon-a/);
 });
 
+test("a link of a reserved port, or of a port whose linked name a declared service holds, is refused as a pylon refuses it", async (t) => {
+  const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8000/tcp -> 127.0.0.1:49000\n8001/tcp -> 127.0.0.1:49001\n" } });
+  const services = dockerServices();
+  await mkdir(join(docker.root, "checkout", ".nexus"), { recursive: true });
+  await writeFile(join(docker.root, "checkout", ".nexus", "services.yaml"), "services:\n  port-8001:\n    command: serve\n    port: 8000\n    preview: true\n");
+  await mkdir(join(docker.root, "run"));
+  await writeFile(join(docker.root, "run", "port-8001.stopped"), "");
+  await services.apply(pylon, {}, false);
+  await assert.rejects(services.link(pylon, 8001), { message: "Service port-8001 runs on another port, so port 8001 cannot be previewed under that name. Rename the service" });
+  await assert.rejects(services.link(pylon, 22), { message: "Port 22 is Nexus's own, so it cannot be previewed" });
+});
+
 test("a services file the container cannot read, and a failed step in the container, fail with the exit code and the output", async (t) => {
   const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8001/tcp -> 127.0.0.1:49001\n" } });
   await mkdir(join(docker.root, "checkout", ".nexus", "services.yaml"), { recursive: true });

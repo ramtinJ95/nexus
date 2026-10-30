@@ -5,6 +5,7 @@ import { linkedName, parseServicesFile, relayPorts, reservedPortMessage, reserve
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, direct, readGuestFile, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
+import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "../preview-links.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { parse } from "../parse.ts";
@@ -344,22 +345,16 @@ export class GuestServices {
 		if (!this.relays.has(port) && this.relays.size >= relayPortList.length)
 			throw new Error(`Port ${port} cannot be previewed, because ${this.full}. Unpublish one first`);
 	}
+	private previewServices(): PreviewService[] {
+		return [...this.entries].map(([name, entry]) => ({ name, port: entry.port, previewed: entry.portal !== undefined, declared: entry.declared }));
+	}
 	/** Previews a port that is already listening, unsupervised. Returns the name it is reported under. */
 	async attach(port: number): Promise<string> {
-		if (reservedPorts.has(port))
-			throw new Error(`Port ${port} is Nexus's own, so it cannot be previewed`);
-		const owner = [...this.entries].find(([, entry]) => entry.port === port);
-		if (owner) {
-			if (!owner[1].portal)
-				throw new Error(
-					`Port ${port} belongs to service ${owner[0]}, which has no preview. Declare one in ${this.configPath}`,
-				);
-			return owner[0];
+		const target = linkTarget(port, this.previewServices(), this.configPath);
+		if (target !== "link") {
+			if ("refused" in target) throw new Error(target.refused);
+			return target.service;
 		}
-		if (this.entries.has(linkedName(port)))
-			throw new Error(
-				`Service ${linkedName(port)} runs on another port, so port ${port} cannot be previewed under that name. Rename the service`,
-			);
 		if (!this.attached.has(port)) {
 			this.roomFor(port);
 			// Saved before the port counts as attached, so a failed save leaves a retry to save it again.
@@ -383,14 +378,7 @@ export class GuestServices {
 	 */
 	async detach(port: number): Promise<string | null> {
 		const portal = this.attached.get(port);
-		if (!portal) {
-			const owner = [...this.entries].find(([, entry]) => entry.port === port && entry.portal);
-			if (owner)
-				return `Port ${port} is the preview of service ${owner[0]}, not a linked port. ${owner[1].declared ? `Remove the preview from ${this.configPath} to unpublish it` : "An ad hoc service keeps its preview"}`;
-			return this.entries.has(linkedName(port))
-				? `Service ${linkedName(port)} is not a linked port, so port ${port} has no linked preview to unpublish. Rename the service`
-				: null;
-		}
+		if (!portal) return unlinkRefusal(port, this.previewServices(), this.configPath);
 		// Saved before the port stops counting as attached, so a failed save leaves it linked and a retry saves it again.
 		await saveJson(join(this.dir, "linked.json"), [...this.attached.keys()].filter((linked) => linked !== port));
 		this.attached.delete(port);
@@ -581,17 +569,14 @@ export class GuestServices {
 		if (selected) return facts;
 		return [...facts, ...(await Promise.all([...this.attached.keys()].map((port) => this.linkedFact(port))))];
 	}
-	/** A start that is being watched is starting even once its process has exited, until its watch fails it. */
 	private async fact(name: string, entry: Entry): Promise<ServiceFact> {
 		const running = await serviceRunning(this.vm, name);
-		const state =
-			running && (await this.healthy(name, entry, running))
-				? "ready"
-				: this.failures.has(name)
-					? "failed"
-					: running || this.watches.has(name)
-						? "starting"
-						: "stopped";
+		const state = serviceState({
+			running,
+			healthy: running && (await this.healthy(name, entry, running)),
+			failed: this.failures.has(name),
+			watched: this.watches.has(name),
+		});
 		return {
 			name,
 			state,
