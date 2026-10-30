@@ -5,11 +5,8 @@ import type { Registry, StoredThread, Thread, ThreadId } from "./registry.ts";
 import type { PrWatchState } from "./pr-watch-store.ts";
 import { singleFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "../agent-protocol.ts";
+import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
 
-/** How often the watch reads GitHub. */
-export const prWatchMs = 120_000;
-/** How many comment-only wakes in a row stop a thread's watch, until a failed check or a conflict resets the count. */
-export const commentCap = 10;
 /** A description's first paragraph past its headings, images and comments, on one line and at most 400 characters. */
 export function summaryOf(body: string): string {
   const prose = body.replace(/<!--[\s\S]*?-->/g, "").split("\n").filter((line) => !/^ {0,3}#{1,6}(\s|$)/.test(line)).join("\n");
@@ -18,18 +15,10 @@ export function summaryOf(body: string): string {
   return line.length > 400 ? `${line.slice(0, 399)}…` : line;
 }
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
-/** Whether the comment cap stopped the watch, so it reads the thread's PRs no more. */
-export const watchStopped = (state: Pick<PrWatchState, "commentWakes"> | null | undefined) => (state?.commentWakes ?? 0) >= commentCap;
 /** An open PR the watch linked but has not read yet, which its empty `url` marks in the stored link. */
 const unread = (repo: string, number: number): PullRequest => ({ repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null });
 /** Whether the watch never read the linked PR, so its first read baselines the comments it already has. */
 export const neverRead = (pr: Pick<PullRequest, "url">) => pr.url === "";
-/**
- * The branches thread `id` pushed to origin. pushedAs is a remote-tracking name, not a URL, and only origin belongs to
- * the project's repository.
- */
-export const pushedBranches = (registry: Pick<Registry, "outputs">, id: ThreadId): string[] =>
-  registry.outputs(id).flatMap((o) => o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []);
 const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
 /**

@@ -12,7 +12,7 @@ import { gitPollMs } from "../git-facts.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
-import { pushedBranches, type prWatcher } from "./pr-watch.ts";
+import { pushedBranches } from "./pr-watch-model.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { Nudge } from "./nudge-store.ts";
 
@@ -25,7 +25,7 @@ export function builderNudger(options: {
   registry: Registry; github: Pick<GitHub, "find">; inbox: Inbox;
   /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
   personWroteTo(t: Thread): Promise<boolean>;
-  watch: Pick<ReturnType<typeof prWatcher>, "passes">; log?: (message: string) => void;
+  watch: { passes(): { started: number; finished: number } }; log?: (message: string) => void;
 }) {
   const { registry, github, inbox, personWroteTo, watch, log = (message: string) => console.error(message) } = options;
   /** The PR watch pass each thread's latest ended turn waits for. A restart only makes a turn wait for another. */

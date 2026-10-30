@@ -32,7 +32,7 @@ import { heldBy, landingHolds, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
-import { prWatchMs, watchStopped } from "./pr-watch.ts";
+import { prWatchMs, watchStopped } from "./pr-watch-model.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, checkOutput, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
