@@ -283,23 +283,28 @@ test("a report of no waiting asks after one of none is not stored again", async 
   assert.equal(stores, 1);
 });
 
-test("an ask withdrawn because no hook took its answer is asked again when the pylon still reports it", async (t) => {
+test("an ask withdrawn because no hook took its answer is asked again at the next read, with no session event, while the pylon still reports it", async (t) => {
   const { registry, thread, probe, state, event } = await askingThread(t);
   event("session.turn-started");
   event("session.waiting");
   state.report = [{ session, toolUseId: "toolu_1", at: 5, input: { questions: [drink] } }];
-  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 10 });
+  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 3_600_000 });
   t.after(() => conversations.close());
   const asks = () => registry.questions(thread.id).map((q) => q.id);
   await conversations.refresh(thread);
   assert.deepEqual(asks(), ["ask-toolu_1"]);
-  // As a delivery that gave up after 5 seconds does, while the hook may still wait.
+  // As a delivery that gave up after 5 seconds does, while the hook may still wait, before the read it asked for.
+  const read = conversations.refresh(thread);
   registry.withdrawAsk("ask-toolu_1");
   assert.deepEqual(asks(), []);
-  event("session.waiting");
-  await until("the read after the event asks", () => state.pulls === 2);
-  await conversations.refresh(thread);
+  await read;
   assert.deepEqual(asks(), ["ask-toolu_1"]);
+  state.report = [];
+  await conversations.refresh(thread);
+  assert.deepEqual(asks(), [], "the hook no longer waits");
+  const pulls = state.pulls;
+  await conversations.refresh(thread);
+  assert.equal(state.pulls, pulls, "a read after an empty report asks no more");
 });
 
 test("a reader whose session events were lost to an expired cursor asks the pylon's hook again at its next read", async (t) => {

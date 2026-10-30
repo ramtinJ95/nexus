@@ -10,9 +10,9 @@
  *
  * A read that reaches the transcript's end then asks the pylon's hook which AskUserQuestion dialogs wait, and the
  * registry opens and withdraws the worker's asks from that. The transcript cannot say: Claude may write the call to it
- * only once its dialog is answered. It asks while one of the thread's asks is open, and otherwise once after each
- * session event, or the reader's start, while a turn runs or waits, since the hook reports an event once a dialog
- * waits. The working reads alone do not ask.
+ * only once its dialog is answered. It asks while one of the thread's asks is open, and while a turn runs or waits it
+ * asks once after each session event or the reader's start, since the hook reports an event once a dialog waits, and
+ * at each read until the hook reports none, once it reported some. The working reads alone do not ask otherwise.
  */
 import { sessionKinds } from "../events.ts";
 import { drained, readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
@@ -97,7 +97,10 @@ interface Reader {
   askFailure: string | null;
   /** Whether a pull is due while a turn runs or waits: since the reader started, a session event, or a failed pull. */
   asksDue: boolean;
-  /** Whether the last report this reader stored was empty, which storing an empty one again would not change. */
+  /**
+   * Whether the last report this reader stored was empty, which storing an empty one again would not change. Until it
+   * is, each read asks while a turn runs or waits, since a withdrawn ask's hook may still wait.
+   */
   storedNone: boolean;
   /**
    * The newest view while the thread is watched, whose entries the next view reads on from. A read that replaces the
@@ -211,16 +214,17 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
   }
 
   /**
-   * Stores which asks wait in the pylon, while one of the thread's asks is open and may have closed, or a pull is due
-   * and a turn runs or waits, and so may show a dialog. A pull that fails keeps the last report, as a failed read keeps
-   * the transcript, and is due again. An empty report after an empty one is not stored again. A report with asks is,
-   * since withdrawing an ask or archiving the thread drops what is stored.
+   * Stores which asks wait in the pylon, while one of the thread's asks is open and may have closed, or while a turn
+   * runs or waits, and so may show a dialog, and a pull is due or the last report stored had asks. A delivery that
+   * gave up withdraws its ask while the hook may still wait, and no event follows. A pull that fails keeps the last
+   * report, as a failed read keeps the transcript, and is due again. An empty report after an empty one is not stored
+   * again. A report with asks is, since withdrawing an ask or archiving the thread drops what is stored.
    */
   async function pullAsks(id: ThreadId, r: Reader, pylonId: PylonId, probe: Pick<ProbeClient, "stream">) {
     const t = registry.thread(id);
     if (t === undefined) return;
     const open = registry.questions(id).some((q) => q.ask !== undefined && q.answer === null);
-    if (!open && !(r.asksDue && (t.sessionTurnRunning === true || t.sessionWaiting === true))) return;
+    if (!open && !((r.asksDue || !r.storedNone) && (t.sessionTurnRunning === true || t.sessionWaiting === true))) return;
     r.asksDue = false;
     let asks: WaitingAsk[];
     try {
