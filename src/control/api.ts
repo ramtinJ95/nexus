@@ -39,7 +39,7 @@ import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
-import type { JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
+import type { JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames, partHash } from "./dashboard.ts";
 import { attachScript, checkoutDir, focusScript, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
@@ -63,6 +63,7 @@ import { itemView, type ItemId, type Pipeline } from "./pipeline.ts";
 import type { Planning } from "./planning.ts";
 import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
+import { listsRunning, observedPylon } from "./observed.ts";
 import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
 import { judgmentView, type JudgmentView } from "./judgment.ts";
 
@@ -421,28 +422,25 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return answerRefusal(question, { person: isPerson(registry, options.deployment, caller), deployer: canDeploy(registry, options.deployment, caller) });
   }
 
-  /** The pylon as its node's last observation reports it. */
-  function observedPylon(pylonId: PylonId) {
-    const node = registry.node(registry.pylon(pylonId)!.node)!;
-    return node.observation?.pylons.find((p) => p.pylonId === pylonId) ?? "absent";
-  }
-
-  function pylonOf(t: Thread): ThreadDetail["pylon"] {
+  /** The thread's pylon, its node, what that node last reported of it, and what it is doing, from one read of each. */
+  function pylonState(t: Pick<Thread, "pylonId" | "status">) {
     const pylon = registry.pylon(t.pylonId)!;
     const node = registry.node(pylon.node)!;
-    const observed = observedPylon(pylon.pylonId);
-    const inFlight = registry.job(pylon.pylonId) ?? null;
+    const observed = observedPylon({ node: () => node }, pylon) ?? "absent";
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
+    return { pylon, node, observed, actualState: actualState(observed, registry.job(pylon.pylonId) ?? null, node.state === "online", gaveUp) };
+  }
+
+  function pylonOf({ pylon, node, observed, actualState }: ReturnType<typeof pylonState>, project: Project): ThreadDetail["pylon"] {
     return {
-      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(registry.project(t.project)!, pylon.boot.dotfiles.repo)),
+      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(project, pylon.boot.dotfiles.repo)),
       id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
-      actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
+      actualState, retryRefused: retryRefusal(observed),
     };
   }
 
-  function portsOf(pylonId: PylonId, previews: readonly Preview[]): ThreadDetail["ports"] {
-    const observed = observedPylon(pylonId);
+  function portsOf(observed: ReturnType<typeof pylonState>["observed"], previews: readonly Preview[]): ThreadDetail["ports"] {
     if (observed === "absent" || observed.phase !== "running") return [];
     if (observed.listening === null) return null;
     return observed.listening.map(({ port }) => {
@@ -454,13 +452,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   function row(t: Thread): ThreadRow {
-    const { node, actualState, failed } = pylonOf(t);
-    return { ...t, attention: registry.attention(t.id), desired: desiredPhase(t, Date.now()), pylon: { node, actualState, failed } };
+    const { pylon, actualState } = pylonState(t);
+    return { ...t, attention: registry.attention(t.id), desired: desiredPhase(t, Date.now()), pylon: { node: pylon.node, actualState, failed: pylon.failed } };
   }
 
   function detail(t: Thread): ThreadDetail {
-    const pylon = registry.pylon(t.pylonId)!;
-    const previews = registry.previews(pylon.pylonId);
+    const state = pylonState(t);
+    const previews = registry.previews(t.pylonId);
     const watch = registry.prWatch(t.id);
     const { claudeWorker, agent } = agents[registry.agent(t).kind].detail(t);
     return {
@@ -468,10 +466,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       ...claudeWorker === undefined ? {} : { claudeWorker },
       attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
-      pylon: pylonOf(t),
-      sessions: registry.sessions(pylon.pylonId),
+      pylon: pylonOf(state, registry.project(t.project)!),
+      sessions: registry.sessions(t.pylonId),
       previews,
-      ports: portsOf(pylon.pylonId, previews),
+      ports: portsOf(state.observed, previews),
       outputs: registry.outputs(t.id),
       prWatch: { enabled: options.prWatchEnabled ?? false, stopped: (watch?.commentWakes ?? 0) >= 10, error: watch?.error ?? null },
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
@@ -661,7 +659,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   function retryPylon(t: Thread) {
     guard(t, { status: "kept" });
-    const refused = retryRefusal(observedPylon(t.pylonId));
+    const refused = retryRefusal(observedPylon(registry, registry.pylon(t.pylonId)!) ?? "absent");
     if (refused !== null) throw new HttpError(409, `pylon ${t.pylonId} cannot be retried. ${refused}`);
     if (!registry.retryPylon(t.pylonId)) throw new HttpError(409, `pylon ${t.pylonId} has not failed`);
     registry.recordActivity(t.id, { human: Date.now() });
@@ -735,7 +733,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (wakes) {
       registry.recordActivity(t.id, { human: Date.now() });
       wake(pylon.node);
-    } else if (!running(pylon.pylonId)) throw new HttpError(409, notRunning(pylon.pylonId, false), "not-running");
+    } else if (!running(pylon)) throw new HttpError(409, notRunning(pylon.pylonId, false), "not-running");
     let result: T;
     try {
       result = await act(probe, pylon.pylonId);
@@ -763,9 +761,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const notRunning = (pylonId: PylonId, wakes: boolean) => wakes ? `pylon ${pylonId} is not running yet. This request wakes it, so ask again once it runs`
     : `pylon ${pylonId} is not running, and this request does not wake it`;
   /** Whether the node, online, reports the pylon running, as a Claude transcript's reads ask. */
-  function running(pylonId: PylonId): boolean {
-    const observed = observedPylon(pylonId);
-    return registry.node(registry.pylon(pylonId)!.node)?.state === "online" && observed !== "absent" && observed.phase === "running";
+  function running(pylon: StoredPylon): boolean {
+    const node = registry.node(pylon.node);
+    return node?.state === "online" && listsRunning(node.observation, pylon.pylonId);
   }
 
   /** What each source of a conversation's image reads it with. Null is an image that is gone. */
@@ -1351,17 +1349,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /** The pylon of a thread, as serveAttach asks for it. */
-  function door(t: Thread, probe: Pick<ProbeClient, "stream">): PylonDoor {
-    const { pylonId, node } = registry.pylon(t.pylonId)!;
+  function door(t: Thread, { pylonId, node }: StoredPylon, probe: Pick<ProbeClient, "stream">): PylonDoor {
     return {
       thread: t.id,
       look() {
         const now = current(t);
         const refused = threadRefusal(now, { status: "active" });
         if (refused !== null) return { kind: "over", error: { kind: "conflict", message: refused } };
-        const pylon = pylonOf(now);
-        if (pylon.actualState === "failed") return { kind: "over", error: { kind: "failed", message: `the pylon of ${t.id} failed: ${pylon.failed ?? "no reason given"}` } };
-        return { kind: "pylon", state: pylon.actualState };
+        const { pylon, actualState } = pylonState(now);
+        if (actualState === "failed") return { kind: "over", error: { kind: "failed", message: `the pylon of ${t.id} failed: ${pylon.failed ?? "no reason given"}` } };
+        return { kind: "pylon", state: actualState };
       },
       open({ size, term, pane }) {
         registry.recordActivity(t.id, { human: Date.now() });
@@ -1401,9 +1398,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       throw new HttpError(400, (err as Error).message);
     }
     guard(t, { status: "active" });
-    const { node } = registry.pylon(t.pylonId)!;
-    const probe = probes.get(node);
-    if (probe === undefined) throw new HttpError(503, `no probe is configured for ${node}`);
+    const pylon = registry.pylon(t.pylonId)!;
+    const probe = probes.get(pylon.node);
+    if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
     if (open.size >= maxStreams) throw new HttpError(503, `${maxStreams} streams are open, the most this control plane serves at once`);
     if (socket.destroyed) return;
     const stop = new AbortController();
@@ -1417,7 +1414,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       });
       if (ws === null) return;
       if (stopping) stop.abort("stopping" satisfies Ending);
-      const session = { end: (why: Ending) => stop.abort(why), served: serveAttach(ws, door(t, probe), request, stop.signal, timing) };
+      const session = { end: (why: Ending) => stop.abort(why), served: serveAttach(ws, door(t, pylon, probe), request, stop.signal, timing) };
       attached.add(session);
       await session.served.finally(() => attached.delete(session));
     } finally {
