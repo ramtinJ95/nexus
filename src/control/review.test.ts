@@ -911,6 +911,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
     "Always needs the person: changes to secrets, as it changes deploy/README.md, src/control/credentials.ts.",
     "Always needs the person: changes to the tailnets, as it changes src/tailscale.ts.",
   ]);
+  assert.deepEqual(holds("src/control/holds.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/holds.ts."]);
 });
 
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {

@@ -33,7 +33,7 @@ const names = (path: string, pattern: RegExp) => !path.startsWith("docs/") && pa
 const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
   { case: "secrets", matches: (p) => names(p, /secret|credential/i) || p.startsWith("deploy/") },
   { case: "egress", matches: (p) => ["src/project.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || p.startsWith("src/pylon-vm") || names(p, /network|egress|allowlist/i) },
-  { case: "auth", matches: (p) => ["src/control/api.ts", "src/control/main.ts", "src/control/login.ts", "src/control/releases.ts", "src/control/attach.ts", "src/control/policy.ts"].includes(p) || p.startsWith("src/probe/") || p.startsWith("src/deploy/") || names(p, /auth|login|whois/i) },
+  { case: "auth", matches: (p) => ["src/control/api.ts", "src/control/main.ts", "src/control/login.ts", "src/control/releases.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts"].includes(p) || p.startsWith("src/probe/") || p.startsWith("src/deploy/") || names(p, /auth|login|whois/i) },
   { case: "tailnet", matches: (p) => names(p, /tailnet|tailscale/i) },
   { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/agent-setup.ts" },
   { case: "irreversible", matches: (p, patch) => p === "src/control/registry.ts" && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },
