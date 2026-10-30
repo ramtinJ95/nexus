@@ -18,25 +18,20 @@ import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { startApi } from "../control/api.ts";
-import { threadStarter } from "../control/threads.ts";
-import { pipeline, type PipelineItem } from "../control/pipeline.ts";
-import { planning } from "../control/planning.ts";
+import type { PipelineItem } from "../control/pipeline.ts";
 import { planningPrefix } from "../agent-protocol.ts";
-import { threadQueue, type QueuedThread } from "../control/queue.ts";
-import { turnGate } from "../control/drain.ts";
-import { fakeHarness } from "../control/fake-harness.ts";
-import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
+import type { QueuedThread } from "../control/queue.ts";
+import type { Thread, ThreadId } from "../control/registry.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
 import { testPr, testReview } from "../control/test-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
-import { agentReader } from "../control/agent-conversation.ts";
 import type { Judgment } from "../control/judgment.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
+import { testApi } from "../control/api-test-kit.ts";
 import type { ImageId, ImageManifest } from "../images.ts";
-import type { ProjectMirror, TemplateRecord } from "../control/templates.ts";
-import { defaultProjectResources, type Project, type RemoteProject } from "../control/project.ts";
+import type { TemplateRecord } from "../control/templates.ts";
+import { defaultProjectResources, type Project } from "../control/project.ts";
 import { titleOf } from "../thread-title.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
@@ -115,13 +110,6 @@ async function socksProxy(t: TestContext, reply: number | "close" = 0, ports: Re
 async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: boolean; reviews?: ReviewLoop } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-cli-"));
   const certificate = setupOptions.https === true ? await testCertificate(dir, apiName) : null;
-  const registry = openRegistry(join(dir, "registry.db"));
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  registry.createProject(project);
-  registry.saveImage(image, null);
-  registry.setCurrentImage(image.id);
-  let caller: TailnetNodeId = laptop;
-  let requests = 0;
   /** What the node's probe answers a guest command with. Tests replace it. */
   let answer = async (command: PylonCommand): Promise<CommandResult> =>
     command.kind === "unlink-port" ? { kind: "unlink-port", refused: null }
@@ -132,54 +120,39 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
   /** What the node's probe opens a pipe to. Tests replace it. */
   let pipe = async (argv: readonly string[]): Promise<ByteStream> => { throw new Error(`unexpected stream ${argv[0]}`); };
   let health = async (): Promise<NodeHealth> => { throw new Error("unexpected node health read"); };
-  /** What the project's remote answers a setup read with. Tests replace it. */
-  let read: ProjectMirror["setupInputs"] = () => Promise.reject(new Error("this test has no remote"));
-  const fake = fakeHarness();
   const noJobs = () => Promise.reject(new Error("the CLI tests' nodes hold every image they roll out"));
-  const images = startImageRollout({
-    registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node,
-    recipe: noJobs, release: null, log: () => {},
-  });
-  const startThread = threadStarter({
-    registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
-    mirror: { setupInputs: (p: RemoteProject, ref: { branch: string } | { commit: string }) => read(p, ref) },
-  });
-  const backfill = usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} });
-  const queue = setupOptions.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") }) : null;
-  const items = queue === null ? null : pipeline({ registry, queue });
-  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies });
-  const options = (port: number) => ({
-    queue,
-    pipeline: items,
-    planning: plans,
+  const control = await testApi(t, {
+    queue: setupOptions.queue === true,
+    pipeline: setupOptions.queue === true,
+    planning: true,
+    dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
+    images: (registry) => startImageRollout({
+      registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node,
+      recipe: noJobs, release: null, log: () => {},
+    }),
+    usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
     ...setupOptions.reviews === undefined ? {} : { reviews: setupOptions.reviews },
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     ...certificate === null ? {} : { https: { port: 0, certificate: async () => certificate } },
-    registry, host: "127.0.0.1", port, whois: async () => { requests++; return caller; }, allowed: new Set([laptop, phone]),
-    hostnames: new Set([apiName, "127.0.0.1"]), harness: fake.harness, wake: () => {}, previewPorts: { first: 10200, last: 10299 }, images, usageBackfill: backfill,
-    startThread,
+    allowed: new Set([laptop, phone]),
+    hostnames: new Set([apiName, "127.0.0.1"]),
     probes: new Map([[node, {
       command: (_pylonId: PylonId, command: PylonCommand) => { commands.push(command); return answer(command); },
       stream: (_pylonId: PylonId, argv: readonly string[]) => pipe(argv),
       health: () => health(),
     }]]),
   });
-  let api = await startApi(options(0));
-  t.after(async () => {
-    await items?.close();
-    await queue?.close();
-    await api.close();
-    await images.close();
-    await backfill.close();
-    registry.close();
-    await rm(dir, { recursive: true });
-  });
+  const { registry, fake, startThread } = control;
+  registry.createProject(project);
+  registry.saveImage(image, null);
+  registry.setCurrentImage(image.id);
+  t.after(() => rm(dir, { recursive: true }));
   const proxy = await socksProxy(t);
   const home = join(dir, "home");
   await mkdir(home);
   /** The environment of a CLI run: a home of its own, and the API through the proxy. */
   const env = (overrides: Record<string, string> = {}) => ({
-    PATH: process.env.PATH!, HOME: home, NEXUS_URL: `http://${apiName}:${api.port}`, NEXUS_SOCKS: `127.0.0.1:${proxy.port}`, ...overrides,
+    PATH: process.env.PATH!, HOME: home, NEXUS_URL: `http://${apiName}:${control.port}`, NEXUS_SOCKS: `127.0.0.1:${proxy.port}`, ...overrides,
   });
   function nexus(args: readonly string[], overrides?: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
@@ -194,25 +167,19 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
     return JSON.parse(res.stdout);
   }
   return {
-    registry, fake, proxy, home, api, env, nexus, json, commands, startThread,
-    /** How many requests the API has admitted. */
-    requests: () => requests,
-    callAs(id: TailnetNodeId) { caller = id; },
+    registry, fake, proxy, home, get api() { return control.api; }, env, nexus, json, commands, startThread,
+    requests: control.requests,
+    callAs: control.callAs,
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
     nodeHealth(next: typeof health) { health = next; },
-    remoteReads(next: typeof read) { read = next; },
-    localUrl: `http://127.0.0.1:${api.port}`,
+    remoteReads: control.remoteReads,
+    localUrl: `http://127.0.0.1:${control.port}`,
     /** The TLS port, once the API serves it. */
-    httpsPort: () => api.httpsPort,
+    httpsPort: () => control.httpsPort,
     /** The certificate's file, for NODE_EXTRA_CA_CERTS, as a tailnet certificate is trusted on a real Mac. */
     certFile: join(dir, "cert.pem"),
-    /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
-    async stop() {
-      const { port } = api;
-      await api.close();
-      return async () => { api = await startApi(options(port)); };
-    },
+    stop: control.stop,
   };
 }
 

@@ -3,16 +3,10 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { request } from "node:http";
-import { join } from "node:path";
-import { startApi, type ApiOptions } from "./api.ts";
-import { threadStarter } from "./threads.ts";
-import { itemThread, pipeline, type PipelineItem } from "./pipeline.ts";
+import { itemThread, type PipelineItem } from "./pipeline.ts";
 import type { ProjectId } from "../project.ts";
-import { threadQueue, type QueuedThread } from "./queue.ts";
-import { turnGate } from "./drain.ts";
-import { readEvents } from "./event-reader.ts";
-import { fakeHarness } from "./fake-harness.ts";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import type { QueuedThread } from "./queue.ts";
+import type { Thread, ThreadId } from "./registry.ts";
 import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Review } from "./review-model.ts";
 import type { ReviewLoop } from "./review.ts";
@@ -26,7 +20,7 @@ import { defaultProjectResources } from "./project.ts";
 import { githubTokenGrant } from "../secret-grants.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../test-kit.ts";
 import { imagePaths } from "./dashboard/items.ts";
 import { liveFrames, liveStreams } from "./dashboard/live-frames.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
@@ -35,6 +29,7 @@ import { startHint, type HintPart } from "./dashboard/start-hint.ts";
 import { agoText, clock } from "./dashboard/elapsed.ts";
 import { imageTypes } from "../image-types.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
+import { testApi, type TestApiOptions } from "./api-test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -45,42 +40,11 @@ const project = (id: string) => ({
 const image = testImage();
 const capacity = testCapacity();
 
-const dir = await tempDir("nexus-dashboard-");
-
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; text: string }
 
-async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
-  const registry = openRegistry(join(dir, `${randomUUID()}.db`));
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  let caller: TailnetNodeId | null = laptop;
-  const fake = fakeHarness({ onParked: (id, parked) => registry.recordParked(id as ThreadId, parked) });
-  const startThread = threadStarter({
-    registry, harness: fake.harness, wake: () => {}, dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" },
-    mirror: { setupInputs: () => Promise.reject(new Error("the dashboard tests read no remote")) },
-  });
-  const queue = threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") });
-  const items = pipeline({ registry, queue });
-  const api = await startApi({
-    registry, host: "127.0.0.1", port: 0,
-    whois: async () => caller,
-    allowed: new Set([laptop]),
-    hostnames: new Set(["127.0.0.1"]),
-    deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} },
-    harness: fake.harness,
-    startThread,
-    queue,
-    pipeline: items,
-    wake: () => {},
-    probes: new Map(),
-    previewPorts: { first: 10200, last: 10299 },
-    ...options,
-  });
-  t.after(async () => {
-    await items.close();
-    await queue.close();
-    await api.close();
-    registry.close();
-  });
+async function setup(t: TestContext, options: TestApiOptions = {}) {
+  const api = await testApi(t, { pipeline: true, planning: false, allowed: new Set([laptop]), probes: new Map(), ...options });
+  const { registry, fake, startThread } = api;
   function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Reply> {
     return new Promise((resolve, reject) => {
       const req = request({
@@ -115,12 +79,12 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
     registry.ingested(testObservation(node, { pylons }), []);
   }
   return {
-    registry, fake, call, start, startThread, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; },
-    events: (path: string) => readEvents(api.port, path),
+    registry, fake, call, start, startThread, observe, observeWith, callAs: api.callAs,
+    events: api.events,
   };
 }
 
-async function seeded(t: TestContext, options: Partial<ApiOptions> = {}) {
+async function seeded(t: TestContext, options: TestApiOptions = {}) {
   const s = await setup(t, options);
   for (const id of ["acme", "beta"]) assert.equal((await s.call("POST", "/v1/projects", project(id))).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
@@ -266,7 +230,7 @@ test("a running review's line offers to cancel it behind a confirm, and one that
 
 const phone = "nPHONE" as TailnetNodeId;
 /** A control plane whose deployers are the laptop only, with a review loop whose PRs from acme/nexus deploy. */
-const landingOptions = (landed: string[] = []): Partial<ApiOptions> => ({
+const landingOptions = (landed: string[] = []): TestApiOptions => ({
   allowed: new Set([laptop, phone]),
   deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} },
   reviews: {
