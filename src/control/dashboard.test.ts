@@ -25,6 +25,8 @@ import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai"
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { testImage } from "../test-kit.ts";
 import { imagePaths, liveFrames } from "./dashboard.ts";
+import { promptSenders, typeIntoClaude } from "./inbox.ts";
+import { usageLimitPrefix } from "./usage-limit.ts";
 import { startHint, type HintPart } from "./dashboard/start-hint.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -1969,6 +1971,21 @@ test("PR outputs show GitHub metadata and automated entries are not labelled as 
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${thread.id}`)).text);
   assert.deepEqual(detail.pullRequests, [pr]);
   assert.ok(detail.outputs.some((o: { kind: string; ref: string }) => o.kind === "pull-request" && o.ref === pr.url));
+});
+
+test("a Claude worker's prompt is Nexus's only when Nexus typed it, the usage limit's continue too, and one the person typed like Nexus's is theirs", async (t) => {
+  const s = await seeded(t);
+  const continued = `${usageLimitPrefix} The usage limit reset. Continue where you stopped.`;
+  const theirs = "[Nexus review] got this wrong, so leave the cache as it is.";
+  const entries: ClaudeEntry[] = [{ kind: "prompt", at: 1, text: continued, from: "person" }, { kind: "prompt", at: 2, text: theirs, from: "person" }];
+  const thread = await claudeThread(s, entries);
+  const typed = await typeIntoClaude(s.registry, thread.id, "s1", null, "usage-limit:s1:1", continued, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "usage-limit");
+  assert.equal(typed.kind, "sent");
+  const rows = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text).rows;
+  assert.ok(rows.includes(`Nexus usage limit ${continued}`), rows.join("\n"));
+  assert.ok(rows.includes(`You ${theirs}`), rows.join("\n"));
+  const frame = liveFrames(thread, null, Date.now, () => [], () => promptSenders(s.registry, thread.id))({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
+  assert.deepEqual(conversationOf(`id="convo"${(frame as { convo: string }).convo}<div class="dock"></main>`).rows, rows, "the page's stream names them as the page does");
 });
 
 test("a failed Claude worker's dashboard agrees with its registry event and API detail", async (t) => {

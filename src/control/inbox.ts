@@ -87,13 +87,16 @@ async function typeOnce(registry: Registry, thread: ThreadId, session: string, m
 
 const textHash = (text: string) => createHash("sha256").update(text).digest("hex");
 
+/** Who typed a prompt a Claude transcript reads as the person's: a Nexus sender, or null for the person. */
+export type PromptSenders = (text: string) => Sender | null;
+
 /**
- * Who typed each prompt of the thread's Claude worker that its transcript reads as the person's: a Nexus sender, or
- * null for the person. Nexus types its messages as the person would, so a prompt is Nexus's only when Nexus recorded
- * typing exactly its text into the thread. A thread with sends recorded before the record kept senders may show a
- * prompt Nexus typed then, which only its prefix tells apart.
+ * Who typed each prompt of the thread's Claude worker that its transcript reads as the person's. Nexus types its
+ * messages as the person would, so a prompt is Nexus's only when Nexus recorded typing exactly its text into the
+ * thread. A thread with sends recorded before the record kept senders may show a prompt Nexus typed then, which only
+ * its prefix tells apart.
  */
-export function promptSenders(registry: Registry, thread: ThreadId): (text: string) => Sender | null {
+export function promptSenders(registry: Registry, thread: ThreadId): PromptSenders {
   const typed = new Map<string, Sender | "person">();
   let before = false;
   for (const { sender, sha256 } of registry.claudeMessageSenders(thread)) {
