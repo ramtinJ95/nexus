@@ -32,7 +32,7 @@ import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
-import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
+import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase, type ThreadStatus } from "../reconcile.ts";
 import { chatgptTokenGrant, gitIdentitySchema, gitUrl, linkedName, reservedPorts, secretHostPattern, secretNamePattern, type BootInputs, type Project, type ProjectId } from "../project.ts";
 import { isImageId, type CommandResult, type NodeHealth, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
@@ -335,26 +335,59 @@ const imageCaching: Readonly<Record<ImageSource["source"], string>> = { transcri
 /** How long a read of a Claude worker's conversation waits for its transcript before answering what is stored. */
 const claudeReadMs = 5_000;
 
+/**
+ * What a route needs of a thread's status: the statuses it refuses, and whether the refusal says the pylon stays
+ * paused. A deleted thread's conversation and pylon are gone, and an archived thread's pylon stays paused, so its
+ * agent could not run a tool.
+ */
+const statusNeeds: Readonly<Record<"kept" | "open" | "pylon" | "active", { refuses: readonly ThreadStatus[]; paused: boolean }>> = {
+  kept: { refuses: ["deleted"], paused: false },
+  open: { refuses: ["archived", "deleted"], paused: false },
+  pylon: { refuses: ["archived", "deleted"], paused: true },
+  active: { refuses: ["idle", "archived", "deleted"], paused: true },
+};
+/** What a route needs of a thread: a status, and an agent of one kind. */
+interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude" }
+
 
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const claude = claudeConversations({ registry, probes });
   const agents = threadAgents({ registry, harness, claude });
 
-  function thread(id: string): Thread {
+  /** The thread `id` names, or the queue record of one that has not started, which has no row. */
+  function lookup(id: string): { thread: Thread } | { queued: QueuedRecord } {
     const found = registry.thread(id as ThreadId);
-    if (found !== undefined) return found;
-    const queued = queuedRecord(id);
-    if (queued !== undefined) throw new HttpError(409, queued.status === "queued" ? `thread ${id} is queued, so it has no pylon or conversation yet` : `thread ${id} was ${queued.status === "archived" ? "cancelled" : "deleted"} while queued, so it has no pylon or conversation`);
+    if (found !== undefined) return { thread: found };
+    const queued = registry.queuedThread(id as ThreadId);
+    if (queued !== undefined && queued.status !== "started") return { queued };
     throw new HttpError(404, `no thread ${id}`);
   }
 
-  /** A thread that has not started, which has a queue record and no row. */
-  function queuedRecord(id: string): QueuedRecord | undefined {
-    if (registry.thread(id as ThreadId) !== undefined) return undefined;
-    const record = registry.queuedThread(id as ThreadId);
-    return record?.status === "started" ? undefined : record;
+  /** The thread `id` names, once it has what `need` asks of it. */
+  function thread(id: string, need: Need = {}): Thread {
+    const found = lookup(id);
+    if ("thread" in found) return guard(found.thread, need);
+    const { status } = found.queued;
+    throw new HttpError(409, status === "queued" ? `thread ${id} is queued, so it has no pylon or conversation yet` : `thread ${id} was ${status === "archived" ? "cancelled" : "deleted"} while queued, so it has no pylon or conversation`);
   }
+
+  /** Why the thread does not have what `need` asks of it, or null when it does. */
+  function threadRefusal(t: Thread, need: Need): string | null {
+    const status = need.status === undefined ? undefined : statusNeeds[need.status];
+    if (status?.refuses.includes(t.status)) return `thread ${t.id} is ${t.status}${status.paused ? ", so its pylon stays paused" : ""}`;
+    if (need.agent === undefined || registry.agent(t).kind === need.agent) return null;
+    return need.agent === "claude" ? `thread ${t.id} has no Claude worker` : `thread ${t.id} has no conversation`;
+  }
+
+  function guard(t: Thread, need: Need): Thread {
+    const refused = threadRefusal(t, need);
+    if (refused !== null) throw new HttpError(409, refused);
+    return t;
+  }
+
+  /** The thread with its status now, which a request that waited may have seen change. */
+  const current = (t: Thread): Thread => ({ ...t, status: registry.threadStatus(t.id)! });
 
   function queueOrRefuse(): ThreadQueue {
     if (!options.queue) throw new HttpError(409, "queued threads need the control plane's GitHub token (github.tokenFile), which is not configured");
@@ -395,30 +428,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (registry.project(project.id) !== undefined) throw new HttpError(409, `project ${project.id} exists`);
     registry.createProject(project);
     return project;
-  }
-
-  function refuseDeleted(t: Thread): Thread {
-    if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
-    return t;
-  }
-
-  /** Only a harness thread has a harness conversation, and a deleted thread's is gone. */
-  function conversing(t: Thread): Thread {
-    refuseDeleted(t);
-    if (registry.agent(t).kind !== "harness") throw new HttpError(409, `thread ${t.id} has no conversation`);
-    return t;
-  }
-
-  function claudeWorker(t: Thread): Thread {
-    refuseDeleted(t);
-    if (registry.agent(t).kind !== "claude") throw new HttpError(409, `thread ${t.id} has no Claude worker`);
-    return t;
-  }
-
-  /** An archived thread's pylon stays paused, so its agent could not run a tool. */
-  function runnable(t: Thread): Thread {
-    if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
-    return conversing(t);
   }
 
   function reviewsOrRefuse(): ReviewLoop {
@@ -644,7 +653,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
-    if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    guard(t, { status: "kept" });
     registry.setThreadStatus(t.id, status);
     wakeThread(t);
     if (status === "deleted") {
@@ -675,7 +684,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * deleted all the same.
    */
   function retryPylon(t: Thread) {
-    if (t.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    guard(t, { status: "kept" });
     const refused = retryRefusal(observedPylon(t.pylonId));
     if (refused !== null) throw new HttpError(409, `pylon ${t.pylonId} cannot be retried. ${refused}`);
     if (!registry.retryPylon(t.pylonId)) throw new HttpError(409, `pylon ${t.pylonId} has not failed`);
@@ -808,7 +817,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * is refused with a 409 until it is.
    */
   async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>, wakes = true): Promise<T> {
-    refuseClosed(t);
+    guard(t, { status: "pylon" });
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
@@ -821,7 +830,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       result = await act(probe, pylon.pylonId);
     } catch (err) {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
-      refuseClosed(registry.thread(t.id)!);
+      guard(current(t), { status: "pylon" });
       const code = (err as Partial<ProbeError>).code;
       if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
       if (code === "unreachable") throw new HttpError(503, (err as Error).message);
@@ -829,7 +838,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       throw err;
     }
     // A delete that landed meanwhile may have released the pylon's ports already.
-    if (registry.thread(t.id)!.status === "deleted") throw new HttpError(409, `thread ${t.id} is deleted`);
+    guard(current(t), { status: "kept" });
     return result;
   }
 
@@ -849,12 +858,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   /** What each source of a conversation's image reads it with. Null is an image that is gone. */
   const imageReaders: { [K in ImageSource["source"]]: (t: Thread, source: Extract<ImageSource, { source: K }>) => Promise<Buffer | null> } = {
     async transcript(t, { source: _, ...image }) {
-      const session = registry.claudeWorker(claudeWorker(t).id)?.session ?? null;
+      const session = registry.claudeWorker(guard(t, { status: "kept", agent: "claude" }).id)?.session ?? null;
       if (session === null) return null;
       return whileRunning(t, (probe, pylonId) => readTranscriptImage((argv) => probe.stream(pylonId, argv), session, image));
     },
     async harness(t, { entry, message, part, sha256 }) {
-      const view = await agents.harness.view(conversing(t));
+      const view = await agents.harness.view(guard(t, { status: "kept", agent: "harness" }));
       const content = view.entries.find((e) => e.id === entry)?.model?.[message]?.content;
       const found = Array.isArray(content) ? content[part] : undefined;
       if (found?.type !== "image" || partHash(found) !== sha256) return null;
@@ -872,10 +881,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const type = imageType(bytes);
     if (type === null) throw new HttpError(415, "it is not a PNG, JPEG, GIF or WebP image");
     return { status: 200, file: bytes, type, cache: imageCaching[source.source] };
-  }
-
-  function refuseClosed(t: Thread) {
-    if (t.status === "deleted" || t.status === "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
   }
 
   /** Runs `argv` in the thread's pylon as a command whose answer the API waits for, at most 15 s. */
@@ -1125,12 +1130,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return { stream: (res) => followEvents(res, first, read) };
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/events$/, ([, id]) => {
-      const t = thread(id!);
-      return { stream: (res) => stream(res, conversing(t), () => agents.harness.watch(t), viewFrames()) };
+      const t = thread(id!, { status: "kept", agent: "harness" });
+      return { stream: (res) => stream(res, t, () => agents.harness.watch(t), viewFrames()) };
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, ([, id]) => {
-      const t = thread(id!);
-      return { stream: (res) => stream(res, claudeWorker(t), () => agents.claude.watch(t), claudeFrames()) };
+      const t = thread(id!, { status: "kept", agent: "claude" });
+      return { stream: (res) => stream(res, t, () => agents.claude.watch(t), claudeFrames()) };
     }],
     ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
       const t = thread(id!);
@@ -1138,8 +1143,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         stream(res) {
           const agent = registry.agent(t);
           return agent.kind === "claude"
-            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model, Date.now, () => registry.questions(t.id), () => promptSenders(registry, t.id)))
-            : stream<ConversationView>(res, conversing(t), () => agents.harness.watch(t), liveFrames(t));
+            ? stream<ClaudeConversation>(res, guard(t, { status: "kept" }), () => agents.claude.watch(t), liveFrames(t, agent.worker.model, Date.now, () => registry.questions(t.id), () => promptSenders(registry, t.id)))
+            : stream<ConversationView>(res, guard(t, { status: "kept", agent: "harness" }), () => agents.harness.watch(t), liveFrames(t));
         },
       };
     }],
@@ -1181,8 +1186,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === null || q.project === project)).map((q) => queuedView(registry, q)));
     }],
     ["GET", /^\/v1\/queued\/([^/]+)$/, (m) => {
-      const queued = queuedRecord(m[1]!);
-      if (queued === undefined) throw new HttpError(404, `no queued thread ${m[1]!}`);
+      const queued = registry.queuedThread(m[1]! as ThreadId);
+      if (queued === undefined || queued.status === "started") throw new HttpError(404, `no queued thread ${m[1]!}`);
       return ok(queuedView(registry, queued));
     }],
     ["GET", /^\/v1\/items$/, (_, r) => {
@@ -1211,7 +1216,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
     ["DELETE", /^\/v1\/threads\/([^/]+)$/, { person: "delete a thread" }, async (m) => {
-      return ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "deleted") : queuedStatus(m[1]!, "deleted"));
+      const found = lookup(m[1]!);
+      return ok("queued" in found ? queuedStatus(m[1]!, "deleted") : await setStatus(found.thread, "deleted"));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, { open: "what the person has read changes no thread or pylon" }, async (m, r) => {
       const t = thread(m[1]!);
@@ -1220,10 +1226,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return noContent;
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, { person: "archive a thread" }, async (m) => {
-      return ok(queuedRecord(m[1]!) === undefined ? await setStatus(thread(m[1]!), "archived") : queuedStatus(m[1]!, "archived"));
+      const found = lookup(m[1]!);
+      return ok("queued" in found ? queuedStatus(m[1]!, "archived") : await setStatus(found.thread, "archived"));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, { person: "unarchive a thread" }, (m) => {
-      return ok(queuedRecord(m[1]!) === undefined ? unarchive(thread(m[1]!)) : queuedStatus(m[1]!, "queued"));
+      const found = lookup(m[1]!);
+      return ok("queued" in found ? queuedStatus(m[1]!, "queued") : unarchive(found.thread));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, { open: "a page open on the thread only keeps its pylon awake" }, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
     // The body first, so the thread's status is read after the last await before the message is submitted.
@@ -1231,9 +1239,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const body = await r.body();
       const t = thread(m[1]!);
       const agent = registry.agent(t);
-      if (agent.kind !== "claude") return { status: 202, body: await sendMessage(runnable(t), body) };
-      if (t.status === "archived") throw new HttpError(409, `thread ${t.id} is archived`);
-      return { status: 202, body: await sendClaude(refuseDeleted(t), agent.worker.session, agent.worker.model, body) };
+      if (agent.kind !== "claude") return { status: 202, body: await sendMessage(guard(t, { status: "open", agent: "harness" }), body) };
+      return { status: 202, body: await sendClaude(guard(t, { status: "open" }), agent.worker.session, agent.worker.model, body) };
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/review$/, { person: "start a review" }, async (m, r) => {
       const body = parse(reviewSchema, await r.body({}));
@@ -1271,12 +1278,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, { person: "abort a thread's turn" }, async (m, r) => {
       const t = thread(m[1]!);
       const agent = registry.agent(t);
-      if (agent.kind === "claude") await interruptClaude(refuseDeleted(t), agent.worker.session);
-      else await harness.abort(conversing(t).id);
+      if (agent.kind === "claude") await interruptClaude(guard(t, { status: "kept" }), agent.worker.session);
+      else await harness.abort(guard(t, { status: "kept", agent: "harness" }).id);
       return noContent;
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, { person: "retry a thread's turn", startsTurn: true }, async (m) => {
-      await harness.retry(runnable(thread(m[1]!)).id);
+      await harness.retry(thread(m[1]!, { status: "open", agent: "harness" }).id);
       return noContent;
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, { person: "retry a thread's pylon" }, (m) => {
@@ -1322,8 +1329,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => {
       const t = thread(m[1]!);
-      if (registry.agent(t).kind !== "claude") return ok(await agents.harness.view(conversing(t)));
-      await Promise.race([claude.refresh(refuseDeleted(t)), sleep(claudeReadMs, undefined, { ref: false })]);
+      if (registry.agent(t).kind !== "claude") return ok(await agents.harness.view(guard(t, { status: "kept", agent: "harness" })));
+      await Promise.race([claude.refresh(guard(t, { status: "kept" })), sleep(claudeReadMs, undefined, { ref: false })]);
       return ok(claude.view(t));
     }],
     ["GET", /^\/v1\/images$/, () => ok(imagesView(registry))],
@@ -1453,8 +1460,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return {
       thread: t.id,
       look() {
-        const now = registry.thread(t.id)!;
-        if (now.status !== "active") return { kind: "over", error: { kind: "conflict", message: `thread ${t.id} is ${now.status}, so its pylon stays paused` } };
+        const now = current(t);
+        const refused = threadRefusal(now, { status: "active" });
+        if (refused !== null) return { kind: "over", error: { kind: "conflict", message: refused } };
         const pylon = pylonOf(now);
         if (pylon.actualState === "failed") return { kind: "over", error: { kind: "failed", message: `the pylon of ${t.id} failed: ${pylon.failed ?? "no reason given"}` } };
         return { kind: "pylon", state: pylon.actualState };
@@ -1496,7 +1504,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     } catch (err) {
       throw new HttpError(400, (err as Error).message);
     }
-    if (t.status !== "active") throw new HttpError(409, `thread ${t.id} is ${t.status}, so its pylon stays paused`);
+    guard(t, { status: "active" });
     const { node } = registry.pylon(t.pylonId)!;
     const probe = probes.get(node);
     if (probe === undefined) throw new HttpError(503, `no probe is configured for ${node}`);
