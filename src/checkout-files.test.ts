@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
+import { imageTypes } from "./image-types.ts";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipes, pathsFit } from "./checkout-files.ts";
 import type { OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
@@ -280,6 +281,14 @@ test("arguments too long for the probe's request are refused before any pipe ope
   assert.equal(pathsFit(fitting), true);
   await assert.rejects(reader.diff("start", fitting), /unreachable/);
   assert.equal(opened, 1);
+});
+
+test("each image extension of the table is served as its image type, in any case", () => {
+  for (const [extension, type] of Object.entries(imageTypes)) {
+    assert.equal(contentType(`shots/a${extension}`, Buffer.alloc(0)), type);
+    assert.equal(contentType(`shots/a${extension.toUpperCase()}`, Buffer.alloc(0)), type);
+    assert.equal(contentType(`shots/${extension}`, Buffer.alloc(0)), type, "a name that is only the extension");
+  }
 });
 
 test("only raster images keep their type, so a repository's HTML or SVG is never served as a page", () => {

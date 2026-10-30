@@ -22,7 +22,9 @@ import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { desiredPhase, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import { countedCapacity, type HerdrStatus, type NodeHealth, type NodeName } from "../protocol.ts";
-import { githubTokenGrant, linkedPort, type Project, type ProjectId } from "../project.ts";
+import { defaultProjectResources, githubTokenGrant, linkedPort, type Project, type ProjectId } from "../project.ts";
+import { defaultClaudeModel } from "../claude-state.ts";
+import { isImage } from "../image-types.ts";
 import { checkoutDir, harnessNamed, type SessionHarness } from "../sessions.ts";
 import type { ThreadDetail, ThreadRow } from "./api.ts";
 import { attentions, needsPerson, type Attention } from "./attention.ts";
@@ -41,7 +43,7 @@ import { itemView, type ItemPhase, type PipelineItem } from "./pipeline.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
 import { releaseView } from "./releases.ts";
 import { agoText, clock, span } from "./dashboard/elapsed.ts";
-import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageBackfill, type UsageTotals } from "./usage.ts";
+import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, utc, type Period, type UsageBackfill, type UsageTotals } from "./usage.ts";
 
 export interface DashboardOptions {
   registry: Registry;
@@ -433,8 +435,8 @@ ${image === null && html`<p class="error">No image is current yet, so a new pylo
 <textarea id="start-claude" name="claude" required placeholder="What should Claude do?" autofocus></textarea>
 <p class="hint">Runs <code>/poteto-mode</code> with this prompt, as <code>nexus start --claude</code> does.</p>
 <label for="start-model">Model (optional)</label>
-<input id="start-model" name="model" autocomplete="off" placeholder="claude-opus-5-5">
-<p class="hint">Opus 5.5 unless you name another.</p>
+<input id="start-model" name="model" autocomplete="off" placeholder="${defaultClaudeModel}">
+<p class="hint"><code>${defaultClaudeModel}</code> unless you name another.</p>
 </div>
 <div id="start-harness-fields" hidden>
 <label class="check"><input type="checkbox" id="start-planning" name="planning" value="true" disabled> Planning thread</label>
@@ -470,9 +472,6 @@ const nodeOptions = (nodes: readonly NodeRecord[]) => nodes.map((n) => html`<opt
 
 const newProjectButton = html`<a class="btn btn-primary" href="/projects/new" data-new-project>New project</a>`;
 
-/** What a new project gets beyond the dialog's fields, the same as `nexus project add` without its flags. */
-const newProjectResources = { cpus: 2, memoryGiB: 6, diskGiB: 10 };
-
 /**
  * The fields `nexus project add` asks for. The node is `auto` unless changed to one of the known nodes, as `nexus
  * project add` without --node, and the API's own checks, such as for an ID that exists, answer in the dialog. GitHub
@@ -481,10 +480,10 @@ const newProjectResources = { cpus: 2, memoryGiB: 6, diskGiB: 10 };
  */
 function projectDialog(c: Context, open: boolean): Html {
   const nodes = c.registry.nodes();
-  const { cpus, memoryGiB, diskGiB } = newProjectResources;
+  const { cpus, memoryGiB, diskGiB } = defaultProjectResources;
   return html`<dialog id="project-dialog" class="modal" aria-labelledby="project-h"${open && " data-autoopen"}>
 <header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
-${nodes.length === 0 ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(newProjectResources)}" data-github-grant="${JSON.stringify(githubTokenGrant)}">
+${nodes.length === 0 ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(defaultProjectResources)}" data-github-grant="${JSON.stringify(githubTokenGrant)}">
 <label for="project-id">ID</label>
 <input id="project-id" name="id" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-app" autofocus>
 <fieldset class="seg"><legend>Repository</legend>
@@ -661,7 +660,6 @@ ${card}`];
 /** A phone hides the wide columns of a usage table. */
 const usageColumns = tokenColumns.map((col) => ({ ...col, wide: col.field === "cacheWrite" || col.field === "cacheRead" }));
 const exact = (n: number) => n.toLocaleString("en-US");
-const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
 /** Each token count reads as 1.2M, with the exact number in its title and, for a script, in `data-tokens`. */
 function usageTable(id: string, keyHead: string, rows: readonly (UsageTotals & { key: Part })[]): Html {
@@ -1459,7 +1457,6 @@ function harnessShots(thread: ThreadId, entry: number, message: number, content:
     : [{ src: imageRoute(thread, { source: "harness", entry, message, part: i, sha256: partHash(part) }) }]));
 }
 
-const imageFile = /\.(?:png|jpe?g|gif|webp)$/i;
 /** What ends a path in prose: space, quotes, brackets and punctuation, but no period, which a sentence's end strips. */
 const pathBreaks = /[\s`'"()<>[\]{}:,;|*!?]+/;
 /**
@@ -1471,7 +1468,7 @@ export function imagePaths(text: string): string[] {
   const paths = new Set<string>();
   for (const word of text.split(pathBreaks)) {
     const token = word.replace(/\.$/, "");
-    if (!imageFile.test(token)) continue;
+    if (!isImage(token)) continue;
     const path = checkoutPath(token);
     if (path !== null) paths.add(path);
     if (paths.size === 6) break;
@@ -1487,7 +1484,7 @@ function checkoutPath(path: string): string | null {
 const writtenFile: Readonly<Record<string, string>> = { write: "path", Write: "file_path" };
 const writtenImages = (name: string, args: Readonly<Record<string, unknown>>): string[] => {
   const path = Object.hasOwn(writtenFile, name) ? args[writtenFile[name]!] : undefined;
-  return typeof path === "string" && imageFile.test(path) ? [checkoutPath(path)].filter((p) => p !== null) : [];
+  return typeof path === "string" && isImage(path) ? [checkoutPath(path)].filter((p) => p !== null) : [];
 };
 
 /**

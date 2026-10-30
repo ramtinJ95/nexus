@@ -227,6 +227,8 @@ export interface Project {
    */
   pipeline?: PipelineSetting | null | undefined;
 }
+/** What `nexus project add` and the dashboard's new-project dialog give a project unless told otherwise. */
+export const defaultProjectResources: Readonly<Project["resources"]> = { cpus: 2, memoryGiB: 6, diskGiB: 10 };
 export interface AutoReview { land: boolean; enabledBy: string }
 export interface PipelineSetting { autoStart: boolean }
 /** Templates mirror a remote, so they take a project that has one. */

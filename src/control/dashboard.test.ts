@@ -20,7 +20,7 @@ import type { Judgment } from "./judgment.ts";
 import type { AgentCall } from "./usage.ts";
 import type { JobId, NodeHealth, NodeName, PylonId, PylonObservation, ServiceFact, TailnetNodeId } from "../protocol.ts";
 import type { ImageId } from "../images.ts";
-import { githubTokenGrant } from "../project.ts";
+import { defaultProjectResources, githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { testImage } from "../test-kit.ts";
@@ -29,6 +29,8 @@ import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { usageLimitPrefix } from "./usage-limit.ts";
 import { startHint, type HintPart } from "./dashboard/start-hint.ts";
 import { agoText, clock } from "./dashboard/elapsed.ts";
+import { imageTypes } from "../image-types.ts";
+import { defaultClaudeModel } from "../claude-state.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -1583,6 +1585,7 @@ test("the new-project form adds the project nexus project add would, and the API
     id, repoUrl: `git@example.com:${id}.git`, defaultBranch: "main", defaultNode,
     resources: JSON.parse(form[1]!.replace(/&quot;/g, '"')), allowedHosts: [], secrets: [], logins: [], preSetup: null,
   });
+  assert.deepEqual(JSON.parse(form[1]!.replace(/&quot;/g, '"')), defaultProjectResources, "the resources nexus project add gives");
   const added = await add("acme", node);
   assert.equal(added.status, 201, added.text);
   assert.deepEqual(JSON.parse(added.text), { ...project("acme"), resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 } }, "the same project as the CLI's defaults");
@@ -1670,10 +1673,10 @@ test("the start dialog picks Claude Code for a prompt unless the reader picks th
     [["claude", true, "Claude Code", "for code work"], ["harness", false, "Nexus agent", "the control plane's own harness"]]);
   const field = (name: string) => new RegExp(`<(?:input|textarea)[^>]* name="${name}"[^>]*>`).exec(dialog)?.[0];
   assert.match(field("claude")!, /^<textarea [^>]*required/, "Claude Code's prompt is required");
-  assert.match(field("model")!, /placeholder="claude-opus-5-5"/);
+  assert.equal(/placeholder="([^"]*)"/.exec(field("model")!)?.[1], defaultClaudeModel, "the model the loop runs unless named");
   assert.doesNotMatch(field("title")!, /required/, "a Claude worker's title defaults to its prompt's first line");
   const claudeFields = textOf(dialog.split('<div id="start-claude-fields">')[1]!.split("</div>")[0]!);
-  assert.equal(claudeFields, "Prompt Runs /poteto-mode with this prompt, as nexus start --claude does. Model (optional) Opus 5.5 unless you name another.");
+  assert.equal(claudeFields, "Prompt Runs /poteto-mode with this prompt, as nexus start --claude does. Model (optional) claude-opus-5-5 unless you name another.");
   const harnessFields = dialog.split('<div id="start-harness-fields" hidden>')[1]!.split("</div>")[0]!;
   assert.match(harnessFields, /<input type="checkbox" id="start-planning" name="planning" value="true" disabled> Planning thread/, "the Nexus agent's planning box, sent only once that worker is picked");
 });
@@ -2388,6 +2391,8 @@ test("image paths in prose are the checkout's, each once, at most six", () => {
     ["shots/home.png", "docs/a.JPG", "out/b.webp"]);
   assert.deepEqual(imagePaths("Not https://example.com/x.png, /tmp/c.png, ../d.png, ~/e.png, src/../../f.gif or a.png.bak"), []);
   assert.deepEqual(imagePaths("1.png 2.gif 3.jpeg 4.jpg 5.webp 6.png 7.png"), ["1.png", "2.gif", "3.jpeg", "4.jpg", "5.webp", "6.png"]);
+  for (const extension of Object.keys(imageTypes)) assert.deepEqual(imagePaths(`See shots/a${extension}.`), [`shots/a${extension}`], extension);
+  assert.deepEqual(imagePaths("See .png and shots/.jpg, not shots.png/x"), [".png", "shots/.jpg"], "a name that is only the extension");
   assert.deepEqual(imagePaths(`${"x".repeat(1 << 20)} ${"a.".repeat(1 << 19)}`), [], "a long word takes one pass, as a reply's base64 would");
 });
 

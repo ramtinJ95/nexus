@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { diffOf, imageSides, maxDiffRows } from "./diff.js";
+import { imageTypes } from "../../image-types.ts";
 
 const edit = `diff --git a/src/a.ts b/src/a.ts
 index 1111111..2222222 100644
@@ -208,5 +209,7 @@ test("a changed image shows its before at the base and its after in the working 
   assert.deepEqual(imageSides(file("added", "a.webp"), "turn"), [{ label: "Before", none: "none, the file is new" }, { label: "After", query: { source: "file", path: "a.webp" } }]);
   assert.deepEqual(imageSides(file("deleted", "b.gif"), "start")?.[1], { label: "After", none: "none, the file was deleted" });
   assert.equal(imageSides(file("modified", "font.woff2"), "start"), null);
+  for (const extension of Object.keys(imageTypes)) assert.notEqual(imageSides(file("modified", `a${extension}`), "start"), null, extension);
+  assert.notEqual(imageSides(file("modified", "shots/.png"), "start"), null, "a name that is only the extension");
   assert.equal(imageSides(undefined, "start"), null);
 });

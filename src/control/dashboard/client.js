@@ -8,6 +8,7 @@ import { agoText, clock } from "./elapsed.ts";
 import { atEnd, endFollower } from "./scroll.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 import { startHint } from "./start-hint.ts";
+import { titleOf } from "../../thread-title.ts";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
@@ -444,12 +445,6 @@ function syncWorker(form) {
 document.addEventListener("change", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.name === "worker" && event.target.form?.matches("#start")) syncWorker(event.target.form);
 });
-
-/** As the CLI's titleOf: the first line that is not blank, cut to 80 characters. */
-function titleOf(prompt) {
-  const line = prompt.split("\n").find((l) => l.trim() !== "")?.trim() ?? prompt;
-  return line.length <= 80 ? line : `${line.slice(0, 80)}...`;
-}
 
 const projectRadios = () => [...document.querySelectorAll("#start input[name=project]")];
 
