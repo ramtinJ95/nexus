@@ -15,22 +15,22 @@
  * the diffs are read by the client from the JSON API, because each read reaches into the pylon and counts as a
  * human's visit, so they are read when asked for rather than with every poll.
  */
-import type { NodeName, TailnetNodeId } from "../ids.ts";
-import type { ProjectId } from "../project.ts";
-import type { ThreadRow } from "./wire.ts";
-import type { Thread, ThreadId } from "./registry.ts";
-import type { AgentView } from "./conversation-view.ts";
-import { queuedView, type QueuedThread } from "./queue.ts";
-import { periods, type Period } from "./usage.ts";
-import { ok, type Page } from "./dashboard/view.ts";
-import type { DashboardOptions, Context, Need } from "./dashboard/context.ts";
-import { assets } from "./dashboard/assets.ts";
-import { notFound } from "./dashboard/shell.ts";
-import { home, needsOf } from "./dashboard/home.ts";
-import { usagePage } from "./dashboard/usage-page.ts";
-import { pipelinePage } from "./dashboard/pipeline-page.ts";
-import { nodePage } from "./dashboard/node-page.ts";
-import { threadPage, queuedPage } from "./dashboard/thread-page.ts";
+import type { NodeName, TailnetNodeId } from "../../ids.ts";
+import type { ProjectId } from "../../project.ts";
+import type { ThreadRow } from "../wire.ts";
+import type { Thread, ThreadId } from "../registry.ts";
+import type { AgentView } from "../conversation-view.ts";
+import { queuedView, type QueuedThread } from "../queue.ts";
+import { periods, type Period } from "../usage.ts";
+import { ok, type Page } from "../dashboard/view.ts";
+import type { DashboardOptions, Context, Need } from "../dashboard/context.ts";
+import { assets } from "../dashboard/assets.ts";
+import { notFound } from "../dashboard/shell.ts";
+import { home, needsOf } from "../dashboard/home.ts";
+import { usagePage } from "../dashboard/usage-page.ts";
+import { pipelinePage } from "../dashboard/pipeline-page.ts";
+import { nodePage } from "../dashboard/node-page.ts";
+import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 
 /** Returns the page for a GET of `path`, or undefined when the path is not the dashboard's. */
 export function dashboard(options: DashboardOptions): (path: string, query: URLSearchParams, caller: TailnetNodeId) => Promise<Page | undefined> {

@@ -36,7 +36,7 @@ import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
 import type { JoinedNode, PortRange, Registry, StartKey, StoredPylon, Thread, ThreadId } from "./registry.ts";
-import { dashboard } from "./dashboard.ts";
+import { dashboard } from "./api/dashboard-routes.ts";
 import { liveStreams } from "./dashboard/live-frames.ts";
 import { attachScript } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
