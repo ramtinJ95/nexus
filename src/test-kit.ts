@@ -7,7 +7,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { join } from "node:path";
 import type { ImageId, ImageManifest } from "./images.ts";
-import type { NodeName } from "./ids.ts";
+import type { NodeName, PylonId } from "./ids.ts";
+import type { NodeCapacity, NodeObservation, PylonObservation } from "./protocol/observations.ts";
 
 /** Waits for the check. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
 export async function until(what: string, check: () => boolean | Promise<boolean>, timeoutMs = 60_000): Promise<void> {
@@ -53,6 +54,34 @@ export function testImage(over: Partial<ImageManifest> = {}): ImageManifest {
       neovim: "0.12.6", neovimSha256: "b".repeat(64),
     },
     ...over,
+  };
+}
+
+/** A node's capacity with nothing committed. */
+export function testCapacity(over: Partial<NodeCapacity> = {}): NodeCapacity {
+  return { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0, ...over };
+}
+
+export type RunningPylon = Extract<PylonObservation, { phase: "running" }>;
+export type StoppedPylon = Extract<PylonObservation, { phase: "stopped" }>;
+
+/** A pylon running img-000000000000 since 2027-01-01, with nothing read from it yet. */
+export function runningPylon(pylonId: PylonId, over: Partial<Omit<RunningPylon, "pylonId" | "phase">> = {}): RunningPylon {
+  return {
+    pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as ImageId, checkpoint: null },
+    services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0, ...over,
+  };
+}
+
+export function stoppedPylon(pylonId: PylonId, over: Partial<Omit<StoppedPylon, "pylonId" | "phase">> = {}): StoppedPylon {
+  return { pylonId, phase: "stopped", checkpoint: null, sessions: [], ...over };
+}
+
+/** A snapshot of `node` read now, by a probe that grants nothing and routes no preview. */
+export function testObservation(node: NodeName, over: Partial<NodeObservation> = {}): NodeObservation {
+  return {
+    node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity: testCapacity(), artifacts: [], jobs: [], pylons: [],
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [], ...over,
   };
 }
 
