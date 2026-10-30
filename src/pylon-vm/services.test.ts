@@ -1,15 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import type { Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { configSchema, type BootSpec, type SandboxRecord } from "./contracts.ts";
+import { fileNotFound, watched } from "./fake-vm.ts";
 import { lifecycleQueue, SandboxRuntime } from "./runtime.ts";
 import { answersScript, GuestServices } from "./services.ts";
 
@@ -20,7 +22,8 @@ import { answersScript, GuestServices } from "./services.ts";
  * as for a service whose cwd is missing. Every port listens while `listening` holds, every new port asked for is the
  * next from 41000, and every other command succeeds. Its relay applies each map as it is written, unless `relay.held`
  * holds, until `relay.apply()`, cannot listen on the relay ports `relay.unbindable` names, and counts each read of its
- * status in `relay.reads`.
+ * status in `relay.reads`. `guest.reads` counts the reads of the services file, whose stamp changes with its content,
+ * and `checks` each check of a service's process.
  */
 function fakeVm() {
 	const routes: string[][] = [];
@@ -45,7 +48,8 @@ function fakeVm() {
 	const running = new Set<string>();
 	const launches: string[] = [];
 	const scripts = new Map<string, string>();
-	const guest = { file: undefined as string | undefined, listening: true, exits: false };
+	const guest = { file: undefined as string | undefined, listening: true, exits: false, reads: 0 };
+	const checks = new Map<string, number>();
 	let nextPort = 41000;
 	const service = (command: string) => /services\/([a-z0-9-]+)\.pid/.exec(command)![1]!;
 	const vm = {
@@ -58,7 +62,12 @@ function fakeVm() {
 			events.push(`route ${JSON.stringify(targets.at(-1))}`);
 		},
 		async exec(argv: string[], options: { stdout: Writable }) {
-			const command = argv[3]!;
+			const command = watched(argv);
+			if (command === undefined) {
+				assert.equal(argv[0], "stat", `only the services file is checked directly: ${argv.join(" ")}`);
+				if (guest.file === undefined) return { exitCode: 1, stdout: "", stderr: `stat: cannot statx '${argv.at(-1)}': No such file or directory\n` };
+				return { exitCode: 0, stdout: `${Buffer.byteLength(guest.file)} 1 ${createHash("sha256").update(guest.file).digest("hex")}\n`, stderr: "" };
+			}
 			let exitCode = 0;
 			const relayMap = /relays\.json\.new' && mv /.test(command) ? /printf '%s' '([^']*)'/.exec(command) : null;
 			if (relayMap) {
@@ -71,10 +80,12 @@ function fakeVm() {
 				relay.reads++;
 				options.stdout.write(relay.status ?? "");
 			}
-			else if (command.startsWith("test -e")) exitCode = guest.file === undefined ? 1 : 0;
 			else if (command.includes("connect_ex")) options.stdout.write(guest.listening ? "True\n" : "False\n");
 			else if (command.includes("getsockname")) options.stdout.write(`${nextPort++}\n`);
-			else if (command.startsWith("test -f")) exitCode = running.has(service(command)) ? 0 : 1;
+			else if (command.startsWith("test -f")) {
+				checks.set(service(command), (checks.get(service(command)) ?? 0) + 1);
+				exitCode = running.has(service(command)) ? 0 : 1;
+			}
 			else if (command.startsWith("if test -f")) running.delete(service(command));
 			else if (command.startsWith("setsid")) {
 				if (!guest.exits) running.add(service(command));
@@ -83,18 +94,17 @@ function fakeVm() {
 			return { exitCode: 0, stderr: JSON.stringify({ state: "exited", exitCode }) };
 		},
 		fs: {
-			async stat() {
-				return { size: Buffer.byteLength(guest.file!) };
-			},
-			async readFile() {
-				return guest.file!;
+			async readFile(path: string) {
+				guest.reads++;
+				if (guest.file === undefined) throw fileNotFound(path);
+				return Buffer.from(guest.file);
 			},
 			async writeFile(path: string, content: string) {
 				scripts.set(/([a-z0-9-]+)\.sh$/.exec(path)![1]!, content);
 			},
 		},
 	};
-	return { vm: vm as unknown as VM, routes, targets, relayMaps, events, relay, running, launches, scripts, guest };
+	return { vm: vm as unknown as VM, routes, targets, relayMaps, events, relay, running, launches, scripts, guest, checks };
 }
 
 test("every route points at a relay port of Nexus's own, which the relay map carries to the routed port, a port keeps its relay port while it stays routed, and a freed one is taken again first", async (t) => {
@@ -213,7 +223,7 @@ test("a wake drops restored ports that are Nexus's own and routes the rest, rath
 	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
 	assert.deepEqual(logged.mock.calls.map((call) => call.arguments[0]), [
 		"services: old's saved port 750 is Nexus's own: sshd's 22, or the preview relay's 700 to 799, so it gets another",
-		"services: ad hoc service api is not restored: services.api.port is Nexus's own: sshd's 22, or the preview relay's 700 to 799",
+		"services: ad hoc service api is not restored: adhoc.json.api.port: is Nexus's own: sshd's 22, or the preview relay's 700 to 799",
 		"services: linked port 700 is Nexus's own: sshd's 22, or the preview relay's 700 to 799, so it is not routed",
 	]);
 });
@@ -477,6 +487,62 @@ test("an unpreview sent to the controller during an ensure of a service that nev
 	const unpreview = queue.run(() => runtime.handle({ action: "unpreview", name: "pylon-q", port: 3000 }));
 	assert.deepEqual(((await ensure) as { state: string }[]).map((f) => f.state), ["starting"]);
 	assert.deepEqual(await unpreview, { refused: "Port 3000 is the preview of service web, not a linked port. Remove the preview from /workspace/repo/.nexus/services.yaml to unpublish it" });
+});
+
+test("a status of a service whose health is its process checks the process once", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const guest = fakeVm();
+	guest.guest.file = declared("  worker:\n    command: work\n    health: process\n");
+	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	await services.operate("ensure");
+	await until(services, "worker", "ready");
+	guest.checks.clear();
+	assert.deepEqual((await services.operate("status")).map((f) => f.state), ["ready"]);
+	assert.equal(guest.checks.get("worker"), 1);
+});
+
+test("statuses read the services file again only once its stamp changed", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const guest = fakeVm();
+	guest.guest.file = declared("  web:\n    command: serve\n    port: 3000\n    preview: true\n");
+	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	assert.deepEqual((await services.operate("status")).map((f) => f.name), ["web"]);
+	assert.deepEqual((await services.operate("status")).map((f) => f.name), ["web"]);
+	assert.equal(guest.guest.reads, 1, "an unchanged file is not read again");
+	guest.guest.file = declared("  web:\n    command: serve\n    port: 3000\n    preview: true\n  api:\n    command: serve\n    port: 3001\n    preview: true\n");
+	assert.deepEqual((await services.operate("status")).map((f) => f.name), ["web", "api"]);
+	assert.equal(guest.guest.reads, 2);
+	guest.guest.file = undefined;
+	assert.deepEqual((await services.operate("status")).map((f) => f.name), ["web", "api"], "a removed file declares nothing, and a status leaves running services to the next ensure");
+	assert.equal(guest.guest.reads, 2, "a missing file is never read");
+});
+
+test("a services status that changes nothing leaves status.json as it was, and one that configures a newly declared preview rewrites it", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	t.mock.method(console, "log", () => {});
+	const guest = fakeVm();
+	guest.guest.file = declared("  web:\n    command: serve\n    port: 3000\n    preview: true\n");
+	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	t.after(() => services.close());
+	await services.initialize();
+	const record = { name: "pylon-q", createdAt: "2027-01-01T00:00:00.000Z", labels: {}, config: { diskGiB: 8, workspace: "/workspace" } } as unknown as SandboxRecord;
+	const runtime = new SandboxRuntime(root, record, { resources: { cpus: 1, memoryGiB: 1 } } as BootSpec, { vm: guest.vm, settleMs: 0, services });
+	const status = join(root, "status.json");
+	await runtime.handle({ action: "services", name: "pylon-q", op: "ensure" });
+	const written = await stat(status);
+	await runtime.handle({ action: "services", name: "pylon-q", op: "status" });
+	assert.equal((await stat(status)).ino, written.ino, "the status file was written again, although nothing in it changed");
+	guest.guest.file = declared("  web:\n    command: serve\n    port: 3000\n    preview: true\n  api:\n    command: serve\n    port: 3001\n    preview: true\n");
+	await runtime.handle({ action: "services", name: "pylon-q", op: "status" });
+	assert.notEqual((await stat(status)).ino, written.ino);
+	assert.deepEqual(Object.keys(JSON.parse(await readFile(status, "utf8")).previews), ["web", "api"], "the probe's preview gateway reads the new preview's origin from it");
 });
 
 /** What the guest's health check prints for the port, and the path if given, and how long it took. */

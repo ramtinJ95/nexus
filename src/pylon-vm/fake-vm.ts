@@ -1,7 +1,8 @@
 /**
  * Test double for a Gondolin 0.13 VM whose guest commands start and never finish, with file writes that hold where
- * a test says. guest.ts runs every command through a watchdog that reports its outcome on stderr, so
- * `test -e <path>/done` exits 1 and every other command exits 0.
+ * a test says. guest.ts runs a shell command through a watchdog that reports its outcome on stderr, and a short one
+ * directly, and every command exits 0 unless `fails` says. A command's files read as a launched process's that runs
+ * on: its `pid` reads 42, and its `done`, `output` and `truncated` are missing, as sandboxd reports a missing file.
  *
  * Its file writes end as Gondolin's do (sandbox/server-ops.js, writeGuestFile). One `queued` for its turn, or
  * `sending` its data, ends when its signal aborts, the latter once its cleanup EOF goes out. One `blocked`, sending
@@ -26,8 +27,10 @@ export interface FakeVm {
 	/** The guest answers every write that holds and every command that hangs, and the bridge drains. */
 	answer(): void;
 	readonly checkpoints: string[];
-	/** The guest commands that ran, in order. */
+	/** The guest commands that ran, in order: a watchdog's shell command, or a direct one's argv joined by spaces. */
 	readonly commands: string[];
+	/** The guest files read, in order. */
+	readonly reads: string[];
 	/** What closed, in order: "ssh" for the guest terminal's SSH, "vm" for the VM. */
 	readonly closed: string[];
 	/** The most commands outstanding at once, and the commands the guest refused as full. */
@@ -36,6 +39,13 @@ export interface FakeVm {
 }
 
 /** `hold` says where a write to `path` holds, or undefined for one that ends at once, and `fails` which commands exit 1. */
+/** The shell command a guest.ts watchdog runs, or undefined for a direct exec. */
+export function watched(argv: readonly string[]): string | undefined {
+	return argv[0] === "python3" && argv[1] === "-c" && argv[2]!.startsWith("import json,os,signal,subprocess,sys,time") ? argv[3] : undefined;
+}
+/** Gondolin's error for a read of a file the guest does not have (sandbox/server.js, sandboxd/main.zig). */
+export const fileNotFound = (path: string) => new Error(`failed to read guest file '${path}': file_read_failed: FileNotFound`);
+
 export function fakeVm(hold: (path: string) => WritePhase | undefined = () => undefined, fails: (cmd: string) => boolean = () => false, hangs: (cmd: string) => boolean = () => false): FakeVm {
 	type Write = { path: string; phase: WritePhase; end(error?: Error): void };
 	const held: Write[] = [];
@@ -43,6 +53,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 	const slotWaiters = new Set<() => void>();
 	const checkpoints: string[] = [];
 	const commands: string[] = [];
+	const reads: string[] = [];
 	const closed: string[] = [];
 	const refused: string[] = [];
 	const hanging = new Set<(error?: Error) => void>();
@@ -65,7 +76,8 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 	};
 	const vm = {
 		async exec(argv: string[], options?: { signal?: AbortSignal }) {
-			const cmd = argv[3]!;
+			const shell = watched(argv);
+			const cmd = shell ?? argv.join(" ");
 			if (outstanding >= 64) {
 				refused.push(cmd);
 				throw new Error("error queue_full: too many concurrent exec requests (limit 64)");
@@ -84,7 +96,8 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 						};
 						hanging.add(answer);
 					});
-				const exitCode = /\/done'?$/.test(cmd) || fails(cmd) ? 1 : 0;
+				const exitCode = fails(cmd) ? 1 : 0;
+				if (shell === undefined) return { exitCode, stdout: "", stderr: "" };
 				return { exitCode: 0, stdout: "", stderr: JSON.stringify({ state: "exited", exitCode }) };
 			})().finally(() => (outstanding -= 1));
 			const signal = options?.signal;
@@ -105,9 +118,12 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 					for (const waiter of waiters.filter((w) => path.endsWith(w.suffix))) waiter.accept();
 				});
 			},
-			async readFile() {
-				return "42";
+			async readFile(path: string) {
+				reads.push(path);
+				if (/\/(done|output|truncated)$/.test(path)) throw fileNotFound(path);
+				return Buffer.from("42");
 			},
+			async deleteFile() {},
 		},
 		async enableSsh() {
 			return { port: 1, identityFile: "/nonexistent/key", close: async () => void closed.push("ssh") };
@@ -133,6 +149,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 		},
 		checkpoints,
 		commands,
+		reads,
 		closed,
 		get peak() {
 			return peak;

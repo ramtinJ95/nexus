@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import type { VM } from "@earendil-works/gondolin";
-import { fakeVm } from "./fake-vm.ts";
+import { fakeVm, fileNotFound } from "./fake-vm.ts";
 import { GuestProcesses } from "./processes.ts";
 
 /** The work's error, or "answered". The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
@@ -15,7 +15,7 @@ test("a status wait on a running command ends as soon as the controller stops, s
 	const processes = new GuestProcesses(fake.vm, stopping.signal);
 	const pid = await processes.launch("sleep 600", "/");
 	const waiting = processes.status(pid, 60_000);
-	while (!fake.commands.some((command) => command.endsWith("/done'"))) await delay(10);
+	while (!fake.reads.some((path) => path.endsWith("/done"))) await delay(10);
 	const reason = new Error("the controller is stopping");
 	stopping.abort(reason);
 	assert.equal(await outcome(waiting), reason, "the wait went on after the stop, so the stop would close the VM under it or wait out its 60 s");
@@ -27,7 +27,8 @@ test("a file read that the closing VM never answers ends as soon as the controll
 	let reading = false;
 	// Gondolin's file read ends when its signal aborts, and one that reaches a VM as it closes is never answered.
 	vm.fs.readFile = (async (path: string, options?: { signal?: AbortSignal }) => {
-		if (path.endsWith("/pid")) return "42";
+		if (path.endsWith("/pid")) return Buffer.from("42");
+		if (path.endsWith("/done")) throw fileNotFound(path);
 		reading = true;
 		const signal = options?.signal;
 		return await new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
@@ -53,25 +54,79 @@ test("a file write waiting for its turn ends as soon as the controller stops, so
 	assert.ok(settled instanceof Error && settled.message === "operation aborted", `the write went on waiting: ${String(settled)}`);
 });
 
-/** A guest whose command files are `files`, keyed by name. `onCheck` runs on each `test -e` of a file before it answers. */
-function guest(files: Map<string, string>, onCheck: (name: string) => void = () => {}) {
+/**
+ * A guest whose command files are `files`, keyed by name, and missing otherwise. `onRead` runs on each read of a file
+ * before it answers. It counts the guest commands it runs and the writes of the worker.
+ */
+function guest(files: Map<string, string>, onRead: (name: string) => void = () => {}) {
 	const { vm } = fakeVm();
-	vm.exec = (async (argv: string[]) => {
-		const path = /^test -e '(.*)'$/.exec(argv[3]!)?.[1];
-		const name = path?.slice(path.lastIndexOf("/") + 1);
-		const exitCode = name === undefined || files.has(name) ? 0 : 1;
-		if (name !== undefined) onCheck(name);
-		return { exitCode: 0, stdout: "", stderr: JSON.stringify({ state: "exited", exitCode }) };
+	const counts = { execs: 0, workerWrites: 0 };
+	vm.exec = (async () => {
+		counts.execs++;
+		return { exitCode: 0, stdout: "", stderr: "" };
 	}) as unknown as VM["exec"];
-	vm.fs.readFile = (async (path: string) => files.get(path.slice(path.lastIndexOf("/") + 1)) ?? "") as unknown as VM["fs"]["readFile"];
-	return vm;
+	vm.fs.readFile = (async (path: string) => {
+		const name = path.slice(path.lastIndexOf("/") + 1);
+		onRead(name);
+		const content = files.get(name);
+		if (content === undefined) throw fileNotFound(path);
+		return Buffer.from(content);
+	}) as unknown as VM["fs"]["readFile"];
+	vm.fs.writeFile = (async (path: string) => {
+		if (path.endsWith("/worker.py")) counts.workerWrites++;
+	}) as unknown as VM["fs"]["writeFile"];
+	return Object.assign(vm, { counts });
 }
+const exited = (exitCode: number) => JSON.stringify({ exitCode, truncated: false });
+
+test("a launch and a status of the finished command run one guest command, the launcher, and the worker is written once for two launches", async () => {
+	const files = new Map([["pid", "42"], ["output", "hello\n"], ["done", exited(0)]]);
+	const vm = guest(files);
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	const status = await processes.status(await processes.launch("echo hello", "/"), 0);
+	assert.deepEqual(status, { pid: status.pid, running: false, output: "hello\n", exitCode: 0, truncated: false });
+	assert.equal(vm.counts.execs, 1, "only the launcher started a guest process");
+	await processes.launch("echo again", "/");
+	assert.equal(vm.counts.workerWrites, 1);
+	assert.equal(vm.counts.execs, 2);
+});
+
+test("a command without its done file is still running, with the output so far", async () => {
+	const files = new Map([["pid", "42"], ["output", "partial"]]);
+	const processes = new GuestProcesses(guest(files), new AbortController().signal);
+	const pid = await processes.launch("sleep 600", "/");
+	assert.deepEqual(await processes.status(pid, 0), { pid, running: true, output: "partial", truncated: false });
+});
+
+test("a read of a command's file that fails for another reason than a missing file fails the status", async () => {
+	const files = new Map([["pid", "42"]]);
+	const vm = guest(files, (name) => {
+		if (name === "output") throw new Error("failed to read guest file: file_read_failed: AccessDenied");
+	});
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	const pid = await processes.launch("sleep 600", "/");
+	await assert.rejects(processes.status(pid, 0), /AccessDenied/);
+});
+
+test("a worker whose write failed is written again by the next launch", async () => {
+	const vm = guest(new Map([["pid", "42"]]));
+	let fail = true;
+	vm.fs.writeFile = (async () => {
+		vm.counts.workerWrites++;
+		if (fail) throw new Error("operation aborted");
+	}) as unknown as VM["fs"]["writeFile"];
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	await assert.rejects(processes.launch("true", "/"), /operation aborted/);
+	fail = false;
+	await processes.launch("true", "/");
+	assert.equal(vm.counts.workerWrites, 2);
+});
 
 test("a command that finishes silently between the launcher's checks for its pid and its end launches and reports its exit", async () => {
 	const files = new Map<string, string>();
 	const vm = guest(files, (name) => {
 		if (name !== "pid" || files.size) return;
-		files.set("pid", "42").set("output", "").set("done", JSON.stringify({ exitCode: 0, truncated: false }));
+		files.set("pid", "42").set("output", "").set("done", exited(0));
 	});
 	const processes = new GuestProcesses(vm, new AbortController().signal);
 	const pid = await processes.launch("herdr pane run", "/");
@@ -82,9 +137,28 @@ test("a command that finishes silently between the launcher's checks for its pid
 
 test("a command the guest could not spawn fails its launch with the exit code and the reason", async () => {
 	const files = new Map([
-		["done", JSON.stringify({ exitCode: 127, truncated: false })],
+		["done", exited(127)],
 		["output", "No such file or directory: 'x'"],
 	]);
 	const processes = new GuestProcesses(guest(files), new AbortController().signal);
 	await assert.rejects(processes.launch("x", "/missing"), /could not start.*127.*No such file or directory: 'x'/s);
+});
+
+test("a finished command's status is answered although forgetting older handles fails on another one's read", async (t) => {
+	t.mock.method(console, "error", () => {});
+	const done = new Set<string>();
+	const { vm } = fakeVm();
+	vm.fs.readFile = (async (path: string) => {
+		if (path.endsWith("/pid")) return Buffer.from("42");
+		if (path.endsWith("/output")) return Buffer.from("out");
+		if (path.endsWith("/done") && done.has(path)) return Buffer.from(exited(0));
+		if (path.endsWith("/done") && done.size > 0) throw new Error("failed to read guest file: file_read_failed: InputOutput");
+		throw fileNotFound(path);
+	}) as unknown as VM["fs"]["readFile"];
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	const pids = [];
+	for (let i = 0; i < 129; i++) pids.push(await processes.launch("sleep 600", "/"));
+	const last = pids.at(-1)!;
+	done.add(`/var/lib/pi-sandbox/commands/${last}/done`);
+	assert.deepEqual(await processes.status(last, 0), { pid: last, running: false, output: "out", exitCode: 0, truncated: false });
 });

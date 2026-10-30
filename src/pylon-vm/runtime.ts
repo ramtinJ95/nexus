@@ -2,19 +2,20 @@ import { access, readFile, rename } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { join, posix } from "node:path";
 import { VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
+import { z } from "zod";
 import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
 import {
 	checked,
 	execute,
 	freeReservedSlots,
-	guestExists,
+	readGuestFile,
 	serviceRoot,
 	stagingRoot,
 	writeFiles,
 } from "./guest.ts";
 import { networkOptions } from "./network.ts";
 import { openTerminal } from "./portals.ts";
-import { GuestProcesses } from "./processes.ts";
+import { commandsRoot, GuestProcesses } from "./processes.ts";
 import { startRelay } from "./relay.ts";
 import { GuestServices } from "./services.ts";
 import { shellQuote as q } from "../project.ts";
@@ -79,7 +80,7 @@ export async function loadKvm(vm: VM, resources: BootSpec["resources"]): Promise
 const chained = (commands: readonly string[]) => commands.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n");
 
 /** Actions that wait on a process, only read, or touch only the host, which run beside the lifecycle queue so that they never wait behind it. */
-const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "read", "write-files", "logs", "update-secret"]);
+const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "write-files", "logs", "update-secret"]);
 export const runsBesideQueue = (action: string) => besideQueue.has(action);
 
 /**
@@ -151,7 +152,7 @@ export class SandboxRuntime {
 	private bootedAt: string | undefined;
 	private recovery: string | undefined;
 	private terminal:
-		| { user: string; command: string; access: SshAccess; close(): Promise<void> }
+		| { user: string; access: SshAccess; close(): Promise<void> }
 		| undefined;
 	private state:
 		| "starting"
@@ -226,7 +227,7 @@ export class SandboxRuntime {
 		// files must never be mistaken for newly booted unrelated processes.
 		await checked(
 			vm,
-			`rm -f ${serviceRoot}/*.pid; rm -rf /var/lib/pi-sandbox/commands ${stagingRoot}`,
+			`rm -f ${serviceRoot}/*.pid; rm -rf ${commandsRoot} ${stagingRoot}; mkdir -p -m 700 ${commandsRoot}`,
 		);
 		// Before the services, whose routes all point at the relay.
 		await startRelay(vm);
@@ -252,10 +253,7 @@ export class SandboxRuntime {
 			const exitCode = await runToEnd(this.processes, await this.processes.launch(hook, "/", true, 120));
 			if (exitCode !== 0) console.error(`Boot hook exited ${exitCode}`);
 		}
-		const marker =
-			resume && (await guestExists(vm, setupMarker))
-				? await vm.fs.readFile(setupMarker, { encoding: "utf8" })
-				: null;
+		const marker = resume ? ((await readGuestFile(vm, setupMarker, this.stopping.signal))?.toString("utf8") ?? null) : null;
 		const done = setupOnDisk(marker, this.record);
 		this.setupRecorded = done !== null;
 		this.failures = done?.setupError ? [{ kind: "setup", message: done.setupError }] : [];
@@ -324,8 +322,14 @@ export class SandboxRuntime {
 			...(this.recovery ? { recovery: this.recovery } : {}),
 		};
 	}
+	/** The status this controller last wrote. While it runs, nothing else writes status.json, so an equal one is not written again. */
+	private written: string | undefined;
 	private async persistStatus(): Promise<void> {
-		await saveJson(join(this.dir, "status.json"), this.status());
+		const status = this.status();
+		const json = JSON.stringify(status);
+		if (json === this.written) return;
+		await saveJson(join(this.dir, "status.json"), status);
+		this.written = json;
 	}
 	private async persisting<T>(operation: Promise<T>): Promise<T> {
 		try {
@@ -454,20 +458,13 @@ export class SandboxRuntime {
 					this.terminal = {
 						user: action.user,
 						access: { user: action.user, port: terminal.port, identityFile: ssh.identityFile },
-						command: `ssh -p ${terminal.port} -i ${q(ssh.identityFile)} -o ForwardAgent=no -o ClearAllForwardings=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${action.user}@127.0.0.1`,
 						close: async () => {
 							await terminal.close();
 							await ssh.close();
 						},
 					};
 				}
-				return {
-					name: this.record.name,
-					access: this.terminal.access,
-					command: this.terminal.command,
-					handoff:
-						"Run this command in a terminal on this host to access the guest. No host credentials were copied",
-				};
+				return { name: this.record.name, access: this.terminal.access };
 			}
 			case "exec":
 				return this.processes!.status(
@@ -481,21 +478,6 @@ export class SandboxRuntime {
 				return this.processes!.status(action.pid, action.timeoutMs);
 			case "exec-kill":
 				return this.processes!.kill(action.pid);
-			case "read": {
-				const result = await execute(
-					vm,
-					`head -c 65537 ${q(action.path)}`,
-					"/",
-					10000,
-				);
-				if (result.exitCode !== 0)
-					throw new Error(`Guest file could not be read: ${result.output}`);
-				return {
-					path: action.path,
-					content: result.output,
-					truncated: result.truncated,
-				};
-			}
 			case "write-files":
 				await writeFiles(vm, action.files, this.stopping.signal);
 				return { paths: action.files.map((file) => file.path) };
@@ -600,6 +582,5 @@ export function setupOnDisk(marker: string | null, record: SandboxRecord): Setup
 	return ran.setupError === undefined ? {} : { setupError: ran.setupError };
 }
 export async function readIntent(dir: string): Promise<{ prepare: boolean }> {
-	const { z } = await import("zod");
 	return z.strictObject({ prepare: z.boolean() }).parse(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")));
 }

@@ -1,0 +1,7 @@
+ref: HEAD (95fb76b), node v26.12.1
+a probe exec, launch and status of a one-line command: 1 guest commands (launcher x1), 4 file reads, 1 file writes, 1 deletes
+a second probe exec: 1 guest commands (launcher x1), 4 file reads, 0 file writes, 1 deletes
+a services status of one process-health service, after an ensure, which left status.json as it was: 3 guest commands (stat x1, cat x1, test x1), 0 file reads, 0 file writes, 0 deletes
+a second services status, which left status.json as it was: 3 guest commands (stat x1, cat x1, test x1), 0 file reads, 0 file writes, 0 deletes
+a services status through the client: 1 controller requests (services)
+an inspect through the client: 1 controller requests (inspect)

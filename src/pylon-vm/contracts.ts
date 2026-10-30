@@ -159,7 +159,6 @@ export const actionSchema = z.discriminatedUnion("action", [
 		...identity,
 		pid: z.string().uuid(),
 	}),
-	z.strictObject({ action: z.literal("read"), ...identity, path: guestPath }),
 	z.strictObject({
 		action: z.literal("write-files"),
 		...identity,
@@ -247,10 +246,6 @@ export const statusSchema = z.strictObject({
 		.union([z.string().uuid(), z.number().int().positive()])
 		.optional(),
 	recovery: z.string().optional(),
-});
-export const inspectionSchema = z.object({
-	name: nameSchema,
-	status: statusSchema,
 });
 export const replySchema = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown() }),

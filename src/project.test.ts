@@ -118,6 +118,7 @@ function guestWith(yaml: string): VM {
     },
     setIngressRoutes() {},
     async exec(argv: string[], options: { stdout: Writable }) {
+      if (argv[0] === "stat") return { exitCode: 0, stdout: `${Buffer.byteLength(yaml)} 1 0\n`, stderr: "" };
       const command = argv[3]!;
       const map = /relays\.json\.new' && mv /.test(command) ? /printf '%s' '([^']*)'/.exec(command) : null;
       if (map) {
@@ -130,11 +131,8 @@ function guestWith(yaml: string): VM {
       return { exitCode: 0, stderr: JSON.stringify({ state: "exited", exitCode: 0 }) };
     },
     fs: {
-      async stat() {
-        return { size: Buffer.byteLength(yaml) };
-      },
       async readFile() {
-        return yaml;
+        return Buffer.from(yaml);
       },
       async writeFile() {},
     },

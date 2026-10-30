@@ -1,0 +1,7 @@
+ref: origin/main (b636ea9), node v26.12.1
+a probe exec, launch and status of a one-line command: 8 guest commands (mkdir x1, launcher x1, test x5, rm x1), 3 file reads, 1 file writes, 0 deletes
+a second probe exec: 8 guest commands (mkdir x1, launcher x1, test x5, rm x1), 3 file reads, 1 file writes, 0 deletes
+a services status of one process-health service, after an ensure, which rewrote status.json: 5 guest commands (test x3, fs.stat x1, cat x1), 1 file reads, 0 file writes, 0 deletes
+a second services status, which rewrote status.json: 5 guest commands (test x3, fs.stat x1, cat x1), 1 file reads, 0 file writes, 0 deletes
+a services status through the client: 2 controller requests (inspect, services)
+an inspect through the client: 2 controller requests (inspect, inspect)
