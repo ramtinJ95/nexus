@@ -33,3 +33,15 @@ export function singleFlight(run: () => Promise<void>, stopped: () => boolean = 
 }
 
 export type SingleFlight = ReturnType<typeof singleFlight>;
+
+/** Runs each `work` after the one before it settles. A failure goes to its own caller and does not stop the next. */
+export function serialQueue() {
+  let last: Promise<unknown> = Promise.resolve();
+  return {
+    run<T>(work: () => Promise<T>): Promise<T> {
+      const next = last.then(() => work());
+      last = next.catch(() => undefined);
+      return next;
+    },
+  };
+}
