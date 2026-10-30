@@ -1,6 +1,6 @@
 # The control plane's turn gate, poll timers, node lookup, error statuses and peer puts
 
-`run.sh` ran in this thread's pylon on 2026-10-30, on Node 26.12.1, against main at ccc2f2e and this branch at 483c483, the last commit that changes code.
+`run.sh` ran in this thread's pylon on 2026-10-30, on Node 26.12.1, against main at fdbc058 and this branch at 60097ad, the last commit that changes code.
 
 `capture.ts` starts each checkout's control plane through `startControlPlane`, as `main.ts` wires it, on loopback, with a fake tailscaled. Each node's probe is the real `connectProbe` client. rj-firebat's points at a loopback stand-in that streams the snapshots the capture sends, counts `PUT /v1/peers` and answers the node-health read with 403. infra-testbench's points at a closed port. The capture writes what the API answers, and how many peer lists reach rj-firebat after each snapshot.
 

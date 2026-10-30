@@ -1,4 +1,4 @@
-# branch's code, 483c483 test(chatgpt-token): a node that joins later gets the token, with the branch's tests
+# branch's code, 60097ad test(chatgpt-token): a node that joins later gets the token, with the branch's tests
 ✔ callers off the allowlist, or unknown to tailscaled, are refused
 ✔ a path that does not decode is a 400 to an allowed caller and a 403 to any other, and a Host that does not parse is a 403
 ✔ any tailnet node may ask who it is and what it may do, under the API's names only

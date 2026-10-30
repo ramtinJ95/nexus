@@ -1,4 +1,4 @@
-# main's code, ccc2f2e Give the Mac CLI one copy of its worker flags, one poll loop, one consumer check and one reused connection (#333), with the branch's tests
+# main's code, fdbc058 refactor(dashboard): give the dashboard one copy of each shared formatter, wire shape and constant (#335), with the branch's tests
 ✔ callers off the allowlist, or unknown to tailscaled, are refused
 ✔ a path that does not decode is a 400 to an allowed caller and a 403 to any other, and a Host that does not parse is a 403
 ✔ any tailnet node may ask who it is and what it may do, under the API's names only
