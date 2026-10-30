@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { themes } from "../dashboard.ts";
+import { themes } from "./shell.ts";
 
 const css = readFileSync(new URL("./style.css", import.meta.url), "utf8");
 
