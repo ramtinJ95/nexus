@@ -24,24 +24,33 @@ export function rewindTo(path: string, version: number): void {
   const rewound = `${path}.rewound`;
   rmSync(rewound, { force: true });
   const db = new DatabaseSync(rewound);
-  db.exec("PRAGMA foreign_keys = ON");
-  for (let applied = 0; applied < version; applied++) {
-    db.exec(`BEGIN IMMEDIATE; ${migrations[applied]!}; PRAGMA user_version = ${applied + 1}; COMMIT`);
+  try {
+    db.exec("PRAGMA foreign_keys = ON");
+    for (let applied = 0; applied < version; applied++) {
+      db.exec(`BEGIN IMMEDIATE; ${migrations[applied]!}; PRAGMA user_version = ${applied + 1}; COMMIT`);
+    }
+    db.prepare("ATTACH ? AS current").run(path);
+    const columns = (schema: string, table: string) => db.prepare('SELECT name, "notnull", dflt_value FROM pragma_table_info(?, ?)').all(table, schema) as Column[];
+    const tables = db.prepare("SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all() as { name: string }[];
+    db.exec("BEGIN IMMEDIATE");
+    // Some migrations seed a row, such as judgment_since's watermark, and the file's own row replaces it.
+    for (const { name: table } of tables.toReversed()) db.exec(`DELETE FROM main."${table}"`);
+    for (const { name: table } of tables) {
+      const source = new Set(columns("current", table).map((c) => c.name));
+      if (source.size === 0) continue;
+      const old = columns("main", table);
+      const missing = old.find((c) => c.notnull && c.dflt_value === null && !source.has(c.name));
+      if (missing !== undefined) throw new Error(`${table}.${missing.name} is NOT NULL at schema ${version}, and the current file has no such column`);
+      const shared = old.filter((c) => source.has(c.name)).map((c) => `"${c.name}"`).join(", ");
+      db.exec(`INSERT INTO main."${table}" (${shared}) SELECT ${shared} FROM current."${table}"`);
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    db.close();
+    rmSync(rewound, { force: true });
+    throw err;
   }
-  db.prepare("ATTACH ? AS current").run(path);
-  const columns = (schema: string, table: string) => db.prepare('SELECT name, "notnull", dflt_value FROM pragma_table_info(?, ?)').all(table, schema) as Column[];
-  const tables = db.prepare("SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all() as { name: string }[];
-  db.exec("BEGIN IMMEDIATE");
-  for (const { name: table } of tables) {
-    const source = new Set(columns("current", table).map((c) => c.name));
-    if (source.size === 0) continue;
-    const old = columns("main", table);
-    const missing = old.find((c) => c.notnull && c.dflt_value === null && !source.has(c.name));
-    if (missing !== undefined) throw new Error(`${table}.${missing.name} is NOT NULL at schema ${version}, and the current file has no such column`);
-    const shared = old.filter((c) => source.has(c.name)).map((c) => `"${c.name}"`).join(", ");
-    db.exec(`INSERT INTO main."${table}" (${shared}) SELECT ${shared} FROM current."${table}"`);
-  }
-  db.exec("COMMIT; DETACH current");
   db.close();
   for (const sidecar of ["-wal", "-shm"]) rmSync(`${path}${sidecar}`, { force: true });
   renameSync(rewound, path);

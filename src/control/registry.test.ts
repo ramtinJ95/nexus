@@ -992,7 +992,9 @@ test("a thread works while its harness turn or a live session turn runs, such as
 test("a turn running before turn starts were recorded has no known start", (t) => {
   const now = 10_000_000;
   const path = tempDb();
-  seeded(path, () => now).reportSession(node, { sequence: 1, time: now, pylon: pylonId, event: { kind: "session.turn-started", session: "c1", at: now } });
+  const first = seeded(path, () => now);
+  first.reportSession(node, { sequence: 1, time: now, pylon: pylonId, event: { kind: "session.turn-started", session: "c1", at: now } });
+  first.close();
   rewindTo(path, versionBefore(/agent_turn_started_at/));
   const db = new DatabaseSync(path);
   db.exec("UPDATE threads SET agent_turn_running = 1");
