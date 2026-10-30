@@ -1,6 +1,7 @@
-# Reads a pylon's checkout for the control plane's Files and Changes views. checkout-files.ts runs it with
-# `python3 - <checkout> <op> [args...]` over a raw pipe and sends this file on stdin, because every pylon image has
-# Python 3, and the probe takes a stream's argv in its request's URL, whose length is limited.
+# Reads a pylon's checkout for the control plane's Files and Changes views, as `checkout-files.py <checkout> <op>
+# [args...]`. checkout-files.ts runs it over a raw pipe through pipe.ts's openPython, which sends this file on stdin,
+# because every pylon image has Python 3, and the probe takes a stream's argv in its request's URL, whose length is
+# limited.
 # It must run on Python 3.9, which the Mac's tests run it with.
 #
 # Ops, each printing to stdout:

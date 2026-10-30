@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipes, pathsFit, type OpenPipe } from "./checkout-files.ts";
+import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipes, pathsFit } from "./checkout-files.ts";
+import type { OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
 import { claudeTurn, snapshotTurn } from "../images/pylon/nexus-turn.ts";
 import type { ByteStream, StreamEnd } from "./protocol.ts";
@@ -62,7 +63,8 @@ test("a listing gives each entry's kind and a file's size, sorted by name, and t
   ]);
   assert.deepEqual(await c.reader.list("src/"), { path: "src", entries: [{ name: "old.ts", kind: "file", size: 400 }], truncated: false });
   // The helper goes in on stdin, so the request, which the probe takes in its URL, stays short.
-  assert.deepEqual(c.requests[0], ["python3", "-", c.dir, "list", ""]);
+  assert.deepEqual(c.requests[0]!.slice(-3), [c.dir, "list", ""]);
+  assert.ok(encodeURIComponent(JSON.stringify({ argv: c.requests[0] })).length < 2048);
 });
 
 test("a path that leaves the checkout is refused, through .. or through a symlink", async (t) => {

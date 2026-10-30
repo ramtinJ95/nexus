@@ -1,8 +1,8 @@
 /**
  * The Files and Changes views of a pylon's checkout: directory listings, file contents, the files that changed since
  * the pylon booted, since HEAD or since the latest turn began, and their diff. checkout-files.py does the reading in the guest, over one raw pipe
- * per request, because every pylon image has Python 3 and a guest exec returns at most 64 KiB. The helper goes in on
- * stdin, because the probe takes a stream's argv in its request's URL, whose length is limited.
+ * per request, because every pylon image has Python 3 and a guest exec returns at most 64 KiB. openPython sends the
+ * helper on stdin, because the probe takes a stream's argv in its request's URL, whose length is limited.
  *
  * The helper's output is the guest's, so every reply is parsed as untrusted input: one longer than the helper would
  * ever print, or with more entries, fails rather than being held in memory or checked entry by entry. A pipe cannot be
@@ -12,12 +12,10 @@
 import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 import { z } from "zod";
+import { openPython, type OpenPipe } from "./pipe.ts";
 import type { ByteStream } from "./protocol.ts";
 
-const helper = readFileSync(new URL("./checkout-files.py", import.meta.url), "utf8");
-
-/** Opens a raw pipe to a process in the pylon, which runs argv. */
-export type OpenPipe = (argv: readonly string[]) => Promise<ByteStream>;
+const helper = readFileSync(new URL("./checkout-files.py", import.meta.url));
 
 /** `start` is what the pylon booted at, which its first boot records as refs/nexus/base. */
 export type ChangesBase = "start" | "head" | "turn";
@@ -97,7 +95,7 @@ export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = re
     openPipes++;
     let stream: ByteStream;
     try {
-      stream = await open(["python3", "-", checkout, ...args]);
+      stream = await openPython(open, helper, [checkout, ...args], "checkout-files.py");
     } catch (err) {
       openPipes--;
       throw err;
@@ -106,7 +104,6 @@ export function checkoutReader(open: OpenPipe, checkout: string, deadlineMs = re
     let chunks: Uint8Array[] = [];
     const reply = (async () => {
       try {
-        await stream.write(Buffer.from(helper));
         await stream.close();
         let bytes = 0;
         // Past the cap, or once the read is abandoned, the rest is still read, so the stream ends, but not kept.

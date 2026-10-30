@@ -769,7 +769,7 @@ test("attach gives this terminal to the pylon's Herdr session through the SOCKS 
   const attached = await inTerminal(s.env(), ["attach", thread.id]);
   assert.equal(attached.code, 0, attached.screen);
   assert.match(attached.screen, /herdr screen/);
-  assert.deepEqual(argvs[0]!.slice(4, 7), ["100", "30", "xterm-256color"], "the terminal's size and TERM reached the pylon");
+  assert.deepEqual(argvs[0]!.slice(5, 8), ["100", "30", "xterm-256color"], "the terminal's size and TERM reached the pylon");
   assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
   assert.ok(s.proxy.connects.length > 0 && s.proxy.connects.every((c) => c === `${apiName}:${s.api.port}`), "through the proxy");
 });

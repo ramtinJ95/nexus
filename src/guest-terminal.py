@@ -1,7 +1,6 @@
-# A program on a pty in a pylon, such as Herdr's client for `nexus attach`. guest-terminal.ts runs it over a raw
-# pipe as `python3 -c <bootstrap> <source bytes> <cols> <rows> <term> <program...>`. The bootstrap reads exactly this
-# file from stdin and runs it, so the rest of stdin is free for frames, and the probe's request URL, whose length is
-# limited, carries only the bootstrap. It must run on Python 3.9, which the Mac's tests run it with.
+# A program on a pty in a pylon, such as Herdr's client for `nexus attach`, as `guest-terminal.py <cols> <rows> <term>
+# <program...>`. guest-terminal.ts runs it over a raw pipe through pipe.ts's openPython, which sends this file ahead of
+# the frames on stdin. It must run on Python 3.9, which the Mac's tests run it with.
 #
 # stdin carries frames: a type byte, a 4-byte big-endian length, then the payload. Type 0 is keys for the program.
 # Type 1 is a resize, whose payload is the cols and rows as 2-byte big-endian numbers. The end of stdin hangs the
@@ -186,4 +185,4 @@ def main(argv):
     sys.exit(exit_code(status))
 
 
-main(sys.argv[2:])
+main(sys.argv[1:])
