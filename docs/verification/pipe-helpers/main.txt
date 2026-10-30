@@ -1,4 +1,4 @@
-main: 74c09ae refactor(probe): check one pylon's state, share one serial queue, and keep per-pylon state in one map (#327)
+main: 6b7dc36 refactor(backend): let the compiler check the backend interface the probe drives (#329)
 ## agent-usage.py as committed
 usage: 11 calls, 9 of them Claude's
   request URL query bytes: 8100

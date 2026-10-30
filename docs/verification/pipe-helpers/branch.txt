@@ -1,4 +1,4 @@
-branch: c004386 docs(verification): capture the pipe readers through a real probe on main and on this branch
+branch: 36a569d docs(verification): rerun the pipe helper capture on the final branch
 ## agent-usage.py as committed
 usage: 11 calls, 9 of them Claude's
   request URL query bytes: 575
