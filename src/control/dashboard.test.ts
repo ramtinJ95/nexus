@@ -2559,6 +2559,8 @@ test("a page's icon template holds only the icons client.js clones", async (t) =
   const s = await seeded(t);
   const template = /<template id="icons">(.*?)<\/template>/.exec((await s.call("GET", "/")).text)![1]!;
   assert.deepEqual([...template.matchAll(/class="i i-([a-z]+)"/g)].map((m) => m[1]), ["chevron", "folder"]);
-  const client = await readFile(new URL("./dashboard/client.js", import.meta.url), "utf8");
+  const dir = new URL("./dashboard/", import.meta.url);
+  const scripts = (await readdir(dir)).filter((name) => name.endsWith(".js") && !name.endsWith(".test.js"));
+  const client = (await Promise.all(scripts.map((name) => readFile(new URL(name, dir), "utf8")))).join("\n");
   assert.deepEqual([...new Set([...client.matchAll(/iconOf\("([a-z]+)"\)/g)].map((m) => m[1]))].sort(), ["chevron", "folder"]);
 });
