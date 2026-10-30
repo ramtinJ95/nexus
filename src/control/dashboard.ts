@@ -1058,7 +1058,7 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
   const held = r.phase.kind === "needs-person";
   const reasons = heldBy(r);
-  const rules = reasons.map((reason) => ({ reason, ...holdRule(reason) }));
+  const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));
   const waived = rules.filter((h) => h.waivable).map((h) => h.reason);
   // A hold that meets every landing again, and that the person cannot waive, leaves only merging on GitHub.
   const stuck = rules.some((h) => h.holdsAgain && !h.waivable);

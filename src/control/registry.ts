@@ -570,6 +570,10 @@ export function openRegistry(path: string, clock = Date.now) {
   }
 
   const queuedThread = (id: ThreadId): QueuedRecord | undefined => recordOf<QueuedRecord>("queued_threads", "id", id) ?? undefined;
+  const storedReviewOf = (builder: ThreadId): Review | null => {
+    const record = recordOf<Review>("reviews", "builder", builder);
+    return record === null ? null : storedReview(record);
+  };
 
   function saveQueued(record: QueuedRecord, key?: StartKey) {
     transaction(() => {
@@ -1057,10 +1061,7 @@ export function openRegistry(path: string, clock = Date.now) {
     /** The newest event's ID, a cursor that follows only the events after it. */
     newestEvent: () => String(sql("SELECT max(id) AS id FROM events").get()?.id ?? 0),
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
-    review(builder: ThreadId): Review | null {
-      const record = recordOf<Review>("reviews", "builder", builder);
-      return record === null ? null : storedReview(record);
-    },
+    review: storedReviewOf,
     reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
@@ -1073,8 +1074,8 @@ export function openRegistry(path: string, clock = Date.now) {
      */
     saveReview(review: Review, archive: readonly ThreadId[] = [], previous?: Review): boolean {
       return transaction(() => {
-        const before = recordOf<Review>("reviews", "builder", review.builder);
-        if (previous !== undefined && JSON.stringify(before === null ? null : storedReview(before)) !== JSON.stringify(previous)) return false;
+        const before = storedReviewOf(review.builder);
+        if (previous !== undefined && JSON.stringify(before) !== JSON.stringify(previous)) return false;
         for (const id of archive) setThreadStatus(id, "archived");
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));

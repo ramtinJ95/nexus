@@ -9,7 +9,7 @@ import { checkCaller, verifyCaller } from "./gate.ts";
 import type { PullRequest } from "./github.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { queuedView, threadQueue, waitOf, type QueuedRecord } from "./queue.ts";
-import { reviewerCaller, type Phase, type Review } from "./review.ts";
+import { personPhase, reviewerCaller, type Phase, type Review } from "./review.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, NodeObservation, PylonId, TailnetNodeId } from "../protocol.ts";
@@ -112,7 +112,7 @@ test("a predecessor is waiting, landed or blocked by what its thread, review and
 
   const b = f.thread("th-b");
   f.links(b, f.pr(5, "open"));
-  f.review(b, { kind: "needs-person", reasons: ["the rounds ran out"] });
+  f.review(b, personPhase("the rounds ran out"));
   assert.equal(wait(f.registry, b), "blocked: its review ended for the person: the rounds ran out");
   f.review(b, { kind: "landed", commit: "m" }, "m");
   assert.equal(wait(f.registry, b), "landed: PR #9 merged");

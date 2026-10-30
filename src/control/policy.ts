@@ -46,91 +46,127 @@ const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch:
 ];
 
 const personOnly = "Always needs the person: ";
-const claudeApproved = "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.";
-const checkChanged = "The pull request changes .nexus/check, the check this policy relies on.";
-const verifyChanged = "The pull request changes .nexus/verify, the live check this policy relies on.";
+
+/**
+ * What a hold is, which decides its rule, and its text, which only the person reads. A reserved case the reviewer
+ * named and one the paths hit are separate codes, so a waiver of the one the person saw never covers the other.
+ * `loop` is a reason of the review loop's own, such as a deploy's failure, and `stale-head` the line a held review
+ * gains when its head moves.
+ */
+export type HoldCode =
+  | "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
+  | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed"
+  | "verify-changed" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "loop";
+export interface Hold { code: HoldCode; text: string }
+const hold = (code: HoldCode, text: string): Hold => ({ code, text });
+const cases = Object.keys(reservedNames) as ReservedCase[];
 
 /** The holds the review's record alone decides: they hold every landing of its approved head, whatever GitHub says. */
-export const recordedHolds = (review: Review): string[] => [
-  ...review.reviewerKind === "claude" ? [claudeApproved] : [],
-  ...(review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => `${personOnly}${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`),
+export const recordedHolds = (review: Review): Hold[] => [
+  ...review.reviewerKind === "claude" ? [hold("claude-approved", "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.")] : [],
+  ...(review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => hold(`reserved:${r.case}`, `${personOnly}${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`)),
 ];
 
 /** What the holds currently on a review are: those its landing met, or else those its record alone decides. */
-export const heldBy = (review: Review): string[] => review.phase.kind === "needs-person" ? review.phase.reasons : recordedHolds(review);
+export const heldBy = (review: Review): Hold[] => review.phase.kind === "needs-person" ? review.phase.holds : recordedHolds(review);
+
+/** Whether a hold meets every landing of the same approved head again, and whether the person may waive it, and why. */
+export interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
+const reserved: HoldRule = { holdsAgain: true, waivable: true, why: "The policy reserves this for you, and pressing Land here is you waiving it." };
+const notWaivable = (why: string): HoldRule => ({ holdsAgain: false, waivable: false, why });
+const loopRule = notWaivable("Only what the policy reserves for you can be waived.");
+const holdRules: Record<HoldCode, HoldRule> = {
+  ...Object.fromEntries(cases.flatMap((c) => [[`reserved:${c}`, reserved], [`reserved-path:${c}`, reserved]])) as Record<`reserved:${ReservedCase}` | `reserved-path:${ReservedCase}`, HoldRule>,
+  "check-changed": { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/check is yours, and pressing Land here is you accepting it." },
+  "verify-changed": { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/verify is yours, and pressing Land here is you accepting it." },
+  "claude-approved": { holdsAgain: true, waivable: false, why: "Nothing here stands in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon." },
+  "not-approved": notWaivable("Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves."),
+  "open-findings": notWaivable("Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves."),
+  unanswered: notWaivable("Every P0 to P2 finding needs the builder's fix or its reason to reject."),
+  "check-failed": notWaivable("Only a .nexus/check that passed at the approved head lands."),
+  "live-failed": notWaivable("A repository with a .nexus/verify lands only once its live check passed at the approved head."),
+  "github-checks": notWaivable("Failing or pending GitHub checks hold every landing until they pass."),
+  "not-approved-head": notWaivable("Only the commit the reviewer approved lands."),
+  conflict: notWaivable("A branch that conflicts with its base cannot merge."),
+  "pr-not-open": notWaivable("Only an open pull request lands."),
+  "same-model": notWaivable("The policy needs a reviewer on another model than the builder's."),
+  "not-checked-live": notWaivable("The description must say what could not be checked live, which the builder can add."),
+  "stale-head": loopRule,
+  loop: loopRule,
+};
+export const holdRule = (code: HoldCode): HoldRule => holdRules[code];
+export const waivable = (code: HoldCode) => holdRule(code).waivable;
 
 /**
- * Whether a hold meets every landing of the same approved head again, and whether the person may waive it, and why.
- * The first rule a reason matches decides. A reason none matches, such as a deploy's failure, is the loop's own and
- * nothing to waive.
+ * The code a hold's text had under the text rules, which reads records saved before holds carried codes: a
+ * needs-person phase with only reasons, and a waiver with only texts.
  */
-export interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
-const holdRules: readonly [(reason: string) => boolean, HoldRule][] = [
-  [(r) => r.startsWith(personOnly), { holdsAgain: true, waivable: true, why: "The policy reserves this for you, and pressing Land here is you waiving it." }],
-  [(r) => r === checkChanged, { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/check is yours, and pressing Land here is you accepting it." }],
-  [(r) => r === verifyChanged, { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/verify is yours, and pressing Land here is you accepting it." }],
-  [(r) => r === claudeApproved, { holdsAgain: true, waivable: false, why: "Nothing here stands in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon." }],
-  [(r) => /^Findings P0 to P2 are open|^The reviewer has not approved/.test(r), { holdsAgain: false, waivable: false, why: "Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves." }],
-  [(r) => r.startsWith("The builder neither fixed nor rejected"), { holdsAgain: false, waivable: false, why: "Every P0 to P2 finding needs the builder's fix or its reason to reject." }],
-  [(r) => r.startsWith(".nexus/check "), { holdsAgain: false, waivable: false, why: "Only a .nexus/check that passed at the approved head lands." }],
-  [(r) => r.startsWith("The live check "), { holdsAgain: false, waivable: false, why: "A repository with a .nexus/verify lands only once its live check passed at the approved head." }],
-  [(r) => /GitHub checks are/.test(r), { holdsAgain: false, waivable: false, why: "Failing or pending GitHub checks hold every landing until they pass." }],
-  [(r) => /, not the approved /.test(r), { holdsAgain: false, waivable: false, why: "Only the commit the reviewer approved lands." }],
-  [(r) => r === "The branch conflicts with its base.", { holdsAgain: false, waivable: false, why: "A branch that conflicts with its base cannot merge." }],
-  [(r) => /^Pull request #\d+ is /.test(r), { holdsAgain: false, waivable: false, why: "Only an open pull request lands." }],
-  [(r) => r.startsWith("The reviewer ran the builder's own model"), { holdsAgain: false, waivable: false, why: "The policy needs a reviewer on another model than the builder's." }],
-  [(r) => /could not be checked live/.test(r), { holdsAgain: false, waivable: false, why: "The description must say what could not be checked live, which the builder can add." }],
-];
-const otherHold: HoldRule = { holdsAgain: false, waivable: false, why: "Only what the policy reserves for you can be waived." };
-export const holdRule = (reason: string): HoldRule => holdRules.find(([matches]) => matches(reason))?.[1] ?? otherHold;
-/** Whether a reason holds every landing of the same approved head again. Landing again gets past it only if the person waives it. */
-export const holdsAgain = (reason: string) => holdRule(reason).holdsAgain;
-export const waivable = (reason: string) => holdRule(reason).waivable;
-
-/** The one hold the review loop answers itself, by having the builder rebase. */
-export const conflictHold = "The branch conflicts with its base.";
+export function legacyHoldCode(text: string): HoldCode {
+  for (const c of cases) {
+    if (text.startsWith(`${personOnly}${reservedNames[c]}, by the reviewer's reading (`)) return `reserved:${c}`;
+    if (text.startsWith(`${personOnly}${reservedNames[c]}, as it changes `)) return `reserved-path:${c}`;
+  }
+  const rules: readonly [HoldCode, (t: string) => boolean][] = [
+    ["check-changed", (t) => t === "The pull request changes .nexus/check, the check this policy relies on."],
+    ["verify-changed", (t) => t === "The pull request changes .nexus/verify, the live check this policy relies on."],
+    ["claude-approved", (t) => t.startsWith("A Claude reviewer approved it.")],
+    ["open-findings", (t) => t.startsWith("Findings P0 to P2 are open")],
+    ["not-approved", (t) => t.startsWith("The reviewer has not approved")],
+    ["unanswered", (t) => t.startsWith("The builder neither fixed nor rejected")],
+    ["check-failed", (t) => t.startsWith(".nexus/check ")],
+    ["live-failed", (t) => t.startsWith("The live check ")],
+    ["github-checks", (t) => /GitHub checks are/.test(t)],
+    ["not-approved-head", (t) => /, not the approved /.test(t)],
+    ["conflict", (t) => t === "The branch conflicts with its base."],
+    ["pr-not-open", (t) => /^Pull request #\d+ is /.test(t)],
+    ["same-model", (t) => t.startsWith("The reviewer ran the builder's own model")],
+    ["not-checked-live", (t) => /could not be checked live/.test(t)],
+    ["stale-head", (t) => /^The pull request's head moved to \S+ after this review was held/.test(t)],
+  ];
+  return rules.find(([, matches]) => matches(text))?.[0] ?? "loop";
+}
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
-const conditions: readonly ((facts: LandingFacts) => string[])[] = [
-  ({ review }) => review.models.reviewer === review.models.builder ? [`The reviewer ran the builder's own model, ${review.models.builder}.`] : [],
+const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
+  ({ review }) => review.models.reviewer === review.models.builder ? [hold("same-model", `The reviewer ran the builder's own model, ${review.models.builder}.`)] : [],
   ({ review }) => {
     const round = review.rounds.at(-1)!;
-    if (round.verdict?.verdict !== "approve") return ["The reviewer has not approved the latest commits."];
+    if (round.verdict?.verdict !== "approve") return [hold("not-approved", "The reviewer has not approved the latest commits.")];
     const open = findingsOf(round).filter(blocks);
-    return open.length ? [`Findings P0 to P2 are open: ${open.map((f) => f.id).join(", ")}.`] : [];
+    return open.length ? [hold("open-findings", `Findings P0 to P2 are open: ${open.map((f) => f.id).join(", ")}.`)] : [];
   },
   ({ review }) => review.rounds.flatMap((round, i) => findingsOf(round).filter(blocks)
     .filter((f) => !answered(f, round.answers ?? []))
-    .map((f) => `The builder neither fixed nor rejected with a reason finding ${f.id} of round ${i + 1}.`)),
+    .map((f) => hold("unanswered", `The builder neither fixed nor rejected with a reason finding ${f.id} of round ${i + 1}.`))),
   ({ review }) => {
     const round = review.rounds.at(-1)!;
-    if (round.check === null) return [`.nexus/check has not run at ${round.head}.`];
-    return round.check.passed ? [] : [`.nexus/check failed at ${round.head}.`];
+    if (round.check === null) return [hold("check-failed", `.nexus/check has not run at ${round.head}.`)];
+    return round.check.passed ? [] : [hold("check-failed", `.nexus/check failed at ${round.head}.`)];
   },
   ({ review, pr }) => {
     const head = review.rounds.at(-1)!.head;
     // A PR merged outside the review is held on what can still be judged: which head merged.
-    if (pr.pr.state === "merged") return pr.detail.head === head ? [] : [`Pull request #${pr.pr.number} merged at ${pr.detail.head}, not the approved ${head}.`];
-    if (pr.pr.state !== "open") return [`Pull request #${pr.pr.number} is ${pr.pr.state}.`];
+    if (pr.pr.state === "merged") return pr.detail.head === head ? [] : [hold("not-approved-head", `Pull request #${pr.pr.number} merged at ${pr.detail.head}, not the approved ${head}.`)];
+    if (pr.pr.state !== "open") return [hold("pr-not-open", `Pull request #${pr.pr.number} is ${pr.pr.state}.`)];
     return [
-      ...pr.detail.head === head ? [] : [`The pull request's head is ${pr.detail.head}, not the approved ${head}.`],
-      ...pr.pr.conflict === true ? [conflictHold] : [],
-      ...pr.pr.checks === "failed" || pr.pr.checks === "pending" ? [`The pull request's GitHub checks are ${pr.pr.checks}.`] : [],
+      ...pr.detail.head === head ? [] : [hold("not-approved-head", `The pull request's head is ${pr.detail.head}, not the approved ${head}.`)],
+      ...pr.pr.conflict === true ? [hold("conflict", "The branch conflicts with its base.")] : [],
+      ...pr.pr.checks === "failed" || pr.pr.checks === "pending" ? [hold("github-checks", `The pull request's GitHub checks are ${pr.pr.checks}.`)] : [],
     ];
   },
   // A live check that ran decides. A head with no .nexus/verify ran none, and lands on the statement of what it could not check live.
   ({ review, pr }) => {
     const round = review.rounds.at(-1)!;
-    if (round.live === undefined) return [`The live check has not run at ${round.head}.`];
-    if (round.live.kind === "ran") return round.live.passed ? [] : [`The live check failed at ${round.head}.`];
+    if (round.live === undefined) return [hold("live-failed", `The live check has not run at ${round.head}.`)];
+    if (round.live.kind === "ran") return round.live.passed ? [] : [hold("live-failed", `The live check failed at ${round.head}.`)];
     const quoted = round.verdict?.notCheckedLive ?? null;
-    if (quoted === null || squash(quoted).length < 20) return ["No live check ran, and the pull request does not say what could not be checked live."];
-    return squash(pr.detail.body).includes(squash(quoted)) ? [] : ["The reviewer's quote of what could not be checked live is not in the pull request's description."];
+    if (quoted === null || squash(quoted).length < 20) return [hold("not-checked-live", "No live check ran, and the pull request does not say what could not be checked live.")];
+    return squash(pr.detail.body).includes(squash(quoted)) ? [] : [hold("not-checked-live", "The reviewer's quote of what could not be checked live is not in the pull request's description.")];
   },
   ({ review }) => recordedHolds(review),
-  ({ files }) => files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [checkChanged] : [],
-  ({ files }) => files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [verifyChanged] : [],
+  ({ files }) => files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [hold("check-changed", "The pull request changes .nexus/check, the check this policy relies on.")] : [],
+  ({ files }) => files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [hold("verify-changed", "The pull request changes .nexus/verify, the live check this policy relies on.")] : [],
   ({ files, nexus }) => {
     if (!nexus) return [];
     const hits = new Map<ReservedCase, string[]>();
@@ -139,17 +175,17 @@ const conditions: readonly ((facts: LandingFacts) => string[])[] = [
         for (const rule of reservedPaths) if (rule.matches(path, file.patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
       }
     }
-    return [...hits].map(([c, paths]) => `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`);
+    return [...hits].map(([c, paths]) => hold(`reserved-path:${c}`, `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`));
   },
 ];
 
 /** Why the policy holds this landing for the person, or nothing when an agent may merge and deploy it. */
-export function landingHolds(facts: LandingFacts): string[] {
+export function landingHolds(facts: LandingFacts): Hold[] {
   return conditions.flatMap((condition) => condition(facts));
 }
 
 /** The holds that still hold the review's landing once the person's waiver at the approved head lets it past those it names. */
-export function unwaived(review: Review, holds: readonly string[]): string[] {
+export function unwaived(review: Review, holds: readonly Hold[]): Hold[] {
   const { waiver } = review;
-  return holds.filter((reason) => !(waiver !== null && waiver.head === review.rounds.at(-1)!.head && waiver.holds.includes(reason) && waivable(reason)));
+  return holds.filter((h) => !(waiver !== null && waiver.head === review.rounds.at(-1)!.head && waiver.codes.includes(h.code) && waivable(h.code)));
 }
