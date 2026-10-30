@@ -18,6 +18,7 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProjectId } from "../project.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
@@ -41,7 +42,7 @@ function fixture(t: import("node:test").TestContext) {
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project("reviewed", { land: false, enabledBy: "nLAPTOP" }));
   registry.createProject(project("plain", null));
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
+  const capacity = testCapacity();
   registry.apply({ record: "node", node, state: "online", capacity });
   const fake = fakeHarness();
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
@@ -84,11 +85,11 @@ function fixture(t: import("node:test").TestContext) {
    */
   function observe(readAt = now, phase: "running" | "unread" | "stopped" = "running") {
     const last = registry.node(node)!.observation;
-    const pylons: PylonObservation[] = [...pushes].map(([pylonId, pushed]) => phase === "stopped" ? { pylonId, phase, checkpoint: null, sessions: [] } : ({
-      pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], declaredOutputs: [], attachedClients: 0,
+    const pylons: PylonObservation[] = [...pushes].map(([pylonId, pushed]) => phase === "stopped" ? stoppedPylon(pylonId) : runningPylon(pylonId, {
+      liveHash: "hash" as LiveHash,
       git: phase === "unread" ? null : { head: "a".repeat(40), branch: "main", dirty: false, branches: pushed.filter((p) => p.at <= readAt).map((p) => ({ name: p.ref.slice(p.ref.indexOf("/") + 1), head: "a".repeat(40), pushedAs: p.ref })) },
     }));
-    const observation = { node, observedAt: new Date(now).toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] };
+    const observation = testObservation(node, { observedAt: new Date(now).toISOString(), capacity, pylons });
     const known = new Map(registry.pylonIdsToTick(node, [...last?.pylons ?? [], ...pylons].map((p) => p.pylonId)).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
     registry.ingested(observation, ingest({ type: "snapshot", observation }, node, known, now).filter((w) => w.record === "output"));
   }

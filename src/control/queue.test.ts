@@ -13,9 +13,8 @@ import { personPhase, type Phase, type Review } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { NodeObservation } from "../protocol/observations.ts";
 import type { ProjectId } from "../project.ts";
-import { testImage } from "../test-kit.ts";
+import { testCapacity, testImage, testObservation } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const project = {
@@ -305,9 +304,9 @@ test("an auto start with no node that has room stays queued, then starts once ro
   assert.match(f.registry.queuedThread(record.id)!.lastError!, /no node can run this pylon: rj-firebat is offline/);
   await assert.rejects(q.startNow(record.id, laptop), /no node can run this pylon/);
   assert.equal(f.registry.queuedThread(record.id)!.status, "queued");
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 200, committedDiskGiB: 0 };
+  const capacity = testCapacity({ diskFreeGiB: 200 });
   f.registry.apply({ record: "node", node, state: "online", capacity });
-  f.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [image.id] as NodeObservation["artifacts"], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  f.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", capacity, artifacts: [image.id] }), []);
   await q.poll();
   assert.equal(f.registry.thread(record.id)?.placement?.how, "auto");
 });

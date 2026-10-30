@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registryLocator } from "./locator.ts";
 import { openRegistry, type ThreadId } from "./registry.ts";
-import { addThread, seedRegistry } from "./test-kit.ts";
+import { addThread, observeNode, seedRegistry } from "./test-kit.ts";
 import type { NodeName, PylonId } from "../ids.ts";
-import type { NodeObservation, PylonObservation } from "../protocol/observations.ts";
 import { probePort } from "../protocol/routes.ts";
+import { runningPylon, testCapacity } from "../test-kit.ts";
 
 const node = "infra-testbench" as NodeName;
 const threadId = "th-1" as ThreadId;
@@ -25,28 +25,20 @@ function seeded(t: import("node:test").TestContext) {
   return registry;
 }
 
-function observe(registry: ReturnType<typeof openRegistry>, pylon: PylonObservation) {
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 32, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-  const observation: NodeObservation = { node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [pylon], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] };
-  registry.ingested(observation, [{ record: "node", node, state: "online", capacity }]);
-}
-
-const running: PylonObservation = {
-  pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000", checkpoint: null },
-  services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-};
+const capacity = testCapacity({ memoryGiB: 32 });
+const running = runningPylon(pylonId);
 
 test("a pylon is located at its node's probe once the node reports it running", async (t) => {
   const registry = seeded(t);
-  observe(registry, { pylonId, phase: "booting" });
+  observeNode(registry, { node, capacity, pylons: [{ pylonId, phase: "booting" }] });
   const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 60_000);
-  observe(registry, running);
+  observeNode(registry, { node, capacity, pylons: [running] });
   assert.deepEqual(await located, { node, host: "infra-testbench.tail.ts.net", port: probePort, nodeId: "nTESTBENCH" });
 });
 
 test("a running pylon on an offline node is not reachable, and the wait ends at the deadline", async (t) => {
   const registry = seeded(t);
-  observe(registry, running);
+  observeNode(registry, { node, capacity, pylons: [running] });
   registry.markOffline(node);
   await assert.rejects(registryLocator(registry).awaitRunning(pylonId, Date.now() + 300), /was not running by/);
 });

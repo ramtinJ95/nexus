@@ -20,6 +20,7 @@ import { prWatchPrefix } from "../agent-protocol.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
+import { runningPylon, testCapacity, testObservation } from "../test-kit.ts";
 
 function fixture(path = ":memory:") {
   const registry = openRegistry(path);
@@ -47,10 +48,9 @@ function fixture(path = ":memory:") {
   const options = { registry, github, inbox: inbox() };
   /** Reports the node online with the thread's pylon running, or with no pylons. */
   function observe(thread: ThreadId, running: boolean) {
-    const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-    registry.apply({ record: "node", node, state: "online", capacity });
-    const pylon = { pylonId: `pylon-${thread}` as PylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 };
-    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: running ? [pylon] : [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+    registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+    const pylon = runningPylon(`pylon-${thread}` as PylonId, { liveHash: "hash" as LiveHash });
+    registry.ingested(testObservation(node, { pylons: running ? [pylon] : [] }), []);
   }
   return { registry, id, add, observe, node, calls, messages, github, harness, inbox, options, watcher: prWatcher(options), get snapshot() { return snapshot; }, set snapshot(s: PrSnapshot) { snapshot = s; }, reject(value: boolean) { reject = value; }, get wakes() { return wakes; } };
 }
@@ -723,7 +723,7 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   guest.exec = async (argv) => ({ exitCode: 0, output: (await promisify(execFile)(argv[0]!, argv.slice(1), { cwd: checkout, env, encoding: "utf8" })).stdout, truncated: false });
   let previous: PylonObservation | "absent" = "absent";
   async function observe() {
-    const pylon: PylonObservation = { pylonId, phase: "running", liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000", checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: await gitFacts(guest), declaredOutputs: [], attachedClients: 0 };
+    const pylon = runningPylon(pylonId, { liveHash: "hash" as LiveHash, git: await gitFacts(guest) });
     f.registry.ingested(null, ingest({ type: "pylon", pylon }, f.node, new Map([[pylonId, previous]]), Date.now()));
     previous = pylon;
   }

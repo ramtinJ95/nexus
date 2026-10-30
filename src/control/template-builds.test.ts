@@ -13,6 +13,7 @@ import type { JobId, NodeName } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { ProbeClient } from "../protocol/client.ts";
+import { testObservation } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";
@@ -76,11 +77,7 @@ function setup(t: TestContext) {
     stored: (): readonly TemplateRecord[] => registry.templates(project),
     /** One pass of the node's loop: every building record on the node, as the registry holds it, with this observation. */
     async pass(over: Partial<NodeObservation> | null = {}) {
-      const observation: NodeObservation | null = over === null ? null : {
-        node, observedAt: new Date().toISOString(), probeBootId: "boot-1", events: [],
-        capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
-        artifacts: [image], jobs: [], pylons: [], previewRoutes: [], grants: { secrets: [], gitSsh: false }, heldSecrets: [], ...over,
-      };
+      const observation = over === null ? null : testObservation(node, { probeBootId: "boot-1", artifacts: [image], ...over });
       for (const record of registry.buildingTemplates(node)) await tickTemplateBuild(record, { probe: fake.probe, observation, registry, log: (line) => logged.push(line) });
     },
     /** A control plane that stops and starts again on the same file. */

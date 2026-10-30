@@ -7,12 +7,13 @@ import {
 import type { JobId, LiveHash, NodeName, PylonId } from "./ids.ts";
 import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "./protocol/jobs.ts";
 import {
-  encodeProbeEvent, parseProbeEvent, upgradeObservation, type NodeObservation, type OlderObservation, type PausedSession, type ProbeEvent,
+  encodeProbeEvent, parseProbeEvent, upgradeObservation, type OlderObservation, type PausedSession, type ProbeEvent,
   type PylonObservation, type RunningFacts, type SessionFact,
 } from "./protocol/observations.ts";
 import { chatgptTokenGrant } from "./secret-grants.ts";
 import type { BootInputs, PylonSource } from "./spawn.ts";
 import type { ArtifactId, CheckpointId, ImageId, TemplateId } from "./images.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "./test-kit.ts";
 
 const now = 1_800_000_000_000;
 const pylonId = "pylon-t1" as PylonId;
@@ -34,11 +35,8 @@ const boot: Omit<BootInputs, "source"> = {
 };
 const live = { previews: [], overlay: [] };
 
-const running = (hash: LiveHash | null): PylonObservation => ({
-  pylonId, phase: "running", liveHash: hash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image, checkpoint: null },
-  services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-});
-const stopped = (checkpoint: CheckpointId | null, sessions: readonly PausedSession[] | null = null): PylonObservation => ({ pylonId, phase: "stopped", checkpoint, sessions });
+const running = (hash: LiveHash | null): PylonObservation => runningPylon(pylonId, { liveHash: hash, bootedFrom: { image, checkpoint: null } });
+const stopped = (checkpoint: CheckpointId | null, sessions: readonly PausedSession[] | null = null): PylonObservation => stoppedPylon(pylonId, { checkpoint, sessions });
 const broken: PylonObservation = { pylonId, phase: "broken", detail: "qcow2 header unreadable", cause: "controller", logTail: "" };
 const brokenSetup: PylonObservation = { pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "setup", logTail: "" };
 const brokenSavedSetup: PylonObservation = { ...brokenSetup, cause: "saved-setup" };
@@ -295,9 +293,12 @@ test("a snapshot from a probe older than route reporting parses as routing nothi
 
 test("a snapshot as the probe every node runs sends it, claudeLaunchRepeatable and all, parses with every fact it sent", () => {
   const observation = {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 2, memoryGiB: 64, committedMemoryGiB: 4, diskFreeGiB: 100, committedDiskGiB: 10 },
-    artifacts: [], jobs: [], pylons: [{ pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: [] }], previewRoutes: [{ httpsPort: 10200, pylonId, service: "web" }],
-    grants: { secrets: ["GH_TOKEN"], gitSsh: true }, claudeLaunchRepeatable: true, heldSecrets: ["NEXUS_CHATGPT_TOKEN"],
+    ...testObservation(node, {
+      observedAt: "2027-01-01T00:00:00Z", capacity: testCapacity({ committedCpus: 2, committedMemoryGiB: 4, committedDiskGiB: 10 }),
+      pylons: [stoppedPylon(pylonId, { checkpoint: lastCheckpoint })], previewRoutes: [{ httpsPort: 10200, pylonId, service: "web" }],
+      grants: { secrets: ["GH_TOKEN"], gitSsh: true }, heldSecrets: ["NEXUS_CHATGPT_TOKEN"],
+    }),
+    claudeLaunchRepeatable: true,
   };
   const parsed = parseProbeEvent(JSON.stringify({ type: "snapshot", observation }));
   assert.ok(parsed.type === "snapshot");
@@ -478,10 +479,9 @@ test("ingest: a pylon that runs again before its sessions are read resumes the p
 });
 
 test("ingest: a deleted pylon drops its sessions", () => {
-  assert.deepEqual(ingest({ type: "snapshot", observation: {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
-    artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
-  } }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
+  assert.deepEqual(ingest({ type: "snapshot", observation: testObservation(node, {
+    observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: testCapacity({ committedMemoryGiB: 8, diskFreeGiB: 500 }),
+  }) }, node, knows(phase("deleting")), now).filter((w) => w.record === "sessions"), [{ record: "sessions", pylonId, sessions: [] }]);
 });
 
 test("ingest: a preview is ready while the running pylon lists it on its port", () => {
@@ -503,13 +503,10 @@ test("ingest: a pylon the registry does not know is an orphan, and nothing is wr
 test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known pylons it omits", () => {
   const status: JobStatus = { jobId: "j" as JobId, subject: pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" };
   const gone = "pylon-gone" as PylonId;
-  const observation: NodeObservation = {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", events: [],
-    capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 500, committedDiskGiB: 0 },
-    artifacts: [image], jobs: [status],
-    pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
-  };
+  const observation = testObservation(node, {
+    observedAt: "2027-01-01T00:00:00Z", probeBootId: "b1", capacity: testCapacity({ committedMemoryGiB: 8, diskFreeGiB: 500 }),
+    artifacts: [image], jobs: [status], pylons: [runningWith({ attachedClients: 2 }), { pylonId: "pylon-x" as PylonId, phase: "booting" }],
+  });
   const known = new Map<PylonId, PylonObservation | "absent">([[pylonId, "absent"], [gone, { ...runningWith({ sessions: [idleShell] }), pylonId: gone }]]);
   assert.deepEqual(ingest({ type: "snapshot", observation }, node, known, now), [
     { record: "node", node, state: "online", capacity: observation.capacity },

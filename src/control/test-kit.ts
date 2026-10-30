@@ -3,9 +3,11 @@
  * git@example.com:acme.git. What needs no registry is in src/test-kit.ts.
  */
 import { randomUUID } from "node:crypto";
+import { testObservation } from "../test-kit.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
+import type { NodeObservation } from "../protocol/observations.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 
 export const testNode = "rj-firebat" as NodeName;
@@ -62,4 +64,11 @@ export function addThread(registry: Registry, options: PylonOptions & { thread?:
   const thread = testThread(options.thread);
   registry.createThread(thread, testPylon(thread, options), options.claudePrompt);
   return thread;
+}
+
+/** Ingests a snapshot of `over.node` (testNode by default) together with the node online, as the loop ingests one. */
+export function observeNode(registry: Registry, over: Partial<NodeObservation> = {}): NodeObservation {
+  const observation = testObservation(over.node ?? testNode, over);
+  registry.ingested(observation, [{ record: "node", node: observation.node, state: "online", capacity: observation.capacity }]);
+  return observation;
 }

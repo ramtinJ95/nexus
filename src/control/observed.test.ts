@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { NodeName } from "../ids.ts";
-import type { NodeObservation, PylonObservation } from "../protocol/observations.ts";
+import type { PylonObservation } from "../protocol/observations.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
 import { observedPylon, runningProbe } from "./observed.ts";
 import { openRegistry } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
@@ -15,16 +16,10 @@ test("a pylon is observed as its node last listed it, online or not, and its pro
   const pylon = registry.pylon(thread.pylonId)!;
   const probe = { name: "the probe" };
   const probes = new Map([[node, probe]]);
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-  const observe = (pylons: PylonObservation[]) => registry.ingested({
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons,
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
-  } satisfies NodeObservation, []);
-  const stopped: PylonObservation = { pylonId: thread.pylonId, phase: "stopped", checkpoint: null, sessions: null };
-  const running: PylonObservation = {
-    pylonId: thread.pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: pylon.boot.image, checkpoint: null },
-    services: null, listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-  };
+  const capacity = testCapacity();
+  const observe = (pylons: PylonObservation[]) => registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", pylons }), []);
+  const stopped = stoppedPylon(thread.pylonId, { sessions: null });
+  const running = runningPylon(thread.pylonId, { bootedFrom: { image: pylon.boot.image, checkpoint: null }, services: null });
 
   registry.apply({ record: "node", node, state: "online", capacity });
   assert.equal(observedPylon(registry, pylon), null, "a node that sent no observation");

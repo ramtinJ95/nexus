@@ -6,12 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { addThread as addTestThread, seedRegistry } from "./test-kit.ts";
+import { addThread as addTestThread, observeNode, seedRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { desiredPhase, envelope } from "../reconcile.ts";
 import type { JobId, NodeName, PylonId } from "../ids.ts";
-import type { NodeObservation, PylonObservation } from "../protocol/observations.ts";
+import type { NodeObservation } from "../protocol/observations.ts";
 import type { ImageId } from "../images.ts";
+import { runningPylon, stoppedPylon, testCapacity } from "../test-kit.ts";
 
 const image: ImageId = "img-000000000000";
 const n1 = "rj-firebat" as NodeName;
@@ -31,14 +32,9 @@ function addThread(registry: Registry, node: NodeName, title: string, status: Th
 }
 
 function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, "stopped" | "running"][], over: Partial<NodeObservation> = {}, memory = { total: 64, committed: 0 }) {
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: memory.total, committedMemoryGiB: memory.committed, diskFreeGiB: 100, committedDiskGiB: 0 };
-  const observed = pylons.map(([pylonId, phase]): PylonObservation => phase === "stopped"
-    ? { pylonId, phase, checkpoint: `ckpt-${pylonId}-1`, sessions: [] }
-    : { pylonId, phase, liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 });
-  registry.ingested({
-    node, observedAt: new Date().toISOString(), probeBootId: "boot-1", events: [], capacity, artifacts: [image], jobs: [], pylons: observed,
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [], spawnsWithoutRelaunch: true, ...over,
-  }, [{ record: "node", node, state: "online", capacity }]);
+  const capacity = testCapacity({ memoryGiB: memory.total, committedMemoryGiB: memory.committed });
+  const observed = pylons.map(([pylonId, phase]) => phase === "stopped" ? stoppedPylon(pylonId, { checkpoint: `ckpt-${pylonId}-1` }) : runningPylon(pylonId));
+  observeNode(registry, { node, probeBootId: "boot-1", capacity, artifacts: [image], pylons: observed, spawnsWithoutRelaunch: true, ...over });
 }
 
 /** Records `calls` calls no read had counted, `tokens` in all, as a backfill's read of the thread does. */

@@ -23,7 +23,7 @@ import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
 import type { ReportedEvent } from "../events.ts";
-import { until, watch } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, until, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;
@@ -85,12 +85,12 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
         // Like the probe, a spawn of a running pylon applies only its LiveSpec, and every spawn publishes the previews.
         const was = pylons.get(job.pylonId);
         const previews = job.live.previews.map((p) => ({ ...p, ready: true }));
-        pylons.set(job.pylonId, was?.phase === "running" ? { ...was, liveHash: job.liveHash, previews } : {
-          pylonId: job.pylonId, phase: "running", liveHash: job.liveHash, bootedAt: new Date().toISOString(),
+        pylons.set(job.pylonId, was?.phase === "running" ? { ...was, liveHash: job.liveHash, previews } : runningPylon(job.pylonId, {
+          liveHash: job.liveHash, bootedAt: new Date().toISOString(),
           bootedFrom: { image, checkpoint: job.boot.source.kind === "resume" ? job.boot.source.checkpoint : null },
           // A woken pylon's sessions are read only once its relaunch has run.
-          services: [], listening: [], previews, sessions: job.boot.source.kind === "resume" ? null : [], git: null, declaredOutputs: [], attachedClients: 0,
-        });
+          previews, sessions: job.boot.source.kind === "resume" ? null : [],
+        }));
         lives.set(job.pylonId, job.live);
         unroute(job.pylonId);
         for (const { service, httpsPort } of job.live.previews) routes.set(httpsPort, { httpsPort, pylonId: job.pylonId, service });
@@ -111,7 +111,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
         const sessions = was?.phase === "running" && was.sessions !== null
           ? was.sessions.map(({ id, herdrPane, harness, harnessSessionId, title }) => ({ id, herdrPane, harness, harnessSessionId, title: title ?? "untitled" }))
           : null;
-        pylons.set(job.pylonId, { pylonId: job.pylonId, phase: "stopped", checkpoint: job.checkpoint, sessions });
+        pylons.set(job.pylonId, stoppedPylon(job.pylonId, { checkpoint: job.checkpoint, sessions }));
         return;
       }
       case "delete":
@@ -228,7 +228,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   function stopOnFailedSetup(pylonId: PylonId, checkpoint: CheckpointId) {
     saved.set(pylonId, checkpoint);
     failedSetupDisks.add(checkpoint);
-    pylons.set(pylonId, { pylonId, phase: "stopped", checkpoint, sessions: null });
+    pylons.set(pylonId, stoppedPylon(pylonId, { checkpoint, sessions: null }));
   }
 
   return {
@@ -760,7 +760,7 @@ test("an unreachable node gets no jobs, is recorded offline after the grace peri
   fake.disconnect();
   run(t, registry, fake.probe, { offlineAfterMs: 30 });
 
-  registry.apply({ record: "node", node, state: "online", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 1, committedMemoryGiB: 0, diskFreeGiB: 1, committedDiskGiB: 0 } });
+  registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
   await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
   assert.equal(fake.submitted.length, 0);
 
@@ -1256,7 +1256,7 @@ test("a port the node still serves for a pylon the registry lost goes to no new 
   const thread = seed(registry);
   const fake = fakeNode({ autoFinish: true });
   const lost = "pylon-th-lost" as PylonId;
-  fake.pylons.set(lost, { pylonId: lost, phase: "stopped", checkpoint: null, sessions: null });
+  fake.pylons.set(lost, stoppedPylon(lost, { sessions: null }));
   fake.routes.set(10200, { httpsPort: 10200, pylonId: lost, service: "web" });
   run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
@@ -1311,7 +1311,7 @@ test("a deleted thread's pylon that is gone is torn down again whenever its node
   await settled(fake, loop);
   assert.equal(deletes(), 1);
 
-  const stopped: PylonObservation = { pylonId: thread.pylonId, phase: "stopped", checkpoint: null, sessions: null };
+  const stopped = stoppedPylon(thread.pylonId, { sessions: null });
   fake.pylons.set(thread.pylonId, stopped);
   fake.announce();
   await until("the listed pylon is deleted again", () => deletes() === 2 && !fake.pylons.has(thread.pylonId));
@@ -1343,7 +1343,7 @@ test("follow leaves out a deleted thread's pylon its node no longer lists, and d
   assert.deepEqual(snapshots.at(-1), { lists: false, known: [], unlisted: [] }, "a snapshot that no longer lists the pylon leaves it out");
 
   const from = snapshots.length;
-  fake.pylons.set(thread.pylonId, { pylonId: thread.pylonId, phase: "stopped", checkpoint: null, sessions: null });
+  fake.pylons.set(thread.pylonId, stoppedPylon(thread.pylonId, { sessions: null }));
   fake.announce();
   await until("the listed pylon is ingested", () => snapshots.slice(from).some((s) => s.lists));
   assert.deepEqual(snapshots.slice(from).find((s) => s.lists), { lists: true, known: [thread.pylonId], unlisted: [thread.pylonId] }, "its sessions are written again, as for a pylon never listed");
