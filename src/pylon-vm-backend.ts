@@ -13,7 +13,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
@@ -23,10 +22,11 @@ import { isImageId, isTemplateId, maxPylonIdLength, pylonIdSchema, type PausedSe
 import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
+import { requiredArtifacts } from "./reconcile.ts";
 import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
 import { checkoutDir, sessionHarnessSchema } from "./sessions.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
-import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
+import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { pylonVmHostBridge } from "./probe/pylon-api.ts";
 import { asUser, controllerLog, pylonGuest } from "./pylon-vm/pylon-guest.ts";
@@ -68,9 +68,7 @@ const workspace = "/home/user/workspace";
 const dotfilesDir = "/home/user/.nexus/dotfiles";
 /** Where the image bakes the common dotfiles layer, as a git repository owned by user. */
 const bakedDotfiles = "/opt/nexus/dotfiles";
-const imageLabel = "nexus.image";
 const checkpointFile = "nexus-checkpoint.json";
-const pollMs = 500;
 /** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
 const secretUpdateMs = 5_000;
 /** Measured in the pylon-vm slice: 3 GiB boots, 4, 8, 12 and 16 GiB pass the whole slice, and 2 GiB hangs at "ACPI: Core revision". */
@@ -81,8 +79,6 @@ export function hostNestsKvm(read: (path: string) => string | null = (path) => {
   return ["kvm_amd", "kvm_intel"].some((module) => /^[Y1]$/.test(read(`/sys/module/${module}/parameters/nested`)?.trim() ?? ""));
 }
 
-const instanceSchema = z.object({ name: z.string(), labels: z.record(z.string(), z.string()), status: statusSchema });
-type Instance = z.infer<typeof instanceSchema>;
 const checkpointId = z.custom<CheckpointId>((v) => typeof v === "string" && v.startsWith("ckpt-"));
 const pausedSessionSchema = z.strictObject({
   id: z.string(), herdrPane: z.string().nullable(), harness: sessionHarnessSchema, harnessSessionId: z.string().nullable(), title: z.string(),
@@ -98,9 +94,9 @@ const sidecarSchema = z.strictObject({
 type Sidecar = z.infer<typeof sidecarSchema>;
 /** What a VM that is up reports holding, from the boot it was started with. */
 const vmHolds = z.object({ cpus: z.number(), memoryGiB: z.number() });
-const setupFailed = (status: Instance["status"]) => status.startupFailures?.some((f) => f.kind === "setup") === true;
+const setupFailed = (status: Inspection["status"]) => status.startupFailures?.some((f) => f.kind === "setup") === true;
 /** A controller older than startupFailures reports only the startupError, so whether setup failed is unknown. */
-const failureUnknown = (status: Instance["status"]) => status.startupError !== undefined && status.startupFailures === undefined;
+const failureUnknown = (status: Inspection["status"]) => status.startupError !== undefined && status.startupFailures === undefined;
 
 const sessionsOf = (sessions: readonly PausedSession[] | null | undefined): Pick<Sidecar, "sessions"> => sessions === null || sessions === undefined ? {} : { sessions: [...sessions] };
 
@@ -258,7 +254,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   // its instance, build or manifest is there for drop to see. Jobs on different subjects run at once, so the two sides shut each other out here.
   const using = new Map<PortableArtifactId, number>();
   const dropping = new Set<PortableArtifactId>();
-  async function holding<T>(ids: PortableArtifactId[], work: () => Promise<T>): Promise<T> {
+  async function holding<T>(ids: readonly PortableArtifactId[], work: () => Promise<T>): Promise<T> {
     const gone = ids.find((id) => dropping.has(id));
     if (gone !== undefined) throw new JobFailure("artifact-missing", `${gone} is being dropped from this node`);
     for (const id of ids) using.set(id, (using.get(id) ?? 0) + 1);
@@ -272,21 +268,13 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   // The controller writes disk.qcow2 only when a stop completes, so without it the VM booted from no disk and nothing was saved.
   const hasCheckpoint = (pylonId: PylonId) => existsSync(join(instanceDir(pylonId), "disk.qcow2"));
 
-  async function inspect(pylonId: PylonId, signal?: AbortSignal): Promise<Instance | null> {
+  async function inspect(pylonId: PylonId, signal?: AbortSignal): Promise<Inspection | null> {
     const name = instanceName(pylonId);
     if (!existsSync(instanceDir(pylonId))) return null;
-    return instanceSchema.parse(await sandbox({ action: "inspect", name }, signal));
+    return inspectionSchema.parse(await sandbox({ action: "inspect", name }, signal));
   }
 
-  /** Waits out a controller that is starting or stopping. Never cuts one short: the deadline only ends the wait. */
-  async function settled(pylonId: PylonId, signal: AbortSignal): Promise<Instance | null> {
-    for (;;) {
-      signal.throwIfAborted();
-      const instance = await inspect(pylonId);
-      if (instance === null || !["starting", "unavailable", "stopping"].includes(instance.status.state)) return instance;
-      await delay(pollMs, undefined, { signal });
-    }
-  }
+  const settledInstance = (pylonId: PylonId, signal: AbortSignal) => settled(() => inspect(pylonId), ["starting", "unavailable", "stopping"], signal);
 
   async function readSidecar(pylonId: PylonId): Promise<Sidecar> {
     const sidecar = await readJson(join(instanceDir(pylonId), checkpointFile));
@@ -347,8 +335,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
 
   async function create(boot: BootInputs, live: LiveSpec, signal: AbortSignal): Promise<void> {
-    const needs: PortableArtifactId[] = boot.source.kind === "template" ? [boot.image, boot.source.template] : [boot.image];
-    await holding(needs, async () => {
+    await holding(requiredArtifacts(boot), async () => {
       let setup: string[];
       let disk: string | undefined;
       switch (boot.source.kind) {
@@ -392,7 +379,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
    *   new instance runs setup again. The failure stays final, and a human retry boots the pylon fresh.
    * Every other failure is final and the instance stays: a service, or a disk that has a checkpoint or finished setup once.
    */
-  async function setupFailure(pylonId: PylonId, status: Instance["status"]): Promise<JobFailure> {
+  async function setupFailure(pylonId: PylonId, status: Inspection["status"]): Promise<JobFailure> {
     const startupError = status.startupError ?? "";
     const { config } = await readRecord(instanceDir(pylonId));
     const checkoutFailed = config.retrySetup && status.setupRecorded === false && setupFailed(status);
@@ -407,7 +394,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
 
   /** CPUs, memory, the allowlist, secrets and SSH remotes apply at every boot. The image and the disk size are fixed at create. */
-  async function refuseFixedChanges(boot: BootInputs, instance: Instance): Promise<void> {
+  async function refuseFixedChanges(boot: BootInputs, instance: Inspection): Promise<void> {
     const created = instance.labels[imageLabel];
     if (created !== boot.image) throw new JobFailure("invalid", `${boot.pylonId} was created from ${created} and cannot boot ${boot.image}: a pylon keeps its image`);
     const { config } = await readRecord(instanceDir(boot.pylonId));
@@ -416,7 +403,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     }
   }
 
-  function vmState(instance: Instance): Pick<BackendPylon, "vm" | "detail" | "cause"> {
+  function vmState(instance: Inspection): Pick<BackendPylon, "vm" | "detail" | "cause"> {
     const { status } = instance;
     switch (status.state) {
       case "starting": case "unavailable": return { vm: "booting" };
@@ -435,7 +422,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
 
   async function list(): Promise<BackendPylon[]> {
-    const instances = z.array(instanceSchema).parse(await sandbox({ action: "list", kind: "instances" }));
+    const instances = z.array(inspectionSchema).parse(await sandbox({ action: "list", kind: "instances" }));
     const listed = await Promise.all(instances.map(async (instance): Promise<BackendPylon | null> => {
       const pylonId = instance.name as PylonId;
       const image = instance.labels[imageLabel];
@@ -532,7 +519,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       const { pylonId } = bootInputs;
       const name = instanceName(pylonId);
       for (;;) {
-        const instance = await settled(pylonId, signal);
+        const instance = await settledInstance(pylonId, signal);
         if (instance === null) {
           await create(bootInputs, live, signal);
           continue;
@@ -571,7 +558,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async ensurePaused(pylonId, checkpoint, signal) {
       const name = instanceName(pylonId);
-      for (let instance = await settled(pylonId, signal); instance?.status.state !== "stopped"; instance = await settled(pylonId, signal)) {
+      for (let instance = await settledInstance(pylonId, signal); instance?.status.state !== "stopped"; instance = await settledInstance(pylonId, signal)) {
         if (instance === null) return;
         signal.throwIfAborted();
         // A disk with a failed setup is never saved. Without a completed checkpoint nothing on the pylon is the user's, so the
@@ -611,7 +598,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async ensureDeleted(pylonId, signal) {
       const name = instanceName(pylonId);
-      await settled(pylonId, signal);
+      await settledInstance(pylonId, signal);
       signal.throwIfAborted();
       // Also when absent, because destroy sweeps what an interrupted create or destroy left aside.
       await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
@@ -640,7 +627,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     },
 
     async updateSecret(secret, value, signal) {
-      const instances = z.array(instanceSchema).parse(await sandbox({ action: "list", kind: "instances" }));
+      const instances = z.array(inspectionSchema).parse(await sandbox({ action: "list", kind: "instances" }));
       const limit = () => signal === undefined ? AbortSignal.timeout(secretUpdateMs) : AbortSignal.any([signal, AbortSignal.timeout(secretUpdateMs)]);
       // A controller whose boot did not grant the secret answers that it does not hold it, which is no failure.
       const failures = await Promise.all(instances.filter((instance) => instance.status.state === "running").map(async ({ name }) => {

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { previewText, serviceDecl, serviceName } from "../project.ts";
 
@@ -251,3 +252,24 @@ export const replySchema = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown() }),
 	z.object({ ok: z.literal(false), error: z.string() }),
 ]);
+/** What inspect answers for one instance or template build, and list for each. */
+export const inspectionSchema = z.object({ name: z.string(), labels, status: statusSchema });
+export type Inspection = z.infer<typeof inspectionSchema>;
+/** The label naming the image an instance or template build was created from. */
+export const imageLabel = "nexus.image";
+/**
+ * Reads until there is nothing to read or its state leaves `states`. Never cuts a controller short: the deadline only
+ * ends the wait.
+ */
+export async function settled(
+	read: () => Promise<Inspection | null>,
+	states: readonly Inspection["status"]["state"][],
+	signal: AbortSignal,
+): Promise<Inspection | null> {
+	for (;;) {
+		signal.throwIfAborted();
+		const found = await read();
+		if (found === null || !states.includes(found.status.state)) return found;
+		await delay(500, undefined, { signal });
+	}
+}

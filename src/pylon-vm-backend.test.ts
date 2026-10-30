@@ -13,6 +13,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { bootHooks, createPylonVmBackend, hostNestsKvm, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { settled, type Inspection } from "./pylon-vm/contracts.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
 import { asUser, imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import { chatgptTokenGrant, type BootInputs } from "./project.ts";
@@ -581,6 +582,16 @@ test("a stopped pylon whose pause recorded nothing reports null", async () => {
   const dir = await leftInstance(instances, "pylon-none", "stopped");
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-none-1" }));
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.sessions]), [["stopped", null]]);
+});
+
+test("the settle helper reads until the state leaves the ones it waits out, or nothing is left to read", async () => {
+  const states: Inspection["status"]["state"][] = ["starting", "stopping", "stopping", "stopped"];
+  let reads = 0;
+  const read = async (): Promise<Inspection | null> => ({ name: "pylon-settle", labels: {}, status: { name: "pylon-settle", state: states[reads++]! } });
+  assert.equal((await settled(read, ["starting", "unavailable", "stopping"], signal()))?.status.state, "stopped");
+  assert.equal(reads, 4);
+  assert.equal(await settled(async () => null, ["starting"], signal()), null);
+  await assert.rejects(settled(async () => ({ name: "pylon-settle", labels: {}, status: { name: "pylon-settle", state: "starting" } }), ["starting"], AbortSignal.timeout(50)), /aborted/, "the deadline ends the wait");
 });
 
 test("the artifacts listed with a list of pylons hold the checkpoints of the stopped ones in it, and no others", async () => {
