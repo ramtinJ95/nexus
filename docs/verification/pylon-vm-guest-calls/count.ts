@@ -123,13 +123,17 @@ try {
 		const runtime = new SandboxRuntime(work, record, { resources: { cpus: 1, memoryGiB: 1 } }, { vm: g.vm, settleMs: 0, services });
 		await runtime.handle({ action: "services", name: "pylon-c", op: "ensure" });
 		await new Promise((accept) => setTimeout(accept, 300));
-		const before = await stat(join(work, "status.json"));
+		// A rename gives the file a new inode and a new mtime, and a freed inode can be handed out again, so both are compared.
+		const stamp = async () => {
+			const { ino, mtimeNs } = await stat(join(work, "status.json"), { bigint: true });
+			return `${ino} ${mtimeNs}`;
+		};
 		g.reset();
-		await runtime.handle({ action: "services", name: "pylon-c", op: "status" });
-		g.report("a services status of one process-health service, after an ensure");
-		await runtime.handle({ action: "services", name: "pylon-c", op: "status" });
-		g.report("a second services status");
-		console.log(`status.json rewritten by the two statuses: ${(await stat(join(work, "status.json"))).ino !== before.ino ? "yes" : "no"}`);
+		for (const what of ["a services status of one process-health service, after an ensure", "a second services status"]) {
+			const before = await stamp();
+			await runtime.handle({ action: "services", name: "pylon-c", op: "status" });
+			g.report(`${what}, which ${(await stamp()) === before ? "left status.json as it was" : "rewrote status.json"}`);
+		}
 		await services.close();
 	}
 	{
