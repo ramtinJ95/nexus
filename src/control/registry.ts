@@ -1224,6 +1224,8 @@ export function openRegistry(path: string, clock = Date.now) {
     upsertNode,
     nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeRow),
     node,
+    /** Each node's tailnet node ID, without reading its observation. */
+    nodeIds: (): Map<NodeName, TailnetNodeId> => new Map(sql("SELECT name, tailnet_node_id FROM nodes").all().map((r) => [r.name as NodeName, r.tailnet_node_id as TailnetNodeId])),
     /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
     markOffline(name: NodeName) { sql("UPDATE nodes SET state = ? WHERE name = ?").run("offline", name); },
     addJoinToken(hash: string, expiresAt: number) { sql("INSERT INTO join_tokens (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt); },
