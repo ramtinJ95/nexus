@@ -168,6 +168,11 @@ test("failed, timed out, truncated and invalid guest replies are rejected", asyn
   }
 });
 
+test("a reply that is not git facts fails naming the read", async () => {
+  await assert.rejects(gitFacts(fakeGuest(() => ({ exitCode: 0, output: "bad JSON", truncated: false }))), /^Error: checkout git facts: /);
+  await assert.rejects(gitFacts(fakeGuest(() => ({ exitCode: 0, output: "{}", truncated: false }))), /^Error: checkout git facts\.head: /);
+});
+
 test("branch names are unambiguous beside a same-named tag and preserve Unicode line separators", async (t) => {
   const s = await checkout(t);
   const head = await s.commit();

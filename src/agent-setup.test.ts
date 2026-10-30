@@ -5,11 +5,12 @@ import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, write
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
-  agentSetupManifest, formatAgentSetup, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
+  agentSetupManifest, formatAgentSetup, herdrPiExtension, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
 } from "../images/pylon/agent-setup/manifest.ts";
 import { claudeHooks, installedPackage, installMismatches, pylonProfile } from "../images/pylon/agent-setup/install.ts";
-import { httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
+import { captureSummary, httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./image-build.ts";
+import type { ImageRecipe } from "./images.ts";
 
 const checkedIn = await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8");
 
@@ -460,6 +461,21 @@ test("the plan is deterministic: the same Mac in any listing order formats to th
 test("--leave-out takes <kind>:<name>, splitting at the first colon", () => {
   assert.deepEqual(parseLeaveOut("pi-package:npm:@me/pi-x"), { kind: "pi-package", name: "npm:@me/pi-x", why: "left out on the command line" });
   for (const bad of ["ramtin-mode", "skills:ramtin-mode", "skill:", ":ramtin-mode"]) assert.throws(() => parseLeaveOut(bad), /--leave-out takes <kind>:<name>/);
+});
+
+const kinds = ["claude-plugin", "pi-package", "skill", "pi-extension", "shepherdr-profile"] as const;
+
+test("--leave-out takes every kind, and refuses another, an inherited name included, naming them all", () => {
+  for (const kind of kinds) assert.deepEqual(parseLeaveOut(`${kind}:x`), { kind, name: "x", why: "left out on the command line" });
+  for (const bad of ["plugin:x", "toString:x"]) assert.throws(() => parseLeaveOut(bad), { message: `--leave-out takes <kind>:<name> with kind one of ${kinds.join(", ")}, such as skill:ramtin-mode` });
+});
+
+test("the capture summary labels each kind of leave-out, and the Herdr pi extension is left out by the manifest's name", () => {
+  assert.ok(leaveOuts.some((rule) => rule.kind === "pi-extension" && rule.name === herdrPiExtension));
+  const capture = { ...captured(plan(thisMac())), leftOut: kinds.map((kind) => ({ kind, name: "x", why: "y" })), notes: [] };
+  const pins = { claudeCode: "2.1.310", pi: "1.4.0" } as ImageRecipe["pins"];
+  const leftOut = captureSummary(capture, thisMac(), pins).split("\n").filter((line) => line.includes(" x: y"));
+  assert.deepEqual(leftOut.map((line) => line.trim()), ["left out   claude plugin x: y", "pi package x: y", "skill x: y", "pi extension x: y", "shepherdr profile x: y"]);
 });
 
 test("git remotes read as the https URL the image build fetches", () => {

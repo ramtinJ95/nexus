@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { claudeProjects } from "./claude-transcript.ts";
 import type { AgentCall } from "./control/usage.ts";
+import { parseJson } from "./parse.ts";
 import { openPython, pipeOutput, type OpenPipe } from "./pipe.ts";
 
 const helper = readFileSync(new URL("./agent-usage.py", import.meta.url));
@@ -40,6 +41,6 @@ export async function readAgentUsage(open: OpenPipe, offsets: ReadonlyMap<string
   const input = Buffer.from(JSON.stringify({ ...logs, offsets: Object.fromEntries(offsets), limit: limitBytes }));
   const { out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "its agents' usage", input });
   const lines = out.toString("utf8").split("\n").filter((line) => line !== "");
-  const end = endSchema.parse(JSON.parse(lines.pop() ?? "null"));
-  return { calls: lines.map((line) => callSchema.parse(JSON.parse(line))), offsets: new Map(Object.entries(end.offsets) as [string, FileCursor][]), more: end.more };
+  const end = parseJson(endSchema, lines.pop() ?? "null", "the agent usage read's end");
+  return { calls: lines.map((line, i) => parseJson(callSchema, line, `agent usage call ${i + 1}`)), offsets: new Map(Object.entries(end.offsets) as [string, FileCursor][]), more: end.more };
 }

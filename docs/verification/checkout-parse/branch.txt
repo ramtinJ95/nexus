@@ -1,0 +1,109 @@
+# branch: c4d188a refactor(agent-setup): spell each leave-out kind and its label once
+## A declared diff of a tree that holds an edit, a rename with an edit, a binary edit, an untracked file and a force-added ignored file
+addOutput diff: 5 git commands
+  git rev-parse --verify --quiet HEAD
+  git rev-parse --verify --quiet a4330e42b8519ef25daef82efbcd466485e6332b^{commit}
+  git rev-parse --git-path index
+  git add --all
+  git diff --cached --no-color --no-ext-diff --no-textconv --find-renames --no-relative --binary --src-prefix=a/ --dst-prefix=b/ a4330e42b8519ef25daef82efbcd466485e6332b
+record: {"id":"<id>","kind":"diff","base":"a4330e42b8519ef25daef82efbcd466485e6332b","sha256":"f9c8e8aa4b6233489fcd7d8112a55a824b48bd0078d4819976316fcd260a6b78","title":"capture"}
+record base is HEAD: true
+diff file:
+  | diff --git a/app.txt b/app.txt
+  | index 814f4a4..f04eb26 100644
+  | --- a/app.txt
+  | +++ b/app.txt
+  | @@ -1,2 +1,3 @@
+  |  one
+  | -two
+  | +2
+  | +three
+  | diff --git a/kept.log b/kept.log
+  | new file mode 100644
+  | index 0000000..537b7ae
+  | --- /dev/null
+  | +++ b/kept.log
+  | @@ -0,0 +1 @@
+  | +force-added
+  | diff --git a/notes.md b/notes.md
+  | new file mode 100644
+  | index 0000000..5a72eb2
+  | --- /dev/null
+  | +++ b/notes.md
+  | @@ -0,0 +1 @@
+  | +untracked
+  | diff --git a/pixel.bin b/pixel.bin
+  | index 8352675d67aed6625ece79af41c27fdb4ee2e867..6bf3847422ec8b0725ea4b4aaef19f2b747745ff 100644
+  | GIT binary patch
+  | literal 4
+  | LcmZQzW?=;Y02%-d
+  | 
+  | literal 3
+  | KcmZQzWC8#H2LJ>B
+  | 
+  | diff --git a/src/old.ts b/src/new.ts
+  | similarity index 95%
+  | rename from src/old.ts
+  | rename to src/new.ts
+  | index 30fddfa..3bd5857 100644
+  | --- a/src/old.ts
+  | +++ b/src/new.ts
+  | @@ -17,4 +17,4 @@ export const a = 1;
+  |  export const a = 1;
+  |  export const a = 1;
+  |  export const a = 1;
+  | -export const a = 1;
+  | +export const b = 2;
+  | 
+git apply to its base: resolves ""
+  app.txt: in the checkout, same bytes after apply
+  src/new.ts: in the checkout, same bytes after apply
+  src/old.ts: absent in the checkout, absent after apply
+  pixel.bin: in the checkout, same bytes after apply
+  notes.md: in the checkout, same bytes after apply
+  kept.log: in the checkout, same bytes after apply
+  dist/bundle.js: in the checkout, absent after apply
+
+## The Changes view of the same tree
+changes head: 5 git commands
+  git rev-parse --verify --quiet HEAD
+  git rev-parse --verify --quiet a4330e42b8519ef25daef82efbcd466485e6332b^{commit}
+  git rev-parse --git-path index
+  git add --all
+  git diff --cached --no-color --no-ext-diff --no-textconv --find-renames --no-relative -z --raw --numstat a4330e42b8519ef25daef82efbcd466485e6332b
+base kind: head, base is HEAD: true
+  {"path":"app.txt","oldPath":null,"status":"modified","additions":2,"deletions":1}
+  {"path":"kept.log","oldPath":null,"status":"added","additions":1,"deletions":0}
+  {"path":"notes.md","oldPath":null,"status":"added","additions":1,"deletions":0}
+  {"path":"pixel.bin","oldPath":null,"status":"modified","additions":null,"deletions":null}
+  {"path":"src/new.ts","oldPath":"src/old.ts","status":"renamed","additions":1,"deletions":1}
+agent's index unchanged: true
+changes start: resolves ["modified app.txt","added kept.log","added notes.md","modified pixel.bin","renamed src/new.ts"]
+
+## Refusals that name their base kind
+blob start missing: rejects CheckoutRefused "notes.md does not exist at the start base"
+blob head directory: rejects CheckoutRefused "src is not a file at the head base"
+changes turn with no snapshot: rejects CheckoutRefused "the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead"
+diff start with no refs/nexus/base: rejects CheckoutRefused "the checkout has no refs/nexus/base, what its pylon booted at, because the pylon booted before Nexus recorded it. Ask for the changes since HEAD instead"
+
+## Declared diff refusals
+a clean tree: rejects OutputRefused "the working tree has no changes against HEAD"
+no commits and no files: rejects OutputRefused "the repository has no commits and no files"
+not a git repository: rejects OutputRefused "the checkout is not a git repository"
+no checkout: rejects OutputRefused "the pylon has no checkout at /home/user/workspace/repo"
+
+## Malformed guest replies
+git facts, not JSON: rejects Error "checkout git facts: Unexpected token 'b', \"bad JSON\" is not valid JSON"
+git facts, wrong shape: rejects Error "checkout git facts.head: Invalid input: expected string, received undefined; checkout git facts.branch: Invalid input: expected string, received undefined; checkout git facts.dirty: Invalid input: expected boolean, received undefined; checkout git facts.branches: Invalid input: expected array, received undefined"
+agent usage, end record of the wrong shape: rejects Error "the agent usage read's end.offsets: Invalid input: expected record, received undefined; the agent usage read's end.more: Invalid input: expected boolean, received undefined"
+agent usage, a call that is not JSON: rejects Error "agent usage call 1: Unexpected token 'x', \"x\" is not valid JSON"
+
+## Leave-out flags
+--leave-out claude-plugin:x: resolves {"kind":"claude-plugin","name":"x","why":"left out on the command line"}
+--leave-out pi-package:npm:@me/x: resolves {"kind":"pi-package","name":"npm:@me/x","why":"left out on the command line"}
+--leave-out skill:x: resolves {"kind":"skill","name":"x","why":"left out on the command line"}
+--leave-out pi-extension:x: resolves {"kind":"pi-extension","name":"x","why":"left out on the command line"}
+--leave-out shepherdr-profile:x: resolves {"kind":"shepherdr-profile","name":"x","why":"left out on the command line"}
+--leave-out plugin:x: rejects Error "--leave-out takes <kind>:<name> with kind one of claude-plugin, pi-package, skill, pi-extension, shepherdr-profile, such as skill:ramtin-mode"
+--leave-out toString:x: rejects Error "--leave-out takes <kind>:<name> with kind one of claude-plugin, pi-package, skill, pi-extension, shepherdr-profile, such as skill:ramtin-mode"
+settled leave-outs: claude-plugin:nexus@claude-mods, pi-package:npm:@ramtinj95/pi-nexus, skill:anki-cards, skill:voxcraft-remote, skill:macmini-handoff, pi-extension:atuin.ts, pi-extension:herdr-agent-state.ts

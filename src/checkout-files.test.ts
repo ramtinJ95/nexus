@@ -141,6 +141,23 @@ test("changes since the start include commits, staged, unstaged and untracked wo
   assert.equal((await c.git("status", "--porcelain")).includes("?? notes.md"), true);
 });
 
+test("one Changes read gives a rename, a binary edit and a plain edit each its status and counts", async (t) => {
+  const c = await checkout(t);
+  await writeFile(join(c.dir, "pixel.bin"), Buffer.from([0, 1, 2]));
+  await c.git("add", "pixel.bin");
+  await c.git("commit", "-q", "-m", "binary");
+  await c.git("mv", "src/old.ts", "src/new.ts");
+  await writeFile(join(c.dir, "src", "new.ts"), "export const a = 1;\n".repeat(19) + "export const b = 2;\n");
+  await writeFile(join(c.dir, "pixel.bin"), Buffer.from([0, 3, 4, 5]));
+  await writeFile(join(c.dir, "app.txt"), "one\n2\nthree\n");
+
+  assert.deepEqual((await c.reader.changes("head")).files, [
+    { path: "app.txt", oldPath: null, status: "modified", additions: 2, deletions: 1 },
+    { path: "pixel.bin", oldPath: null, status: "modified", additions: null, deletions: null },
+    { path: "src/new.ts", oldPath: "src/old.ts", status: "renamed", additions: 1, deletions: 1 },
+  ]);
+});
+
 test("a diff is the unified diff from the base, of the whole tree or of the paths asked for", async (t) => {
   const c = await checkout(t);
   await writeFile(join(c.dir, "app.txt"), "one\n2\n");

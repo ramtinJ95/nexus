@@ -12,13 +12,14 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PassThrough, Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { JobFailure } from "./backend.ts";
 import type { ArtifactManifest, ImageId, ImageManifest, PortableArtifactId, TemplateManifest } from "./images.ts";
+import { readJson } from "./json-file.ts";
 import { isImageId, isPortableArtifactId, parseArtifactManifest } from "./protocol.ts";
 
 const execFileAsync = promisify(execFile);
@@ -112,14 +113,9 @@ export function artifactDirectory(root: string, codec: ArtifactCodec): ArtifactD
     writeFile(join(dir, manifestFileOf(manifest.id)), `${JSON.stringify(manifest, null, 2)}\n`);
 
   async function manifest<I extends PortableArtifactId>(id: I): Promise<ManifestOf<I> | null> {
-    let text: string;
-    try {
-      text = await readFile(join(path(id), manifestFileOf(id)), "utf8");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw err;
-    }
-    const parsed = parseArtifactManifest(JSON.parse(text));
+    const value = await readJson(join(path(id), manifestFileOf(id)));
+    if (value === undefined) return null;
+    const parsed = parseArtifactManifest(value);
     if (parsed.id !== id) throw new Error(`${path(id)} holds the manifest of ${parsed.id}`);
     return parsed as ManifestOf<I>;
   }

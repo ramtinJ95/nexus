@@ -16,11 +16,13 @@ import { join, posix, relative, resolve, sep } from "node:path";
 import { promisify, parseArgs } from "node:util";
 import { z } from "zod";
 import {
-  agentSetupManifest, asCommit, asDotfilesPath, asHttpsUrl, formatAgentSetup, parseAgentSetup,
+  agentSetupManifest, asCommit, asDotfilesPath, asHttpsUrl, formatAgentSetup, herdrPiExtension, parseAgentSetup,
   type AgentSetup, type Commit, type DotfilesPath, type Harness, type HttpsUrl, type PiPackage, type PluginId,
 } from "../images/pylon/agent-setup/manifest.ts";
+import { output as execOutput } from "./exec.ts";
 import { loadImageRecipe, pylonRecipeDir } from "./image-build.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
+import { parseJson } from "./parse.ts";
 
 /** Git blob IDs by POSIX path inside a plugin's directory, as `git ls-tree` prints them. */
 export type PluginFiles = ReadonlyMap<string, string>;
@@ -90,10 +92,11 @@ export interface MacSetup {
   versions: { claudeCode: string; pi: string };
 }
 
-export type LeaveOutKind = "claude-plugin" | "pi-package" | "skill" | "pi-extension" | "shepherdr-profile";
+/** Each kind of capability a leave-out names, and its label in the capture's lines. */
+const leaveOutKinds = { "claude-plugin": "claude plugin", "pi-package": "pi package", skill: "skill", "pi-extension": "pi extension", "shepherdr-profile": "shepherdr profile" } as const;
+export type LeaveOutKind = keyof typeof leaveOutKinds;
 /** One deliberate leave-out. The capture prints each with its reason, so nothing disappears silently. */
 export interface LeaveOut { kind: LeaveOutKind; name: string; why: string }
-const leaveOutKinds: readonly LeaveOutKind[] = ["claude-plugin", "pi-package", "skill", "pi-extension", "shepherdr-profile"];
 
 /** The settled leave-outs, the only list of them. --leave-out adds to it for one run. */
 export const leaveOuts: readonly LeaveOut[] = [
@@ -103,7 +106,7 @@ export const leaveOuts: readonly LeaveOut[] = [
   { kind: "skill", name: "voxcraft-remote", why: "Mac-only" },
   { kind: "skill", name: "macmini-handoff", why: "Mac-only" },
   { kind: "pi-extension", name: "atuin.ts", why: "needs the atuin binary" },
-  { kind: "pi-extension", name: "herdr-agent-state.ts", why: "herdr integration install pi writes its own" },
+  { kind: "pi-extension", name: herdrPiExtension, why: "herdr integration install pi writes its own" },
 ];
 
 export type Capture =
@@ -148,8 +151,9 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
    * The item's path in the dotfiles repo, or null after recording why it cannot ship from there. A skill or an
    * extension installs under its directory's name, so that name must be the one it has on this Mac.
    */
-  const inDotfiles = (what: string, name: string, realPath: string, installedByName: boolean): DotfilesPath | null => {
+  const inDotfiles = (kind: LeaveOutKind, name: string, realPath: string, installedByName: boolean): DotfilesPath | null => {
     fromDotfiles = true;
+    const what = leaveOutKinds[kind];
     const rel = relative(dotfiles.root, realPath).split(sep).join("/");
     if (rel === "" || rel === ".." || rel.startsWith("../")) {
       problems.push(`${what} ${name}: ${realPath} is outside ${dotfiles.root}`);
@@ -228,7 +232,7 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
       if (version === undefined) problems.push(`pi package ${entry}: no version of ${name} is installed under ~/.pi/agent/npm`);
       else packages.push({ kind: "npm", name, version });
     } else if (local !== undefined) {
-      const path = inDotfiles("pi package", entry, local, false);
+      const path = inDotfiles("pi-package", entry, local, false);
       if (path !== null) packages.push({ kind: "local", path });
     } else problems.push(`pi package ${entry}: only npm: packages and local paths that exist are captured`);
   }
@@ -242,14 +246,14 @@ export function planAgentSetup(mac: MacSetup, rules: readonly LeaveOut[]): Captu
       loadNothing.push({ kind: "pi-extension", name: extension.name, why: loadsNothing });
       continue;
     }
-    const path = inDotfiles("pi extension", extension.name, extension.realPath, true);
+    const path = inDotfiles("pi-extension", extension.name, extension.realPath, true);
     if (path !== null) extensions.push(path);
   }
 
   const shepherdrProfiles: DotfilesPath[] = [];
   for (const profile of mac.pi.shepherdrProfiles) {
     if (leftOut("shepherdr-profile", profile.name)) continue;
-    const path = inDotfiles("shepherdr profile", profile.name, profile.realPath, true);
+    const path = inDotfiles("shepherdr-profile", profile.name, profile.realPath, true);
     const defects = profileProblems(profile.name, profile.files, profile.links);
     problems.push(...defects);
     if (path !== null && defects.length === 0) shepherdrProfiles.push(path);
@@ -357,14 +361,7 @@ function samePluginFiles(installed: PluginFiles, atHead: PluginFiles): boolean {
 const gitEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" };
 const execFileAsync = promisify(execFile);
 
-async function output(command: string, args: readonly string[], cwd?: string): Promise<string> {
-  try {
-    return (await execFileAsync(command, args, { cwd, env: { ...gitEnv, PI_OFFLINE: "1" }, maxBuffer: 256 * 1024 * 1024 })).stdout;
-  } catch (err) {
-    const { stderr = "", message } = err as { stderr?: string; message: string };
-    throw new Error(`${command} ${args.join(" ")}: ${message}${stderr === "" ? "" : `\n${stderr}`}`);
-  }
-}
+const output = (command: string, args: readonly string[], cwd?: string) => execOutput(command, args, { cwd, env: { ...gitEnv, PI_OFFLINE: "1" }, maxBuffer: 256 * 1024 * 1024 });
 
 async function succeeds(command: string, args: readonly string[]): Promise<boolean> {
   return output(command, args).then(() => true, () => false);
@@ -446,7 +443,7 @@ const claudeSettingsSchema = z.object({
 });
 const piSettingsSchema = z.object({ packages: z.array(z.string()).default([]), skills: z.array(z.string()).default([]) });
 
-const readJson = async <T>(path: string, schema: z.ZodType<T>): Promise<T> => schema.parse(JSON.parse(await readFile(path, "utf8")));
+const readConfig = async <T>(path: string, schema: z.ZodType<T>): Promise<T> => parseJson(schema, await readFile(path, "utf8"), path);
 
 /** Entries of `dir` that hold a SKILL.md, by name, sorted. */
 async function skillsIn(dir: string): Promise<{ name: string; realPath: string }[]> {
@@ -487,13 +484,13 @@ export async function readMacSetup(home: string): Promise<MacSetup> {
     if (/^[RC]/.test(record)) changed.add(status[++i]!);
   }
 
-  const claudeSettings = await readJson(join(claudeDir, "settings.json"), claudeSettingsSchema);
-  const installed = await readJson(join(claudeDir, "plugins", "installed_plugins.json"), installedPluginsSchema);
+  const claudeSettings = await readConfig(join(claudeDir, "settings.json"), claudeSettingsSchema);
+  const installed = await readConfig(join(claudeDir, "plugins", "installed_plugins.json"), installedPluginsSchema);
   const plugins = await Promise.all(Object.entries(installed.plugins).flatMap(([id, installs]) =>
     installs.filter((i) => i.scope === "user").map(async (i) => ({
       id, version: i.version, enabled: claudeSettings.enabledPlugins[id] === true, files: await hashTree(i.installPath),
     }))));
-  const known = await readJson(join(claudeDir, "plugins", "known_marketplaces.json"), knownMarketplacesSchema);
+  const known = await readConfig(join(claudeDir, "plugins", "known_marketplaces.json"), knownMarketplacesSchema);
   const marketplaceNames = [...new Set(plugins.map((p) => p.id.slice(p.id.lastIndexOf("@") + 1)))].sort();
   const marketplaces = await Promise.all(marketplaceNames.flatMap((name): Promise<MacMarketplace>[] => {
     const entry = known[name];
@@ -539,7 +536,7 @@ async function directoryLoads(dir: string): Promise<boolean> {
 /** The pi part of the reader. It reads only files under `home`: pi's settings, its npm installs and what it discovers. */
 export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
   const piAgent = join(home, ".pi", "agent");
-  const piSettings = await readJson(join(piAgent, "settings.json"), piSettingsSchema);
+  const piSettings = await readConfig(join(piAgent, "settings.json"), piSettingsSchema);
   /** A settings path as pi resolves it: ~ is the home, and a relative path is under ~/.pi/agent. */
   const settingPath = (path: string) => resolve(piAgent, path.trim().replace(/^~(?=\/|$)/, home));
   const npmVersions = new Map<string, string>();
@@ -548,7 +545,7 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
     const name = npmName(entry);
     if (name !== null) {
       const packageJson = join(piAgent, "npm", "node_modules", name, "package.json");
-      if (existsSync(packageJson)) npmVersions.set(name, (await readJson(packageJson, z.object({ version: z.string() }))).version);
+      if (existsSync(packageJson)) npmVersions.set(name, (await readConfig(packageJson, z.object({ version: z.string() }))).version);
     } else if (!/^[a-z+]+:/.test(entry) && existsSync(settingPath(entry))) {
       localPackages.set(entry, await realpath(settingPath(entry)));
     }
@@ -592,11 +589,11 @@ export async function readPiSetup(home: string): Promise<MacSetup["pi"]> {
 /** `<kind>:<name>`, split at the first colon, since pi package names such as npm:x carry their own. */
 export function parseLeaveOut(flag: string): LeaveOut {
   const at = flag.indexOf(":");
-  const kind = flag.slice(0, at) as LeaveOutKind;
-  if (at < 1 || at === flag.length - 1 || !leaveOutKinds.includes(kind)) {
-    throw new Error(`--leave-out takes <kind>:<name> with kind one of ${leaveOutKinds.join(", ")}, such as skill:ramtin-mode`);
+  const kind = flag.slice(0, at);
+  if (at < 1 || at === flag.length - 1 || !Object.hasOwn(leaveOutKinds, kind)) {
+    throw new Error(`--leave-out takes <kind>:<name> with kind one of ${Object.keys(leaveOutKinds).join(", ")}, such as skill:ramtin-mode`);
   }
-  return { kind, name: flag.slice(at + 1), why: "left out on the command line" };
+  return { kind: kind as LeaveOutKind, name: flag.slice(at + 1), why: "left out on the command line" };
 }
 
 /** The lines after the first: what ships, what is left out and why, and anything worth a look. */
@@ -604,7 +601,6 @@ export function captureSummary(capture: Extract<Capture, { kind: "captured" }>, 
   const { setup } = capture;
   const evidence = mac.dotfiles.onOrigin.shown ? `, on origin by ${mac.dotfiles.onOrigin.by}` : "";
   const forHarness = (h: Harness) => setup.skills.filter((s) => s.for.includes(h)).length;
-  const kindLabel: Record<LeaveOutKind, string> = { "claude-plugin": "claude plugin", "pi-package": "pi package", skill: "skill", "pi-extension": "pi extension", "shepherdr-profile": "shepherdr profile" };
   const notes = [
     ...capture.notes,
     ...(mac.versions.claudeCode === pins.claudeCode ? [] : [`this Mac runs Claude Code ${mac.versions.claudeCode} and the image pins ${pins.claudeCode} (pins.json is yours to change)`]),
@@ -615,7 +611,7 @@ export function captureSummary(capture: Extract<Capture, { kind: "captured" }>, 
     ["claude", setup.claude.plugins.map((p) => `${p.id} ${p.version}`)],
     ["skills", [`${setup.skills.length}: ${forHarness("claude")} for Claude Code, ${forHarness("pi")} for pi`]],
     ["pi", [`${setup.pi.packages.length} packages, ${setup.pi.extensions.length} extensions, ${setup.pi.shepherdrProfiles.length} shepherdr profiles`]],
-    ["left out", capture.leftOut.map((rule) => `${kindLabel[rule.kind]} ${rule.name}: ${rule.why}`)],
+    ["left out", capture.leftOut.map((rule) => `${leaveOutKinds[rule.kind]} ${rule.name}: ${rule.why}`)],
     ["note", notes],
   ];
   return rows.flatMap(([label, lines]) => lines.map((line, i) => `  ${(i === 0 ? label : "").padEnd(10)} ${line}\n`)).join("");

@@ -109,6 +109,47 @@ test("a diff of a repository with no commits and no files is refused", async (t)
   assert.deepEqual(await listOutputs(guest), []);
 });
 
+test("a diff output shows a rename as a rename, whatever the agent's config, and applies to its base", async (t) => {
+  const { guest, at } = await localGuest(t);
+  const { dir, git } = await gitRepo(at);
+  await git("config", "diff.renames", "false");
+  await writeFile(join(dir, "app.txt"), "one\n".repeat(20));
+  await git("commit", "-q", "-am", "longer");
+  await git("mv", "app.txt", "main.txt");
+  await writeFile(join(dir, "main.txt"), "one\n".repeat(19) + "two\n");
+  const output = await addOutput(guest, { kind: "diff" });
+  assert.ok(output.kind === "diff");
+  const file = at(`${outputsDir}/${output.id}.diff`);
+  assert.match(await readFile(file, "utf8"), /^rename from app.txt\nrename to main.txt$/m);
+
+  const base = await mkdtemp(join(tmpdir(), "nexus-apply-"));
+  t.after(() => rm(base, { recursive: true }));
+  await run("git", ["-C", dir, "worktree", "add", "-q", "--detach", base, output.base]);
+  await run("git", ["apply", file], { cwd: base });
+  await assert.rejects(readFile(join(base, "app.txt")));
+  assert.equal(await readFile(join(base, "main.txt"), "utf8"), "one\n".repeat(19) + "two\n");
+});
+
+test("a diff output holds an ignored file the agent force-added, as the Changes view does", async (t) => {
+  const { guest, at } = await localGuest(t);
+  const { dir, git } = await gitRepo(at);
+  await writeFile(join(dir, ".git", "info", "exclude"), "*.log\n");
+  await writeFile(join(dir, "kept.log"), "kept\n");
+  await writeFile(join(dir, "skipped.log"), "skipped\n");
+  await git("add", "-f", "kept.log");
+  const output = await addOutput(guest, { kind: "diff" });
+  const diff = await readFile(at(`${outputsDir}/${output.id}.diff`), "utf8");
+  assert.match(diff, /^diff --git a\/kept.log b\/kept.log$/m);
+  assert.doesNotMatch(diff, /skipped.log/);
+});
+
+test("a diff of a checkout that is not a git repository is refused", async (t) => {
+  const { guest, at } = await localGuest(t);
+  await mkdir(at(repo), { recursive: true });
+  await assert.rejects(addOutput(guest, { kind: "diff" }), (err) => err instanceof OutputRefused && /the checkout is not a git repository/.test(err.message));
+  assert.deepEqual(await listOutputs(guest), []);
+});
+
 test("outputs list in the order they were declared", async (t) => {
   const { guest, at } = await localGuest(t);
   await mkdir(at(repo), { recursive: true });
