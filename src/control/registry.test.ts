@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type StoredPylon, type ThreadId } from "./registry.ts";
+import { promptSenders, typeIntoClaude } from "./inbox.ts";
+import { reviewPrefix } from "./review.ts";
 import { seedRegistry, testPylon, testProject, testThread } from "./test-kit.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { PullRequest } from "./github.ts";
@@ -102,6 +104,28 @@ test("the image a new current one replaces becomes previous, and making it curre
   assert.deepEqual([registry.currentImage(), registry.previousImage()], [next.id, image.id], "making the current image current again keeps previous");
   registry.setCurrentImage(image.id);
   assert.deepEqual([registry.currentImage(), registry.previousImage()], [image.id, next.id]);
+});
+
+test("a Claude message recorded before senders were reads as unknown, and only its thread tells Nexus's prompts by their prefix", async (t) => {
+  const path = tempDb();
+  seeded(path).close();
+  const db = new DatabaseSync(path);
+  const version = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+  db.exec(`DROP TABLE claude_senders; PRAGMA user_version = ${version - 1}`);
+  db.prepare("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, 'rv-1:1', 'sent', ?)").run(threadId, JSON.stringify({ session: "s1", outcome: "sent", resumed: false }));
+  db.close();
+  const registry = openRegistry(path);
+  t.after(() => registry.close());
+  assert.deepEqual(registry.claudeMessageSenders(threadId), [{ sender: "unknown", sha256: null }]);
+  const review = `${reviewPrefix}\nReview pull request #7.`;
+  assert.equal(promptSenders(registry, threadId)(review), "review", "a thread with sends from before the record keeps the prefix");
+  assert.equal(promptSenders(registry, threadId)("build the cache"), null);
+
+  const fresh = seeded(tempDb());
+  t.after(() => fresh.close());
+  assert.equal(promptSenders(fresh, threadId)(review), null, "on a thread whose every send is recorded, an unrecorded prompt is the person's");
+  await typeIntoClaude(fresh, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
+  assert.equal(promptSenders(fresh, threadId)(review), "review");
 });
 
 test("an image recorded before images carried their release reads as of no known release", async (t) => {
@@ -993,7 +1017,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 23}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 24}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1417,7 +1441,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 13}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 14}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1458,7 +1482,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 7}`);
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 8}`);
     db.close();
   };
   rewind();
@@ -1484,7 +1508,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 6}`);
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 7}`);
     db.close();
   };
   rewind();
@@ -1496,7 +1520,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 6}`);
+  db.exec(`PRAGMA user_version = ${version - 7}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());
@@ -1567,7 +1591,7 @@ test("a registry from before join tokens keeps its nodes as they were, with none
   before.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 3}`);
+  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 4}`);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());

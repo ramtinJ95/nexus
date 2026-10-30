@@ -68,7 +68,6 @@ export const verifyGate: Gate = {
     resources: { memoryGiB: verifyMemoryGiB, nestedVirtualization: true },
   }),
 };
-export const checkScript = checkGate.script;
 
 /**
  * A check run's state. `waiting` while its pylon boots. `void` when this run cannot give a verdict, because its pipe was

@@ -30,6 +30,8 @@ import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, Thread
 import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource, type TranscriptImage } from "../claude-transcript.ts";
+import type { Sender } from "../harness/host.ts";
+import { promptSenders, type PromptSenders } from "./inbox.ts";
 import { queuedOf } from "./claude-conversation.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";
 import { heldBy, holdRule, reservedNames } from "./policy.ts";
@@ -844,7 +846,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
   const { thread: t } = d;
   const agent = c.registry.agent(t).kind;
   const read = view === null || view instanceof Error ? null : view;
-  const items = read === null ? [] : itemsOf(read, d.questions ?? [], t.id);
+  const items = read === null ? [] : itemsOf(read, d.questions ?? [], t.id, () => promptSenders(c.registry, t.id));
   const run = runOf(d, read, items, c.now);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
@@ -1058,7 +1060,7 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
   const held = r.phase.kind === "needs-person";
   const reasons = heldBy(r);
-  const rules = reasons.map((reason) => ({ reason, ...holdRule(reason) }));
+  const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));
   const waived = rules.filter((h) => h.waivable).map((h) => h.reason);
   // A hold that meets every landing again, and that the person cannot waive, leaves only merging on GitHub.
   const stuck = rules.some((h) => h.holdsAgain && !h.waivable);
@@ -1226,14 +1228,14 @@ const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
  * its growing parts changed, such as a new entry or a tool call that finished, and otherwise only the parts that
  * grew. Each frame is the change since the one this reader got last, so a reader that fell behind skips ahead.
  */
-export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now, questions: () => readonly Question[] = () => []): (view: ConversationView | ClaudeConversation) => LiveFrame | null {
+export function liveFrames(t: Thread, claudeModel: string | null = null, now: () => number = Date.now, questions: () => readonly Question[] = () => [], senders: () => PromptSenders = () => () => null): (view: ConversationView | ClaudeConversation) => LiveFrame | null {
   let shape: string | null = null;
   let parts: string[] = [];
   let shown: string | null = null;
   return (served) => {
     const view = agentView(served);
     const model = view.kind === "claude" ? claudeModel : modelOf(view.view);
-    const region = convo(t, view, itemsOf(view, questions(), t.id), model, now()).text;
+    const region = convo(t, view, itemsOf(view, questions(), t.id, senders), model, now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
@@ -1402,12 +1404,14 @@ type ToolItem = Extract<Item, { kind: "tool" }>;
 type AskItem = Extract<Item, { kind: "ask" }>;
 type UserItem = Extract<Item, { kind: "user" }>;
 
-/** Who a message came from. Nexus's PR watch, review loop and nudge write into a conversation as a user. */
-type PromptFrom = PromptSource | "pr-watch" | "review" | "nudge";
+/** Who a message came from. Nexus's PR watch, review loop, usage-limit watch and nudge write into a conversation as a user. */
+type PromptFrom = PromptSource | Sender;
 /** How a bubble names who a message came from. A person's is said only to a screen reader, as the bubble's side shows it. */
 const promptLabel: Record<PromptFrom, string> = {
-  person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", nudge: "Nexus nudge", command: "Slash command", other: "Claude Code",
+  person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge", command: "Slash command", other: "Claude Code",
 };
+/** A harness entry's kind for each sender's messages. */
+const nexusKinds: Readonly<Record<string, Sender>> = { "nexus.pr-watch": "pr-watch", "nexus.review": "review", "nexus.usage-limit": "usage-limit", "nexus.nudge": "nudge" } satisfies Record<`nexus.${Sender}`, Sender>;
 
 /** A message's text, with what each image part becomes in it. A committed message's images show as images. */
 const messageText = (content: UserMessage["content"], image: (part: ImageContent) => string) => typeof content === "string" ? content
@@ -1488,7 +1492,7 @@ function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
     if (message.role === "user") {
       const text = messageText(message.content, () => "");
       items.push({
-        kind: "user", text, queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : entry.kind === "nexus.review" ? "review" : entry.kind === "nexus.nudge" ? "nudge" : "person",
+        kind: "user", text, queued: null, at: message.timestamp, from: nexusKinds[entry.kind] ?? "person",
         images: [...harnessShots(thread, entry.id, place, message.content), ...fileShots(thread, imagePaths(text))],
       });
     }
@@ -1519,7 +1523,7 @@ function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
   return items;
 }
 
-const itemsOf = (view: AgentView, questions: readonly Question[], thread: ThreadId): Item[] => view.kind === "claude" ? claudeItems(view.view, questions, thread) : conversationItems(view.view, thread);
+const itemsOf = (view: AgentView, questions: readonly Question[], thread: ThreadId, senders: () => PromptSenders): Item[] => view.kind === "claude" ? claudeItems(view.view, questions, thread, senders()) : conversationItems(view.view, thread);
 
 /**
  * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a
@@ -1527,7 +1531,8 @@ const itemsOf = (view: AgentView, questions: readonly Question[], thread: Thread
  * Claude works. An AskUserQuestion call is its own row, with the thread's question for it. A message Claude Code
  * queued and has not taken shows queued at the end. A pull request shows once.
  */
-function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[], thread: ThreadId): Item[] {
+function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[], thread: ThreadId, senderOf: PromptSenders): Item[] {
+  const from = (text: string | null | undefined): PromptFrom => (text == null ? null : senderOf(text)) ?? "person";
   const items: Item[] = [];
   const tools = new Map<string, ToolItem>();
   const calledAt = new Map<string, number>();
@@ -1536,7 +1541,7 @@ function claudeItems({ entries, working }: ClaudeConversation, questions: readon
   let turn: ToolItem[] = [];
   for (const entry of entries) {
     switch (entry.kind) {
-      case "prompt": items.push({ kind: "user", text: entry.text, queued: null, at: entry.at, from: entry.from, images: [...transcriptShots(thread, entry.images), ...fileShots(thread, imagePaths(entry.text))] }); break;
+      case "prompt": items.push({ kind: "user", text: entry.text, queued: null, at: entry.at, from: entry.from === "person" ? from(entry.text) : entry.from, images: [...transcriptShots(thread, entry.images), ...fileShots(thread, imagePaths(entry.text))] }); break;
       case "reply": items.push({ kind: "agent", text: entry.text, streaming: false, images: fileShots(thread, imagePaths(entry.text)) }); break;
       case "tool": {
         const asked = askedIn(entry);
@@ -1586,7 +1591,7 @@ function claudeItems({ entries, working }: ClaudeConversation, questions: readon
     }
   }
   if (working) for (const tool of turn) if (tool.result.state === "none") tool.result = { state: "running", output: "" };
-  for (const q of queuedOf(entries)) items.push({ kind: "user", text: q.text ?? "A message the transcript does not show", queued: "Claude takes it at its next step", at: q.at, from: "person" });
+  for (const q of queuedOf(entries)) items.push({ kind: "user", text: q.text ?? "A message the transcript does not show", queued: "Claude takes it at its next step", at: q.at, from: from(q.text) });
   return items;
 }
 
@@ -1623,7 +1628,7 @@ function runOf(d: ThreadDetail, view: AgentView | null, items: readonly Item[], 
     return { kind: "waiting", why, inTerminal: terminal };
   }
   if (!busy) return { kind: "idle", paused: d.pylon.actualState === "paused", repliedAt: d.lastReplyAt };
-  return working(d, items, claude ? (item) => item.from === "person" : () => true, claude);
+  return working(d, items, claude ? (item) => item.from !== "command" && item.from !== "other" : () => true, claude);
 }
 
 /** A turn's calls are those after the message it answers. Its start is the registry's, so the bar and the rows agree. */
@@ -1717,8 +1722,8 @@ function blocks(items: readonly Item[]): Block[] {
 function blockView(block: Block, now: number): Html {
   switch (block.kind) {
     case "user": {
-      const from: PromptFrom = block.from !== "person" ? block.from : block.text.startsWith("[Nexus PR watch") ? "pr-watch" : block.text.startsWith("[Nexus review") ? "review" : block.text.startsWith("[Nexus nudge") ? "nudge" : "person";
-      const named = from !== "person" && from !== "pr-watch" && from !== "review" && from !== "nudge";
+      const { from } = block;
+      const named = from === "command" || from === "other";
       return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     }
     case "agent": return block.streaming

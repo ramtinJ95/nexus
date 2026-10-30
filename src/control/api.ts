@@ -54,7 +54,7 @@ import { attachRoute, herdrPanePattern, parseAttachQuery } from "../attach-wire.
 import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
-import { typeIntoClaude } from "./inbox.ts";
+import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { HttpError, type ApiErrorCode } from "./http-error.ts";
 import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "./questions.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
@@ -1142,7 +1142,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         stream(res) {
           const agent = registry.agent(t);
           return agent.kind === "claude"
-            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model, Date.now, () => registry.questions(t.id)))
+            ? stream<ClaudeConversation>(res, refuseDeleted(t), () => agents.claude.watch(t), liveFrames(t, agent.worker.model, Date.now, () => registry.questions(t.id), () => promptSenders(registry, t.id)))
             : stream<ConversationView>(res, conversing(t), () => agents.harness.watch(t), liveFrames(t));
         },
       };

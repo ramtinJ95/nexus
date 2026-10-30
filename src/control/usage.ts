@@ -36,8 +36,6 @@ export interface Tokens { input: number; output: number; cacheWrite: number; cac
  */
 export interface AgentCall extends Tokens { id: string; agent: AgentKind; model: string; at: number }
 
-/** A call as the registry keeps it, with the thread it was read from. */
-export interface UsageRecord extends AgentCall { thread: ThreadId; project: ProjectId; role: ThreadRole }
 
 export interface UsageTotals extends Tokens { total: number; calls: number }
 export const breakdowns = ["model", "project", "kind", "role", "day"] as const;

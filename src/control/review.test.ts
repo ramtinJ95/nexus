@@ -9,7 +9,7 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts"
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, landingHolds, reservedNames } from "./policy.ts";
+import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
 import { agentModelFailure, agentReplies, humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review } from "./review.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -172,6 +172,14 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   };
 }
 
+/** A phase as the person reads it: a needs-person phase has one hold per reason, in its order, and shows its reasons. */
+function shown(phase: Review["phase"]) {
+  if (phase.kind !== "needs-person") return phase;
+  const { holds, ...rest } = phase;
+  assert.deepEqual(holds.map((h) => h.text), phase.reasons, "one hold per reason, in the same order");
+  return rest;
+}
+
 /** A read of the Claude builder's transcript that finds `entries`, and the pylon's reports of `kinds` for its session. */
 function claudeRead(f: ReturnType<typeof fixture>, entries: ClaudeEntry[], kinds: readonly ("session.turn-started" | "session.heartbeat")[]) {
   const from = f.registry.claudeTranscript(f.builder)?.cursor ?? transcriptStart;
@@ -251,7 +259,7 @@ test("rounds that run out, and agents that never answer in the block, end with t
   const reviewer = f.review().reviewer;
   f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], label: { state: "added" } });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], label: { state: "added" } });
   assert.equal(f.registry.threads().find((th) => th.id === f.builder) && (f.registry.events("0", { kinds: ["attention.changed"], thread: f.builder }).at(-1)?.payload.attention), "decision");
 
   const g = fixture(t);
@@ -328,7 +336,7 @@ test("a model that fails a fifth time in a row ends the review for the person wi
     f.tick(20 * 60_000);
     await loop.poll();
   }
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer's model failed 5 times in a row (last: 529 Overloaded), in round 1. Run nexus review again once the provider recovers."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The reviewer's model failed 5 times in a row (last: 529 Overloaded), in round 1. Run nexus review again once the provider recovers."] });
   assert.equal(f.sent.length, 5, "the request and four resends");
   assert.deepEqual(f.labelCalls, []);
 });
@@ -649,7 +657,7 @@ test("a deploy that fails rolls back to the previous release and tells the perso
   assert.equal(f.review().phase.kind, "rolling-back", "a rollback is not claimed until the fleet reports it healthy");
   for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `The deploy of ${merged} failed: node control rolled-back (health check failed).`,
     `Rolled back to the previous release, ${previous}, which every service reports healthy.`,
     `${merged} is still on the default branch, so revert it before the next deploy.`,
@@ -840,7 +848,7 @@ test("a token that cannot merge holds the landing for the person, and a later la
   const f = fixture(t, { repo: "acme/shop" });
   f.mergeAnswer = () => ({ kind: "denied", message: "GitHub answered 403: Resource not accessible by personal access token" });
   const loop = await approved(f, "nLAPTOP");
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The control plane's GitHub token cannot merge (GitHub answered 403: Resource not accessible by personal access token). Merging needs a token with write access to acme/shop's contents and pull requests, which only the person can grant."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The control plane's GitHub token cannot merge (GitHub answered 403: Resource not accessible by personal access token). Merging needs a token with write access to acme/shop's contents and pull requests, which only the person can grant."] });
   f.mergeAnswer = () => ({ kind: "merged", commit: merged });
   assert.throws(() => loop.land(f.builder, "nLAPTOP", "f".repeat(40)), /is at [0-9a-f]{40}, not f{40}, so it was not landed/, "a land for another commit than the approved one does nothing");
   assert.equal(f.review().phase.kind, "needs-person");
@@ -864,7 +872,7 @@ test("the policy names every condition that fails and every reserved case, and h
   f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "renames --wait" }] }));
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     "The reviewer's quote of what could not be checked live is not in the pull request's description.",
     "Always needs the person: breaking changes to the CLI's contract, by the reviewer's reading (renames --wait).",
     "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.",
@@ -879,7 +887,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
     maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "merging", authorized: null }, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0, rounds: [round],
   };
   const pr: PrSnapshot = { pr: { repo: "ramtinJ95/nexus", number: 199, title: "", url: "", state: "open", checks: "none", review: "none", conflict: false }, detail: { head: head1, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  const holds = (...paths: string[]) => landingHolds({ review, pr, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) });
+  const holds = (...paths: string[]) => landingHolds({ review, pr, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) }).map((h) => h.text);
   const pr199 = ["README.md", "docs/explorations/install.md", "docs/roadmap.md", ...["README.md", "loopback.py", "run.ts", "standin/apt-get", "standin/github-host-keys", "standin/journalctl", "standin/qemu",
     "standin/ssh-keyscan", "standin/systemctl", "standin/tailscale", "tailnet.ts", "transcript.txt", "tsconfig.json"].map((p) => `docs/verification/fresh-install/${p}`)];
   assert.deepEqual(holds(...pr199), []);
@@ -897,7 +905,7 @@ test("the policy's review conditions: another model, an approval with no P0 to P
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   };
   const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }), [
+  assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }).map((h) => h.text), [
     "The reviewer ran the builder's own model, m.",
     "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
     "The builder neither fixed nor rejected with a reason finding F2 of round 1.",
@@ -950,7 +958,7 @@ test("a check the pylon cannot run goes to the person with its output, and costs
   const f = fixture(t);
   f.check = { kind: "unrunnable", output: "The repository has no executable .nexus/check at 1." };
   await approved(f, null);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `.nexus/check could not run at ${head1}.`,
     "The check's output:\nThe repository has no executable .nexus/check at 1.",
   ] });
@@ -966,7 +974,7 @@ test("a failed check the builder answers without a push goes to the person at on
   assert.equal(f.review().phase.kind, "fixing");
   f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "rejected", reason: "npm cannot reach the registry from the check pylon." }]));
   await f.loop().poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `.nexus/check failed at ${head1}, and the builder pushed nothing for it: npm cannot reach the registry from the check pylon.`,
     "The check's output:\nnpm error code SELF_SIGNED_CERT_IN_CHAIN",
   ] });
@@ -983,7 +991,7 @@ test("a failed check answered as fixed with no push goes to the person once the 
   assert.equal(f.review().phase.kind, "fixing", "a push may land a little after the turn");
   f.tick(10 * 60_000);
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: Fixed the test.`, "The check's output:\n1 test failed"] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: Fixed the test.`, "The check's output:\n1 test failed"] });
   assert.equal(f.sent.length, 2, "no reminder, and no round for the reviewer");
 });
 
@@ -1002,7 +1010,7 @@ test("a check that fails again at a head where it failed before goes to the pers
   assert.equal(f.review().rounds.at(-1)!.head, head1);
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed again at ${head1}, where it failed before.`, "The check's output:\n1 test failed"] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`.nexus/check failed again at ${head1}, where it failed before.`, "The check's output:\n1 test failed"] });
 });
 
 test("in a review stored before priorities, a reviewer's repeat approval of an unchanged head costs no round", async (t) => {
@@ -1114,7 +1122,7 @@ test("a head with a .nexus/verify lands once its live check passes in a verify p
   assert.deepEqual(g.merges, [], "a head without .nexus/verify still needs the statement");
   assert.deepEqual(g.liveThreads, []);
   assert.deepEqual(g.review().rounds.at(-1)!.live, { kind: "absent" });
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
 });
 
 test("a landing stored before live checks, whose head has a .nexus/verify, is held until a landing runs its live check", async (t) => {
@@ -1125,7 +1133,7 @@ test("a landing stored before live checks, whose head has a .nexus/verify, is he
   f.verifies = true;
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [`The live check has not run at ${head1}.`] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`The live check has not run at ${head1}.`] });
   loop.land(f.builder, "nLAPTOP");
   await loop.poll();
   assert.equal(f.liveThreads.length, 1, "landing again ran the live check");
@@ -1171,7 +1179,7 @@ test("a live check that fails holds the landing like a failed check: the builder
   assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409 });
   f.reply(f.builder, answers(f.review(), [{ id: "LIVE", action: "rejected", reason: "The stack is flaky." }]));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `The live check failed at ${head1}, and the builder pushed nothing for it: The stack is flaky.`,
     "The live check's output:\nverify-nexus: the thread never reported running",
   ] });
@@ -1212,7 +1220,7 @@ test("a verify pylon no node can take yet is tried again, and the person hears w
   const gLoop = await approved(g, "nLAPTOP");
   g.tick(61 * 60_000);
   await gLoop.poll();
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: [
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: [
     `The live check gave no verdict within 60 minutes at ${head1}.`,
     "No node could take its verify pylon: no node can run this pylon: infra-testbench cannot give a pylon KVM of its own: its probe does not report nested virtualization",
   ] });
@@ -1223,7 +1231,7 @@ test("a live check its pylon cannot run goes to the person, and a verify pylon n
   f.verifies = true;
   f.live = { kind: "unrunnable", output: "The verify pylon did not boot: This pylon asked for nested virtualization, and its guest has no /dev/kvm." };
   await approved(f, "nLAPTOP");
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `The live check could not run at ${head1}.`,
     "The live check's output:\nThe verify pylon did not boot: This pylon asked for nested virtualization, and its guest has no /dev/kvm.",
   ] });
@@ -1248,9 +1256,11 @@ test("the policy reads a live check: a failure holds, a pass needs no statement,
   const review = { ...f.review(), rounds: [{ ...f.review().rounds[0]!, live: { kind: "ran" as const, thread: f.liveThreads[0]!, passed: false, output: "boom" } }] };
   const pr: PrSnapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" }, detail: { ...f.snapshot.detail, mergeCommit: null } };
   assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }), [
-    "Findings P0 to P2 are open: LIVE.", "The builder neither fixed nor rejected with a reason finding LIVE of round 1.", `The live check failed at ${head1}.`,
+    { code: "open-findings", text: "Findings P0 to P2 are open: LIVE." },
+    { code: "unanswered", text: "The builder neither fixed nor rejected with a reason finding LIVE of round 1." },
+    { code: "live-failed", text: `The live check failed at ${head1}.` },
   ]);
-  assert.equal(holdRule(`The live check failed at ${head1}.`).waivable, false);
+  assert.equal(holdRule("live-failed").waivable, false);
 });
 
 test("a check run that cannot give a verdict starts again in a fresh check thread", async (t) => {
@@ -1292,7 +1302,7 @@ test("every merge attempt checks the policy again, so checks that fail after app
   g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, checks: "failed" } };
   await g.loop().poll();
   assert.deepEqual(g.merges, []);
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed."] });
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed."] });
 });
 
 test("a reply that came while a delivered message was not yet cleared is still read after a crash", async (t) => {
@@ -1373,11 +1383,11 @@ async function labelsOnceAcrossRetries(f: ReturnType<typeof fixture>, loop: Retu
   f.labelAnswer = (name) => { f.labels.add(name); throw new Error("connection reset"); };
   exhaust();
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons, label: { state: "adding" } }, "a failed call leaves the label to add at the next pass");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons, label: { state: "adding" } }, "a failed call leaves the label to add at the next pass");
   f.labelAnswer = (name) => { f.labels.add(name); return { kind: "labelled" }; };
   await loop.poll();
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons, label: { state: "added" } });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons, label: { state: "added" } });
   assert.deepEqual([...f.labels], [humanLabel]);
   assert.equal(f.labelCalls.length, 2, "once more after the failed call, then never again");
   assert.deepEqual(labelStates(f), ["adding", "added"]);
@@ -1421,7 +1431,7 @@ test("a review stored with more rounds reads back capped at 5 with priorities, a
   assert.equal("severity" in f.review().rounds[0]!.verdict!.findings[0]!, false);
   f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The reviewer still requests changes after 5 rounds, the most this review allows."], label: { state: "added" } });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The reviewer still requests changes after 5 rounds, the most this review allows."], label: { state: "added" } });
   assert.deepEqual(f.labelCalls, [humanLabel]);
 });
 
@@ -1449,8 +1459,8 @@ test("a token that cannot label tells the person why, and the loop does not try 
     "The reviewer still requests changes after 1 rounds, the most this review allows.",
     `Nexus could not add the label "needs human review" to pull request #7 (GitHub answered 403: Resource not accessible by personal access token). Labelling needs a token that may write issues or pull requests, which only the person can grant.`,
   ], label: { state: "failed", why: "GitHub answered 403: Resource not accessible by personal access token" } };
-  assert.deepEqual(f.review().phase, phase);
-  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).at(-1)!.payload.phase, phase, "the event log says the label could not be added");
+  assert.deepEqual(shown(f.review().phase), phase);
+  assert.deepEqual(shown(f.registry.events("0", { kinds: ["review.changed"] }).at(-1)!.payload.phase as Review["phase"]), phase, "the event log says the label could not be added");
   await loop.poll();
   await loop.poll();
   assert.equal(f.labelCalls.length, 1);
@@ -1514,7 +1524,7 @@ test("a check that fails again at an earlier head in the last round still gets t
   assert.equal(f.review().rounds.length, 3);
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", label: { state: "added" }, reasons: [
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", label: { state: "added" }, reasons: [
     `.nexus/check failed at ${head1} after the last round this review allows.`, `.nexus/check failed again at ${head1}, where it failed before.`, "The check's output:\n1 test failed",
   ] });
   assert.deepEqual([...f.labels], ["needs human review"]);
@@ -1616,7 +1626,7 @@ test("a review that lands still sees a merge made outside it through, and a real
   await silent.poll();
   g.tick(4 * 60 * 60_000);
   await silent.poll();
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: ["The reviewer gave no answer Nexus could read within 3 hours in round 1."] });
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["The reviewer gave no answer Nexus could read within 3 hours in round 1."] });
   assert.equal(g.attention().at(-1), "decision");
 });
 
@@ -1921,7 +1931,7 @@ test("a builder that cannot rebase, or a conflict after the last round, goes to 
   await loop.poll();
   f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "rejected", reason: "main rewrote the cache this PR adds, so one side has to go." }]));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: main rewrote the cache this PR adds, so one side has to go."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: main rewrote the cache this PR adds, so one side has to go."] });
 
   const last = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db") });
   const capped = last.loop();
@@ -1930,7 +1940,7 @@ test("a builder that cannot rebase, or a conflict after the last round, goes to 
   conflicting(last);
   last.reply(last.review().reviewer, verdict(last.review(), {}));
   await capped.poll();
-  assert.deepEqual(last.review().phase, { kind: "needs-person", label: { state: "added" }, reasons: ["The branch conflicts with main, and round 1 was the last this review allows, so a rebase could not be reviewed."] });
+  assert.deepEqual(shown(last.review().phase), { kind: "needs-person", label: { state: "added" }, reasons: ["The branch conflicts with main, and round 1 was the last this review allows, so a rebase could not be reviewed."] });
   assert.deepEqual(last.sent.filter((s) => s.to === last.builder), [], "the builder is not asked for a rebase no round can review");
 });
 
@@ -1974,7 +1984,7 @@ test("each landing asks again whether its lander may deploy, and whether the pro
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["nLAPTOP, who asked for this landing, is not among the control plane's deployers, so only the person can land it."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["nLAPTOP, who asked for this landing, is not among the control plane's deployers, so only the person can land it."] });
 
   const auto = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db"), autoReview: { land: true, enabledBy: "nLAPTOP" } });
   const own = auto.loop();
@@ -1984,7 +1994,7 @@ test("each landing asks again whether its lander may deploy, and whether the pro
   auto.reply(auto.review().reviewer, verdict(auto.review(), {}));
   await own.poll();
   assert.deepEqual(auto.merges, []);
-  assert.deepEqual(auto.review().phase, { kind: "needs-person", reasons: ["Project nexus no longer lands its builders' pull requests on its own, so this one is the person's to land."] });
+  assert.deepEqual(shown(auto.review().phase), { kind: "needs-person", reasons: ["Project nexus no longer lands its builders' pull requests on its own, so this one is the person's to land."] });
 });
 
 test("a review held for the person ends once the person closes its PR or archives or deletes its builder, and asks nothing more", async (t) => {
@@ -2065,10 +2075,10 @@ test("a held reserved path holds again when landed, and lands once the person wa
   const f = fixture(t);
   f.files = [{ path: "src/control/registry.ts", previous: null, patch: "@@ -240,3 +240,4 @@ const migrations: readonly string[] = [\n+  `CREATE TABLE x (a TEXT) STRICT;`," }];
   const loop = await approved(f, "nLAPTOP");
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "landing again meets the same hold");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds }, "landing again meets the same hold");
   assert.deepEqual(f.merges, []);
 
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
@@ -2076,7 +2086,7 @@ test("a held reserved path holds again when landed, and lands once the person wa
   assert.deepEqual(f.merges, [head1]);
   assert.equal(f.review().phase.kind, "deploying");
   const { at, ...waiver } = f.review().waiver!;
-  assert.deepEqual(waiver, { head: head1, holds: reservedHolds, by: "nLAPTOP" }, "the review records who waived which holds, at which commit");
+  assert.deepEqual(waiver, { head: head1, holds: reservedHolds, codes: ["reserved-path:irreversible"], by: "nLAPTOP" }, "the review records who waived which holds, at which commit");
   assert.equal(typeof at, "number");
   assert.deepEqual(f.registry.events("0", { kinds: ["review.waived"], thread: f.builder }).map((e) => e.payload), [{ review: f.review().id, repo: "ramtinJ95/nexus", pr: 7, ...waiver, at }]);
   for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
@@ -2096,21 +2106,21 @@ test("a waiver lets the landing past only the holds it names, and only at the co
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] },
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [...reservedHolds, image] },
     "a hold the waiver did not name still holds, and the person sees every hold again, those waived too, to confirm them together");
 
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "failed" } };
   loop.land(f.builder, "nLAPTOP", head1, [...reservedHolds, image]);
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed.", ...reservedHolds, image] }, "a waiver never waives failing checks");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed.", ...reservedHolds, image] }, "a waiver never waives failing checks");
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, ["The pull request's GitHub checks are failed."]), { status: 409, message: /cannot be waived/ });
 
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
   assert.equal(f.review().waiver, null, "a landing that names no holds waives nothing");
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [...reservedHolds, image] });
 
   loop.land(f.builder, "nLAPTOP", head1, [...reservedHolds, image]);
   await loop.poll();
@@ -2135,36 +2145,17 @@ test("a Claude reviewer's approval is not waivable, and a change to .nexus/check
 });
 
 test("the person may waive the reserved cases, the reserved paths and a changed .nexus/check, and nothing else the policy holds for", () => {
-  const waivable = [
-    "Always needs the person: changes to secrets, by the reviewer's reading (rotates the token).",
-    "Always needs the person: changes to login or auth, as it changes src/control/api.ts.",
-    "The pull request changes .nexus/check, the check this policy relies on.",
-    "The pull request changes .nexus/verify, the live check this policy relies on.",
+  const waivable: HoldCode[] = ["reserved:secrets", "reserved-path:auth", "check-changed", "verify-changed"];
+  const never: HoldCode[] = [
+    "open-findings", "not-approved", "unanswered", "check-failed", "github-checks", "not-approved-head", "conflict", "pr-not-open",
+    "claude-approved", "same-model", "not-checked-live", "live-failed", "stale-head", "loop",
   ];
-  const never = [
-    "Findings P0 to P2 are open: F1.",
-    "The reviewer has not approved the latest commits.",
-    "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
-    `.nexus/check failed at ${head1}.`,
-    `.nexus/check has not run at ${head1}.`,
-    "The pull request's GitHub checks are failed.",
-    "The pull request's GitHub checks are pending.",
-    `The pull request's head is ${head2}, not the approved ${head1}.`,
-    "The branch conflicts with its base.",
-    "Pull request #7 is closed.",
-    "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.",
-    "The reviewer ran the builder's own model, gpt-6-astra.",
-    "No live check ran, and the pull request does not say what could not be checked live.",
-    "GitHub refused the merge: Base branch was modified.",
-    `The live check failed at ${head1}.`,
-    `The live check gave no verdict within 60 minutes at ${head1}.`,
-  ];
-  for (const reason of waivable) assert.equal(holdRule(reason).waivable, true, reason);
-  for (const reason of never) {
-    assert.equal(holdRule(reason).waivable, false, reason);
-    assert.notEqual(holdRule(reason).why, "", reason);
+  for (const code of waivable) assert.equal(holdRule(code).waivable, true, code);
+  for (const code of never) {
+    assert.equal(holdRule(code).waivable, false, code);
+    assert.notEqual(holdRule(code).why, "", code);
   }
-  assert.match(holdRule(never[10]!).why, /stands in for a harness reviewer's approval/);
+  assert.match(holdRule("claude-approved").why, /stands in for a harness reviewer's approval/);
 });
 
 test("a waived landing whose branch conflicts goes back to the builder to rebase, and the rebased head needs the person's waiver again", async (t) => {
@@ -2183,7 +2174,50 @@ test("a waived landing whose branch conflicts goes back to the builder to rebase
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "the waiver was for the head before the rebase");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds }, "the waiver was for the head before the rebase");
+});
+
+test("a review stored before hold codes reads its holds and its waiver with codes, and lands past the hold it waived", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  await approved(f, "nLAPTOP");
+  const { holds: _, ...reasonsOnly } = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
+  f.registry.saveReview({ ...f.review(), phase: reasonsOnly as Review["phase"] });
+  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds, holds: [{ code: "reserved-path:irreversible", text: reservedHolds[0] }] });
+
+  const waiver = { head: head1, holds: reservedHolds, by: "nLAPTOP", at: 1 };
+  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, waiver: waiver as Review["waiver"], phase: { kind: "merging", authorized: null } });
+  assert.deepEqual(f.review().waiver, { ...waiver, codes: ["reserved-path:irreversible"] });
+  const loop = f.loop();
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.registry.events("0", { kinds: ["review.waived"], thread: f.builder }).length, 1, "the codes it gains on its next save are no new waiver");
+});
+
+test("a waiver covers its hold by code, whatever the hold's text, and the reviewer's reading of a case never covers the paths that hit it", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null },
+    waiver: { head: head1, holds: ["Always needs the person: anything irreversible, in words an older control plane used."], codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1 } });
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+
+  const g = fixture(t, { path: ":memory:" });
+  g.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const gLoop = g.loop();
+  await gLoop.start(g.builder, { land: "nLAPTOP" });
+  await gLoop.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { reserved: [{ case: "irreversible", why: "drops a column" }] }));
+  await gLoop.poll();
+  const reading = "Always needs the person: anything irreversible, by the reviewer's reading (drops a column).";
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: [reading, ...reservedHolds] });
+  gLoop.land(g.builder, "nLAPTOP", head1, [reading]);
+  await gLoop.poll();
+  assert.deepEqual(g.merges, [], "the waiver names the reviewer's reading, not the path the person may not have seen");
+  assert.deepEqual((g.review().phase as Extract<Review["phase"], { kind: "needs-person" }>).holds.map((h) => h.code), ["reserved:irreversible", "reserved-path:irreversible"]);
 });
 
 test("a harness, a Claude worker and a bare thread each give the replies and take the messages of their kind", async (t) => {
@@ -2254,7 +2288,7 @@ test("a landing held for the person reviews a head pushed after the hold in a ne
   const loop = await approved(f, "nLAPTOP");
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: [...reservedHolds, image] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [...reservedHolds, image] });
   pushed(f, head1);
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person", "a read of the same head changes nothing");
@@ -2273,7 +2307,7 @@ test("a landing held for the person reviews a head pushed after the hold in a ne
   await loop.poll();
   assert.deepEqual(f.review().rounds[1]!.check, { passed: true, output: "ok" }, "the check runs at the new head");
   assert.deepEqual(f.merges, []);
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds }, "the waiver named the head before the push");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds }, "the waiver named the head before the push");
   await loop.poll();
   assert.equal(f.review().rounds.length, 2);
   loop.land(f.builder, "nLAPTOP", head2, reservedHolds);
@@ -2304,7 +2338,7 @@ test("a held review with no round left, or one held with the reviewer's changes 
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
   pushed(f, head2);
   await loop.poll();
   await loop.poll();
@@ -2330,7 +2364,7 @@ test("a held review with no round left, or one held with the reviewer's changes 
   g.reply(g.builder, "Still fine.");
   await gave.poll();
   const reasons = ["The builder ended 3 turns in a row without an answer Nexus could read, in round 1."];
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons });
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons });
   pushed(g, head2);
   await gave.poll();
   await gave.poll();
@@ -2350,7 +2384,7 @@ test("a review held after an approval for a conflict the builder did not rebase,
   await loop.poll();
   f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "rejected", reason: "I will rebase once main settles." }]));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: I will rebase once main settles."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: I will rebase once main settles."] });
   pushed(f, head2);
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing");
@@ -2366,7 +2400,7 @@ test("a review held after an approval for a conflict the builder did not rebase,
   const gave = await approved(g, null);
   g.reply(g.builder, answers(g.review(), [{ id: "CHECK", action: "rejected", reason: "The test is flaky." }]));
   await gave.poll();
-  assert.deepEqual(g.review().phase, { kind: "needs-person", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"] });
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"] });
   g.check = { kind: "done", passed: true, output: "ok" };
   pushed(g, head2);
   await gave.poll();
@@ -2434,7 +2468,7 @@ test("a force-push back to a head an earlier round reviewed gets a new round", a
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
   pushed(f, head1);
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing");

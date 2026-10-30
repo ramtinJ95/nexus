@@ -9,7 +9,7 @@ import type { PullRequest } from "./github.ts";
 import { itemPhase, itemThread, itemView, pipeline, type ItemId } from "./pipeline.ts";
 import { threadQueue } from "./queue.ts";
 import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
-import type { Phase, Review } from "./review.ts";
+import { personPhase, type Phase, type Review } from "./review.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import type { NodeName, TailnetNodeId } from "../protocol.ts";
 import type { PipelineSetting, ProjectId } from "../project.ts";
@@ -116,7 +116,7 @@ test("an item is held for the person by its review, its thread's attention, a bl
   const a = f.add("A"), b = f.add("B"), c = f.add("C"), d = f.add("D");
   await f.passes();
   const [ta, tb, tc, td] = [a, b, c, d].map((id) => thread(r, id));
-  f.review(ta!, { kind: "needs-person", reasons: ["the rounds ran out"] });
+  f.review(ta!, personPhase("the rounds ran out"));
   assert.equal(phase(r, a), "held: its review ended for the person: the rounds ran out");
   f.review(tb!, { kind: "approved" });
   assert.equal(phase(r, b), `held: PR #9 is approved, and lands once the person runs nexus land ${tb}`);

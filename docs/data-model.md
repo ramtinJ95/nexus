@@ -189,7 +189,7 @@ An item's thread is not stored. It is the thread the start request ID `pipeline:
 
 ## Token usage records
 
-`usage_records` holds one row per model call an agent made, keyed by `id`, the call's own ID in the agent's record. `AgentCall` and `UsageRecord` in `src/control/usage.ts` are the shapes.
+`usage_records` holds one row per model call an agent made, keyed by `id`, the call's own ID in the agent's record. A row is an `AgentCall` from `src/control/usage.ts` with the `thread` it was read from, and that thread's `project` and `role`.
 
 | Source | `id` | `agent` | Read from |
 |---|---|---|---|
@@ -521,4 +521,13 @@ means the probe's answer never came, so a repeat asks the probe with
 says the send failed partway, or no longer knows it, the row stays `sending` and the
 repeat is refused with a 422. A thread keeps every request ID until the thread is
 deleted. The control plane's continue after a usage limit uses `usage-limit:<session>:<stoppedAt>`, so each stop gets at most one.
+
+`claude_senders` records, per thread and request ID of `claude_messages`, who typed the message (`sender`: `person`
+for a send through the API, or the Nexus sender `pr-watch`, `review`, `usage-limit` or `nudge`) and a SHA-256 of its
+text as typed (`text_sha256`). It is written with the `sending` row and removed with it. Nexus types its messages
+into the session as the person would, so the transcript records them as the person's prompts. A prompt is Nexus's
+only when the thread has a row of a Nexus sender with that text's hash, which the nudger and the dashboard read
+through `promptSenders` in `src/control/inbox.ts`. A `claude_messages` row with no `claude_senders` row was recorded
+before the table, and its sender is unknown. Only on a thread with one does a prompt that matches no row read as
+Nexus's by its sender's prefix, such as `[Nexus review`.
 

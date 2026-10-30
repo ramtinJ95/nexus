@@ -1,0 +1,1 @@
+cf74389 docs(verification): check that Claude records a typed message as Nexus typed it

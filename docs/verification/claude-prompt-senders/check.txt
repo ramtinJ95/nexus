@@ -1,0 +1,6 @@
+review: typed 2216 chars; prompts with the same SHA-256: user from=person
+busy: typed 180 chars; prompts with the same SHA-256: user from=person
+nudge: typed 566 chars; prompts with the same SHA-256: attachment/queued_command from=person
+  prompt user from=person "[Nexus review — automated, not a message from the person]\nRound 1 of r"
+  prompt user from=person "Run each of these as its own separate Bash tool call, one after anothe"
+  prompt attachment/queued_command from=person "[Nexus nudge — automated, not a message from the person]\nTyped mid-tur"

@@ -1,0 +1,11 @@
+{
+  "reasons": [
+    "Always needs the person: anything irreversible, as it changes src/control/registry.ts."
+  ],
+  "holds": [
+    {
+      "code": "reserved-path:irreversible",
+      "text": "Always needs the person: anything irreversible, as it changes src/control/registry.ts."
+    }
+  ]
+}

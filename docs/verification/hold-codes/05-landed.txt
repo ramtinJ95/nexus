@@ -1,0 +1,3 @@
+phase: {"kind":"landed","commit":"8888888888888888888888888888888888888888"}
+waiver: {"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"codes":["reserved-path:irreversible"],"by":"nLAPTOP","at":1793324937563}
+review.waived events: [{"id":"20","time":1793324937564,"thread":"th-93507e292959","project":"nexus","kind":"review.waived","payload":{"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"codes":["reserved-path:irreversible"],"by":"nLAPTOP","at":1793324937563}}]

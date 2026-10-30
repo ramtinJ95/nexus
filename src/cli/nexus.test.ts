@@ -26,7 +26,7 @@ import { threadQueue, type QueuedThread } from "../control/queue.ts";
 import { turnGate } from "../control/drain.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
-import { agentReplies, type Review, type ReviewLoop } from "../control/review.ts";
+import { agentReplies, personPhase, type Review, type ReviewLoop } from "../control/review.ts";
 import type { Judgment } from "../control/judgment.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
@@ -1572,7 +1572,7 @@ test("review and land reach the review loop's routes, and show prints a review a
     id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "claude",
     models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
     rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }],
-    phase: { kind: "needs-person", reasons: ["The reviewer still requests changes after 5 rounds, the most this review allows.", "Nexus could not add the label \"needs human review\" to pull request #7 (GitHub answered 403: Forbidden)."], label: { state: "failed", why: "GitHub answered 403: Forbidden" } },
+    phase: { ...personPhase("The reviewer still requests changes after 5 rounds, the most this review allows.", "Nexus could not add the label \"needs human review\" to pull request #7 (GitHub answered 403: Forbidden)."), label: { state: "failed", why: "GitHub answered 403: Forbidden" } },
   };
   s.registry.saveReview(review);
   const shown = await s.nexus(["show", thread.id]);
@@ -1597,7 +1597,7 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match((await s.nexus(["show", thread.id])).stdout, /^live check failed at 111111111111\n {2}booting the fleet\n {2}the thread never reported running$/m);
   s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: true, output: "fleet ok" } }], phase: { kind: "approved" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^live check passed at 111111111111$/m);
-  s.registry.saveReview({ ...review, rounds: [checked], phase: { kind: "needs-person", reasons: [`The live check could not run at ${head}.`] } });
+  s.registry.saveReview({ ...review, rounds: [checked], phase: personPhase({ code: "live-failed", text: `The live check could not run at ${head}.` }) });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^no live check ran at 111111111111$/m, "a live check that gave no verdict is not a missing script");
   s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "absent" } }], phase: { kind: "approved" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^no live check: ${head.slice(0, 12)} has no \\.nexus/verify, so the landing reads the pull request's statement of what could not be checked live$`, "m"));
@@ -1607,7 +1607,7 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: reviewing, round 2 of 5, .*\na new round reviews 222222222222, since the pull request's head moved from 111111111111 after its approval$/m);
 
   const hold = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
-  s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9) } });
+  s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9) } });
   const waived = await s.nexus(["show", thread.id]);
   assert.match(waived.stdout, new RegExp(`^waived by nLAPTOP at ${"1".repeat(40)}, 2026-10-27T09:00:00.000Z:\n  ${hold.replace(/[.()]/g, "\\$&")}$`, "m"));
   const events = await s.nexus(["events", "--thread", thread.id, "--kind", "review.waived"]);
