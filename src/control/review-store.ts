@@ -8,7 +8,7 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "../agent-protocol.ts";
-import { storedReview, type Review } from "./review-model.ts";
+import { needsPerson, storedReview, type Review } from "./review-model.ts";
 
 export type ReviewStore = ReturnType<typeof reviewStore>;
 
@@ -21,6 +21,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
   };
   const isCurrentReview = (review: Review) => JSON.stringify(storedReviewOf(review.builder)) === JSON.stringify(review);
   return {
+    participant: { needsPerson: (thread: ThreadId) => needsPerson(recordOf<Review>("reviews", "builder", thread)) },
     review: storedReviewOf,
     /** Whether `review` is the builder's review as stored, so no other save came since it was read. */
     isCurrentReview,

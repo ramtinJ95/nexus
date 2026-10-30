@@ -62,6 +62,8 @@ export function usageStore(db: Db, threadRecord: (id: ThreadId) => Row | undefin
     coalesce(sum(cache_read), 0) AS cache_read, ${calls} AS calls, coalesce(sum(input + output + cache_write + cache_read), 0) AS total`;
 
   return {
+    /** The thread the usage backfill is reading, for the thread core. */
+    readingUsage: () => sql("SELECT thread FROM usage_backfill WHERE state = 'running' AND phase = 'reading'").get()?.thread,
     /**
      * Records each call under the thread it was read from, with the thread's project and role, and moves each cursor
      * to where its read ended. A call recorded before keeps its thread and time, and each count the larger of the two

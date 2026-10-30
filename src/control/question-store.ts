@@ -1,7 +1,8 @@
 /**
  * The question store: each question a thread asked, in `questions`, and the asks each thread's pylon last reported
- * waiting, in `waiting_asks`. A write recomputes the thread's attention, in its transaction. `reconcileAsks` is for
- * the thread core, which runs it when a Claude worker, its transcript or its thread's status changes.
+ * waiting, in `waiting_asks`. A write recomputes the thread's attention, in its transaction. Its participant tells the
+ * thread core of an unanswered question, drops a closed thread's asks, and runs `reconcileAsks` when a Claude worker,
+ * its transcript or its thread's status changes.
  */
 import { json, jsonOrNull, type Db } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
@@ -39,8 +40,11 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
     return changes > 0;
   }
 
+  const needsPerson = (thread: ThreadId) => sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(thread) !== undefined;
+  const closed = (thread: ThreadId) => { sql("DELETE FROM waiting_asks WHERE thread = ?").run(thread); };
+
   return {
-    reconcileAsks,
+    participant: { needsPerson, closed, reconcile: reconcileAsks },
     /** Stores the question unless one with its ID exists, and answers the stored one either way. */
     askQuestion(question: Omit<Question, "answer">): Question {
       return transaction(() => {

@@ -31,6 +31,7 @@ export type NudgeStore = ReturnType<typeof nudgeStore>;
 export function nudgeStore(db: Db, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql, recordOf, saveRecord } = db;
   return {
+    participant: { needsPerson: (thread: ThreadId) => recordOf<Nudge>("nudges", "thread", thread)?.state === "person" },
     nudge: (thread: ThreadId): Nudge | null => recordOf<Nudge>("nudges", "thread", thread),
     /** The threads with a nudge record that a later pass may still change or clear, which is every one but left-alone. */
     nudgedThreads: (): ThreadId[] => sql("SELECT thread FROM nudges WHERE json_extract(record, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),

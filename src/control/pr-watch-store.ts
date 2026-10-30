@@ -5,6 +5,7 @@
 import type { Db } from "./db.ts";
 import type { EventKind } from "../events.ts";
 import type { ThreadId } from "../ids.ts";
+import type { Output } from "./thread-store.ts";
 import type { PullRequest } from "./github.ts";
 
 export interface PrLink {
@@ -24,6 +25,12 @@ export type PrWatchStore = ReturnType<typeof prWatchStore>;
 export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown) {
   const { transaction, recordOf, saveRecord } = db;
   return {
+    participant: {
+      outputs(thread: ThreadId): Output[] {
+        const watch = recordOf<PrWatchState>("pr_watches", "thread", thread);
+        return watch ? watch.links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : [];
+      },
+    },
     prWatch: (thread: ThreadId): PrWatchState | null => recordOf<PrWatchState>("pr_watches", "thread", thread),
     /**
      * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
