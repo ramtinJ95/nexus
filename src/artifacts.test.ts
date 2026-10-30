@@ -13,8 +13,7 @@ import type { ImageId, ImageManifest, TemplateId, TemplateManifest } from "./ima
 const gnuTar = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout?.includes("GNU tar") === true;
 const template: TemplateId = "tpl-0123456789ab";
 const image: ImageId = "img-0123456789ab";
-const unhashed: Omit<TemplateManifest, "sha256"> = {
-  id: template,
+const unhashed: Omit<TemplateManifest, "id" | "sha256"> = {
   key: { project: "p" as TemplateManifest["key"]["project"], image, setupHash: "s".repeat(64) },
   commit: "c0ffee",
   builtAt: "2027-01-01T00:00:00.000Z",
@@ -30,7 +29,7 @@ async function scratch(t: { after(fn: () => Promise<void>): void }): Promise<str
 async function published(t: { after(fn: () => Promise<void>): void }, content = "saved image bytes") {
   const root = await scratch(t);
   const store = artifactDirectory(join(root, "a"), fileCodec("image.tar"));
-  const manifest = await store.publish(unhashed, (dir) => writeFile(join(dir, "image.tar"), content), AbortSignal.timeout(5_000));
+  const manifest = await store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), content); return unhashed; }, AbortSignal.timeout(5_000));
   return { root, store, manifest };
 }
 
@@ -115,9 +114,24 @@ test("a drop or a publish that a crash cut short is cleaned up by its retry", as
   assert.deepEqual(await readdir(store.root), []);
   await mkdir(join(store.root, `${template}.partial`));
   await writeFile(join(store.root, `${template}.partial`, "stale"), "from the build before");
-  await store.publish(unhashed, (dir) => writeFile(join(dir, "image.tar"), "saved image bytes"), AbortSignal.timeout(5_000));
+  await store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), "saved image bytes"); return unhashed; }, AbortSignal.timeout(5_000));
   assert.deepEqual(await readdir(store.root), [template]);
   assert.deepEqual((await readdir(store.path(template))).sort(), ["image.tar", "template.json"]);
+});
+
+test("a published image gets image.json with the sha256 of an archive that leaves it out, and is listed", async (t) => {
+  const store = artifactDirectory(join(await scratch(t), "a"), fileCodec("rootfs.ext4"));
+  const built: Omit<ImageManifest, "id" | "sha256"> = { gondolinBuildId: "gb-1", pins: {} as ImageManifest["pins"], builtOn: "infra-testbench" as ImageManifest["builtOn"], builtAt: "2027-01-01T00:00:00.000Z" };
+  const manifest = await store.publish(image, async (dir) => { await writeFile(join(dir, "rootfs.ext4"), "rootfs bytes"); return built; }, AbortSignal.timeout(5_000));
+  assert.deepEqual(manifest, { ...built, id: image, sha256: createHash("sha256").update("rootfs bytes").digest("hex") });
+  assert.deepEqual((await readdir(store.path(image))).sort(), ["image.json", "rootfs.ext4"]);
+  assert.deepEqual(await store.list(), [image]);
+});
+
+test("a publish whose fill fails leaves no .partial and publishes nothing", async (t) => {
+  const store = artifactDirectory(join(await scratch(t), "a"), fileCodec("image.tar"));
+  await assert.rejects(store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), "half"); throw new Error("docker save failed"); }, AbortSignal.timeout(5_000)), /docker save failed/);
+  assert.deepEqual(await readdir(store.root), []);
 });
 
 test("an ID that is not an image or template ID names no path", async (t) => {

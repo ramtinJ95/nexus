@@ -29,7 +29,7 @@ import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { pylonVmHostBridge } from "./probe/pylon-api.ts";
-import { asUser, controllerLog, pylonGuest } from "./pylon-vm/pylon-guest.ts";
+import { asUser, controllerLog, pylonGuest, type StatusCache } from "./pylon-vm/pylon-guest.ts";
 import { readJson, saveJson } from "./json-file.ts";
 import { alive, readIdentity } from "./pylon-vm/identity.ts";
 import { directory, existsError, readRecord } from "./pylon-vm/storage.ts";
@@ -250,6 +250,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
   const sandbox = (action: Record<string, unknown>, signal?: AbortSignal) => run(stateRoot, action, signal);
   const store = artifactDirectory(options.artifacts, tarCodec);
+  const statuses: StatusCache = new Map();
   // A create, a template build or a template import depends on its image, and a create on its template, before
   // its instance, build or manifest is there for drop to see. Jobs on different subjects run at once, so the two sides shut each other out here.
   const using = new Map<PortableArtifactId, number>();
@@ -536,7 +537,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             // again in case they changed, and a changed URL restarts the services it reaches.
             await sandbox({ action: "write-files", name, files: live.overlay }, signal);
             await sandbox({ action: "public-urls", name, urls: publicUrls(pylonId, live.previews, options.previewHost) }, signal);
-            await finishRelaunch(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, await readSidecar(pylonId)), relaunch);
+            await finishRelaunch(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, await readSidecar(pylonId)), relaunch);
             return;
           }
           // The instance holds the pylon's newest disk whatever the boot source says, so it is started as it is.
@@ -578,7 +579,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
         const sessions = instance.status.state === "running"
-          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
+          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
         await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
@@ -603,6 +604,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       signal.throwIfAborted();
       // Also when absent, because destroy sweeps what an interrupted create or destroy left aside.
       await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
+      statuses.delete(pylonId);
     },
 
     async buildTemplate(template, inputs, signal) {
@@ -619,12 +621,12 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async buildImage(image, recipe, node, signal) {
       if (imageIdOf(recipe) !== image) throw new JobFailure("invalid", `the recipe is image ${imageIdOf(recipe)}, not ${image}`);
-      await buildPylonImage(recipe, node, store.path(image), signal);
+      await buildPylonImage(recipe, node, store, signal);
     },
 
     guest(pylonId): Guest {
       instanceName(pylonId);
-      return pylonGuest(pylonId, instanceDir(pylonId), sandbox);
+      return pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses);
     },
 
     async updateSecret(secret, value, signal) {

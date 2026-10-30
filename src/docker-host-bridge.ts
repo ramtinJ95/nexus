@@ -5,13 +5,11 @@
  * of its NEXUS_API, kept in a label so a probe restart loses nothing, and the probe names the pylon from the
  * running container that carries the token.
  */
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { promisify } from "node:util";
+import { docker, label } from "./docker-cli.ts";
 import { listenHostBridge, type HostBridge } from "./probe/pylon-api.ts";
 import type { PylonId } from "./protocol.ts";
 
-const execFileAsync = promisify(execFile);
 const tokenLabel = "nexus.bridge-token";
 
 /** `docker run` arguments for a new container: its token, its NEXUS_API, and the host name NEXUS_API uses. */
@@ -38,7 +36,7 @@ export function dockerHostBridge(port: number, labels: Readonly<Record<string, s
   return listenHostBridge({ host: process.platform === "darwin" ? "127.0.0.1" : "0.0.0.0", port }, async (req) => {
     const token = /^\/([0-9a-f]{32})\/v1\/request$/.exec(req.url ?? "")?.[1];
     if (token === undefined) return null;
-    const { stdout } = await execFileAsync("docker", ["ps", "--filter", `label=${tokenLabel}=${token}`, ...scope, "--format", '{{.Label "nexus.pylon"}}']);
+    const stdout = await docker(["ps", "--filter", `label=${tokenLabel}=${token}`, ...scope, "--format", `{{.Label "${label.pylon}"}}`]);
     const pylons = stdout.split("\n").filter((line) => line !== "");
     return pylons.length === 1 ? pylons[0] as PylonId : null;
   });

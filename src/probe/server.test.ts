@@ -1309,10 +1309,11 @@ async function previewSetup(t: import("node:test").TestContext, services: Guest[
       answer = a;
       return { async close() {} };
     },
-    guest: (id) => {
-      if (fake.pylons.get(id)?.vm !== "running") throw new Error(`${id} is not running`);
-      return { previewOrigin: () => "http://127.0.0.1:9", services, linkPort: async (port: number) => `port-${port}`, unlinkPort: async () => null } as unknown as Guest; // nothing listens there
-    },
+    guest: (id) => ({
+      // Nothing listens there.
+      previewOrigin: () => fake.pylons.get(id)?.vm === "running" ? "http://127.0.0.1:9" : { unavailable: `${id} is not running` },
+      services, linkPort: async (port: number) => `port-${port}`, unlinkPort: async () => null,
+    }) as unknown as Guest,
   };
   const logged: string[] = [];
   const previews = { gatewayPort, routesFile: join(dir, "routes.json"), tailscale: tailscale.cli, get: viaGateway(() => `http://127.0.0.1:${gatewayPort}`).get };

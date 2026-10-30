@@ -139,6 +139,20 @@ test("a container without a services file runs no services, and one with a file 
   assert.deepEqual(await services.operate(pylon, "list"), [{ name: "web", state: "stopped", port: 8000, declared: true, wantsPreview: false }]);
 });
 
+test("a preview origin is unavailable before a spawn reaches the container and for a service with no preview, and a preview port Docker did not publish is a fault", async (t) => {
+  const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8000/tcp -> 127.0.0.1:49000\n" } });
+  const services = dockerServices();
+  assert.deepEqual(services.origin(pylon, "web"), { unavailable: "pylon-a is not running, or no spawn has reached it since the probe started" });
+  await mkdir(join(docker.root, "checkout", ".nexus"), { recursive: true });
+  await writeFile(join(docker.root, "checkout", ".nexus", "services.yaml"), "services:\n  web:\n    command: serve\n    port: 8000\n    preview: true\n  docs:\n    command: serve\n    port: 8001\n    preview: true\n  worker:\n    command: work\n    port: 8002\n");
+  await mkdir(join(docker.root, "run"));
+  for (const name of ["web", "docs", "worker"]) await writeFile(join(docker.root, "run", `${name}.stopped`), "");
+  await services.apply(pylon, {}, false);
+  assert.equal(services.origin(pylon, "web"), "http://127.0.0.1:49000");
+  assert.deepEqual(services.origin(pylon, "worker"), { unavailable: "pylon-a has no preview of worker" });
+  assert.throws(() => services.origin(pylon, "docs"), /Docker published no loopback port for docs's port 8001 in pylon-a/);
+});
+
 test("a services file the container cannot read, and a failed step in the container, fail with the exit code and the output", async (t) => {
   const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8001/tcp -> 127.0.0.1:49001\n" } });
   await mkdir(join(docker.root, "checkout", ".nexus", "services.yaml"), { recursive: true });

@@ -10,25 +10,23 @@
  * template that arrived as an archive is loaded into Docker on its first boot. The double clones nothing: its
  * setup is the project's preSetup, run as root in the build container.
  */
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure, type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type VmBackend } from "./backend.ts";
 import { dockerBridgeRunArgs, dockerHostBridge, labelFilters } from "./docker-host-bridge.ts";
-import { exit, output } from "./exec.ts";
+import { docker, dockerExec, label } from "./docker-cli.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
-import type { OverlayFile } from "./project.ts";
+import { installFileCommand, shellQuote as q, type OverlayFile } from "./project.ts";
 import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
 import type { CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "./session-wake.ts";
 import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
 
-/** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
-const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;
 const encoded = (sessions: readonly PausedSession[] | null) => sessions === null ? "" : Buffer.from(JSON.stringify(sessions)).toString("base64url");
 const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {
   const sessions = labels[label.sessions] ?? "";
@@ -65,32 +63,11 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   const scope = Object.entries(options.labels ?? {});
   const scopeFilters = labelFilters(options.labels ?? {});
 
-  /**
-   * The signal is checked before each call, never passed to the CLI: killing the CLI does not stop the
-   * daemon's operation, so the job would end and free its subject while Docker was still stopping or committing.
-   */
-  async function dockerWithInput(args: readonly string[], input: string): Promise<void> {
-    const child = spawn("docker", args, { stdio: ["pipe", "ignore", "pipe"] });
-    let stderr = "";
-    child.stderr.setEncoding("utf8").on("data", (text: string) => { stderr += text; });
-    // A docker exec that exits before reading its input breaks the pipe, which its exit code then explains.
-    let broken: Error | undefined;
-    child.stdin.on("error", (err) => { broken = err; }).end(input);
-    const code = await new Promise<number | null>((resolve, reject) => child.on("error", reject).on("close", resolve));
-    if (code !== 0) throw new Error(`docker ${args.slice(0, 3).join(" ")}: exited ${code}: ${stderr.trim()}`);
-    if (broken) throw new Error(`docker ${args.slice(0, 3).join(" ")}: its input broke off: ${broken.message}`);
-  }
-
-  async function docker(args: readonly string[], signal?: AbortSignal): Promise<string> {
-    signal?.throwIfAborted();
-    return (await output("docker", args, { maxBuffer: 64 << 20 })).trim();
-  }
-
   /** Inspects each ID. One removed since it was listed is absent now, so it is left out. */
   async function inspect<T>(kind: "container" | "image", ids: readonly string[], signal?: AbortSignal): Promise<T[]> {
     const found: (T | null)[] = await Promise.all(ids.map(async (id) => {
       try {
-        return (JSON.parse(await docker([kind, "inspect", id], signal)) as T[])[0] ?? null;
+        return (JSON.parse(await docker([kind, "inspect", id], { signal })) as T[])[0] ?? null;
       } catch (err) {
         if (/No such (container|image|object)/i.test((err as Error).message)) return null;
         throw err;
@@ -100,7 +77,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   }
 
   async function containers(pylonId: PylonId | null, signal?: AbortSignal): Promise<ContainerInfo[]> {
-    const ids = await docker(["ps", "-a", "-q", "--no-trunc", "--filter", `label=${pylonId === null ? label.pylon : `${label.pylon}=${pylonId}`}`, ...scopeFilters], signal);
+    const ids = await docker(["ps", "-a", "-q", "--no-trunc", "--filter", `label=${pylonId === null ? label.pylon : `${label.pylon}=${pylonId}`}`, ...scopeFilters], { signal });
     return inspect<ContainerInfo>("container", ids === "" ? [] : ids.split("\n"), signal);
   }
 
@@ -113,14 +90,14 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   /** Newest first. */
   async function checkpointImages(pylonId: PylonId | null, signal?: AbortSignal): Promise<ImageInfo[]> {
     const pylonFilter = pylonId === null ? [] : ["--filter", `label=${label.pylon}=${pylonId}`];
-    const ids = await docker(["images", "-q", "--no-trunc", "--filter", `label=${label.checkpoint}`, ...pylonFilter, ...scopeFilters], signal);
+    const ids = await docker(["images", "-q", "--no-trunc", "--filter", `label=${label.checkpoint}`, ...pylonFilter, ...scopeFilters], { signal });
     const unique = [...new Set(ids === "" ? [] : ids.split("\n"))];
     const images = await inspect<ImageInfo>("image", unique, signal);
     return images.sort((a, b) => Date.parse(b.Created) - Date.parse(a.Created));
   }
 
   async function imagePresent(ref: string, signal?: AbortSignal): Promise<boolean> {
-    return (await docker(["images", "-q", "--filter", `reference=${ref}`], signal)) !== "";
+    return (await docker(["images", "-q", "--filter", `reference=${ref}`], { signal })) !== "";
   }
 
   const services = dockerServices();
@@ -151,7 +128,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   async function stoppedSessions(id: string, signal: AbortSignal): Promise<readonly PausedSession[]> {
     const dir = await mkdtemp(join(tmpdir(), "nexus-sessions-"));
     try {
-      await docker(["cp", `${id}:${sessionsFile}`, dir], signal);
+      await docker(["cp", `${id}:${sessionsFile}`, dir], { signal });
       return pausedSessionsIn(await readFile(join(dir, basename(sessionsFile)), "utf8"));
     } catch (err) {
       if (/Could not find the file/.test((err as Error).message)) return [];
@@ -182,7 +159,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         // docker exec reports a missing or stopped container as an ordinary exit code 1.
         const existing = await container(pylonId, AbortSignal.timeout(timeoutMs));
         if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
-        return execIn(pylonId, cwd, argv, timeoutMs);
+        return { ...await dockerExec(pylonId, argv, { cwd, timeoutMs }), truncated: false };
       },
       async stream(argv, log) {
         const existing = await container(pylonId, AbortSignal.timeout(30_000));
@@ -192,13 +169,9 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       /** Each file through stdin. Missing parents are made as the file's owner, as in a pylon. */
       async writeFiles(files) {
         for (const file of files) {
-          await dockerWithInput(["exec", "--interactive", pylonId, "sh", "-c", [
-            'dir=$(dirname "$1")',
-            'if [ "$2" = root ]; then mkdir -p "$dir"; else runuser -u "$2" -- mkdir -p "$dir"; fi',
-            'cat > "$1.nexus-write"',
-            'install -o "$2" -g "$(id -gn "$2")" -m "$3" "$1.nexus-write" "$1"',
-            'rm -f "$1.nexus-write"',
-          ].join(" && "), "sh", file.path, file.owner, file.mode.toString(8)], file.content);
+          // Outside the file's directory, which the install makes.
+          const staged = `/tmp/nexus-write-${randomUUID()}`;
+          await docker(["exec", "--interactive", pylonId, "sh", "-c", `cat > ${q(staged)} && ${installFileCommand(file.path, file.owner, file.mode, staged)} && rm -f ${q(staged)}`], { input: file.content });
         }
       },
       async services(op, name, lines) {
@@ -242,7 +215,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     if (manifest === null) throw new JobFailure("artifact-missing", `template ${template} is not on this node`);
     if (manifest.key.image !== image) throw new JobFailure("invalid", `template ${template} was built on ${manifest.key.image}, and the pylon boots ${image}`);
     const ref = templateRef(template);
-    if (!await imagePresent(ref, signal)) await docker(["load", "--input", join(templates().path(template), savedImage)], signal);
+    if (!await imagePresent(ref, signal)) await docker(["load", "--input", join(templates().path(template), savedImage)], { signal });
     return ref;
   }
 
@@ -285,7 +258,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       if (existing?.State.Status === "running") return afterBoot(boot.pylonId, live.overlay, urls, "running", relaunch);
       // A container that exists holds the newest disk, newer than any checkpoint, so it is started as it is.
       if (existing !== null) {
-        await docker(["start", existing.Id], signal);
+        await docker(["start", existing.Id], { signal });
         return afterBoot(boot.pylonId, live.overlay, urls, "existing", relaunch);
       }
       let from: string;
@@ -313,7 +286,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         "--publish", `127.0.0.1::${publishedPorts.first}-${publishedPorts.last}`,
         ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
-      ], signal);
+      ], { signal });
       await afterBoot(boot.pylonId, live.overlay, urls, bootedFrom === null ? "fresh" : "existing", relaunch);
     },
 
@@ -330,15 +303,15 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         // On the disk, so the checkpoint carries it to the wake.
         await markRelaunch(pylonId);
       }
-      await docker(["stop", existing.Id], signal);
+      await docker(["stop", existing.Id], { signal });
       // Set either way, because a container booted from a checkpoint carries that checkpoint's labels.
       const labels = { ...labelsOf(existing), [label.checkpoint]: checkpoint, [label.sessions]: sessions };
       await docker([
         "commit",
         ...Object.entries(labels).flatMap(([k, v]) => ["--change", `LABEL ${k}="${v}"`]),
         existing.Id, checkpointRef(pylonId, checkpoint),
-      ], signal);
-      await docker(["rm", existing.Id], signal);
+      ], { signal });
+      await docker(["rm", existing.Id], { signal });
       // Only now, because snapshots read the services of a container for as long as it runs.
       services.forget(pylonId);
     },
@@ -346,10 +319,10 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     async ensureDeleted(pylonId, signal) {
       services.forget(pylonId);
       const existing = await container(pylonId, signal);
-      if (existing !== null) await docker(["rm", "--force", existing.Id], signal);
+      if (existing !== null) await docker(["rm", "--force", existing.Id], { signal });
       // Newest first, one at a time, because removing a checkpoint can also remove the untagged parent it was committed on.
       for (let images = await checkpointImages(pylonId, signal); images.length > 0; images = await checkpointImages(pylonId, signal)) {
-        await docker(["rmi", "--force", images[0]!.Id], signal);
+        await docker(["rmi", "--force", images[0]!.Id], { signal });
       }
     },
 
@@ -389,34 +362,27 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       const build = `nexus-build-${template}`;
       // What an earlier, interrupted build left is started over.
       await removeContainer(build);
-      await docker(["run", "--detach", "--init", "--pull", "never", "--name", build, "--label", `${label.templateBuild}=${template}`, ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]), from, "sleep", "infinity"], signal);
+      await docker(["run", "--detach", "--init", "--pull", "never", "--name", build, "--label", `${label.templateBuild}=${template}`, ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]), from, "sleep", "infinity"], { signal });
       try {
         if (inputs.preSetup !== null) {
-          const setup = await execIn(build, "/", ["sh", "-c", inputs.preSetup], setupLimitMs);
+          const setup = await dockerExec(build, ["sh", "-c", inputs.preSetup], { cwd: "/", timeoutMs: setupLimitMs });
           if (setup.exitCode !== 0) throw new JobFailure("setup-failed", `the setup of template ${template} ${setup.exitCode === null ? "passed its 20-minute limit" : `exited ${setup.exitCode}`}`, setup.output.slice(-4096));
         }
-        await docker(["stop", build], signal);
-        await docker(["commit", build, templateRef(template)], signal);
+        await docker(["stop", build], { signal });
+        await docker(["commit", build, templateRef(template)], { signal });
       } finally {
         await removeContainer(build);
       }
-      await store.publish(
-        { id: template, key: inputs.key, commit: inputs.repo.commit, builtAt: new Date().toISOString() },
-        async (dir) => { await docker(["save", "--output", join(dir, savedImage), templateRef(template)], signal); },
-        signal,
-      );
+      await store.publish(template, async (dir) => {
+        await docker(["save", "--output", join(dir, savedImage), templateRef(template)], { signal });
+        return { key: inputs.key, commit: inputs.repo.commit, builtAt: new Date().toISOString() };
+      }, signal);
     },
     buildImage(image) { return Promise.reject(new JobFailure("invalid", `the Docker backend uses configured Docker images and builds none, so it cannot build ${image}`)); },
     guest,
     // Its containers get no secrets, so none holds one to update.
     async updateSecret() { return []; },
   };
-}
-
-/** A timeout reports exitCode null, as a pylon's exec does. */
-async function execIn(container: string, cwd: string, argv: readonly string[], timeoutMs: number): Promise<{ exitCode: number | null; output: string; truncated: boolean }> {
-  const { code, stdout, stderr } = await exit("docker", ["exec", "--workdir", cwd, container, ...argv], { timeout: timeoutMs, maxBuffer: 64 << 20 });
-  return { exitCode: code, output: stdout + stderr, truncated: false };
 }
 
 /**

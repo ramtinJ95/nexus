@@ -9,7 +9,7 @@ import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { actionSchema } from "./pylon-vm/contracts.ts";
 import { GuestServices } from "./pylon-vm/services.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, secretHostPattern, secretNamePattern, serviceDecl, type ParsesTo, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, installFileCommand, parseServicesFile, renderOverlay, secretHostPattern, secretNamePattern, serviceDecl, type ParsesTo, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
 import type { NodeName, PylonId } from "./protocol.ts";
 
 const usageExample = `
@@ -408,4 +408,27 @@ test("a schema and an interface that differ by one field fail the typecheck's Pa
   true satisfies ParsesTo<typeof link, { url: string; title: string }>;
   // @ts-expect-error the interface requires what the schema leaves optional
   true satisfies ParsesTo<typeof link, { url: string; title: string; description: string }>;
+});
+
+test("installFileCommand makes the parent as a user owner, as root for root, and installs with the owner's group and mode, a path with a space and a quote intact", (t) => {
+  const bin = mkdtempSync(join(tmpdir(), "nexus-install-"));
+  t.after(() => rmSync(bin, { recursive: true }));
+  const log = join(bin, "argv");
+  const record = `#!${process.execPath}\nrequire("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify([require("node:path").basename(process.argv[1]), ...process.argv.slice(2)]) + "\\n");\n`;
+  for (const program of ["mkdir", "install", "runuser"]) writeFileSync(join(bin, program), record, { mode: 0o755 });
+  writeFileSync(join(bin, "id"), "#!/bin/sh\necho \"group-of-$2\"\n", { mode: 0o755 });
+  const run = (command: string) => {
+    rmSync(log, { force: true });
+    execFileSync("/bin/sh", ["-c", command], { env: { PATH: bin } });
+    return execFileSync("/bin/cat", [log], { encoding: "utf8" }).trim().split("\n").map((line) => JSON.parse(line));
+  };
+  assert.deepEqual(run(installFileCommand("/etc/nexus/a.conf", "root", 0o644, "/staging/0")), [
+    ["mkdir", "-p", "/etc/nexus"],
+    ["install", "-o", "root", "-g", "group-of-root", "-m", "644", "/staging/0", "/etc/nexus/a.conf"],
+  ]);
+  const path = "/home/user/it's a dir/run me.sh";
+  assert.deepEqual(run(installFileCommand(path, "user", 0o755, "/staging/it's 1")), [
+    ["runuser", "-u", "user", "--", "mkdir", "-p", "/home/user/it's a dir"],
+    ["install", "-o", "user", "-g", "group-of-user", "-m", "755", "/staging/it's 1", path],
+  ]);
 });

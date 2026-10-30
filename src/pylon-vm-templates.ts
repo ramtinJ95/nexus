@@ -39,7 +39,7 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
     }
     const found = await settled(async () => (await builds(stateRoot)).find((b) => b.name === name) ?? null, ["starting", "unavailable"], signal);
     if (found?.status.state === "prepared") {
-      await store.publish({ ...prepare.manifest, builtAt: new Date().toISOString() }, (into) => copyFile(join(dir, diskFile), join(into, diskFile), constants.COPYFILE_FICLONE), signal);
+      await store.publish(name, async (into) => { await copyFile(join(dir, diskFile), join(into, diskFile), constants.COPYFILE_FICLONE); return { ...prepare.manifest, builtAt: new Date().toISOString() }; }, signal);
       continue;
     }
     if (found !== null) {

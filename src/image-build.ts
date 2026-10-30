@@ -8,25 +8,24 @@
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { createReadStream, existsSync, readFileSync } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../images/pylon/agent-setup/manifest.ts";
-import { artifactArchive, manifestFiles, sha256Of } from "./artifacts.ts";
+import { artifactDirectory, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
-import { imageIdOf, pinsSchema, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
+import { compare, imageIdOf, pinsSchema, type ImageId, type ImageManifest, type ImageRecipe } from "./images.ts";
 import { shellQuote } from "./project.ts";
 import type { NodeName } from "./protocol.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));
-const imageManifestFile = manifestFiles.image;
 
 /** build.sh only runs a build. pins.json becomes ImageRecipe.pins. */
 const notRecipeFiles = new Set(["build.sh", "pins.json"]);
@@ -50,7 +49,7 @@ export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<Ima
     if (!entry.isFile()) throw new Error(`${path} in ${dir} is not a regular file`);
     if (!notRecipeFiles.has(path)) await load(path, join(dir, path));
   }
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  files.sort((a, b) => compare(a.path, b.path));
   return { files, pins: pinsSchema.parse(JSON.parse(await readFile(join(dir, "pins.json"), "utf8"))) };
 }
 
@@ -127,7 +126,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  * 1. docker build the Dockerfile, tagged nexus-pylon:<image ID>, with the pins as build args.
  * 2. Seed: the Alpine module tree for pins.alpineKernel, absolute vmlinuz link included. A kernel that
  *    differs from the pin fails the job, because the workaround breaks silently otherwise.
- * 3. Gondolin's build into outDir.partial.
+ * 3. Gondolin's build into the store's <image ID>.partial.
  * 3a. Modes (restoreModes): Gondolin 0.13.0 extracts the OCI rootfs with a non-root `tar -xf`, which drops setuid, setgid
  *    and sticky bits and applies the umask, and it restores only owners. The modes of every file and
  *    directory with one of those bits are listed from the Docker image, written into rootfs.ext4 with
@@ -143,70 +142,52 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
  *    subreaper and as PID 1, nexus-kvm giving user /dev/kvm, which needs a build node that passes nested
  *    virtualization through, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
- * 5. Write image.json, then rename outDir.partial to outDir.
- * A crash leaves only outDir.partial, which the next attempt removes. An existing outDir is the finished
+ * 5. The store hashes the directory, writes image.json and renames it in (ArtifactDirectory.publish).
+ * A crash leaves only the .partial, which the next attempt removes. An image the store holds is the finished
  * image, because its ID names its inputs.
  */
-export async function buildImage(input: ImageRecipe, node: NodeName, out: string, signal: AbortSignal): Promise<ImageManifest> {
-  const outDir = resolve(out);
+export async function buildImage(input: ImageRecipe, node: NodeName, store: ArtifactDirectory, signal: AbortSignal): Promise<ImageManifest> {
   const recipe = parseRecipe(input);
   const checks = smokeChecks(recipe);
   const id = imageIdOf(recipe);
-  const done = join(outDir, imageManifestFile);
-  if (existsSync(done)) {
-    const built = JSON.parse(await readFile(done, "utf8")) as ImageManifest;
-    if (built.id !== id) throw new JobFailure("invalid", `${outDir} holds ${built.id}, not ${id}`);
-    return built;
-  }
+  const built = await store.manifest(id);
+  if (built !== null) return built;
   const gondolin = gondolinVersion();
   if (gondolin !== recipe.pins.gondolin) {
     throw new JobFailure("invalid", `this node runs Gondolin ${gondolin}, but the recipe pins ${recipe.pins.gondolin}, which the kernel module seed workaround is tied to`);
   }
-  const partial = `${outDir}.partial`;
-  const scratch = join(partial, ".scratch");
-  await rm(partial, { recursive: true, force: true });
-  const context = join(scratch, "context");
-  await writeRecipeFiles(recipe.files, context);
-  // The tag only lives until the modes are listed from it.
-  const tag = `nexus-pylon:${id}`;
-  const seed = join(scratch, "kernel-module-seed");
-  const { config, alpine } = gondolinConfig(recipe, tag, seed, context);
-  const configFile = join(scratch, "gondolin.json");
-  await writeFile(configFile, JSON.stringify(config, null, 2));
+  return store.publish(id, async (partial) => {
+    const scratch = join(partial, ".scratch");
+    const context = join(scratch, "context");
+    await writeRecipeFiles(recipe.files, context);
+    // The tag only lives until the modes are listed from it.
+    const tag = `nexus-pylon:${id}`;
+    const seed = join(scratch, "kernel-module-seed");
+    const { config, alpine } = gondolinConfig(recipe, tag, seed, context);
+    const configFile = join(scratch, "gondolin.json");
+    await writeFile(configFile, JSON.stringify(config, null, 2));
 
-  const args = Object.entries(dockerBuildArgs(recipe.pins)).flatMap(([name, value]) => ["--build-arg", `${name}=${value}`]);
-  await run("docker", ["build", "--platform", "linux/amd64", "--label", `nexus.image=${id}`, "--tag", tag, ...args, context], signal);
-  try {
-    // The S1 workaround. Delete this step once Gondolin's kernel-modules copy sets verbatimSymlinks
-    // (spikes/UPSTREAM-ISSUE-DRAFT.md).
-    await seedKernelModules(config.arch, alpine, recipe.pins.alpineKernel, scratch, seed, signal);
-    await run(process.execPath, [gondolinBuild, configFile, partial, join(scratch, "gondolin-work")], signal);
-    await restoreModes(tag, partial, `nexus.image=${id}`, signal);
-  } finally {
-    await run("docker", ["image", "rm", tag], AbortSignal.timeout(60_000))
-      .catch((err: Error) => process.stderr.write(`buildImage could not remove ${tag}, so it stays in Docker: ${err.message}\n`));
-  }
-  await rm(scratch, { recursive: true });
+    const args = Object.entries(dockerBuildArgs(recipe.pins)).flatMap(([name, value]) => ["--build-arg", `${name}=${value}`]);
+    await run("docker", ["build", "--platform", "linux/amd64", "--label", `nexus.image=${id}`, "--tag", tag, ...args, context], signal);
+    try {
+      // The S1 workaround. Delete this step once Gondolin's kernel-modules copy sets verbatimSymlinks
+      // (spikes/UPSTREAM-ISSUE-DRAFT.md).
+      await seedKernelModules(config.arch, alpine, recipe.pins.alpineKernel, scratch, seed, signal);
+      await run(process.execPath, [gondolinBuild, configFile, partial, join(scratch, "gondolin-work")], signal);
+      await restoreModes(tag, partial, `nexus.image=${id}`, signal);
+    } finally {
+      await run("docker", ["image", "rm", tag], AbortSignal.timeout(60_000))
+        .catch((err: Error) => process.stderr.write(`buildImage could not remove ${tag}, so it stays in Docker: ${err.message}\n`));
+    }
+    await rm(scratch, { recursive: true });
 
-  // Nothing is published unless a pylon booted from these assets works.
-  await smokeBoot(partial, checks, id, signal);
+    // Nothing is published unless a pylon booted from these assets works.
+    await smokeBoot(partial, checks, id, signal);
 
-  const gondolinManifest = JSON.parse(await readFile(join(partial, "manifest.json"), "utf8")) as { buildId?: string };
-  if (gondolinManifest.buildId === undefined) throw new JobFailure("backend", `Gondolin wrote no buildId into ${partial}/manifest.json`);
-  const manifest: ImageManifest = {
-    id,
-    gondolinBuildId: gondolinManifest.buildId,
-    pins: recipe.pins,
-    builtOn: node,
-    builtAt: new Date().toISOString(),
-    sha256: await Promise.try(() => sha256Of(artifactArchive(partial, imageManifestFile, signal))).catch((err: Error) => {
-      if (signal.aborted) throw signal.reason;
-      throw new JobFailure("backend", err.message);
-    }),
-  };
-  await writeFile(join(partial, imageManifestFile), `${JSON.stringify(manifest, null, 2)}\n`);
-  await rename(partial, outDir);
-  return manifest;
+    const gondolinManifest = JSON.parse(await readFile(join(partial, "manifest.json"), "utf8")) as { buildId?: string };
+    if (gondolinManifest.buildId === undefined) throw new JobFailure("backend", `Gondolin wrote no buildId into ${partial}/manifest.json`);
+    return { gondolinBuildId: gondolinManifest.buildId, pins: recipe.pins, builtOn: node, builtAt: new Date().toISOString() };
+  }, signal);
 }
 
 type SeedAlpine = AlpineConfig & { kernelPackage: string };
@@ -303,7 +284,7 @@ export function parseModeListing(listing: string): readonly ModeFix[] {
   if (!fixes.some((fix) => fix.type === "f" && (fix.mode & 0o6000) !== 0)) {
     throw new Error("the image lists no setuid or setgid file, so the mode listing is broken");
   }
-  return fixes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return fixes.sort((a, b) => compare(a.path, b.path));
 }
 
 /** debugfs's command parser takes `""` inside quotes as a quote and has no other escapes. */
@@ -674,6 +655,6 @@ if (import.meta.main) {
     process.exit(64);
   }
   const recipe = await loadImageRecipe();
-  const manifest = await buildImage(recipe, node as NodeName, join(artifacts, imageIdOf(recipe)), AbortSignal.timeout(30 * 60_000));
+  const manifest = await buildImage(recipe, node as NodeName, artifactDirectory(artifacts, tarCodec), AbortSignal.timeout(30 * 60_000));
   console.log(JSON.stringify(manifest, null, 2));
 }

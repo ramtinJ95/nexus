@@ -5,12 +5,13 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { artifactDirectory, tarCodec } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
 import {
   buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, loadImageRecipe, modeMismatches,
   parseDebugfsModes, parseModeListing, pylonRecipeDir, smokeChecks, smokeFailure,
 } from "./image-build.ts";
-import type { ImageRecipe } from "./images.ts";
+import { imageIdOf, type ImageRecipe } from "./images.ts";
 import { agentSetupManifest, installedLayout, parseAgentSetup } from "../images/pylon/agent-setup/manifest.ts";
 import type { NodeName } from "./protocol.ts";
 
@@ -86,7 +87,7 @@ test("loading refuses pins with a missing or unknown field, a bad digest, and a 
 test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus script or agent setup manifest are unsafe, before it writes anything", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "nexus-image-out-"));
   t.after(() => rm(root, { recursive: true }));
-  const outDir = join(root, "img-000000000000");
+  const store = artifactDirectory(root, tarCodec);
   const node = "infra-testbench" as NodeName;
   const bad: readonly ImageRecipe[] = [
     { files: [{ path: "../escape", mode: 0o644, content: "" }], pins },
@@ -102,9 +103,9 @@ test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus scr
     { files: [{ ...manifest, content: manifest.content.replace(/"commit":"([0-9a-f]{7})[0-9a-f]+"/, '"commit":"$1"') }], pins },
   ];
   for (const recipe of bad) {
-    await assert.rejects(buildImage(recipe, node, outDir, AbortSignal.timeout(5_000)), (err) => err instanceof JobFailure && err.code === "invalid");
+    await assert.rejects(buildImage(recipe, node, store, AbortSignal.timeout(5_000)), (err) => err instanceof JobFailure && err.code === "invalid");
   }
-  assert.ok(!existsSync(`${outDir}.partial`) && !existsSync(join(root, "escape")));
+  assert.deepEqual(await readdir(root), []);
 });
 
 test("a build job under the probe's 077 umask gives Docker each recipe file with its own mode, and directories 0755", async (t) => {
@@ -112,19 +113,20 @@ test("a build job under the probe's 077 umask gives Docker each recipe file with
   t.after(() => rm(root, { recursive: true }));
   const docker = join(root, "bin", "docker");
   await mkdir(join(root, "bin"));
-  await writeFile(docker, `#!/bin/sh\n[ "$1" = build ] || exit 0\nfor context; do :; done\nprintf %s "$context" > ${root}/context\nexit 1\n`);
+  // The failed build's .partial is removed, so the context is copied out first.
+  await writeFile(docker, `#!/bin/sh\n[ "$1" = build ] || exit 0\nfor context; do :; done\ncp -a "$context" ${root}/context\nexit 1\n`);
   await chmod(docker, 0o755);
   const recipe = await loadImageRecipe();
   const path = process.env.PATH;
   const umask = process.umask(0o077);
   process.env.PATH = `${join(root, "bin")}:${path}`;
   try {
-    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, join(root, "out"), AbortSignal.timeout(30_000)), /docker build exited 1/);
+    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, artifactDirectory(join(root, "out"), tarCodec), AbortSignal.timeout(30_000)), /docker build exited 1/);
   } finally {
     process.umask(umask);
     process.env.PATH = path;
   }
-  const context = await readFile(join(root, "context"), "utf8");
+  const context = join(root, "context");
   const modes = new Map<string, string>();
   for (const entry of await readdir(context, { recursive: true, withFileTypes: true })) {
     const path = join(entry.parentPath, entry.name);
@@ -134,6 +136,25 @@ test("a build job under the probe's 077 umask gives Docker each recipe file with
   for (const file of recipe.files) assert.equal(modes.get(file.path), file.mode.toString(8), file.path);
   for (const dir of ["agent-setup", "dotfiles"]) assert.equal(modes.get(dir), "755", dir);
   assert.equal(modes.size, recipe.files.length + 2);
+});
+
+test("an image.json in the store that names the recipe's image but is no manifest fails the build before any docker call", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nexus-image-held-"));
+  t.after(() => rm(root, { recursive: true }));
+  await mkdir(join(root, "bin"));
+  await writeFile(join(root, "bin", "docker"), `#!/bin/sh\necho "$@" >> ${root}/calls\n`, { mode: 0o755 });
+  const recipe = await loadImageRecipe();
+  const store = artifactDirectory(join(root, "artifacts"), tarCodec);
+  await mkdir(store.path(imageIdOf(recipe)), { recursive: true });
+  await writeFile(join(store.path(imageIdOf(recipe)), "image.json"), JSON.stringify({ id: imageIdOf(recipe), builtOn: "infra-testbench" }));
+  const path = process.env.PATH;
+  process.env.PATH = `${join(root, "bin")}:${path}`;
+  try {
+    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, store, AbortSignal.timeout(30_000)));
+  } finally {
+    process.env.PATH = path;
+  }
+  assert.equal(existsSync(join(root, "calls")), false, "no docker call");
 });
 
 test("the smoke boot expects each tool's exact pinned version, and whatever the recipe's nexus CLI prints", async () => {

@@ -11,6 +11,7 @@ import type { PylonEvent } from "./events.ts";
  *   ships it in the spawn job. The probe writes those files without reading them.
  */
 import { createHash } from "node:crypto";
+import { posix } from "node:path";
 import { isScalar, parseDocument, visit } from "yaml";
 import { z } from "zod";
 import type { LiveHash, NodeName, PylonId } from "./protocol.ts";
@@ -400,6 +401,17 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
 export const nexusApi = "http://nexus.pylon";
 
 export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
+/**
+ * A shell command that installs `source` at `path` with `owner`, the owner's group and `mode`. Missing parents are
+ * made as the owner, so a user's file never lands in a directory only root can write.
+ */
+export function installFileCommand(path: string, owner: string, mode: number, source: string): string {
+  const user = shellQuote(owner);
+  const dir = shellQuote(posix.dirname(path));
+  const mkdir = owner === "root" ? `mkdir -p ${dir}` : `runuser -u ${user} -- mkdir -p ${dir}`;
+  return `${mkdir} && install -o ${user} -g "$(id -gn ${user})" -m ${mode.toString(8)} ${shellQuote(source)} ${shellQuote(path)}`;
+}
 
 function pylonGuide(o: PylonOverlay): string {
   const list = (items: readonly string[]): string => items.map((item) => `- ${item}\n`).join("");

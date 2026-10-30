@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import type { PylonId } from "../protocol.ts";
-import { startGateway, warmHeader, type PreviewHit, type PreviewRoute } from "./gateway.ts";
+import { startGateway, warmHeader, type GatewayOptions, type PreviewHit, type PreviewRoute } from "./gateway.ts";
 
 const pylonId = "pylon-gw" as PylonId;
 const publicHost = "infra-testbench.example.ts.net:10001";
@@ -39,9 +39,10 @@ async function guestOrigin(t: import("node:test").TestContext) {
   return { origin: `http://127.0.0.1:${port}` as const, releaseSecond: () => second.resolve() };
 }
 
-async function setup(t: import("node:test").TestContext, origin: (route: PreviewRoute) => `http://127.0.0.1:${number}`) {
+async function setup(t: import("node:test").TestContext, origin: GatewayOptions["origin"]) {
   const hits: PreviewHit[] = [];
-  const gateway = await startGateway({ port: 0, routes: new Map(), origin, onHit: (hit) => hits.push(hit) });
+  const logged: string[] = [];
+  const gateway = await startGateway({ port: 0, routes: new Map(), origin, onHit: (hit) => hits.push(hit), log: (message) => logged.push(message) });
   t.after(() => gateway.close());
   gateway.routes.set(10001, { pylonId, service: "web" });
   const gatewayPort = Number(new URL(gateway.origin).port);
@@ -55,7 +56,7 @@ async function setup(t: import("node:test").TestContext, origin: (route: Preview
       req.on("error", reject);
       req.end(init.body);
     });
-  return { gateway, gatewayPort, hits, call };
+  return { gateway, gatewayPort, hits, logged, call };
 }
 
 test("a request is forwarded by its Host port, with its body, the public Host and x-forwarded-* for https", async (t) => {
@@ -169,7 +170,7 @@ test("hits are reported once a minute per route, with the tailnet login", async 
 });
 
 test("a pylon that cannot serve gets a waking page in a browser, plain text otherwise, and the hit still counts", async (t) => {
-  const { call, hits } = await setup(t, () => { throw new Error("pylon-gw is not running"); });
+  const { call, hits, logged } = await setup(t, () => ({ unavailable: "pylon-gw is not running" }));
   const page = await call("/", { headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } });
   assert.equal(page.status, 503);
   assert.equal(page.headers["retry-after"], "3");
@@ -181,6 +182,30 @@ test("a pylon that cannot serve gets a waking page in a browser, plain text othe
   assert.match(api.headers["content-type"] ?? "", /^text\/plain/);
   assert.match(api.body, /not running/);
   assert.equal(hits.length, 1, "the second request falls inside the hit interval");
+  assert.deepEqual(logged, []);
+});
+
+test("an origin lookup that throws is a fault: 502 with its message to a request and an upgrade alike, and logged", async (t) => {
+  const { call, gatewayPort, logged } = await setup(t, () => { throw new Error("status.json is not JSON"); });
+  const page = await call("/", { headers: { accept: "text/html" } });
+  assert.equal(page.status, 502);
+  assert.match(page.body, /status\.json is not JSON/);
+  const req = request({ host: "127.0.0.1", port: gatewayPort, path: "/ws", headers: { host: publicHost, connection: "upgrade", upgrade: "websocket" } });
+  req.end();
+  const [res] = await once(req, "response") as [IncomingMessage];
+  let body = "";
+  for await (const chunk of res) body += chunk;
+  assert.equal(res.statusCode, 502);
+  assert.match(body, /status\.json is not JSON/);
+  assert.equal(logged.length, 2);
+  assert.match(logged[0]!, /web on pylon-gw.*status\.json is not JSON/);
+});
+
+test("an origin that is no URL is a fault too, and the gateway keeps serving", async (t) => {
+  const { call, logged } = await setup(t, () => "http://127.0.0.1:99999");
+  assert.equal((await call("/")).status, 502);
+  assert.equal((await call("/")).status, 502);
+  assert.match(logged[0]!, /Invalid URL/);
 });
 
 test("a service that is not listening gets 502", async (t) => {
