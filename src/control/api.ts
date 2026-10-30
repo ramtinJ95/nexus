@@ -36,7 +36,6 @@ import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
 import type { JoinedNode, PortRange, Registry, StartKey, StoredPylon, Thread, ThreadId } from "./registry.ts";
-import { dashboard } from "./dashboard.ts";
 import { liveStreams } from "./dashboard/live-frames.ts";
 import { attachScript } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
@@ -57,6 +56,7 @@ import { streamRoutes } from "./api/stream-routes.ts";
 import { projectRoutes } from "./api/project-routes.ts";
 import { usageRoutes } from "./api/usage-routes.ts";
 import { nodeRoutes } from "./api/node-routes.ts";
+import { dashboardRoutes } from "./api/dashboard-routes.ts";
 import { threadRoutes } from "./api/thread-routes.ts";
 import { pipelineRoutes } from "./api/pipeline-routes.ts";
 import { reviewRoutes } from "./api/review-routes.ts";
@@ -124,6 +124,7 @@ export interface Api {
 /** Every route but the health route, which reports the server's own state. Each feature's module holds its routes. */
 export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   return [
+    ...dashboardRoutes(kit, options, nodeHealth),
     ...releaseRoutes(kit, options),
     ...streamRoutes(kit),
     ...projectRoutes(kit, options),
@@ -141,7 +142,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (cal
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
-  const { thread, threadRefusal, guard, current, personOnly, refusalOf } = access;
+  const { thread, threadRefusal, guard, current, personOnly } = access;
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
@@ -150,7 +151,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const live = liveStreams();
 
   const views = threadViews(registry, agents, options);
-  const { pylonState, row, detail, conversation } = views;
+  const { pylonState } = views;
 
   /** The agent of a thread that has one. */
   function agentOf(t: Thread): ThreadAgents["harness" | "claude"] {
@@ -158,14 +159,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (kind === "none") throw new HttpError(409, noConversation(t));
     return agents[kind];
   }
-
-  const page = dashboard({
-    registry, detail, row, conversation,
-    landRefusal: (caller) => !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
-    answerRefusal: refusalOf,
-    deploys: (r) => options.reviews?.deploys(r) ?? false,
-    nodeHealth,
-  });
 
   /** A node's health says what runs on it, so only a deployer reads it. Nothing reached from here acts on the node. */
   async function nodeHealth(caller: TailnetNodeId, name: NodeName): Promise<NodeHealth> {
@@ -256,8 +249,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const path = pathOf(req.url);
     if (path === null) throw new HttpError(400, `the request path ${JSON.stringify(req.url)} is not a valid URL path`);
     const url = new URL(req.url ?? "/", "http://nexus");
-    const view = req.method === "GET" ? await page(path, url.searchParams, caller) : undefined;
-    if (view !== undefined) return void res.writeHead(view.status, view.headers).end(view.body);
     const matches = routes.flatMap((entry): { method: string; m: RegExpExecArray; policy?: Policy; route: Route }[] => {
       const m = entry[1].exec(path);
       if (m === null) return [];
@@ -271,6 +262,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const reply = match.policy?.startsTurn ? await gate.run(async () => route()) : await route();
     if (reply.stream !== undefined) return reply.stream(res);
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
+    else if (reply.headers !== undefined) res.writeHead(reply.status, reply.headers).end(reply.body);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
     else send(res, reply.status, reply.body);
   }

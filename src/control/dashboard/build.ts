@@ -1,5 +1,5 @@
 /**
- * Bundles the dashboard client into dist/dashboard, which src/control/dashboard.ts serves. The output is outside
+ * Bundles the dashboard client into dist/dashboard, which src/control/api/dashboard-routes.ts serves. The output is outside
  * src, so release.sh hashes only sources, and a release builds its own. Each module the client imports only
  * dynamically, such as a language's grammar, becomes a chunk of its own that a page fetches when it needs it.
  */
