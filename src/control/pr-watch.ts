@@ -30,11 +30,14 @@ export function summaryOf(body: string): string {
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
 /** Whether the comment cap stopped the watch, so it reads the thread's PRs no more. */
 export const watchStopped = (state: Pick<PrWatchState, "commentWakes"> | null | undefined) => (state?.commentWakes ?? 0) >= commentCap;
-/** A link to an open PR the watch has not read yet, which `url: ""` marks as stored. */
+/** An open PR the watch linked but has not read yet, which its empty `url` marks in the stored link. */
 const unread = (repo: string, number: number): PullRequest => ({ repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null });
 /** Whether the watch never read the linked PR, so its first read baselines the comments it already has. */
 export const neverRead = (pr: Pick<PullRequest, "url">) => pr.url === "";
-/** The branches thread `id` pushed to origin. pushedAs is a remote-tracking name, not a URL, and only origin belongs to the project's repository. */
+/**
+ * The branches thread `id` pushed to origin. pushedAs is a remote-tracking name, not a URL, and only origin belongs to
+ * the project's repository.
+ */
 export const pushedBranches = (registry: Pick<Registry, "outputs">, id: ThreadId): string[] =>
   registry.outputs(id).flatMap((o) => o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []);
 const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
