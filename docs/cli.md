@@ -517,7 +517,7 @@ interface Review {
   land: { requestedBy: string; fromProject?: true } | null;  // fromProject: the project's autoReview asked, and is read again at each landing
   auto: boolean;                      // started on its own when the PR watch first linked the PR
   merged: string | null;              // the merge commit once merged
-  waiver: { head: string; holds: string[]; by: string; at: number } | null;  // since 0.28.0
+  waiver: { head: string; holds: string[]; codes?: HoldCode[]; by: string; at: number } | null;  // since 0.28.0, codes additive
   rounds: { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: { kind: "absent" } | { kind: "ran"; thread: string; passed: boolean; output: string }; answers: Answer[] | null; conflict?: { base: string } }[];
   phase: { kind: "reviewing" | "fixing"; failing?: ModelFailure }  // failing since 0.48.0
     | { kind: "approved" }
@@ -527,7 +527,7 @@ interface Review {
     | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
     | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
     | { kind: "landed"; commit: string }
-    | { kind: "needs-person"; reasons: string[]; label?: Label; unreviewed?: string }
+    | { kind: "needs-person"; reasons: string[]; holds?: Hold[]; label?: Label; unreviewed?: string }  // holds additive
     | { kind: "merged" | "closed" }
     | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
     | { kind: "cancelled"; who: "person"; by: string };  // since 0.45.0
@@ -550,6 +550,16 @@ Since 0.48.0 a turn that ends because the agent's model failed is not a turn wit
 
 ```ts
 type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };  // why is GitHub's answer
+```
+
+`holds` is the same list as `reasons`, one per reason in the same order, each with the code that decides whether the person may waive it, which [the merge policy](merge-policy.md#what-the-person-may-waive) lists. A waiver's `codes` are the codes of the holds it names in `holds`, and the landing matches a waiver by code at its head, so a waiver keeps covering its hold if the hold's wording changes. `reasons` and a waiver's `holds` stay the texts the person reads, and the Land route still takes `waive` as those texts. Both fields are additive: a control plane without them sends neither, and one with them reads a review stored before them with codes worked out from its texts.
+
+```ts
+interface Hold { code: HoldCode; text: string }
+type HoldCode = "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
+  | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed" | "verify-changed"
+  | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}`  // the reviewer's reading of a case, and a Nexus path that hits it
+  | "stale-head" | "loop";  // the line a held review gains when its head moves, and the review loop's own reasons
 ```
 
 `waiting` is why a landing that deploys waits before it merges, since landings that deploy go one at a time: `<review> deploys`, `<review> rolls back` or `<review> merges` for another review's landing, `a deploy drains the control plane`, or `not every service reports <commit> healthy` for a desired release the fleet does not report healthy, such as one whose deploy failed with nothing to roll back to. `show` ends the review line with `, waiting while ` and that reason, such as `, waiting while rv-1a2b3c4d deploys`.

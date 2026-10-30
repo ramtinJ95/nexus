@@ -92,7 +92,7 @@ Pressing Land on the dashboard is how the person waives a hold. `nexus land` nev
 
 The Land card on the dashboard marks each hold "you may waive" or not, with the reason. When every hold that would meet the landing again is one the person may waive, its Land button waives them. Its confirmation names the pull request, the commit and that it waives the holds the policy reserves for the person, and the button sends that commit and those holds. The caller must still be a deployer, and each named hold must be one the review has at that commit. The landing then checks every condition again, as `nexus land` does, with the named holds met at that commit and nothing else. The review records the waiver, who waived which holds at which commit, `nexus show` prints it, and the event stream gets a `review.waived` event.
 
-A waiver lasts for the landing it starts. If that landing holds again for anything else, such as checks that turned pending or a reserved path the reviewer did not name, the review lists every hold it met, those the person waived too, and the person confirms them all again.
+A waiver names each hold by the text the person saw, and the control plane records the kind of hold that text was. The landing matches a waiver by that kind at the waiver's head, so rewording a hold does not undo a waiver, and a waiver of a reserved case the reviewer named never covers a reserved path that hits the same case. A waiver lasts for the landing it starts. If that landing holds again for anything else, such as checks that turned pending or a reserved path the reviewer did not name, the review lists every hold it met, those the person waived too, and the person confirms them all again.
 
 ## Known limits of waivers
 
