@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { addThread as addTestThread, seedRegistry } from "./test-kit.ts";
+import { addThread as addTestThread, observeNode, seedRegistry } from "./test-kit.ts";
 import { usageCounter } from "./usage-counter.ts";
 import { tokenCount, usageFilter, utc } from "./usage.ts";
 import type { AgentCall, Tokens } from "../agent-usage.ts";
@@ -18,6 +18,7 @@ import type { LiveHash, NodeName, PylonId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
+import { runningPylon } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";
@@ -43,15 +44,10 @@ function addThread(registry: Registry, options: { startedBy?: string; conversati
 }
 
 function observe(registry: Registry, pylonId: PylonId, phase: "running" | "paused") {
-  const pylons = [...(registry.node(node)?.observation?.pylons ?? []).filter((p) => p.pylonId !== pylonId), ...phase === "paused" ? [] : [{
-    pylonId, phase, liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null },
-    services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-  }]];
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-  registry.ingested(
-    { node, observedAt: new Date().toISOString(), probeBootId: "boot-1", events: [], capacity, artifacts: [image], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] },
-    [{ record: "node", node, state: "online", capacity }],
-  );
+  const pylons = [...(registry.node(node)?.observation?.pylons ?? []).filter((p) => p.pylonId !== pylonId), ...phase === "paused" ? [] : [
+    runningPylon(pylonId, { liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null } }),
+  ]];
+  observeNode(registry, { node, probeBootId: "boot-1", artifacts: [image], pylons });
 }
 
 /** A pylon's home: the Claude fixture as a worker's transcript, and the pi fixture as a reviewer's session. */
