@@ -1,12 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
-import { newPylonRecord } from "../tick.ts";
+import { openRegistry, type ThreadId } from "./registry.ts";
+import { testPr, testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { desiredPhase, ingest } from "../reconcile.ts";
 import { fakeGuest } from "../fake-guest.ts";
 import { gitFacts } from "../git-facts.ts";
@@ -20,7 +18,7 @@ import { prWatchPrefix } from "../agent-protocol.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
-import { runningPylon, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 
 function fixture(path = ":memory:") {
   const registry = openRegistry(path);
@@ -29,15 +27,15 @@ function fixture(path = ":memory:") {
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
   function add(id = "th-1", claude = false, output: string | null = "origin/feature") {
-    const thread: Thread = { id: id as ThreadId, title: "test", project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
-    const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "paused", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
+    const thread = testThread({ id: id as ThreadId, title: "test", project: project.id, conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
+    const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
     registry.createThread(thread, pylon, claude ? "/poteto-mode fix it" : undefined);
     if (claude) registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, "c0ffee00-0000-4000-8000-000000000000");
     if (output !== null) registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: output });
     return thread.id;
   }
   const id = add();
-  let snapshot: PrSnapshot = { pr: { repo: "acme/repo", number: 1, title: "Fix", url: "https://github.com/acme/repo/pull/1", state: "open", checks: "passing", review: "none", conflict: false }, detail: { head: "1".repeat(40), branch: "feature", base: "main", body: "", mergeCommit: null }, failures: [], comments: [] };
+  let snapshot: PrSnapshot = { pr: testPr({ checks: "passing" }), detail: { head: "1".repeat(40), branch: "feature", base: "main", body: "", mergeCommit: null }, failures: [], comments: [] };
   const calls: string[] = [];
   const messages: Parameters<HarnessHost["send"]>[] = [];
   let reject = false;
@@ -160,11 +158,11 @@ test("a non-comment wake resets the consecutive count", async (t) => {
 });
 
 test("durable pending delivery reuses its request id after restart, with no repeated news", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-pr-watch-")); t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-pr-watch-", t);
   const path = join(dir, "registry.db"); const f = fixture(path);
   await f.watcher.poll(); f.snapshot.pr.conflict = true; f.reject(true); await f.watcher.poll();
   const requestId = f.messages[0]![2]; f.registry.close();
-  const registry = openRegistry(path); t.after(() => registry.close()); f.reject(false);
+  const registry = testRegistry(t, path); f.reject(false);
   const restarted = prWatcher({ ...f.options, registry, inbox: f.inbox(registry) }); await restarted.poll();
   assert.equal(f.messages[1]![2], requestId); await restarted.poll(); assert.equal(f.messages.length, 2);
 });
@@ -700,8 +698,7 @@ test("a predecessor's PRs are read before any is saved, and a known one that clo
 
 test("a branch a thread checks out links no PR, so a thread queued after it waits; the branch it pushes, force-pushed too, links its own", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
-  const dir = await mkdtemp(join(tmpdir(), "nexus-pr-watch-git-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempDir("nexus-pr-watch-git-", t);
   const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
   const git = async (cwd: string, ...args: string[]) => (await promisify(execFile)("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd, env, encoding: "utf8" })).stdout.trim();
   await git(dir, "init", "-q", "--bare", "remote.git");
@@ -728,7 +725,7 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
     previous = pylon;
   }
   const prs = new Map<string, PrSnapshot>();
-  const pr = (number: number, branch: string, state: "open" | "merged") => prs.set(branch, { pr: { repo: "acme/repo", number, title: branch, url: `https://github.com/acme/repo/pull/${number}`, state, checks: "passing", review: "none", conflict: false }, detail: { head: "1".repeat(40), branch, base: "main", body: "", mergeCommit: null }, failures: [], comments: [] });
+  const pr = (number: number, branch: string, state: "open" | "merged") => prs.set(branch, { pr: testPr({ number, title: branch, state, checks: "passing" }), detail: { head: "1".repeat(40), branch, base: "main", body: "", mergeCommit: null }, failures: [], comments: [] });
   const github = {
     async find(_repo: string, branch: string, state = "open") { const s = prs.get(branch); return s !== undefined && (state === "all" || s.pr.state === "open") ? [s.pr.number] : []; },
     async poll(_repo: string, number: number) { return structuredClone([...prs.values()].find((s) => s.pr.number === number)!); },

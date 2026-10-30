@@ -1,7 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -9,11 +7,12 @@ import type { PullRequest } from "./github.ts";
 import { itemPhase, itemThread, itemView, pipeline, type ItemId } from "./pipeline.ts";
 import { threadQueue } from "./queue.ts";
 import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
-import { personPhase, type Phase, type Review } from "./review-model.ts";
+import { testPr, testReview } from "./test-kit.ts";
+import { personPhase, type Phase } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { PipelineSetting, ProjectId } from "../project.ts";
-import { testImage } from "../test-kit.ts";
+import { tempDir, testImage } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
@@ -34,7 +33,7 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
   const items = pipeline({ registry, queue });
   t.after(async () => { await items.close(); await queue.close(); });
   const request = (title: string, over: Partial<StartRequest> = {}): StartRequest => ({ project: "acme", title, ...over });
-  const pr = (number: number, state: PullRequest["state"]): PullRequest => ({ repo: "acme/acme", number, title: `PR ${number}`, url: `https://github.com/acme/acme/pull/${number}`, state, checks: "none", review: "none", conflict: false });
+  const pr = (number: number, state: PullRequest["state"]): PullRequest => testPr({ repo: "acme/acme", number, title: `PR ${number}`, state });
   return {
     registry, queue, items, fake, request, pr,
     add: (title: string, after: readonly ItemId[] = [], over: Partial<StartRequest> = {}) => items.add(request(title, over), over.claude === undefined ? `Build ${title}.` : null, after, laptop).id,
@@ -42,12 +41,11 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
     async passes() { await items.poll(); await queue.poll(); },
     links(id: ThreadId, ...prs: PullRequest[]) { registry.savePrWatch(id, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null }); },
     review(id: ThreadId, phase: Phase, land: string | null = null) {
-      const r: Review = {
+      registry.saveReview(testReview({
         id: `r-${id}`, expect: "", sent: 0, builder: id, reviewer: `${id}-reviewer` as ThreadId, pr: { repo: "acme/acme", number: 9, url: "", title: "", branch: "feature" },
-        models: { builder: "a", reviewer: "b" }, reviewerKind: "harness", maxRounds: 5, land: land === null ? null : { requestedBy: land, fromProject: true }, auto: true, waiver: null,
-        rounds: [{ head: "h", verdict: null, check: null, answers: null }], merged: phase.kind === "landed" ? phase.commit : null, phase, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
-      };
-      registry.saveReview(r);
+        models: { builder: "a", reviewer: "b" }, land: land === null ? null : { requestedBy: land, fromProject: true }, auto: true,
+        rounds: [{ head: "h", verdict: null, check: null, answers: null }], merged: phase.kind === "landed" ? phase.commit : null, phase,
+      }));
     },
     setPipeline(next: PipelineSetting | null) { registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: next })); },
   };
@@ -165,7 +163,7 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
 });
 
 test("an item is queued once across passes and restarts, under its request ID", async (t) => {
-  const path = join(await mkdtemp(join(tmpdir(), "nexus-pipeline-")), "registry.db");
+  const path = join(await tempDir("nexus-pipeline-", t), "registry.db");
   const first = fixture(t, { autoStart: true }, path);
   const a = first.add("A");
   const b = first.add("B", [a], { claude: "Build B" });

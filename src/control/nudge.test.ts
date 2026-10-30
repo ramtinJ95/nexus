@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
-import { newPylonRecord } from "../tick.ts";
+import type { ThreadId } from "./registry.ts";
+import { testPr, testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { agentInbox, type Inbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { builderNudger } from "./nudge.ts";
@@ -34,8 +34,7 @@ const assistant = (text: string) => ({
  * workers on a fake probe. Pushed branches reach the registry only through a snapshot, as the probe reports them.
  */
 function fixture(t: import("node:test").TestContext) {
-  const registry = openRegistry(":memory:");
-  t.after(() => registry.close());
+  const registry = testRegistry(t);
   const resources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
   const project = (id: string, autoReview: { land: boolean; enabledBy: string } | null) =>
     ({ id: id as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources, allowedHosts: [], secrets: [], logins: [], preSetup: null, autoReview });
@@ -68,7 +67,7 @@ function fixture(t: import("node:test").TestContext) {
     async poll(r, number) {
       const state = [...prs.values()].flat().find((pr) => pr.number === number)?.state ?? "open";
       return {
-        pr: { repo: r, number, title: "Add the cache", url: `https://github.com/${r}/pull/${number}`, state, checks: "none", review: "none", conflict: false },
+        pr: testPr({ repo: r, number, title: "Add the cache", state }),
         detail: { head: "a".repeat(40), branch: "nexus/cache", base: "main", body: "", mergeCommit: null }, failures: [], comments: [],
       };
     },
@@ -95,8 +94,8 @@ function fixture(t: import("node:test").TestContext) {
   }
 
   async function add(id: string, options: { claude?: boolean; startedBy?: string; project?: string } = {}): Promise<ThreadId> {
-    const thread: Thread = { id: id as ThreadId, title: id, project: (options.project ?? "reviewed") as ProjectId, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: options.claude ? null : "1", startedBy: options.startedBy ?? "nLAPTOP", createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
-    const { desired: _, ...pylon } = newPylonRecord({ thread: thread.id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: `https://github.com/${repo}.git`, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: `https://github.com/${repo}.git`, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
+    const thread = testThread({ id: id as ThreadId, title: id, project: (options.project ?? "reviewed") as ProjectId, conversationId: options.claude ? null : "1", startedBy: options.startedBy ?? "nLAPTOP", createdAt: 1, lastHumanActivityAt: 1 });
+    const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: `https://github.com/${repo}.git`, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: `https://github.com/${repo}.git`, ref: "main" } } });
     if (options.claude) {
       registry.createThread(thread, pylon, "build the cache", "claude-opus-5-5");
       registry.setClaudeWorker(thread.id, "build the cache", "started", undefined, session);
@@ -152,7 +151,7 @@ function fixture(t: import("node:test").TestContext) {
       await nudges.poll();
     },
     link(id: ThreadId, number: number) {
-      registry.savePrWatch(id, { links: [{ pr: { repo, number, title: "Add the cache", url: `https://github.com/${repo}/pull/${number}`, state: "open", checks: "none", review: "none", conflict: false }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+      registry.savePrWatch(id, { links: [{ pr: testPr({ repo, number, title: "Add the cache" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
     },
   };
 }
