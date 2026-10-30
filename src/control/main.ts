@@ -25,17 +25,15 @@ import { peerHandoff } from "./peers.ts";
 import { githubClient, githubRepo } from "./github.ts";
 import { reviewLoop } from "./review.ts";
 import { agentReader } from "./agent-conversation.ts";
-import { threadStarter } from "./threads.ts";
+import { threadServices } from "./thread-services.ts";
 import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { digestPattern, tsNet } from "../deploy/model.ts";
-import { prWatcher, prWatchMs } from "./pr-watch.ts";
-import { threadQueue } from "./queue.ts";
+import { prWatcher } from "./pr-watch.ts";
+import { prWatchMs } from "./pr-watch-model.ts";
 import { builderNudger } from "./nudge.ts";
 import { judgmentPass } from "./judgment.ts";
-import { pipeline } from "./pipeline.ts";
-import { planning } from "./planning.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageCounter } from "./usage-counter.ts";
@@ -208,7 +206,11 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const mirror = projectMirror({ githubToken: token });
   const wake = (node: NodeName) => { void loop.wake(node); };
   const backfill = usageBackfill({ registry, counter: usage, wake });
-  const startThread = threadStarter({ registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake });
+  const threads = threadServices({
+    registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake, gate, log,
+    queue: github !== null, pipeline: true, planning: { replies: agents.replies },
+  });
+  const { startThread } = threads.api;
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
@@ -223,16 +225,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto });
   every(prWatchMs, () => watch.poll());
   every(15_000, () => reviews?.poll());
-  // Its starts pass the drain gate, so a deploy's drain refuses them, which leaves them queued, and waits for one in flight.
-  const queue = github === null ? null : threadQueue({
-    registry, startThread, gate, log,
-    send: (id, text, requestId) => harness.send(id, text, requestId, "followUp"),
-  });
-  every(15_000, () => queue?.poll());
-  const items = queue === null ? null : pipeline({ registry, queue, log });
-  every(15_000, () => items?.poll());
-  const plans = planning({ registry, pipeline: items, replies: agents.replies, log });
-  every(15_000, () => plans.poll());
+  for (const poll of threads.polls) every(15_000, poll);
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });
   every(15_000, () => nudges?.poll());
   // Judgments need no GitHub, so they run without a token too.
@@ -242,9 +235,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
     reviews,
-    queue,
-    pipeline: items,
-    planning: plans,
+    ...threads.api,
     gate,
     deployment,
     registry, whois, host: config.listen.host, port: config.listen.port,
@@ -260,7 +251,6 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     },
     hostnames: new Set(config.listen.hostnames),
     harness,
-    startThread,
     wake,
     probes: probeMap,
     previewPorts: config.previewPorts,
@@ -273,7 +263,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       for (const timer of timers) clearInterval(timer);
-      for (const service of [watch, handoff, peers, resumer, reviews, plans, items, queue, nudges, judgments, api, backfill, usage, harness, loop, images]) await service?.close();
+      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };

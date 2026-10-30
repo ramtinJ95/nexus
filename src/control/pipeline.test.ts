@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import type { PullRequest } from "./github.ts";
-import { itemPhase, itemThread, itemView, pipeline, type ItemId } from "./pipeline.ts";
-import { threadQueue } from "./queue.ts";
+import { itemPhase, itemThread, itemView, type ItemId } from "./pipeline.ts";
 import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
 import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
-import { threadStarter, type StartRequest } from "./threads.ts";
+import type { StartRequest } from "./threads.ts";
+import { threadServices } from "./thread-services.ts";
 import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
 import type { PipelineSetting } from "./project.ts";
 import { tempDir, testImage } from "../test-kit.ts";
@@ -29,10 +29,10 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
     registry.setCurrentImage(image.id);
   }
   const fake = fakeHarness();
-  const start = threadStarter({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {} });
-  const queue = threadQueue({ registry, gate: turnGate(() => false), startThread: start, send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") });
-  const items = pipeline({ registry, queue });
-  t.after(async () => { await items.close(); await queue.close(); });
+  const services = threadServices({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {}, gate: turnGate(() => false), queue: true, pipeline: true, planning: null });
+  const queue = services.api.queue!;
+  const items = services.api.pipeline!;
+  t.after(() => services.close());
   const request = (title: string, over: Partial<StartRequest> = {}): StartRequest => ({ project: "acme", title, ...over });
   const pr = (number: number, state: PullRequest["state"]): PullRequest => testPr({ repo: "acme/acme", number, title: `PR ${number}`, state });
   return {

@@ -13,7 +13,7 @@ import { linkedName } from "../../services-file.ts";
 import type { BootInputs } from "../../spawn.ts";
 import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
-import { watchStopped } from "../pr-watch.ts";
+import { watchStopped } from "../pr-watch-model.ts";
 
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();

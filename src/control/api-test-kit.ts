@@ -12,10 +12,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { startApi, type ApiOptions } from "./api.ts";
-import { threadStarter } from "./threads.ts";
-import { pipeline } from "./pipeline.ts";
-import { planning } from "./planning.ts";
-import { threadQueue } from "./queue.ts";
+import { threadServices } from "./thread-services.ts";
 import { turnGate } from "./drain.ts";
 import type { AttachTiming } from "./attach.ts";
 import type { ReviewLoop } from "./review.ts";
@@ -107,10 +104,11 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
   const reads: Parameters<ProjectMirror["setupInputs"]>[1][] = [];
   const wake = (n: NodeName) => { woken.push(n); };
   const mirror: ProjectMirror = { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } };
-  const startThread = threadStarter({ registry, harness, mirror, dotfiles: dots ?? dotfiles, gitIdentity, wake });
-  const queue = queued === true || piped === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => harness.send(id, text, requestId, "followUp") }) : null;
-  const items = piped === true ? pipeline({ registry, queue: queue! }) : null;
-  const plans = planned === true ? planning({ registry, pipeline: items, replies: agentReader(registry, harness).replies }) : null;
+  const services = threadServices({
+    registry, harness, mirror, dotfiles: dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
+    queue: queued === true || piped === true, pipeline: piped === true, planning: planned === true ? { replies: agentReader(registry, harness).replies } : null,
+  });
+  const { startThread, queue, planning: plans } = services.api;
   /** The options of an API on `port`, so a restart serves the same registry and services. */
   const optionsAt = (port: number): ApiOptions => ({
     registry, host: "127.0.0.1", port,
@@ -126,14 +124,11 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
     joins: { configured: new Set(["nFIREBAT", "nBENCH"] as TailnetNodeId[]), whois: async () => caller === null ? null : { id: caller, host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
     // The control plane runs on rj-firebat and deploys nothing unless a test says so.
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
-    ...(queue === null ? {} : { queue }),
-    ...(items === null ? {} : { pipeline: items }),
-    ...(plans === null ? {} : { planning: plans }),
+    ...services.api,
     ...(images === undefined ? {} : { images }),
     ...(backfill === undefined ? {} : { usageBackfill: backfill }),
     hostnames: new Set(["127.0.0.1"]),
     harness,
-    startThread,
     wake,
     probes: new Map([[node, {
       command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
@@ -145,9 +140,7 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
   });
   let api = await startApi(optionsAt(0));
   t.after(async () => {
-    await plans?.close();
-    await items?.close();
-    await queue?.close();
+    await services.close();
     await api.close();
     await images?.close();
     await backfill?.close();
