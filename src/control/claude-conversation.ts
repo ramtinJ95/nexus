@@ -269,7 +269,11 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
       update(id, r, false);
       void refreshOf(id);
     }
-  }, (err) => console.error(`following session events for Claude transcripts: ${err.message}. Following from the newest`));
+  }, (err) => {
+    console.error(`following session events for Claude transcripts: ${err.message}. Following from the newest`);
+    // The events skipped may have told a reader that a dialog waits.
+    for (const r of readers.values()) r.asksDue = true;
+  });
 
   return {
     view,

@@ -301,3 +301,19 @@ test("an ask withdrawn because no hook took its answer is asked again when the p
   await conversations.refresh(thread);
   assert.deepEqual(asks(), ["ask-toolu_1"]);
 });
+
+test("a reader whose session events were lost to an expired cursor asks the pylon's hook again at its next read", async (t) => {
+  const { registry, thread, probe, state, event } = await askingThread(t);
+  event("session.turn-started");
+  const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 10 });
+  t.after(() => conversations.close());
+  await conversations.refresh(thread);
+  await conversations.refresh(thread);
+  assert.equal(state.pulls, 1, "the reader's first read asks, and the next does not");
+  const error = t.mock.method(console, "error", () => {});
+  for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
+  await until("the follower resets", () => error.mock.callCount() > 0);
+  state.report = [{ session, toolUseId: "toolu_1", at: 5, input: { questions: [drink] } }];
+  await conversations.refresh(thread);
+  assert.deepEqual(registry.questions(thread.id).map((q) => q.id), ["ask-toolu_1"]);
+});
