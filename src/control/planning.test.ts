@@ -3,13 +3,11 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { pipeline } from "./pipeline.ts";
 import { planBlocks, planning, proposalItem } from "./planning.ts";
 import { planningPrefix } from "../agent-protocol.ts";
-import { threadQueue } from "./queue.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { agentReader } from "./agent-conversation.ts";
-import { threadStarter } from "./threads.ts";
+import { threadServices } from "./thread-services.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { ProjectId } from "../project.ts";
 import { tempDir, testImage } from "../test-kit.ts";
@@ -57,11 +55,12 @@ async function fixture(t: import("node:test").TestContext, path = ":memory:", fa
     registry.saveImage(image, null);
     registry.setCurrentImage(image.id);
   }
-  const start = threadStarter({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {} });
-  const queue = threadQueue({ registry, gate: turnGate(() => false), startThread: start, send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") });
-  const items = pipeline({ registry, queue });
+  const services = threadServices({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {}, gate: turnGate(() => false), queue: true, pipeline: true, planning: null });
+  const start = services.api.startThread;
+  const queue = services.api.queue!;
+  const items = services.api.pipeline!;
   const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies, now: () => ++asked });
-  t.after(async () => { await plans.close(); await items.close(); await queue.close(); });
+  t.after(async () => { await plans.close(); await services.close(); });
   return {
     registry, fake, plans, items, queue,
     async planner(): Promise<Thread> {
