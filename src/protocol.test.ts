@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import {
-  connectProbe, parseArtifactManifest, parseJobEnvelope, parseProbeEvent, parsePylonCommand, parseStreamRequest, parseSubmitReply,
+  connectProbe, parseArtifactManifest, parseJobEnvelope, parseProbeEvent, parsePylonCommand, parseStreamRequest, parseSubmitReply, ProbeHttpError,
   type NodeName, type PylonCommand, type PylonId, type TailnetNodeId,
 } from "./protocol.ts";
 
@@ -253,14 +253,15 @@ test("an artifact manifest is read as it was written, with the fields it does no
   for (const value of bad) assert.throws(() => parseArtifactManifest(value), Error, JSON.stringify(value));
 });
 
-/** The control plane's client, against a probe that answers every request with `body`. */
+/** The control plane's client, against a probe that answers every request with `body` and `status`. */
 async function stubProbe(t: import("node:test").TestContext) {
   let body = "";
-  const server = createServer((req, res) => { req.resume().on("end", () => res.writeHead(200, { "content-type": "application/json" }).end(body)); }).listen(0, "127.0.0.1");
+  let status = 200;
+  const server = createServer((req, res) => { req.resume().on("end", () => res.writeHead(status, { "content-type": "application/json" }).end(body)); }).listen(0, "127.0.0.1");
   await new Promise((ready) => server.once("listening", ready));
   t.after(() => server.close());
   const client = connectProbe(node as NodeName, "127.0.0.1", "nPROBE" as TailnetNodeId, { port: (server.address() as { port: number }).port, whois: async () => "nPROBE" as TailnetNodeId });
-  return { client, answer(value: unknown) { body = JSON.stringify(value); } };
+  return { client, answer(value: unknown, answerStatus = 200) { body = JSON.stringify(value); status = answerStatus; } };
 }
 
 test("a command result is read as the probe sent it, a close without an outcome as closed, and a result for another command is refused", async (t) => {
@@ -313,4 +314,29 @@ test("a job status is read as the probe sent it, and one that fails a check is r
     answer(status);
     await assert.rejects(client.job("job-1" as never), Error, JSON.stringify(status));
   }
+});
+
+test("a status a method gives no meaning rejects with its status, and with a ProbeError code only for 403 and a command's 409", async (t) => {
+  const { client, answer } = await stubProbe(t);
+  const at = pylonId as PylonId;
+  const rejection = (promise: Promise<unknown>) => promise.then(() => assert.fail("resolved"), (err: unknown) => err);
+  answer("no such route", 404);
+  const missing = await rejection(client.putPeers([]));
+  assert.ok(missing instanceof ProbeHttpError);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.message, `${node}: PUT /v1/peers: HTTP 404: "no such route"`);
+  assert.ok(!("code" in missing), "a plain HTTP error has no code, which callers would read as a ProbeError");
+  answer("bad command", 400);
+  const invalid = await rejection(client.command(at, commands[0]!));
+  assert.ok(invalid instanceof ProbeHttpError && invalid.status === 400 && !("code" in invalid));
+  answer("not you", 403);
+  const forbidden = await rejection(client.putPeers([]));
+  assert.ok(forbidden instanceof ProbeHttpError);
+  assert.deepEqual([forbidden.status, forbidden.code, forbidden.message], [403, "forbidden", `${node} refused this caller`]);
+  answer("the pylon is stopped", 409);
+  const stopped = await rejection(client.command(at, commands[0]!));
+  assert.ok(stopped instanceof ProbeHttpError);
+  assert.deepEqual([stopped.status, stopped.code, stopped.message], [409, "not-running", `${node}: "the pylon is stopped"`]);
+  const conflict = await rejection(client.putPeers([]));
+  assert.ok(conflict instanceof ProbeHttpError && !("code" in conflict), "only a command or stream means not-running by 409");
 });

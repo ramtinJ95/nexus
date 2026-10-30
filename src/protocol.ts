@@ -377,7 +377,25 @@ export interface ByteStream extends AsyncIterable<Uint8Array> {
 
 export type ProbeError = { code: "unreachable" | "not-running" | "forbidden"; message: string };
 
-/** The control plane's handle on one probe. All methods reject with ProbeError. */
+/**
+ * A probe answered with a status its method gives no meaning, other than in a reply the method parses. `code` is set
+ * only for a status that means a ProbeError: 403 is `forbidden`, and 409 to a command or stream `not-running`.
+ */
+export class ProbeHttpError extends Error {
+  readonly status: number;
+  declare readonly code?: Extract<ProbeError["code"], "forbidden" | "not-running">;
+  constructor(message: string, status: number, code?: ProbeHttpError["code"]) {
+    super(message);
+    this.status = status;
+    if (code !== undefined) this.code = code;
+  }
+}
+
+/**
+ * The control plane's handle on one probe. Methods reject with ProbeError when the probe cannot be reached or is not
+ * the node whois must name, with ProbeHttpError for a status the method gives no meaning, and with a plain Error for
+ * a reply that fails its checks.
+ */
 export interface ProbeClient {
   readonly node: NodeName;
   /** PUT /v1/jobs/{jobId}. Retry the same envelope on a transport error until it is accepted or expires. */
@@ -448,7 +466,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const req = request({ host: tailnetHost, port, method, path, agent, timeout: timeoutMs, ...(signal ? { signal } : {}) }, (res) => {
         if (res.statusCode === 403) {
           res.destroy();
-          return reject(probeError("forbidden", `${node} refused this caller`));
+          return reject(statusError(method, path, 403, ""));
         }
         resolve(res);
       });
@@ -466,6 +484,17 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   function refusal(err: Error, what: "connection" | "stream"): Error {
     if (!(err instanceof PeerRefused)) return err;
     return err.peer === null ? probeError("unreachable", `${node}: the ${what} closed before whois`) : probeError("forbidden", `${node}: ${err.message}, expected ${expected}`);
+  }
+
+  function statusError(method: string, path: string, status: number, body: string, conflict?: "not-running"): ProbeHttpError {
+    if (status === 403) return new ProbeHttpError(`${node} refused this caller`, 403, "forbidden");
+    if (status === 409 && conflict !== undefined) return new ProbeHttpError(`${node}: ${body}`, 409, conflict);
+    return new ProbeHttpError(`${node}: ${method} ${path}: HTTP ${status}: ${body}`, status);
+  }
+
+  /** Throws for any status but `expected`. `conflict` is what a 409 means to a method that gives it one. */
+  function expectStatus(method: string, path: string, res: { status: number; body: string }, expected: number, conflict?: "not-running"): void {
+    if (res.status !== expected) throw statusError(method, path, res.status, res.body, conflict);
   }
 
   async function call(method: "GET" | "PUT" | "POST", path: string, body: string | null = null, timeoutMs = requestTimeoutMs, contentType?: string): Promise<{ status: number; body: string }> {
@@ -493,12 +522,12 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     async job(jobId) {
       const res = await call("GET", `/v1/jobs/${encodeURIComponent(jobId)}`);
       if (res.status === 404) return "unknown";
-      if (res.status !== 200) throw new Error(`${node}: GET /v1/jobs/${jobId}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("GET", `/v1/jobs/${jobId}`, res, 200);
       return parseJson(asSent(jobStatusSchema), res.body, "status");
     },
     async *observe(signal) {
       const res = await open("GET", "/v1/observe", null, signal);
-      if (res.statusCode !== 200) throw new Error(`${node}: GET /v1/observe: HTTP ${res.statusCode}: ${await text(res)}`);
+      if (res.statusCode !== 200) expectStatus("GET", "/v1/observe", { status: res.statusCode ?? 0, body: await text(res) }, 200);
       // The first snapshot arrives with the headers. After that, events can be a minute apart.
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
@@ -507,23 +536,22 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     async command(pylonId, command) {
       const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
       const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);
-      if (res.status === 409) throw probeError("not-running", `${node}: ${res.body}`);
-      if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("POST", path, res, 200, "not-running");
       return parseCommandResult(command, res.body);
     },
     async health() {
       const res = await call("GET", "/v1/node-health");
-      if (res.status !== 200) throw new Error(`${node}: GET /v1/node-health: HTTP ${res.status}: ${res.body}`);
+      expectStatus("GET", "/v1/node-health", res, 200);
       return parseJson(asSent(nodeHealthSchema), res.body, "health");
     },
     async putSecret(name, value) {
       const path = `/v1/secrets/${encodeURIComponent(name)}`;
       const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
-      if (res.status !== 204) throw new Error(`${node}: PUT ${path}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("PUT", path, res, 204);
     },
     async putPeers(peers) {
       const res = await call("PUT", "/v1/peers", JSON.stringify(peers));
-      if (res.status !== 204) throw new Error(`${node}: PUT /v1/peers: HTTP ${res.status}: ${res.body}`);
+      expectStatus("PUT", "/v1/peers", res, 204);
     },
     stream(pylonId, argv) {
       const path = streamPath(pylonId, argv);
@@ -539,11 +567,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
           }, (err: Error) => { socket.destroy(); reject(refusal(err, "stream")); });
         });
         req.on("response", (res) => {
-          text(res).then((body) => reject(
-            res.statusCode === 409 ? probeError("not-running", `${node}: ${body}`)
-              : res.statusCode === 403 ? probeError("forbidden", `${node} refused this caller`)
-              : new Error(`${node}: GET ${path}: HTTP ${res.statusCode}: ${body}`),
-          ), reject);
+          text(res).then((body) => reject(statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
         });
         req.on("timeout", () => req.destroy(new Error(`no answer within ${requestTimeoutMs} ms`)));
         req.on("error", (err) => reject(probeError("unreachable", `${node}: ${err.message}`)));
@@ -554,7 +578,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const path = `/v1/manifests/${encodeURIComponent(artifact)}`;
       const res = await call("GET", path);
       if (res.status === 404) return null;
-      if (res.status !== 200) throw new Error(`${node}: GET ${path}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("GET", path, res, 200);
       return parseArtifactManifest(JSON.parse(res.body));
     },
   };
@@ -1052,7 +1076,7 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
     const req = request({ host: peer.host, port: peer.port, method: "GET", path, agent: false, timeout: artifactIdleMs, signal }, (res) => {
       verifyPeer(res.socket, check.whois, (id) => check.peers.includes(id)).then(() => {
         if (res.statusCode === 409) return text(res).then((refused) => resolve({ refused }), reject);
-        if (res.statusCode !== 200) return text(res).then((body) => reject(new Error(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`)), reject);
+        if (res.statusCode !== 200) return text(res).then((body) => reject(new ProbeHttpError(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`, res.statusCode ?? 0)), reject);
         let manifest: ArtifactManifest;
         try {
           manifest = parseArtifactManifest(JSON.parse(Buffer.from(String(res.headers[manifestHeader]), "base64url").toString("utf8")));
