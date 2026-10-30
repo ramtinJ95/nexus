@@ -3399,6 +3399,30 @@ test("a Claude worker's page stream sends nothing while its conversation is unch
   assert.match((await stream.next()).convo, /<span class="t-name">Write<\/span>/, "the first frame after the pings is the read's, not one for the age");
 });
 
+test("two page streams of one Claude worker render each new view once between them", async (t) => {
+  const s = await withClaude(t);
+  await writeFile(s.transcript, fixture.slice(0, 22).join(""));
+  const streams = [s.events(`/threads/${s.thread.id}/stream`), s.events(`/threads/${s.thread.id}/stream`)];
+  t.after(() => { for (const stream of streams) stream.close(); });
+  const frame = async (stream: (typeof streams)[number], pattern: RegExp) => {
+    for (;;) {
+      const next = await stream.next();
+      if (next.convo !== undefined && pattern.test(next.convo)) return next;
+    }
+  };
+  for (const stream of streams) await frame(stream, /Do these steps one at a time/);
+  // Each render reads who sent the prompts it shows, and nothing else here does.
+  const senders = s.registry.claudeMessageSenders;
+  let renders = 0;
+  s.registry.claudeMessageSenders = (...args) => { renders++; return senders(...args); };
+  t.after(() => { s.registry.claudeMessageSenders = senders; });
+  await appendFile(s.transcript, fixture.slice(22, 24).join(""));
+  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  const [a, b] = await Promise.all(streams.map((stream) => frame(stream, /<span class="t-name">Write<\/span>/)));
+  assert.deepEqual(a, b);
+  assert.equal(renders, 1, "the second stream's frame reuses the first's render");
+});
+
 test("a Claude worker's transcript streams to the CLI as its entries whole, then each read's new entries and the turn's start and end", async (t) => {
   const s = await withClaude(t);
   await writeFile(s.transcript, fixture.slice(0, 22).join(""));

@@ -40,7 +40,7 @@ import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
 import type { JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, StoredPylon, Thread, ThreadId } from "./registry.ts";
-import { dashboard, liveFrames, partHash } from "./dashboard.ts";
+import { dashboard, liveStreams, partHash } from "./dashboard.ts";
 import { attachScript, checkoutDir, focusScript, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
 import { agentView, noConversation, threadAgents, type AgentView, type Frames, type ThreadAgents, type Watch } from "./thread-agent.ts";
@@ -173,7 +173,7 @@ export type ThreadRow = Thread & { attention: Attention; desired: DesiredPhase; 
 export type { Frames, ViewFrame } from "./thread-agent.ts";
 type EventBatch = ReturnType<Registry["eventBatch"]>;
 
-/** Streams open at once, across threads and callers. Each holds a watch and renders on every change. */
+/** Streams open at once, across threads and callers. Each holds a watch, and the streams of one thread page share its renders. */
 export const maxStreams = 16;
 /**
  * Under the CLI's 30 s idle timeout, so a quiet thread's stream stays open. Each ping renders the latest view again
@@ -325,6 +325,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const claude = claudeConversations({ registry, probes });
   const agents: ThreadAgents = threadAgents({ registry, harness, claude, inPylon, whileRunning, wake: wakeThread, planning: options.planning ?? null });
+  const live = liveStreams();
 
   /** The thread `id` names, or the queue record of one that has not started, which has no row. */
   function lookup(id: string): { thread: Thread } | { queued: QueuedRecord } {
@@ -563,9 +564,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * until it drains, commits only replace the view to send, and the next event carries everything since the last one.
    * So the harness's listener never waits on a client.
    */
-  async function stream<V>(res: ServerResponse, t: Thread, follow: () => Promise<Watch<V>>, frames: Frames<V>) {
+  async function stream<V>(res: ServerResponse, t: Thread, follow: () => Promise<Watch<V>>, frames: Frames<V>, leave = () => {}) {
     let watch: Watch<V> | null = null;
-    const sse = eventStream(res, t.id, `${maxStreams} streams are open, the most this control plane serves at once`, () => void watch?.stop());
+    const sse = eventStream(res, t.id, `${maxStreams} streams are open, the most this control plane serves at once`, () => {
+      void watch?.stop();
+      leave();
+    });
     try {
       watch = await follow();
     } catch (err) {
@@ -1046,7 +1050,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
       const t = thread(id!, { status: "kept" });
       const agent = agentOf(t);
-      return { stream: (res) => stream(res, t, () => agent.watch(t), liveFrames(t, registry.claudeWorker(t.id)?.model ?? null, Date.now, () => registry.questions(t.id), () => promptSenders(registry, t.id))) };
+      const reader = live(t, registry.claudeWorker(t.id)?.model ?? null, () => registry.questions(t.id), () => promptSenders(registry, t.id));
+      return { stream: (res) => stream(res, t, () => agent.watch(t), reader.frames, reader.leave) };
     }],
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, { person: "edit a project" }, async ([, id], r) => {
       const { autoReview, pipeline, ...patch } = parse(projectEditSchema, await r.body());
