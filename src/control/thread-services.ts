@@ -32,7 +32,11 @@ export function threadServices(options: Parameters<typeof threadStarter>[0] & {
   const plans = options.planning === null ? null : planning({ registry, pipeline: items, replies: options.planning.replies, log });
   return {
     api: { startThread, queue, pipeline: items, planning: plans },
-    poll: () => Promise.all([queue?.poll(), items?.poll(), plans?.poll()]),
+    /**
+     * Each on its own timer. In one callback, the pipeline's poll of the queue would join the queue's empty pass before
+     * it settles, so an item queued then would wait 15 seconds more to start.
+     */
+    polls: [() => queue?.poll(), () => items?.poll(), () => plans?.poll()],
     async close() {
       await plans?.close();
       await items?.close();

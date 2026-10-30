@@ -225,7 +225,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto });
   every(prWatchMs, () => watch.poll());
   every(15_000, () => reviews?.poll());
-  every(15_000, () => threads.poll());
+  for (const poll of threads.polls) every(15_000, poll);
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });
   every(15_000, () => nudges?.poll());
   // Judgments need no GitHub, so they run without a token too.
