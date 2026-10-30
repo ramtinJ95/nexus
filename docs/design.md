@@ -197,6 +197,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-30 | An archived pylon's disk is deleted automatically once its thread has been archived 24 hours, with no card, replacing the 7 days and the person's yes decided on 2026-10-28. The thread record and its conversation stay, and unarchiving the thread boots a fresh pylon. Pylons of threads that are not archived are never deleted this way. |
 | 2026-10-30 | A review's reviewer and check threads leave their builder's node once it has no room, rather than overcommitting it. Pinned, they put about ten pylons and 90 GiB on `rj-firebat`'s 22.8 GiB while `infra-testbench` sat idle |
 | 2026-10-29 | The dashboard opens, closes and shows the pylon's sessions, so it does what `nexus attach` and `nexus session` do without Herdr's prefix keys. Its terminal stays the whole Herdr session, not one pane, and Show in terminal moves Herdr's focus, which every attached terminal shares, rather than attaching a terminal to the pane alone |
 | 2026-10-29 | Every route that acts on a thread, its pylon or a project answers only a person, as starting and messaging one do, so no thread drives another through the API. The person can cancel a running review, which archives its reviewer and keeps its builder, except a landing that has begun its merge or deploy |
