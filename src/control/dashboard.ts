@@ -37,6 +37,7 @@ import { askedIn, askQuestionId, type AnswerRefusal, type AskedQuestion, type Qu
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 import { itemView, type ItemPhase, type PipelineItem } from "./pipeline.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
+import { releaseView } from "./releases.ts";
 import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageBackfill, type UsageTotals } from "./usage.ts";
 
 export interface DashboardOptions {
@@ -55,7 +56,6 @@ export interface DashboardOptions {
   deploys(review: Review): boolean;
   /** The API's read of a node's health, which refuses a caller that is not a deployer. */
   nodeHealth(caller: TailnetNodeId, node: NodeName): Promise<NodeHealth>;
-  now?: () => number;
 }
 
 export interface Page { status: number; headers: Record<string, string>; body: string }
@@ -65,10 +65,15 @@ export const pollMs = 5_000;
 
 export type LandRefusal = "no review loop" | "not a deployer";
 
-/** What every part of a page reads. */
+/** What every part of a page reads. `now` is read once, so every text of a render agrees on the time. */
 interface Context {
   registry: Registry; row: DashboardOptions["row"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null;
   answerRefusal(question: Question): AnswerRefusal | null;
+  /** Every thread, oldest first, and a project's, read once per render however many parts show them. */
+  threads(): readonly Thread[];
+  threadsIn(project: string): readonly Thread[];
+  /** A project's threads that wait in the queue, in the order they were queued. */
+  queuedIn(project: string): readonly QueuedThread[];
   /** What waits on the person, which the sidebar counts and the home page lists. */
   needs(): readonly Need[];
 }
@@ -130,8 +135,18 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       const rows = new Map<ThreadId, ThreadRow>();
       const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, options.row(t)).get(t.id)!;
       let needs: readonly Need[] | undefined;
-      const c: Context = { registry, row, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller),
-        answerRefusal: (question) => options.answerRefusal(caller, question), needs: () => needs ??= needsOf(c, detail) };
+      let threads: readonly Thread[] | undefined;
+      // registry.threads() is in the order registry.threads(project) is, so each project's keeps its order.
+      let byProject: Map<string, Thread[]> | undefined;
+      let queued: Map<string, QueuedThread[]> | undefined;
+      const c: Context = {
+        registry, row, deploys, now: Date.now(), caller, landRefusal: options.landRefusal(caller),
+        answerRefusal: (question) => options.answerRefusal(caller, question),
+        threads: () => threads ??= registry.threads(),
+        threadsIn: (project) => (byProject ??= Map.groupBy(c.threads(), (t) => t.project)).get(project) ?? [],
+        queuedIn: (project) => (queued ??= Map.groupBy(registry.queuedThreads().filter((q) => q.status === "queued").map((q) => queuedView(registry, q)), (q) => q.project)).get(project) ?? [],
+        needs: () => needs ??= needsOf(c, detail),
+      };
       return c;
     };
     for (const [pattern, page] of pages) {
@@ -333,13 +348,10 @@ ${projectDialog(c, page.addProject === true)}
 
 /** A project's threads, newest first: the open ones, and the archived or deleted ones folded below them. */
 function threadsOf(c: Context, project: string) {
-  const threads = c.registry.threads(project as Thread["project"]).toReversed();
+  const threads = c.threadsIn(project).toReversed();
   const closed = (t: Thread) => t.status === "archived" || t.status === "deleted";
   return { open: threads.filter((t) => !closed(t)), closed: threads.filter(closed) };
 }
-/** A project's threads that wait in the queue, in the order they were queued. */
-const queuedThreadsOf = (c: Context, project: string) =>
-  c.registry.queuedThreads().filter((q) => q.project === project && q.status === "queued").map((q) => queuedView(c.registry, q));
 /** A blocked thread waits for the person, as a review that ended for them does. */
 function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
   if (q.status !== "queued") return [q.status === "archived" ? "cancelled" : "deleted", "muted"];
@@ -356,6 +368,7 @@ function closedLabel(threads: readonly Thread[]): string {
 
 function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
   const projects = c.registry.projects();
+  const releases = Map.groupBy(releaseLines(c), (r) => r.node);
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
     const r = c.row(t);
@@ -374,7 +387,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
-  const queued = queuedThreadsOf(c, p.id);
+  const queued = c.queuedIn(p.id);
   // A project folds like a folder. client.js remembers which ones the reader folded.
   return html`<details class="group" id="group-${p.id}" open>
 <summary class="group-h">${icon("chevron")}${icon("folder")}<span class="group-name"><span>${p.id}</span><span class="group-branch">${p.defaultBranch}</span></span></summary>
@@ -384,10 +397,20 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}`)}</div>
 <div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
+}
+
+/**
+ * Each node's release as `GET /v1/release` reports it. The dashboard is not told which node is the control node, but
+ * the API takes a control report only from the control node, so the node that holds one is it, and the view gives a
+ * control line to that node alone, as it does to the control node.
+ */
+function releaseLines(c: Context) {
+  const control = c.registry.releaseReports().find((r) => r.role === "control")?.node;
+  return releaseView(c.registry, c.registry.nodes().find((n) => n.name === control)?.tailnetNodeId, c.now).nodes;
 }
 
 /** A node's committed and total memory, and what its paused pylons need to wake. */
@@ -523,7 +546,7 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
 <div class="page" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
-  const queued = queuedThreadsOf(c, p.id);
+  const queued = c.queuedIn(p.id);
   return html`<section aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
 ${open.length === 0 ? html`<p class="empty">No open threads.</p>` : table(open)}
@@ -563,8 +586,8 @@ type Need =
  * other attention that needs the person one for the thread. A new reply does not wait on the person, so it has none,
  * but it outranks a dialog in the terminal, which the session's own state says waits.
  */
-function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions["detail"]): Need[] {
-  return c.registry.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
+function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail: DashboardOptions["detail"]): Need[] {
+  return c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
     const { attention } = c.row(t);
     const review = c.registry.review(t.id);
     const holds = review !== null && review.phase.kind === "approved" && heldBy(review).length > 0;

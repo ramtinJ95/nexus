@@ -2328,3 +2328,45 @@ test("image paths in prose are the checkout's, each once, at most six", () => {
   assert.deepEqual(imagePaths("1.png 2.gif 3.jpeg 4.jpg 5.webp 6.png 7.png"), ["1.png", "2.gif", "3.jpeg", "4.jpg", "5.webp", "6.png"]);
   assert.deepEqual(imagePaths(`${"x".repeat(1 << 20)} ${"a.".repeat(1 << 19)}`), [], "a long word takes one pass, as a reply's base64 would");
 });
+
+test("a page reads the threads, the queue and the release reports as often whatever the count of projects and nodes", async (t) => {
+  const reads = async (projects: number, nodes: number) => {
+    const s = await setup(t);
+    assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+    s.registry.setCurrentImage(image.id as ImageId);
+    for (let n = 1; n < nodes; n++) s.registry.upsertNode({ name: `node-${n}` as NodeName, tailnetHost: `node-${n}.tail.ts.net`, tailnetNodeId: `nNODE${n}` as TailnetNodeId });
+    let thread: Thread | undefined;
+    for (let p = 0; p < projects; p++) {
+      assert.equal((await s.call("POST", "/v1/projects", project(`p${p}`))).status, 201);
+      thread = await s.start(`p${p}`, `Thread ${p}`);
+      assert.equal((await s.call("POST", "/v1/threads", { project: `p${p}`, title: `Queued ${p}`, after: [thread.id] })).status, 201);
+    }
+    const counted = (["threads", "queuedThreads", "releaseReports"] as const).map((name) => [name, t.mock.method(s.registry, name)] as const);
+    const counts: Record<string, Record<string, number>> = {};
+    for (const path of ["/", `/threads/${thread!.id}`, "/pipeline"]) {
+      for (const [, mock] of counted) mock.mock.resetCalls();
+      assert.equal((await s.call("GET", path)).status, 200);
+      counts[path.replace(thread!.id, "<id>")] = Object.fromEntries(counted.map(([name, mock]) => [name, mock.mock.callCount()]));
+    }
+    return counts;
+  };
+  const one = await reads(1, 1);
+  assert.deepEqual(await reads(5, 4), one);
+  assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
+});
+
+test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {
+  const s = await seeded(t);
+  const tower = "tower" as NodeName;
+  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  const commit = "a".repeat(40);
+  const report = (role: "control" | "probe", observedAt: number) => s.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt });
+  report("control", Date.now());
+  report("probe", Date.now() - 90_000);
+  const lines = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!.split(/<span><svg class="i i-server"/).slice(1)
+    .map((n) => [textOf(/<a [^>]*>([^<]*)<\/a>/.exec(n)![1]!), ...[...n.matchAll(/<small title="([^"]*)">([^<]*)<\/small>/g)].map((m) => `${m[2]} (${m[1]})`)]);
+  assert.deepEqual(lines, [
+    [node, "control: aaaaaaaaaaaa · healthy ()", "probe: aaaaaaaaaaaa · pending (deployer report is stale)"],
+    [tower, "probe: unknown · pending (no deployer report)"],
+  ]);
+});
