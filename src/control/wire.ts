@@ -1,17 +1,20 @@
 /**
  * The JSON the control plane's API serves that the CLI, the dashboard and the on-node checks read.
  */
+import type { Submission } from "@earendil-works/pi-durable";
 import type { Attention } from "./attention.ts";
 import type { ActualState, DesiredPhase } from "../reconcile.ts";
 import type { BootInputs } from "../project.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { SessionHarness } from "../session-harness.ts";
-import type { NodeRecord, Output, Preview, Session, Thread } from "./registry.ts";
+import type { ClaudeSent, NodeRecord, Output, Preview, Session, Thread } from "./registry.ts";
 import type { PullRequest } from "./github.ts";
 import type { Question } from "./questions.ts";
 import type { JudgmentView } from "./judgment.ts";
 import type { NodePylons } from "./placement.ts";
 import type { Review } from "./review-model.ts";
+import type { ImageEntry } from "./image-rollout.ts";
+import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 
 /** A session `POST /v1/threads/<id>/sessions` opened. Its observed state shows in ThreadDetail.sessions. */
 export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
@@ -73,3 +76,12 @@ export interface Whoami { node: TailnetNodeId; allowed: boolean; person: boolean
  * observation's pylons by what they hold, and is null for a node never observed.
  */
 export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null; overcommitted: boolean; pylons: NodePylons | null };
+
+/** What a send answers: the harness's submission, or what typing into the Claude worker's session did. */
+export type Sent = { submission: Submission["id"] } | { claude: ClaudeSent };
+
+/** `GET /v1/images/current`: the current and previous images, each null when none is. */
+export interface ImagesCurrent { current: ImageEntry | null; previous: ImageEntry | null }
+
+/** `GET /v1/usage/backfill`: the backfill's state, and the archived threads a start would read. */
+export interface BackfillView { backfill: UsageBackfill; plan: BackfillPlanRow[] }

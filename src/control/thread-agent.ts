@@ -8,7 +8,7 @@
  * transcript and its `/claude/events` stream. Only the transcript carries a kind, which `agentView` reads.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ConversationView, Submission } from "@earendil-works/pi-durable";
+import type { ConversationView } from "@earendil-works/pi-durable";
 import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { PylonId } from "../ids.ts";
 import type { CommandResult } from "../protocol/commands.ts";
@@ -22,14 +22,11 @@ import { claudeFrames, viewFrames, type Frames, type Watch } from "./conversatio
 import { HttpError } from "./http-error.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import type { Planning } from "./planning.ts";
-import type { ClaudeSent, Registry, Thread } from "./registry.ts";
-import type { ThreadDetail } from "./wire.ts";
+import type { Registry, Thread } from "./registry.ts";
+import type { Sent, ThreadDetail } from "./wire.ts";
 
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */
 export interface AgentMessage { text: string; requestId: string; mode: "followUp" | "steer" }
-
-/** What a send answers: the harness's submission, or what typing into the Claude worker's session did. */
-export type Sent = { submission: Submission["id"] } | { claude: ClaudeSent };
 
 /** Runs `act` in the thread's pylon, as the API's `inPylon` does, mapping the probe's failures to its refusals. */
 export type PylonRun = <T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>) => Promise<T>;
