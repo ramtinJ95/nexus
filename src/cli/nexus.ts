@@ -23,7 +23,7 @@ import type { QueuedThread, Wait } from "../control/queue.ts";
 import type { ClaudeSent, Preview, Thread } from "../control/registry.ts";
 import type { Review } from "../control/review.ts";
 import type { Question } from "../control/questions.ts";
-import { reservedNames } from "../control/policy.ts";
+import { reservedNames } from "../control/holds.ts";
 import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../claude-transcript.ts";
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { agentView } from "../control/thread-agent.ts";

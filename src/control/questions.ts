@@ -8,7 +8,7 @@ import type { AskAnswer } from "../../images/pylon/nexus-ask.ts";
 import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import type { ThreadId } from "./registry.ts";
-import type { ReservedCase } from "./review.ts";
+import type { ReservedCase } from "./holds.ts";
 
 export interface Question {
   /** Chosen by the asker, so asking again with one ID asks nothing new. */

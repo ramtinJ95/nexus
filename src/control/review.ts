@@ -28,7 +28,8 @@ import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
 import { isDraining } from "./drain.ts";
-import { heldBy, landingHolds, legacyHoldCode, reservedNames, unwaived, waivable, type Hold, type HoldCode } from "./policy.ts";
+import { legacyHoldCode, reservedCases, reservedNames, waivable, type Hold, type HoldCode } from "./holds.ts";
+import { heldBy, landingHolds, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
@@ -50,9 +51,6 @@ const retryMs = [2, 5, 10, 20].map((minutes) => minutes * 60_000);
 const checkMs = 60 * 60_000;
 /** As long as `nexus deploy --wait` waits. */
 const deployMs = 30 * 60_000;
-
-export const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
-export type ReservedCase = typeof reservedCases[number];
 
 export const priorities = ["P0", "P1", "P2", "P3"] as const;
 /** What a finding's severity, before priorities, reads as: a reviewer told the old shape, or a stored round, still answers with it. */

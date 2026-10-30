@@ -9,7 +9,8 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts"
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
+import { holdRule, reservedNames, type HoldCode } from "./holds.ts";
+import { landingHolds } from "./policy.ts";
 import { humanLabel, landable, phaseNote, reviewLoop, type HoldCause, type Review, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
