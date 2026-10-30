@@ -16,7 +16,7 @@
  */
 import { sessionKinds } from "../events.ts";
 import { readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
-import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-ask.ts";
+import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-contract.ts";
 import { followEvents } from "./follow-events.ts";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, PylonId } from "../ids.ts";
