@@ -11,7 +11,7 @@ import type { HarnessHost } from "../harness/host.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
-import type { Inbox } from "./inbox.ts";
+import { promptSenders, type Inbox } from "./inbox.ts";
 import type { prWatcher } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import { startedByNexus } from "./usage.ts";
@@ -62,8 +62,8 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
       case "claude": {
         const entries = registry.claudeEntries(t.id);
         const first = entries.findIndex((e) => e.kind === "reply");
-        // Nexus types its messages into the session as the person would, so only their prefix tells them apart.
-        return first !== -1 && entries.slice(first).some((e) => e.kind === "prompt" && e.from === "person" && !e.text.startsWith("[Nexus "));
+        const sender = promptSenders(registry, t.id);
+        return first !== -1 && entries.slice(first).some((e) => e.kind === "prompt" && e.from === "person" && sender(e.text) === null);
       }
       case "none": throw new Error(`thread ${t.id} has no agent, so no one wrote to it`);
       case "harness": {

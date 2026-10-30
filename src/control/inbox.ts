@@ -4,10 +4,15 @@
  * person's message is, but they count only as agent activity, so they wake a paused pylon without holding it awake
  * for the twenty minutes a human visit does.
  */
+import { createHash } from "node:crypto";
 import type { HarnessHost, Sender } from "../harness/host.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand } from "../protocol.ts";
+import { nudgePrefix } from "./nudge.ts";
 import { runningProbe } from "./observed.ts";
+import { prWatchPrefix } from "./pr-watch.ts";
 import type { ClaudeSent, Registry, Thread, ThreadId } from "./registry.ts";
+import { reviewPrefix } from "./review.ts";
+import { usageLimitPrefix } from "./usage-limit.ts";
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
 export interface AutomatedMessage { id: string; text: string; sender: Sender }
@@ -30,11 +35,11 @@ export type ClaudeTyped =
  * only a pylon found not running, which typed nothing, forgets it. A fenced ID is asked after, never typed: its first
  * answer may only have been lost, as when the wait for it ran out while the probe still had it queued.
  */
-export function typeIntoClaude(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>): Promise<ClaudeTyped> {
+export function typeIntoClaude(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>, sender: Sender | "person" = "person"): Promise<ClaudeTyped> {
   const held = attempts.get(registry) ?? new Map<string, Promise<unknown>>();
   attempts.set(registry, held);
   const key = `${thread} ${requestId}`;
-  const next = (held.get(key) ?? Promise.resolve()).then(() => typeOnce(registry, thread, session, model, requestId, text, ask));
+  const next = (held.get(key) ?? Promise.resolve()).then(() => typeOnce(registry, thread, session, model, requestId, text, ask, sender));
   const settled = next.catch(() => undefined);
   held.set(key, settled);
   void settled.then(() => { if (held.get(key) === settled) held.delete(key); });
@@ -47,7 +52,7 @@ export function typeIntoClaude(registry: Registry, thread: ThreadId, session: st
  */
 const attempts = new WeakMap<Registry, Map<string, Promise<unknown>>>();
 
-async function typeOnce(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>): Promise<ClaudeTyped> {
+async function typeOnce(registry: Registry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>, sender: Sender | "person"): Promise<ClaudeTyped> {
   const stored = registry.claudeMessage(thread, requestId);
   if (stored?.state === "sent") return { kind: "sent", sent: stored.result };
   let result: Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">;
@@ -63,7 +68,7 @@ async function typeOnce(registry: Registry, thread: ThreadId, session: string, m
     if (earlier.send === "failed" || earlier.send === "unknown") return { kind: "uncertain" };
     result = earlier.send;
   } else {
-    registry.setClaudeMessage(thread, requestId, { state: "sending" });
+    registry.setClaudeMessage(thread, requestId, { state: "sending" }, { sender, sha256: textHash(text) });
     try {
       result = await ask({ kind: "send-claude", session, text, requestId, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
     } catch (err) {
@@ -79,6 +84,35 @@ async function typeOnce(registry: Registry, thread: ThreadId, session: string, m
   registry.setClaudeMessage(thread, requestId, { state: "sent", result: sent });
   return { kind: "sent", sent };
 }
+
+const textHash = (text: string) => createHash("sha256").update(text).digest("hex");
+
+/**
+ * Who typed each prompt of the thread's Claude worker that its transcript reads as the person's: a Nexus sender, or
+ * null for the person. Nexus types its messages as the person would, so a prompt is Nexus's only when Nexus recorded
+ * typing exactly its text into the thread. A thread with sends recorded before the record kept senders may show a
+ * prompt Nexus typed then, which only its prefix tells apart.
+ */
+export function promptSenders(registry: Registry, thread: ThreadId): (text: string) => Sender | null {
+  const typed = new Map<string, Sender | "person">();
+  let before = false;
+  for (const { sender, sha256 } of registry.claudeMessageSenders(thread)) {
+    if (sender === "unknown") before = true;
+    // The person typing what Nexus once did is the person.
+    else if (sha256 !== null && typed.get(sha256) !== "person") typed.set(sha256, sender);
+  }
+  return (text) => {
+    const sender = typed.get(textHash(text));
+    if (sender !== undefined) return sender === "person" ? null : sender;
+    return before ? prefixSender(text) : null;
+  };
+}
+
+/** Built when asked, since nudge.ts imports this module. */
+const prefixSender = (text: string): Sender | null => {
+  const prefixes: Readonly<Record<Sender, string>> = { "pr-watch": prWatchPrefix, review: reviewPrefix, nudge: nudgePrefix, "usage-limit": usageLimitPrefix };
+  return (Object.keys(prefixes) as Sender[]).find((sender) => text.startsWith(prefixes[sender])) ?? null;
+};
 
 /** GitHub text often ends lines with CRLF and indents with tabs, which Claude's prompt cannot take as typed. */
 export function typeable(text: string): string {
@@ -99,7 +133,7 @@ export function agentInbox(options: { registry: Registry; harness: Pick<HarnessH
     if (worker.session === null || probe === null) return "later";
     let typed: ClaudeTyped;
     try {
-      typed = await typeIntoClaude(registry, t.id, worker.session, worker.model, message.id, typeable(message.text), (command) => probe.command(t.pylonId, command));
+      typed = await typeIntoClaude(registry, t.id, worker.session, worker.model, message.id, typeable(message.text), (command) => probe.command(t.pylonId, command), message.sender);
     } catch (err) {
       if ((err as Partial<ProbeError>).code === "not-running") return "later";
       throw err;

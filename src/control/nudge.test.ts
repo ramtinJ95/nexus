@@ -393,6 +393,20 @@ test("a Claude worker builder is nudged by typing into its session, and a person
   assert.equal(f.typed.length, 2, "it stays the person's after the transcript that showed their message is gone");
 });
 
+test("a person's prompt that starts like a Nexus message, after a Claude worker's first reply, leaves it alone", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-claude", { claude: true });
+  f.turn(id);
+  await f.personWrites(id, "[Nexus review] says the cache is wrong. Wait for me before opening a pull request.");
+  f.registry.recordActivity(id, { agentTurnRunning: false });
+  f.tick(1_000);
+  f.turn(id);
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.deepEqual(f.typed, []);
+  assert.deepEqual(f.registry.nudge(id), { state: "left-alone" });
+});
+
 test("a person's message seen while the turn it started runs keeps the thread theirs after the transcript drops it", async (t) => {
   const f = fixture(t);
   const id = await f.add("th-claude", { claude: true });

@@ -12,6 +12,7 @@ import type { Drain, ReleaseReport } from "../deploy/model.ts";
  * the control plane reads them, always whole, so they need no columns of their own.
  */
 import type { PrWatchState } from "./pr-watch.ts";
+import type { Sender } from "../harness/host.ts";
 import type { PlanningRecord } from "./planning.ts";
 import { askQuestionId, askRecord, type Question, type WaitingAsk } from "./questions.ts";
 import type { Nudge } from "./nudge.ts";
@@ -135,6 +136,8 @@ export interface ClaudeRead { session: string; from: TranscriptCursor; entries: 
  * every request ID until it is deleted, since a forgotten ID would be typed again on a resend however late it comes.
  */
 export type ClaudeMessage = { state: "sending" } | { state: "sent"; result: ClaudeSent };
+/** Who typed a message into a Claude worker: the person, a Nexus sender, or `unknown` for a send recorded before senders were. */
+export type ClaudeMessageSender = Sender | "person" | "unknown";
 /** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
 export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
 
@@ -386,6 +389,11 @@ const migrations: readonly string[] = [
   // The dashboard and the API list a node's orphans from its observation, so nothing read this table. Dropping it
   // touches nothing an earlier migration needs, so a registry rewound past it applies it again unchanged.
   `DROP TABLE IF EXISTS orphans;`,
+  // Who typed each message in claude_messages, and a SHA-256 of its text as typed, so a transcript's prompt reads as
+  // Nexus's only when Nexus typed exactly that text. A message recorded before has no row here, so its sender is
+  // unknown. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS claude_senders (thread TEXT NOT NULL, request_id TEXT NOT NULL, sender TEXT NOT NULL, text_sha256 TEXT NOT NULL,
+     PRIMARY KEY (thread, request_id)) STRICT;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -702,7 +710,7 @@ export function openRegistry(path: string, clock = Date.now) {
       if (status === "deleted") {
         // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
         sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
-        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
+        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
       }
       reconcileAsks(id);
       updateAttention(id);
@@ -987,12 +995,21 @@ export function openRegistry(path: string, clock = Date.now) {
       const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
       return row === undefined ? undefined : row.state === "sent" ? { state: "sent", result: json<ClaudeSent>(row.result) } : { state: "sending" };
     },
-    /** Null forgets the message, as for a send that typed nothing. */
-    setClaudeMessage(thread: ThreadId, requestId: string, message: ClaudeMessage | null) {
-      if (message === null) return void sql("DELETE FROM claude_messages WHERE thread = ? AND request_id = ?").run(thread, requestId);
-      sql("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
-        .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
+    /** Null forgets the message, as for a send that typed nothing. `typed` is who typed it and the hash of its text, kept from the first write. */
+    setClaudeMessage(thread: ThreadId, requestId: string, message: ClaudeMessage | null, typed?: { sender: Exclude<ClaudeMessageSender, "unknown">; sha256: string }) {
+      transaction(() => {
+        if (message === null) {
+          for (const table of ["claude_messages", "claude_senders"]) sql(`DELETE FROM ${table} WHERE thread = ? AND request_id = ?`).run(thread, requestId);
+          return;
+        }
+        sql("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
+          .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
+        if (typed !== undefined) sql("INSERT OR IGNORE INTO claude_senders (thread, request_id, sender, text_sha256) VALUES (?, ?, ?, ?)").run(thread, requestId, typed.sender, typed.sha256);
+      });
     },
+    /** Who typed each message recorded for the thread's Claude worker, and the hash of its text, null for one recorded before senders were. */
+    claudeMessageSenders: (thread: ThreadId) => sql("SELECT coalesce(s.sender, 'unknown') AS sender, s.text_sha256 FROM claude_messages m LEFT JOIN claude_senders s USING (thread, request_id) WHERE m.thread = ?").all(thread)
+      .map((r) => ({ sender: r.sender as ClaudeMessageSender, sha256: r.text_sha256 as string | null })),
     setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
       transaction(() => {
         sql("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null, defaultClaudeModel);
