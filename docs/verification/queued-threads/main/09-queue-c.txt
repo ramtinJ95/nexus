@@ -1,3 +1,0 @@
-$ nexus start --project wave --title "C: build on A3" --after th-410eda46d2b2 --message "C: build on A3, after the earlier change landed" --json
-[stderr] {"error":"Unknown option '--after'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--after\"","kind":"invalid","status":null}
-[exit 64]

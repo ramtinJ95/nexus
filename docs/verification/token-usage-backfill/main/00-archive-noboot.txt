@@ -1,3 +1,0 @@
-$ nexus archive th-4e5732442267
-Archived th-4e5732442267.
-exit 0

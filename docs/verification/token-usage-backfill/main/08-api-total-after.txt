@@ -1,3 +1,0 @@
-GET /v1/usage total after the backfill: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
-expected:  {"calls":6053,"input":22347,"output":304513,"cacheWrite":1250165,"cacheRead":6357182,"total":7934207}
-DIFFERENT

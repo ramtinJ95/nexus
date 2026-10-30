@@ -1,3 +1,0 @@
-$ nexus item show it-000000000000
-[stderr] nexus: unknown command item. Run nexus --help for usage
-[exit 64]

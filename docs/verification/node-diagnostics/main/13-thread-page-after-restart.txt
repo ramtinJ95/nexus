@@ -1,5 +1,0 @@
-The planner gave up on this thread's pylon, so its agent cannot run tools and the thread takes no messages. Fix the cause, such as the project's git access, and retry, or start again from the same project. A retry runs setup again on a new pylon whose setup failed, and resumes a broken pylon from its newest disk.
-
-pylon is broken: the controller failed to boot the VM. Read controller.log in the instance directory
-Retry
-Start again

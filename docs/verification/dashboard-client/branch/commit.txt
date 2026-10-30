@@ -1,1 +1,0 @@
-branch: 4072920 refactor(dashboard): read the changes base from one table and build the unreadable message once

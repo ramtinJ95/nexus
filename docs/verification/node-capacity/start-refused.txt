@@ -1,2 +1,0 @@
-nexus: no node can run this pylon: bare-node has 0 of 7.8 GiB of memory committed, and the pylon needs 64; busy-node has 43 of 7.8 GiB of memory committed, and the pylon needs 64; quiet-node has 3 of 7.8 GiB of memory committed, and the pylon needs 64
-exit 5

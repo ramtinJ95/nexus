@@ -1,3 +1,0 @@
-$ nexus project add drinks --scratch --node node-a --cpus 1 --memory 3 --disk 5
-Added scratch project drinks on node-a
-[exit 0]

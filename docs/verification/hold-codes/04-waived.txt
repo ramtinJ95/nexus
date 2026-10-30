@@ -1,2 +1,0 @@
-POST /v1/threads/th-93507e292959/land {"head":"4444444444444444444444444444444444444444","waive":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."]}
-=> 200 {"phase":{"kind":"checking","startedAt":1793324937563,"thread":null},"waiver":{"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"codes":["reserved-path:irreversible"],"by":"nLAPTOP","at":1793324937563}}

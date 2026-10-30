@@ -1,3 +1,0 @@
-$ nexus abort th-9498b0f2ad97
-nexus: Claude waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed. Attach to the pylon (`nexus attach th-9498b0f2ad97`) and answer it
-[exit 5]

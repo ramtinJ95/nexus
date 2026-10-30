@@ -1,4 +1,0 @@
-$ nexus events --follow --since latest --kind pull-request.error --kind pull-request.error-cleared --json
-0 events
-[stderr] {"error":"unknown event kind","kind":"invalid","status":400}
-[exit 64]

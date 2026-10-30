@@ -1,5 +1,0 @@
-{"time":1792962560115,"request":{"op":"event","kind":"session.turn-started","at":1792962560059,"session":"4cf9e510-d91a-4438-a347-edc194eaf9e8"}}
-{"time":1792962562717,"request":{"op":"event","kind":"session.heartbeat","at":1792962562658,"session":"4cf9e510-d91a-4438-a347-edc194eaf9e8"}}
-{"time":1792962888534,"request":{"op":"event","kind":"session.heartbeat","at":1792962888481,"session":"4cf9e510-d91a-4438-a347-edc194eaf9e8"}}
-{"time":1792962936152,"request":{"op":"event","kind":"session.turn-started","at":1792962936100,"session":"4cf9e510-d91a-4438-a347-edc194eaf9e8"}}
-{"time":1792962937857,"request":{"op":"event","kind":"session.turn-ended","at":1792962937806,"session":"4cf9e510-d91a-4438-a347-edc194eaf9e8"}}

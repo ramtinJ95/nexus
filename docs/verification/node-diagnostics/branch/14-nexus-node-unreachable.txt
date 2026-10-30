@@ -1,3 +1,0 @@
-$ nexus node infra-testbench
-nexus: infra-testbench: connect ECONNREFUSED 127.0.0.1:38935
-exit 1

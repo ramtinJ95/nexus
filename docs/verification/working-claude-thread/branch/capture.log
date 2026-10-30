@@ -1,9 +1,0 @@
-fix/issue-127-working-claude-thread at 7cdde53: Claude thread th-16dc9f271f3a, harness thread th-ae69f49b524c, idle thread th-83719084ae99
-nexus threads, the Claude thread's row: th-16dc9f271f3a | active | working | pylon running | nexus | 0s ago | Fix the flaky stream test
-nexus show, its status line: status: active, agent working
-show --json thread: {"agentTurnRunning":false,"sessionTurnRunning":true,"working":true,"workingSince":"set"}
-thread page while the turn runs: <span data-pylon="running" data-turn="true" data-agent-at="1793103281490" data-thread-status="active"></span>
-changes reads by the thread page: 0 during 15 s of the turn's heartbeats, 1 in the 7 s after the turn ends
-home page has focus: true
-toasts 3 s after a follow-up turn starts, while it runs: []
-toasts 3 s after that turn ends: ["Fix the flaky stream test: reply"]

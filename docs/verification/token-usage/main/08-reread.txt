@@ -1,2 +1,0 @@
-The stack appended the Claude worker's transcript to itself and reported its turn's end.
-total after the read: nothing to compare, as GET /v1/usage answered 404

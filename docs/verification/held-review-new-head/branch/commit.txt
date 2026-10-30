@@ -1,1 +1,0 @@
-branch: 53d577f fix(review): settle on GitHub's head when the PR watch lags, and ignore a stopped watch's head

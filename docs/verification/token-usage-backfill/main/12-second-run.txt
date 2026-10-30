@@ -1,3 +1,0 @@
-$ nexus usage backfill
-nexus: usage takes 0 arguments, got 1. Run nexus --help for usage
-exit 64

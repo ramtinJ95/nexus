@@ -1,3 +1,0 @@
-$ nexus review th-a297c0341eda
-[stderr] nexus: thread th-a297c0341eda has no open pull request that the PR watch linked
-[exit 5]

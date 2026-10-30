@@ -1,1 +1,0 @@
-branch: 9dd4784 feat(dashboard): a hub-and-nodes favicon

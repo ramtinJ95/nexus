@@ -1,4 +1,0 @@
-PR #46 moved from 6666666666666666666666666666666666666666 to 7777777777777777777777777777777777777777, and the reviewer approved it there. The driver sends a waiver confirmed for 6666666666666666666666666666666666666666:
-POST /v1/threads/th-fd7047351384/land {"head":"6666666666666666666666666666666666666666","waive":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 400 {"error":"✖ Unrecognized key: \"waive\""}
-The review is still needs-person at 7777777777777777777777777777777777777777.

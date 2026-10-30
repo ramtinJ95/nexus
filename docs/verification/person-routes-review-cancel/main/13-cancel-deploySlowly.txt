@@ -1,3 +1,0 @@
-$ nexus review --cancel th-bdf277d1d85c
-[stderr] nexus: Unknown option '--cancel'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--cancel". Run nexus --help for usage
-[exit 64]

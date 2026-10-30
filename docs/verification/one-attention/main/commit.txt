@@ -1,1 +1,0 @@
-main: 9da62ea fix: a working Claude thread reads as working in the CLI, the dashboard and notifications (#148)

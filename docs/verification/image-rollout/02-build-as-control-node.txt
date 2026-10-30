@@ -1,3 +1,0 @@
-$ nexus image build
-nexus: caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons
-exit 3

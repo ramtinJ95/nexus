@@ -1,4 +1,0 @@
-As the phone:
-POST /v1/threads/th-fd7047351384/land {"head":"7777777777777777777777777777777777777777","waive":["Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile."]}
-=> 400 {"error":"✖ Unrecognized key: \"waive\""}
-The review is still needs-person.

@@ -1,4 +1,0 @@
-$ nexus threads
-th-ac73f7c67505  active  -        pylon running  nexus  0s ago  Write the CLI usage docs
-th-c01c6d6aedad  active  working  pylon running  nexus  0s ago  Refactor the reconcile loop
-th-aa97ee139152  active  -        pylon running  nexus  0s ago  Fix the flaky stream test

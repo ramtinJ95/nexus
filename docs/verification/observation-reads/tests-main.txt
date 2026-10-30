@@ -1,8 +1,0 @@
-ℹ fail 5
-ℹ pass 1
-✔ a deleted thread's harness read in flight through a sweep still runs one at a time
-✖ a pass over several running pylons reads its node's record at most once
-✖ a sweep reads an archived thread's Nexus agent from the harness, and a deleted thread's not at all
-✖ each put reads the nodes' tailnet IDs once, without their records, and every snapshot puts the list again
-✖ previews and allocatePreviews answer the same with the node's observation passed, and use the routes of the one passed
-✖ src/control/observed.test.ts

@@ -1,4 +1,0 @@
-+   7.1s A: controller crash the judgment retries: pylon running, attention none, judgments []
-+  63.7s A: controller crash the judgment retries: pylon failed, failed, attention failed, judgments []
-+ 131.0s B: controller crash with a malformed judgment: pylon running, attention none, judgments []
-+ 183.3s B: controller crash with a malformed judgment: pylon failed, failed, attention failed, judgments []

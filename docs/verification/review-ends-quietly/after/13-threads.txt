@@ -1,7 +1,0 @@
-$ nexus threads --all
-th-4fe6bf2d4c57  active    -  pylon running  nexus  2m ago   Greet script
-th-e4df02f25dbb  active    -  pylon running  nexus  2m ago   Review of #1: Add greet.sh
-th-e169b02a8c5b  archived  -  pylon running  nexus  1m ago   Review of #1: Add greet.sh
-th-7044d3cc23c6  active    -  pylon running  nexus  1m ago   Review of #1: Add greet.sh
-th-b3a6a4d27855  active    -  pylon running  nexus  57s ago  Review of #1: Add greet.sh
---- exit 0

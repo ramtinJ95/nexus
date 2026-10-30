@@ -1,1 +1,0 @@
-branch: d520374 docs(verification): count follow()'s work on main and this branch over one scripted hour

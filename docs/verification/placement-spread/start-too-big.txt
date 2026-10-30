@@ -1,2 +1,0 @@
-nexus: no node can run this pylon: infra-testbench has 28 of 31.3 GiB of memory committed, and the pylon needs 20; rj-firebat is overcommitted, with 56 of 22.8 GiB of memory committed; spare-node has 20 of 31.3 GiB of memory committed, and the pylon needs 20
-exit 5

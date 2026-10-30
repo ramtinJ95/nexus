@@ -1,1 +1,0 @@
-2cc7977 test: pin a stream's status errors and whois's 1 MiB cap

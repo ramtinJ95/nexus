@@ -1,3 +1,0 @@
-$ nexus project add big --scratch --node verify-node --cpus 1 --memory 5 --disk 1
-Added scratch project big on verify-node
-exit 0

@@ -1,4 +1,0 @@
-#!/bin/sh
-# Stand-in for `ssh-keyscan github.com`, for a host that reaches github.com only over HTTPS: the host keys GitHub
-# published at https://api.github.com/meta on 2026-10-29, in github-host-keys, as ssh-keyscan prints them.
-sed 's/^/github.com /' /usr/local/share/standin-github-host-keys

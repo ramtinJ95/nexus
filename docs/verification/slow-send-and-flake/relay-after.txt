@@ -1,2 +1,0 @@
-# this branch, 100 runs of src/pylon-vm/relay.test.ts beside squat.mjs
-pass=100 fail=0

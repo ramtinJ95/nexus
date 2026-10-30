@@ -1,3 +1,0 @@
-$ nexus session open th-e005de25c52c --harness shell
-[stderr] nexus: caller may not open a session in a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons
-[exit 3]

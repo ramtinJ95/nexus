@@ -1,3 +1,0 @@
-$ nexus archive th-e62fc008f85b
-Archived th-e62fc008f85b.
-exit 0

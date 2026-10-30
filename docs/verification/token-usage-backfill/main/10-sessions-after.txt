@@ -1,6 +1,0 @@
-live: claude-code paused
-big: claude-code paused
-pi: claude-code paused
-both: claude-code paused
-noboot: claude-code paused
-noread: claude-code paused

@@ -1,3 +1,0 @@
-$ nexus delete th-69892b8fb123
-Deleted th-69892b8fb123.
-[exit 0]

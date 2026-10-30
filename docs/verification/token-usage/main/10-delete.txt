@@ -1,1 +1,0 @@
-total after deleting the Claude worker thread: nothing to compare, as GET /v1/usage answered 404

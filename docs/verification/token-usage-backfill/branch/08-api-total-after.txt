@@ -1,3 +1,0 @@
-GET /v1/usage total after the backfill: {"calls":6053,"input":22347,"output":304513,"cacheWrite":1250165,"cacheRead":6357182,"total":7934207}
-expected:  {"calls":6053,"input":22347,"output":304513,"cacheWrite":1250165,"cacheRead":6357182,"total":7934207}
-MATCH

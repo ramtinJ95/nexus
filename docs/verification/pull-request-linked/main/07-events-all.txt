@@ -1,2 +1,0 @@
-$ nexus events
-[exit 0]

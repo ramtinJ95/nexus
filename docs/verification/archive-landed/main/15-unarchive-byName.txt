@@ -1,3 +1,0 @@
-$ nexus unarchive th-fc2e02bf17c0
-[stderr] nexus: thread th-fc2e02bf17c0 is active, not archived
-[exit 5]

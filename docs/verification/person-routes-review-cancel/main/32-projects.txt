@@ -1,4 +1,0 @@
-$ nexus projects
-nexus         node verify-node  branch main   auto review and land, for nLAPTOP  pipeline off  https://github.com/ramtinJ95/nexus.git
-nexus-review  node verify-node  branch trunk  auto review, set by nLAPTOP        pipeline off  https://github.com/ramtinJ95/nexus.git
-[exit 0]

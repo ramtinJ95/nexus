@@ -1,3 +1,0 @@
-$ nexus usage backfill --dry-run --json
-{"error":"Unknown option '--dry-run'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--dry-run\"","kind":"invalid","status":null}
-exit 64

@@ -1,6 +1,0 @@
-a3c41b8 test(loop): pin what a snapshot's journal and session, job and preview-hit events change: src/control/loop.test.ts, main's code with the new tests
-✔ a snapshot's journal applies each report past the node's receipt in order, and the reports before it change nothing (21.630149ms)
-✔ session, job and preview-hit events apply their writes and leave the stored observation as the last snapshot stored it (21.139541ms)
-ℹ tests 46
-ℹ pass 46
-ℹ fail 0

@@ -1,3 +1,0 @@
-$ nexus threads
-No threads.
-[exit 0]

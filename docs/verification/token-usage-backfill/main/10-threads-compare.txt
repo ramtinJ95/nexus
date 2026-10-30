@@ -1,6 +1,0 @@
-live     archived attention=null pylon=paused: UNCHANGED
-big      archived attention=null pylon=paused: UNCHANGED
-pi       archived attention=null pylon=paused: UNCHANGED
-both     archived attention=null pylon=paused: UNCHANGED
-noboot   archived attention=null pylon=paused: UNCHANGED
-noread   archived attention=null pylon=paused: UNCHANGED

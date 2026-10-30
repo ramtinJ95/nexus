@@ -1,3 +1,0 @@
-$ nexus items --json
-[stderr] {"error":"unknown command items","kind":"invalid","status":null}
-[exit 64]

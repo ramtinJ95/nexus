@@ -1,8 +1,0 @@
-$ nexus show th-c70feae4599f
-th-c70feae4599f  Review of #1: Add greet.sh
-project: nexus
-attention: reply
-status: active
-pylon: pylon-th-c70feae4599f on verify-node, running, observed 0s ago
-PR watch: on
---- exit 0

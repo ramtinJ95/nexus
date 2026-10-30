@@ -1,1 +1,0 @@
-branch: 279143e test: capture node diagnostics on main and the branch

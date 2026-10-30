@@ -1,3 +1,0 @@
-$ nexus projects
-wave  node node-a  branch main  auto review off  pipeline starts items  git@github.com:verify/wave.git
-[exit 0]

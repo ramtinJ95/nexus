@@ -1,9 +1,0 @@
-# Recipe file modes in an image built by a job
-
-`run.sh` ran in this thread's pylon on 2026-10-26, once on main (599972b) and once on this branch. This pylon has no Docker, and its package mirrors are blocked, so a `docker` on PATH stands in for `docker build`. Everything up to it is the real build-image path: the checkout's `loadImageRecipe` and `buildImage`, run under `umask 0077`, the probe unit's `UMask=0077`. The shim prints the build context as `buildImage` wrote it. It then applies the Dockerfile's COPY lines to a root-owned directory with `cp --preserve=mode`, because COPY keeps a source file's mode unless `--chmod` sets one. It reads every copied file as `user` (uid 1000, the image's user) and runs the smoke boot's Claude turn snapshot with the copied `nexus-turn.ts` and `checkout-files.py`.
-
-`01-main.txt` is the fleet failure. The recipe is `img-051b22b601e4`, the image the live build targeted. Every context file is 0600 and every directory 0700. COPY gives root the four files without `--chmod`, so `nexus-heartbeat.ts`, `nexus-outbox.ts`, `nexus-turn.ts` and `checkout-files.py` are unreadable to `user`. The snapshot fails with the smoke boot's `EACCES: permission denied, open '.../usr/local/bin/nexus-turn.ts'`. The agent setup and dotfiles are owned by `user` through `--chown`, so they stay readable, and `nexus` and `nexus-claude-hook` were readable only because of `--chmod=0755`.
-
-`02-branch.txt` is the fix. The recipe is `img-ffea3222ffb0`. The context holds `nexus` and `nexus-claude-hook` at 0755, every other file at 0644 and the directories at 0755, as a git checkout has them, though the Dockerfile no longer sets any mode. Every copied file is readable, and the snapshot prints `true` and `Nexus turn smoke`, the smoke check's expected output.
-
-Not verified: a real `docker build`, the Gondolin build and the smoke boot in a VM. They need Docker and KVM, which the build node has and this pylon does not.

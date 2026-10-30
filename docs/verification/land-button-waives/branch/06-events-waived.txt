@@ -1,3 +1,0 @@
-$ nexus events --thread th-0f01ff17611f --kind review.waived
-25 2026-10-27T19:26:48.706Z th-0f01ff17611f review.waived {"review":"rv-42000000","repo":"ramtinJ95/nexus","pr":42,"head":"4444444444444444444444444444444444444444","holds":["Always needs the person: anything irreversible, as it changes src/control/registry.ts."],"by":"nLAPTOP","at":1793129208706}
-exit 0

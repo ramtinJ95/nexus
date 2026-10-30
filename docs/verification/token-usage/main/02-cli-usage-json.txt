@@ -1,3 +1,0 @@
-$ nexus usage --since all --json
-{"error":"unknown command usage","kind":"invalid","status":null}
-exit 64

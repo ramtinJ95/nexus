@@ -1,1 +1,0 @@
-branch: b472863 docs(verification): measure follow's known and listed with deleted threads

@@ -1,8 +1,0 @@
-2026-10-28T05:11:21.435Z asked qn-image-rebuild on th-090e5f31f75e: The builder's pull request changes images/pylon/Dockerfile. Rebuild the pylon image and roll it out once it lands?
-2026-10-28T05:11:21.436Z asked qn-merge-token on th-482afd619ef8: Rotating the merge token changes a secret on rj-firebat. Rotate it now?
-2026-10-28T05:11:21.437Z asked qn-brief on th-5850688c4c82: The planning thread wrote a brief for "Archive what landed". Start a builder with it?
-2026-10-28T05:11:22.229Z whois now answers nLAPTOP
-2026-10-28T05:11:28.570Z whois now answers nPHONE
-2026-10-28T05:11:30.058Z whois now answers nVERIFYNODE
-2026-10-28T05:11:30.077Z whois now answers nPHONE
-2026-10-28T05:11:32.998Z whois now answers nLAPTOP
