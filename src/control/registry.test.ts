@@ -835,6 +835,18 @@ test("opening the registry stores the attention of a thread whose attention was 
   assert.equal(second.events("0", { kinds: ["attention.changed"], thread: threadId }).at(-1)!.payload.attention, "reply");
 });
 
+test("opening the registry asks the features whether a thread whose attention was never stored needs a decision", (t) => {
+  const path = tempDb();
+  const first = seed(openRegistry(path));
+  first.askQuestion({ id: "qn-1", thread: threadId, text: "Rebuild the image?", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 5 });
+  first.close();
+  const db = new DatabaseSync(path);
+  db.exec("DELETE FROM thread_attention");
+  db.close();
+
+  assert.equal(testRegistry(t, path).attention(threadId), "decision");
+});
+
 test("opening the registry clears the parked flag a thread deleted while parked kept", (t) => {
   const path = tempDb();
   const first = seed(openRegistry(path));
