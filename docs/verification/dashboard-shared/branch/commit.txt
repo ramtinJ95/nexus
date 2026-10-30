@@ -1,0 +1,1 @@
+branch: e846ec3 refactor: read the default model, project resources, image types, titleOf and utc from the modules that own them
