@@ -397,6 +397,31 @@ test("a port the node routes is never handed out, though no row holds it", async
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");
 });
 
+test("previews and allocatePreviews answer the same with the node's observation passed, and use the routes of the one passed", async (t) => {
+  const withIt = seeded(tempDb());
+  const without = seeded(tempDb());
+  t.after(() => { withIt.close(); without.close(); });
+  const observation: NodeObservation = {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
+    artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [{ httpsPort: 10200, pylonId: "pylon-lost" as PylonId, service: "web" }], heldSecrets: [],
+    pylons: [{
+      pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
+      services: [{ name: "web", state: "failed", port: 8000, declared: true, wantsPreview: true }],
+      listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+    }],
+  };
+  for (const registry of [withIt, without]) registry.ingested(observation, []);
+  withIt.allocatePreviews(pylonId, ["web", "api"], ports, withIt.node(node)!.observation);
+  without.allocatePreviews(pylonId, ["web", "api"], ports);
+  assert.deepEqual(withIt.previews(pylonId, withIt.node(node)!.observation), without.previews(pylonId));
+  assert.deepEqual(portsOf(without, pylonId), ["api 10202", "web 10201"]);
+  assert.equal(without.previews(pylonId).find((p) => p.service === "web")!.failed, "the service web failed. `nexus service logs web` in the pylon shows why");
+
+  const neighbour = addPylon(without, "th-2");
+  without.allocatePreviews(neighbour, ["web"], ports, { ...observation, previewRoutes: [...observation.previewRoutes, { httpsPort: 10203, pylonId: "pylon-lost" as PylonId, service: "api" }] });
+  assert.deepEqual(portsOf(without, neighbour), ["web 10204"], "a port the passed observation routes is not handed out");
+});
+
 test("an observation stored from a probe older than route reporting routes no port", async (t) => {
   const registry = seeded(tempDb());
   t.after(() => registry.close());

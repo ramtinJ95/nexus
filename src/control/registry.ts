@@ -540,11 +540,12 @@ export function openRegistry(path: string, clock = Date.now) {
   const setting = (key: string): string | null => (sql("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null) as string | null;
   const setSetting = (key: string, value: string) => sql("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
 
-  function previews(pylon: PylonId): Preview[] {
+  /** `observation` is the pylon's node's latest, which a caller that holds it passes so it is not read again. */
+  function previews(pylon: PylonId, observation?: NodeObservation | null): Preview[] {
     const rows = sql("SELECT previews.*, nodes.tailnet_host FROM previews JOIN nodes ON nodes.name = previews.node WHERE pylon = ? ORDER BY service").all(pylon);
     if (rows.length === 0) return [];
     // A pylon's previews are all on its node.
-    const observed = node(rows[0]!.node as NodeName)!.observation?.pylons.find((p) => p.pylonId === pylon);
+    const observed = (observation === undefined ? node(rows[0]!.node as NodeName)!.observation : observation)?.pylons.find((p) => p.pylonId === pylon);
     // Only a running pylon's services are known. A paused one's preview shows the waking page, which answers.
     const facts = new Map(observed?.phase === "running" ? (observed.services ?? []).map((s) => [s.name, s]) : []);
     return rows.map((r): Preview => {
@@ -1407,13 +1408,14 @@ export function openRegistry(path: string, clock = Date.now) {
      * holds and that the node's last observation does not route. A port the node routes without a row here is left
      * from records that were lost, so handing it out would publish two previews on one URL. A service keeps its port
      * until releasePreviews, so its URL survives pauses and restarts, and asking again changes nothing. Throws when
-     * the range is used up, after allocating the services before it.
+     * the range is used up, after allocating the services before it. `observation` is as for previews.
      */
-    allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange) {
+    allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange, observation?: NodeObservation | null) {
       const on = pylon(pylonId)?.node;
       if (on === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
-      const routed = (node(on)!.observation?.previewRoutes ?? []).map((r) => r.httpsPort);
-      const held = new Set(previews(pylonId).map((p) => p.service));
+      const last = observation === undefined ? node(on)!.observation : observation;
+      const routed = (last?.previewRoutes ?? []).map((r) => r.httpsPort);
+      const held = new Set(previews(pylonId, last).map((p) => p.service));
       for (const service of services) {
         if (held.has(service)) continue;
         const taken = new Set([...routed, ...(sql("SELECT https_port FROM previews WHERE node = ?").all(on) as Row[]).map((r) => r.https_port as number)]);

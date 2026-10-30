@@ -719,6 +719,21 @@ test("a pylon moved to another node while a pass waits on the probe for another 
   assert.equal(registry.pylon(second!.pylonId)!.node, other);
 });
 
+test("a pass over several running pylons reads its node's record at most once", async (t) => {
+  const registry = openRegistry(tempDb());
+  const threads = [seed(registry), addThread(registry, { node, boot: { image } }), addThread(registry, { node, boot: { image } })];
+  let reads = 0;
+  const counted: Registry = { ...registry, node: (name) => { if (name === node) reads++; return registry.node(name); } };
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, counted, fake.probe, { intervalMs: 60_000 });
+  await until("every pylon runs", () => threads.every((th) => fake.pylons.get(th.pylonId)?.phase === "running"));
+  await settled(fake, loop);
+
+  reads = 0;
+  await loop.wake(node);
+  assert.ok(reads <= 1, `the pass read ${node}'s record ${reads} times`);
+});
+
 test("a pylon pauses once its agent turn ends and nobody has used it for a while", async (t) => {
   const registry = openRegistry(tempDb());
   const longAgo = Date.now() - 60 * 60_000;
