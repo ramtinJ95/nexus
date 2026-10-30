@@ -215,9 +215,10 @@ export type PylonObservation =
  * declared service did not start. `controller`: the VM stopped outside a completed pause, and its disk is its last
  * checkpoint.
  */
-export type BrokenCause = "setup" | "saved-setup" | "services" | "controller";
+export const brokenCauses = ["setup", "saved-setup", "services", "controller"] as const;
+export type BrokenCause = typeof brokenCauses[number];
 /** `unknown`: a backend that cannot tell why, or a cause this control plane does not know, or none, from a probe older or newer than it. */
-const brokenCauses: ReadonlySet<unknown> = new Set(["setup", "saved-setup", "services", "controller", "unknown"] satisfies (BrokenCause | "unknown")[]);
+const reportedCauses: readonly unknown[] = [...brokenCauses, "unknown"];
 
 export interface RunningFacts {
   liveHash: LiveHash | null; // null until the probe has applied a LiveSpec since its own start or its last withdrawn preview route
@@ -314,8 +315,12 @@ export type PylonCommand =
   /** Stops previewing a linked port. A port not linked succeeds, and a port a service's preview owns is refused. */
   | { kind: "unlink-port"; port: number };
 
-export type SendClaudeOutcome = "sent" | "queued" | "blocked" | "starting" | "moved";
-export type InterruptClaudeOutcome = "interrupted" | "idle" | "blocked" | "unknown" | "not-running";
+export const sendClaudeOutcomes = ["sent", "queued", "blocked", "starting", "moved"] as const;
+export type SendClaudeOutcome = typeof sendClaudeOutcomes[number];
+export const interruptClaudeOutcomes = ["interrupted", "idle", "blocked", "unknown", "not-running"] as const;
+export type InterruptClaudeOutcome = typeof interruptClaudeOutcomes[number];
+export const closeSessionOutcomes = ["closed", "not-open", "moved"] as const;
+export type CloseSessionOutcome = typeof closeSessionOutcomes[number];
 
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
@@ -324,7 +329,7 @@ export type CommandResult =
    * `not-open`: no such pane is open. `moved`: the pane runs another session than the command names, such as one a wake
    * put there after moving the named one. Both leave every pane as it was. A probe older than the field sends none.
    */
-  | { kind: "close-session"; outcome: "closed" | "not-open" | "moved" }
+  | { kind: "close-session"; outcome: CloseSessionOutcome }
   /** `dropped` is false when the pylon holds no such failed session. */
   | { kind: "drop-failed-session"; dropped: boolean }
   /**
@@ -375,7 +380,8 @@ export interface ByteStream extends AsyncIterable<Uint8Array> {
   readonly done: Promise<StreamEnd>;
 }
 
-export type ProbeError = { code: "unreachable" | "not-running" | "forbidden"; message: string };
+export const probeErrorCodes = ["unreachable", "not-running", "forbidden"] as const;
+export type ProbeError = { code: typeof probeErrorCodes[number]; message: string };
 
 /**
  * A probe answered with a status its method gives no meaning, other than in a reply the method parses. `code` is set
@@ -588,7 +594,7 @@ function probeError(code: ProbeError["code"], message: string): Error & ProbeErr
   return Object.assign(new Error(message), { code });
 }
 function isProbeError(err: unknown): err is Error & ProbeError {
-  return err instanceof Error && "code" in err && (err.code === "unreachable" || err.code === "not-running" || err.code === "forbidden");
+  return err instanceof Error && "code" in err && (probeErrorCodes as readonly unknown[]).includes(err.code);
 }
 
 /** Ends quietly when the link drops or the caller aborts: that is how observe reports a lost link. */
@@ -970,15 +976,15 @@ export function parsePylonCommand(body: string): PylonCommand {
   return parseJson(asSent(pylonCommandSchema), body, "command");
 }
 
-const sendSchema = z.looseObject({ outcome: z.enum(["sent", "queued", "blocked", "starting", "moved"] satisfies SendClaudeOutcome[]), herdrPane: nonEmpty, resumed: z.boolean() });
+const sendSchema = z.looseObject({ outcome: z.enum(sendClaudeOutcomes), herdrPane: nonEmpty, resumed: z.boolean() });
 const commandResultSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), exitCode: unchecked<number | null>(), output: unchecked<string>(), truncated: unchecked<boolean>() }),
   z.looseObject({ kind: z.literal("open-session"), herdrPane: nonEmpty }),
-  z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(["closed", "not-open", "moved"]).nullish() }),
+  z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(closeSessionOutcomes).nullish() }),
   z.looseObject({ kind: z.literal("drop-failed-session"), dropped: z.boolean() }),
   z.looseObject({ kind: z.literal("send-claude"), ...sendSchema.shape }),
   z.looseObject({ kind: z.literal("send-claude-outcome"), send: z.union([z.enum(["failed", "unknown"]), sendSchema], { error: "expected failed, unknown or what the send became" }) }),
-  z.looseObject({ kind: z.literal("interrupt-claude"), outcome: z.enum(["interrupted", "idle", "blocked", "unknown", "not-running"] satisfies InterruptClaudeOutcome[]) }),
+  z.looseObject({ kind: z.literal("interrupt-claude"), outcome: z.enum(interruptClaudeOutcomes) }),
   z.looseObject({ kind: z.literal("service"), services: unchecked<readonly ServiceFact[]>(), logs: unchecked<string>() }),
   z.looseObject({ kind: z.literal("link-port"), service: nonEmpty }),
   z.looseObject({ kind: z.literal("unlink-port"), refused: nonEmpty.nullable() }),
@@ -1045,7 +1051,7 @@ function upgradePylon(p: OlderPylonObservation): PylonObservation {
       sessions: p.sessions?.map((s): SessionFact => s.state === undefined ? { ...s, state: "running", id: s.herdrPane } : s) ?? null,
     };
     case "stopped": return { ...p, sessions: p.sessions ?? null };
-    case "broken": return { ...p, cause: brokenCauses.has(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown", logTail: p.logTail ?? "" };
+    case "broken": return { ...p, cause: reportedCauses.includes(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown", logTail: p.logTail ?? "" };
     default: return p;
   }
 }

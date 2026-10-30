@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import {
-  connectProbe, parseArtifactManifest, parseJobEnvelope, parseProbeEvent, parsePylonCommand, parseStreamRequest, parseSubmitReply, ProbeHttpError,
-  type NodeName, type PylonCommand, type PylonId, type TailnetNodeId,
+  brokenCauses, closeSessionOutcomes, connectProbe, interruptClaudeOutcomes, parseArtifactManifest, parseJobEnvelope, parseProbeEvent, parsePylonCommand, parseStreamRequest,
+  parseSubmitReply, probeErrorCodes, ProbeHttpError, sendClaudeOutcomes, upgradeObservation,
+  type BrokenCause, type CloseSessionOutcome, type InterruptClaudeOutcome, type NodeName, type ProbeError, type PylonCommand, type PylonId, type SendClaudeOutcome, type TailnetNodeId,
 } from "./protocol.ts";
 
 const node = "test-node";
@@ -339,4 +340,39 @@ test("a status a method gives no meaning rejects with its status, and with a Pro
   assert.deepEqual([stopped.status, stopped.code, stopped.message], [409, "not-running", `${node}: "the pylon is stopped"`]);
   const conflict = await rejection(client.putPeers([]));
   assert.ok(conflict instanceof ProbeHttpError && !("code" in conflict), "only a command or stream means not-running by 409");
+});
+
+test("each union's list holds exactly its type's members, and the parser that reads it takes those and no other", async (t) => {
+  const members = {
+    send: { sent: true, queued: true, blocked: true, starting: true, moved: true } satisfies Record<SendClaudeOutcome, true>,
+    interrupt: { interrupted: true, idle: true, blocked: true, unknown: true, "not-running": true } satisfies Record<InterruptClaudeOutcome, true>,
+    close: { closed: true, "not-open": true, moved: true } satisfies Record<CloseSessionOutcome, true>,
+    broken: { setup: true, "saved-setup": true, services: true, controller: true } satisfies Record<BrokenCause, true>,
+    probeError: { unreachable: true, "not-running": true, forbidden: true } satisfies Record<ProbeError["code"], true>,
+  };
+  const lists = { send: sendClaudeOutcomes, interrupt: interruptClaudeOutcomes, close: closeSessionOutcomes, broken: brokenCauses, probeError: probeErrorCodes };
+  for (const [union, list] of Object.entries(lists)) assert.deepEqual([...list].sort(), Object.keys(members[union as keyof typeof members]).sort(), union);
+
+  const { client, answer } = await stubProbe(t);
+  const at = pylonId as PylonId;
+  const send = { herdrPane: "w1:p1", resumed: false };
+  for (const outcome of sendClaudeOutcomes) {
+    answer({ kind: "send-claude", outcome, ...send });
+    assert.equal((await client.command(at, commands[9]!) as { outcome: string }).outcome, outcome);
+  }
+  for (const outcome of interruptClaudeOutcomes) {
+    answer({ kind: "interrupt-claude", outcome });
+    assert.deepEqual(await client.command(at, commands[16]!), { kind: "interrupt-claude", outcome });
+  }
+  for (const outcome of closeSessionOutcomes) {
+    answer({ kind: "close-session", outcome });
+    assert.deepEqual(await client.command(at, commands[5]!), { kind: "close-session", outcome });
+  }
+  for (const [command, result] of [[commands[9]!, { kind: "send-claude", outcome: "typed", ...send }], [commands[16]!, { kind: "interrupt-claude", outcome: "pressed" }], [commands[5]!, { kind: "close-session", outcome: "gone" }]] as const) {
+    answer(result);
+    await assert.rejects(client.command(at, command), Error, JSON.stringify(result));
+  }
+  const causes = (cause: string) => (upgradeObservation({ pylons: [{ pylonId, phase: "broken", detail: "", cause }] } as never).pylons[0] as { cause: string }).cause;
+  for (const cause of [...brokenCauses, "unknown"]) assert.equal(causes(cause), cause);
+  assert.equal(causes("cosmic-ray"), "unknown", "a cause this control plane does not know");
 });
