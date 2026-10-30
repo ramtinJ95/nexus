@@ -1,2 +1,2 @@
-+   0.9s control: nexus control plane: API on 127.0.0.1:7470, following node-a
-+  62.9s control: th-f22c4b53a168/pylon: reading token usage failed, so the counts keep what was read before: reading the agents' usage exited 1
++   0.8s control: nexus control plane: API on 127.0.0.1:7470, following node-a
++  80.9s control: th-49cc7812dc2f/pylon: reading token usage failed, so the counts keep what was read before: reading the agents' usage exited 1

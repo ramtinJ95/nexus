@@ -1,4 +1,4 @@
-$ nexus conversation th-f22c4b53a168
+$ nexus conversation th-49cc7812dc2f
 > /pstack:poteto-mode This thread only checks how Nexus follows a Claude worker. Do nothing else: read no files, write none, start no subagents, ask no reviewer, open no pull request.
 > First run the shell command "sleep 45" with the Bash tool, in the foreground.
 > Then call AskUserQuestion once, with one question: header "Size", question "Which size?", not multi-select, options "Small" (description "200 ml") and "Large" (description "400 ml").
@@ -6,15 +6,21 @@ $ nexus conversation th-f22c4b53a168
 
 [tool] Bash {"command":"sleep 45","description":"Wait 45 seconds","timeout":60000} (failed)
 
-The standalone `sleep 45` was blocked. I'll wait the same 45 seconds in the foreground with an until-loop.
+The harness blocked a foreground `sleep 45`, so I'll run it in the background and wait for it to finish.
 
-[tool] Bash {"command":"SECONDS=0; until [ $SECONDS -ge 45 ]; do sleep 2; done; echo done","description":"Wait 45 seconds in foreground","timeout":90000} (ok)
+[tool] Bash {"command":"sleep 45","description":"Wait 45 seconds in background","run_in_background":true} (ok)
 
-[tool] AskUserQuestion {"questions":[{"header":"Size","question":"Which size?","multiSelect":false,"options":[{"label":"Small","description":"200 ml"},{"label":"Large","description":"400 ml"}]}]} (ok)
+The 45-second wait is running in the background. I'll ask the question once it finishes.
+
+[turn] 7s
+
+[task] completed: Background command "Wait 45 seconds in background" completed (exit code 0)
+
+[tool] AskUserQuestion {"questions":[{"question":"Which size?","header":"Size","multiSelect":false,"options":[{"label":"Small","description":"200 ml"},{"label":"Large","description":"400 ml"}]}]} (ok)
 
 ```
 Your questions have been answered: "Which size?"="Large". You can now continue with these answers in mind.
 ```
 
-[turn] 54s
+[turn] 3s
 [exit 0]

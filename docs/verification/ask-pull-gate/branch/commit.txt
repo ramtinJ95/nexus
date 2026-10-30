@@ -1,1 +1,1 @@
-branch: 44cfaa4 perf(control): ask the pylon which dialogs wait only after a session event or while an ask is open
+branch: 674fed6 docs(verification): add a mixed run with main's hooks, and answer the card after 20 s

@@ -1,2 +1,2 @@
-asks pulls while the watched turn ran its Bash command: 2 in 52.9 s
-card: ask-toolu_01WcUjvQBz7LuhmG3ksQEprV
+asks pulls while the watched turn ran its Bash command: 3 in 52.5 s
+card: ask-toolu_01TnmXBArBQg9WpDTDFUHiZQ

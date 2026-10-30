@@ -1,17 +1,17 @@
 $ nexus start --project sizes --title "Ask about a size" --claude "This thread only checks how Nexus follows a Claude worker. Do nothing else: read no files, write none, start no subagents, ask no reviewer, open no pull request.\nFirst run the shell command \"sleep 45\" with the Bash tool, in the foreground.\nThen call AskUserQuestion once, with one question: header \"Size\", question \"Which size?\", not multi-select, options \"Small\" (description \"200 ml\") and \"Large\" (description \"400 ml\").\nThen reply with the tool's result word for word in a code block, and end your turn." --model claude-sonnet-5-5 --json
 {
-  "id": "th-f22c4b53a168",
+  "id": "th-49cc7812dc2f",
   "title": "Ask about a size",
   "project": "sizes",
-  "pylonId": "pylon-th-f22c4b53a168",
+  "pylonId": "pylon-th-49cc7812dc2f",
   "status": "active",
   "conversationId": null,
   "startedBy": "nVERIFYLAPTOP",
-  "createdAt": 1793323544055,
+  "createdAt": 1793323946727,
   "agentTurnRunning": false,
   "working": false,
   "lastAgentActivityAt": 0,
-  "lastHumanActivityAt": 1793323544055,
+  "lastHumanActivityAt": 1793323946727,
   "seenAt": null,
   "lastReplyAt": null,
   "placement": {
