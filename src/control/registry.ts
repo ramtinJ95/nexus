@@ -31,7 +31,7 @@ import {
   upgradeObservation, type HerdrStatus, type NodeObservation, type OlderObservation, type ReportedCapacity,
 } from "../protocol/observations.ts";
 import type { BootInputs } from "../spawn.ts";
-import type { Project } from "../project.ts";
+import type { Project } from "./project.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SessionHarness } from "../sessions.ts";
 import type { BuildingTemplate, TemplateRecord, ThreadSetup } from "./templates.ts";

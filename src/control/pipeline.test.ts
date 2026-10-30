@@ -10,8 +10,8 @@ import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
 import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
-import type { NodeName, TailnetNodeId } from "../ids.ts";
-import type { PipelineSetting, ProjectId } from "../project.ts";
+import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
+import type { PipelineSetting } from "./project.ts";
 import { tempDir, testImage } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;

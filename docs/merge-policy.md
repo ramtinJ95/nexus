@@ -50,7 +50,7 @@ Text in the pull request can mislead the reviewer but cannot change which files 
 | Reserved case | Paths |
 |---|---|
 | Secrets | any path naming a secret or a credential, and everything under `deploy/` |
-| The egress allowlist | `src/project.ts`, `src/control/threads.ts`, `src/control/live.ts`, every path starting `src/pylon-vm`, and any path naming a network, egress or an allowlist |
+| The egress allowlist | `src/control/project.ts`, `src/control/overlay.ts`, `src/control/threads.ts`, `src/control/live.ts`, every path starting `src/pylon-vm`, and any path naming a network, egress or an allowlist |
 | Login or auth | `src/control/api.ts`, `src/control/main.ts`, `src/control/login.ts`, `src/control/releases.ts`, `src/control/attach.ts`, `src/control/policy.ts`, `src/control/holds.ts`, `src/protocol/routes.ts`, everything under `src/control/api/`, everything under `src/probe/` and `src/deploy/`, and any path naming auth, login or whois |
 | The tailnets | any path naming tailscale or a tailnet |
 | Pylon image rebuilds | everything under `images/`, and `src/agent-setup.ts` |

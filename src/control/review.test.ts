@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { AutoReview } from "../project.ts";
+import type { AutoReview } from "./project.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SecretGrant } from "../secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
@@ -916,6 +916,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
     "Always needs the person: changes to secrets, as it changes deploy/README.md, src/control/credentials.ts.",
     "Always needs the person: changes to the tailnets, as it changes src/tailscale.ts.",
   ]);
+  assert.deepEqual(holds("src/control/project.ts", "src/control/overlay.ts", "src/project.ts"), ["Always needs the person: changes to the egress allowlist, as it changes src/control/project.ts, src/control/overlay.ts."]);
   assert.deepEqual(holds("src/control/holds.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/holds.ts."]);
   assert.deepEqual(holds("src/protocol/routes.ts"), ["Always needs the person: changes to login or auth, as it changes src/protocol/routes.ts."]);
   assert.deepEqual(holds("src/control/api/kit.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/api/kit.ts."]);

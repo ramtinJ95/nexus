@@ -2,7 +2,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ParseArgsOptionsConfig } from "node:util";
 import type { ThreadDetail } from "../control/wire.ts";
-import type { Project } from "../project.ts";
+import type { Project } from "../control/project.ts";
 import { titleOf } from "../thread-title.ts";
 import type { WebSocket } from "ws";
 import { CliError } from "./transport.ts";

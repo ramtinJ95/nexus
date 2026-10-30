@@ -8,7 +8,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { Guest } from "./backend.ts";
 import { fakeGuest } from "./fake-guest.ts";
-import { renderOverlay } from "./project.ts";
+import { renderOverlay } from "./control/overlay.ts";
 import type { ProjectId } from "./ids.ts";
 import type { ServiceDecl } from "./services-file.ts";
 import type { NodeName, PylonId } from "./ids.ts";
