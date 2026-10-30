@@ -13,33 +13,27 @@ import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { type BackendPylon, type VmBackend } from "../backend.ts";
 import { commandPolicies, runCommand, runJob, type CommandPolicy, type ProbeDeps } from "./run.ts";
-import { isPortableArtifactId, type JobId, type LiveHash, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
+import { isPortableArtifactId, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
 import {
   encodeSubmitReply, jobDeadlineMs, JobFailure, jobSubject, parseJobEnvelope, type Job, type JobEnvelope, type JobStatus, type Subject,
 } from "../protocol/jobs.ts";
-import {
-  encodeProbeEvent, heldSecrets, type DeclaredOutput, type GitFacts, type ListeningFact, type NodeObservation, type ProbeEvent,
-  type PylonObservation, type ServiceFact, type SessionFact,
-} from "../protocol/observations.ts";
+import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } from "../protocol/observations.ts";
 import { parsePylonCommand, type CommandResult, type PylonCommand } from "../protocol/commands.ts";
 import { parseStreamRequest, serveByteStream, streamUpgradeResponse } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { peersSchema, probePort, routeAuth, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
-import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import { onePerClaudeSession } from "../session-wake.ts";
 import type { Whois } from "../tailscale.ts";
-import { listOutputs } from "../outputs.ts";
-import { listeningFacts } from "../listening.ts";
 import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
-import { gitFacts, gitPollMs } from "../git-facts.ts";
 import { rawResponse, startGateway } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
 import { serialQueue, singleFlight } from "../single-flight.ts";
 import type { NodeSecrets } from "./config.ts";
+import { createFactReader, notRunning, type PylonState } from "./pylon-facts.ts";
 
 export interface ProbeOptions {
   node: NodeName;
@@ -84,44 +78,7 @@ const maxSecretBytes = 16_384;
 /** RFC 6750's b64token, the alphabet bearer tokens are written in. */
 const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
 const sum = (pylons: readonly BackendPylon[], resource: keyof NonNullable<BackendPylon["holds"]>) => pylons.reduce((total, p) => total + (p.holds?.[resource] ?? 0), 0);
-/** Short, because snapshots are read one at a time and a stuck guest would hold up every observer. */
-const sessionReadTimeoutMs = 3_000;
-/** Longer, because a pylon's supervisor checks each service's health to answer. */
-const serviceReadTimeoutMs = 5_000;
 const claudeSendMemoryMs = 60 * 60_000;
-
-type FactKind = "sessions" | "attached" | "services" | "listening" | "outputs" | "git";
-
-/** What the probe holds for one pylon, in memory only. A delete drops it all, and named resets in startProbe clear parts. */
-interface PylonState {
-  /** Cleared, with `published` and `reportedListening`, when a pause starts. */
-  liveHash?: LiveHash;
-  /** The previews of the pylon's last successful spawn in this process, which published and warmed them. */
-  published?: Extract<Job, { kind: "spawn" }>["live"]["previews"];
-  /** The listening ports the pylon's last observation reported, so a poll can tell when they changed. */
-  reportedListening?: string;
-  /**
-   * Bumped when the pylon's routes stop matching a spawn's live spec, so a spawn in flight across it does not count as
-   * applied. It outlives a pause, so a services read that a withdraw and then a pause overlapped still sees a change.
-   */
-  diverged: number;
-  /**
-   * The services that were unlinked and not linked again. No spawn routes them: one that carries them was planned
-   * before the unlink, whenever it reaches the probe. Only a delete forgets them.
-   */
-  unlinked: Set<ServiceName>;
-  /** Whether the last snapshot saw the pylon running, which a listening poll reads instead of listing every pylon. */
-  running: boolean;
-  /** The last git read, which later snapshots reuse for gitPollMs while the pylon stays on the same boot. Cleared, with `logged`, once the pylon is seen not running. */
-  git?: { bootedAt: string; at: number; facts: GitFacts | null };
-  /** The fact kinds whose failure was logged since their last successful read. */
-  logged: Set<FactKind>;
-  /**
-   * Reads still outstanding, timed out or not, so later snapshots cannot pile up RPCs behind one the controller has yet
-   * to answer. Each removes itself when it settles, also across a pause.
-   */
-  reads: Map<FactKind, Promise<unknown>>;
-}
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -163,12 +120,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     delete state.liveHash;
     delete state.published;
     delete state.reportedListening;
-  }
-  /** Observed not running, or missing from the backend's list: the next boot's reads start fresh, and log a failure again. */
-  function notRunning(state: PylonState) {
-    state.running = false;
-    delete state.git;
-    state.logged.clear();
   }
   const relinked = (pylonId: PylonId, service: ServiceName) => pylons.get(pylonId)?.unlinked.delete(service);
   const serve = previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get });
@@ -233,68 +184,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   /**
-   * A failed, late or still outstanding read answers `fallback`. `log.line` is logged once until a read succeeds, or on
-   * every failure with `log.every`. Without `log` nothing is.
-   */
-  async function readFact<T>(pylonId: PylonId, kind: FactKind, timeoutMs: number, read: () => Promise<T>, options: {
-    fallback: T; log?: { line: (reason: string) => string; every?: true };
-  }): Promise<T> {
-    const { reads, logged } = pylon(pylonId);
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      if (reads.has(kind)) throw new Error(`${kind} read is still outstanding`);
-      const pending = Promise.resolve().then(read);
-      reads.set(kind, pending);
-      void pending.then(() => reads.delete(kind), () => reads.delete(kind));
-      const facts = await Promise.race([pending, new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${kind} read exceeded ${timeoutMs} ms`)), timeoutMs);
-      })]);
-      logged.delete(kind);
-      return facts;
-    } catch (err) {
-      if (options.log !== undefined && (options.log.every === true || !logged.has(kind))) log(options.log.line((err as Error).message));
-      logged.add(kind);
-      return options.fallback;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /**
-   * Costs one guest exec (`herdr api snapshot`) per running pylon per snapshot, so a snapshot waits for the
-   * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions".
-   */
-  const sessions = (pylonId: PylonId): Promise<readonly SessionFact[] | null> =>
-    readFact(pylonId, "sessions", sessionReadTimeoutMs, () => sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs), {
-      fallback: null, log: { line: (reason) => `${pylonId} sessions: ${reason}. The control plane keeps the last list read until a read succeeds` },
-    });
-
-  /**
-   * Terminals attached to the pylon's Herdr session. A count that fails reads as none, so it never keeps a pylon
-   * awake nor fails the rest of the observation.
-   */
-  const attached = (pylonId: PylonId): Promise<number> =>
-    readFact(pylonId, "attached", sessionReadTimeoutMs, () => attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs), {
-      fallback: 0, log: { line: (reason) => `${pylonId} attached terminals: ${reason}. They count as none until a count succeeds` },
-    });
-
-  /** A failed or late read reports null, never "no services". */
-  async function services(pylonId: PylonId): Promise<readonly ServiceFact[] | null> {
-    const since = pylon(pylonId).diverged;
-    const facts = await readFact(pylonId, "services", serviceReadTimeoutMs, async () => (await backend.guest(pylonId).services("list")).services, {
-      fallback: null, log: { line: (reason) => `${pylonId} services: ${reason}`, every: true },
-    });
-    // A service that wants a preview under an unlinked name, linked again or declared, may be routed again. Not
-    // from a read that a withdraw overlapped, which may predate the unlink.
-    if (facts !== null && pylons.get(pylonId)?.diverged === since) for (const fact of facts) if (fact.wantsPreview) relinked(pylonId, fact.name);
-    return facts;
-  }
-
-  /** A failed read reports null, never "nothing listens". */
-  const listening = (pylonId: PylonId): Promise<readonly ListeningFact[] | null> =>
-    readFact(pylonId, "listening", sessionReadTimeoutMs, () => listeningFacts(backend.guest(pylonId), sessionReadTimeoutMs), { fallback: null });
-
-  /**
    * An app that starts or stops listening gives the probe no event, so the ports of every pylon the last snapshot saw
    * running are read again between snapshots, and a change publishes one. Without observers nobody would see it, so
    * nothing is read.
@@ -308,54 +197,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (changed.some(Boolean)) await publishSnapshot();
   }, () => shutdown.signal.aborted);
 
-  /** Declared outputs only accumulate in the control plane, so a failed read reported as none loses nothing. `nexus output list` shows the failure. */
-  const declaredOutputs = (pylonId: PylonId): Promise<readonly DeclaredOutput[]> =>
-    readFact(pylonId, "outputs", sessionReadTimeoutMs, () => listOutputs(backend.guest(pylonId), sessionReadTimeoutMs), { fallback: [] });
-
   const storage = backend.storage ?? "/";
 
   /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
   const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
-
-  async function git(pylonId: PylonId, bootedAt: string): Promise<GitFacts | null> {
-    const state = pylon(pylonId);
-    const previous = state.git;
-    const at = Date.now();
-    if (previous?.bootedAt === bootedAt && at - previous.at < gitPollMs) return previous.facts;
-    const facts = await readFact(pylonId, "git", sessionReadTimeoutMs, () => gitFacts(backend.guest(pylonId)), {
-      fallback: null, log: { line: () => `${pylonId} git: checkout facts unavailable; retrying on the next git poll` },
-    });
-    state.git = { bootedAt, at, facts };
-    return facts;
-  }
-
-  async function observation(p: BackendPylon): Promise<PylonObservation> {
-    const { pylonId } = p;
-    const state = pylon(pylonId);
-    if (p.vm === "running") state.running = true;
-    else notRunning(state);
-    switch (p.vm) {
-      case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
-      case "stopped":
-        return { pylonId, phase: "stopped", checkpoint: p.checkpoint, sessions: p.sessions };
-      case "broken":
-        return { pylonId, phase: "broken", detail: redacted(p.detail), cause: p.cause, logTail: redacted(p.logTail ?? "") };
-      case "running": {
-        const [ports, serviceFacts, sessionFacts, checkout, outputs, attachedClients] = await Promise.all([
-          listening(pylonId), services(pylonId), sessions(pylonId), git(pylonId, p.bootedAt), declaredOutputs(pylonId), attached(pylonId),
-        ]);
-        // Looked up again, as a delete may have started while the guest was read.
-        const current = pylons.get(pylonId);
-        if (ports !== null && current !== undefined) current.reportedListening = JSON.stringify(ports);
-        return {
-          pylonId, phase: "running", liveHash: current?.liveHash ?? null, bootedAt: p.bootedAt,
-          bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          services: serviceFacts, listening: ports, previews: current?.published ?? [], sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
-          attachedClients,
-        };
-      }
-    }
-  }
+  const { listening, observation } = createFactReader({ backend, log, redacted, pylons, pylon, relinked });
 
   /**
    * Reads run one at a time, so snapshots resolve, and are published, in the order they were read. Otherwise a
@@ -528,37 +374,29 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return routeAuth[route] === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);
   }
 
-  async function handle(req: IncomingMessage, res: ServerResponse) {
-    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
-      return;
-    }
-    const path = new URL(req.url ?? "/", "http://probe").pathname;
-    const route = (Object.keys(routeAuth) as (keyof typeof routeAuth)[]).find((prefix) => path === prefix || path.startsWith(`${prefix}/`));
-    if (route === undefined) return send(res, 404, `no route ${path}`);
-    if (!await authorized(req, route)) return send(res, 403, "caller is not the tailnet node this route allows");
-
-    const jobMatch = /^\/v1\/jobs\/([^/]+)$/.exec(path);
-    if (jobMatch) {
-      const jobId = decodeURIComponent(jobMatch[1]!) as JobId;
-      if (req.method === "PUT") {
-        const reply = submit(jobId, await readBody(req));
-        return send(res, reply.status, reply.body, "application/json");
-      }
-      if (req.method === "GET") {
-        const job = jobs.get(jobId);
-        return job ? send(res, 200, JSON.stringify(job.status), "application/json") : send(res, 404, `no job ${jobId}`);
-      }
-      return send(res, 405, `${req.method} is not allowed on ${path}`);
-    }
-    if (path === "/v1/observe" && req.method === "GET") {
+  const routes: readonly ProbeRoute[] = [{
+    path: /^\/v1\/jobs\/([^/]+)$/, notAllowed: "",
+    async PUT(req, res, match) {
+      const jobId = decodeURIComponent(match[1]!) as JobId;
+      const reply = submit(jobId, await readBody(req));
+      return send(res, reply.status, reply.body, "application/json");
+    },
+    GET(_req, res, match) {
+      const jobId = decodeURIComponent(match[1]!) as JobId;
+      const job = jobs.get(jobId);
+      return job ? send(res, 200, JSON.stringify(job.status), "application/json") : send(res, 404, `no job ${jobId}`);
+    },
+  }, {
+    path: /^\/v1\/observe$/,
+    GET(req, res) {
       // whois is async, so the caller or the probe may be gone by now, and nothing would remove the observer.
       if (req.socket.destroyed || shutdown.signal.aborted) return;
       return observe(res);
-    }
-    const commandMatch = /^\/v1\/pylons\/([^/]+)\/commands$/.exec(path);
-    if (commandMatch && req.method === "POST") {
-      const pylonId = decodeURIComponent(commandMatch[1]!) as PylonId;
+    },
+  }, {
+    path: /^\/v1\/pylons\/([^/]+)\/commands$/,
+    async POST(req, res, match) {
+      const pylonId = decodeURIComponent(match[1]!) as PylonId;
       let command: PylonCommand;
       try {
         command = parsePylonCommand(await readBody(req));
@@ -577,18 +415,19 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const result = await running;
       if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
-    }
-    const manifestMatch = /^\/v1\/manifests\/([^/]+)$/.exec(path);
-    if (manifestMatch && req.method === "GET") {
-      const id = decodeURIComponent(manifestMatch[1]!);
+    },
+  }, {
+    path: /^\/v1\/manifests\/([^/]+)$/,
+    async GET(_req, res, match) {
+      const id = decodeURIComponent(match[1]!);
       if (!isPortableArtifactId(id)) return send(res, 400, `${JSON.stringify(id)} is not an image or template ID`);
       const manifest = await backend.artifacts.manifest(id);
       return manifest === null ? send(res, 404, `this node holds no ${id}`) : send(res, 200, JSON.stringify(manifest), "application/json");
-    }
-    const secretMatch = /^\/v1\/secrets\/([^/]+)$/.exec(path);
-    if (secretMatch) {
-      if (req.method !== "PUT") return send(res, 405, `${req.method} is not allowed on ${path}`);
-      const name = decodeURIComponent(secretMatch[1]!);
+    },
+  }, {
+    path: /^\/v1\/secrets\/([^/]+)$/, notAllowed: "",
+    async PUT(req, res, match) {
+      const name = decodeURIComponent(match[1]!);
       if (!heldSecrets.includes(name)) return send(res, 404, `${name} is not a secret the control plane hands over`);
       // No reply or log carries the value, so a refusal says what a value must be, never what this one was.
       let value: string;
@@ -605,9 +444,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // Boots that need it wait for a snapshot that lists it.
       if (first) void publishSnapshot();
       return;
-    }
-    if (path === "/v1/peers") {
-      if (req.method !== "PUT") return send(res, 405, `${req.method} is not allowed on ${path}`);
+    },
+  }, {
+    path: /^\/v1\/peers$/, notAllowed: "",
+    async PUT(req, res) {
       let next: readonly TailnetNodeId[];
       try {
         next = peersSchema.parse(JSON.parse(await readBody(req)));
@@ -617,10 +457,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       if (next.join() !== peers.join()) log(`peers: ${next.join(", ") || "none"}, from the control plane`);
       peers = next;
       return void res.writeHead(204).end();
-    }
-    const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
-    if (artifactMatch && req.method === "GET") {
-      const id = decodeURIComponent(artifactMatch[1]!);
+    },
+  }, {
+    path: /^\/v1\/artifacts\/([^/]+)$/,
+    async GET(req, res, match) {
+      const id = decodeURIComponent(match[1]!);
       const wanted = new URL(req.url ?? "/", "http://probe").searchParams.get("sha256");
       if (wanted === null) return send(res, 400, "name the sha256 the copy must have, as ?sha256=");
       if (!isPortableArtifactId(id) || !await backend.artifacts.has(id)) return send(res, 404, `this node holds no image or template ${id}. A checkpoint never leaves its node`);
@@ -634,11 +475,32 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       res.writeHead(200, artifactHeaders(manifest));
       // A failed archive destroys the response, so the peer's copy breaks off instead of ending as if complete.
       return pipeline(stream, res).catch((err: Error) => log(`artifact ${id}: ${err.message}`));
-    }
-    if (path === "/v1/node-health") {
-      if (req.method !== "GET") return send(res, 405, `${req.method} is not allowed on ${path}: node health is read-only`);
+    },
+  }, {
+    path: /^\/v1\/node-health$/, notAllowed: ": node health is read-only",
+    async GET(_req, res) {
       const health = await readNodeHealth(node, { root: "/", storage, pylons: await backend.processes?.() ?? null, sampleMs: healthSampleMs });
       return send(res, 200, JSON.stringify(health), "application/json");
+    },
+  }];
+
+  async function handle(req: IncomingMessage, res: ServerResponse) {
+    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
+      return;
+    }
+    const path = new URL(req.url ?? "/", "http://probe").pathname;
+    const route = (Object.keys(routeAuth) as (keyof typeof routeAuth)[]).find((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+    if (route === undefined) return send(res, 404, `no route ${path}`);
+    if (!await authorized(req, route)) return send(res, 403, "caller is not the tailnet node this route allows");
+
+    for (const entry of routes) {
+      const match = entry.path.exec(path);
+      if (match === null) continue;
+      const handler = req.method === "GET" || req.method === "PUT" || req.method === "POST" ? entry[req.method] : undefined;
+      if (handler !== undefined) return handler(req, res, match);
+      if (entry.notAllowed !== undefined) return send(res, 405, `${req.method} is not allowed on ${path}${entry.notAllowed}`);
+      break;
     }
     if (route === "/v1/pylons") return send(res, 501, `${route} is not implemented in this slice`);
     return send(res, 404, `no route ${req.method} ${path}`);
@@ -715,6 +577,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 function refuse(socket: Duplex, status: number, body: string) {
   if (!socket.destroyed) socket.end(rawResponse(status, { "content-type": "text/plain; charset=utf-8", connection: "close" }, body));
 }
+
+type RouteHandler = (req: IncomingMessage, res: ServerResponse, match: RegExpExecArray) => Promise<unknown> | void;
+/**
+ * A route under routeAuth: its whole path and a handler per method. With `notAllowed`, any other method answers 405
+ * with it after the reason. Without it, another method falls through to the 501 or 404 below.
+ */
+interface ProbeRoute { path: RegExp; GET?: RouteHandler; PUT?: RouteHandler; POST?: RouteHandler; notAllowed?: string }
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, { "content-type": contentType }).end(body);

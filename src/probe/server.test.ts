@@ -149,6 +149,23 @@ test("callers that are not the configured node get 403", async (t) => {
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
 });
 
+test("a method a route does not serve gets that route's answer: 405, the 501 under /v1/pylons, or 404", async (t) => {
+  const { base, callAs } = await setup(t);
+  const answer = async (method: string, path: string) => {
+    const res = await fetch(`${base}${path}`, { method });
+    return [res.status, await res.text()];
+  };
+  assert.deepEqual(await answer("PATCH", "/v1/jobs/x"), [405, "PATCH is not allowed on /v1/jobs/x"]);
+  assert.deepEqual(await answer("POST", "/v1/observe"), [404, "no route POST /v1/observe"]);
+  assert.deepEqual(await answer("GET", "/v1/pylons/x/commands"), [501, "/v1/pylons is not implemented in this slice"]);
+  assert.deepEqual(await answer("PUT", "/v1/manifests/img-000000000000"), [404, "no route PUT /v1/manifests/img-000000000000"]);
+  assert.deepEqual(await answer("GET", "/v1/secrets/NEXUS_CHATGPT_TOKEN"), [405, "GET is not allowed on /v1/secrets/NEXUS_CHATGPT_TOKEN"]);
+  assert.deepEqual(await answer("GET", "/v1/peers"), [405, "GET is not allowed on /v1/peers"]);
+  assert.deepEqual(await answer("POST", "/v1/node-health"), [405, "POST is not allowed on /v1/node-health: node health is read-only"]);
+  callAs(peer);
+  assert.deepEqual(await answer("PUT", "/v1/artifacts/img-000000000000"), [404, "no route PUT /v1/artifacts/img-000000000000"]);
+});
+
 test("a peer's fetch of a checkpoint or of an artifact this node lacks is 404, and lists nothing", async (t) => {
   const { base, fake, callAs } = await setup(t);
   fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-held-1", image, sessions: null });
