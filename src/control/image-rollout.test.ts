@@ -10,7 +10,7 @@ import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from ".
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { testImage, watch } from "../test-kit.ts";
+import { testCapacity, testImage, testObservation, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const testbench = "infra-testbench" as NodeName;
@@ -39,12 +39,9 @@ function fakeNodes(registry: Registry, names: readonly NodeName[]) {
   for (const name of names) registry.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
 
   function observe(node: NodeName) {
-    const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 200, committedDiskGiB: 0 };
+    const capacity = testCapacity({ diskFreeGiB: 200 });
     registry.apply({ record: "node", node, state: "online", capacity });
-    registry.ingested({
-      node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [...stores.get(node)!.keys()], jobs: [], pylons: [],
-      grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
-    }, []);
+    registry.ingested(testObservation(node, { capacity, artifacts: [...stores.get(node)!.keys()] }), []);
   }
 
   const probe = (node: NodeName): Pick<ProbeClient, "submit" | "job" | "manifest"> => ({
