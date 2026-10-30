@@ -19,14 +19,15 @@ export interface ReleaseReport {
   reason: string | null;
   observedAt: number;
 }
+/** What the control plane answers, which has already turned a stale report into a pending one. */
 export interface ReleaseView {
   desired: DesiredRelease | null;
   nodes: ReleaseReport[];
 }
 export interface Drain { commit: string; expiresAt: number; locked?: boolean }
 
-export function releaseOutcome(view: ReleaseView, commit: string, now = Date.now()): "pending" | "healthy" | "failed" | "superseded" {
+export function releaseOutcome(view: ReleaseView, commit: string): "pending" | "healthy" | "failed" | "superseded" {
   if (view.desired?.commit !== commit) return "superseded";
   if (view.nodes.some((r) => r.target === commit && (r.state === "failed" || r.state === "rolled-back"))) return "failed";
-  return view.nodes.length > 0 && view.nodes.every((r) => r.commit === commit && r.state === "healthy" && now - r.observedAt < 90_000) ? "healthy" : "pending";
+  return view.nodes.length > 0 && view.nodes.every((r) => r.commit === commit && r.state === "healthy") ? "healthy" : "pending";
 }

@@ -45,7 +45,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { attachScript, checkoutDir, focusScript } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import { reportStates, tokenDigest } from "../deploy/model.ts";
+import { releaseOutcome, reportStates, tokenDigest, type ReleaseReport } from "../deploy/model.ts";
 import { call as callJson, testImage, until } from "../test-kit.ts";
 import type { ByteStream, CommandResult, InterruptClaudeOutcome, JobId, NodeHealth, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
 
@@ -2135,6 +2135,22 @@ test("deploy defaults off, main resolves, and release records the authenticated 
   assert.equal(r.body.desired.requestedBy, laptop);
   assert.equal(r.body.nodes.length, 2);
   assert.equal((await on.call("PUT", "/v1/release", { commit: "--evil" })).status, 400);
+});
+
+test("the release view shows a deployer report 90 s old as pending, so a wait on that release is pending", async (t) => {
+  const s = await setup(t, { deployment });
+  assert.equal((await s.call("PUT", "/v1/release", { commit: "main" })).status, 200);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  for (const role of ["control", "probe"]) {
+    const report = { role, commit: deployCommit, target: deployCommit, state: "healthy", reason: null };
+    assert.equal((await s.call("POST", "/v1/deployer/report", report, reporterHeaders)).status, 200);
+  }
+  s.callAs(laptop);
+  assert.equal(releaseOutcome((await s.call("GET", "/v1/release")).body, deployCommit), "healthy");
+  for (const report of s.registry.releaseReports()) s.registry.reportRelease({ ...report, observedAt: Date.now() - 90_000 });
+  const view = (await s.call("GET", "/v1/release")).body;
+  assert.deepEqual(view.nodes.map((r: ReleaseReport) => [r.role, r.state, r.reason]), [["control", "pending", "deployer report is stale"], ["probe", "pending", "deployer report is stale"]]);
+  assert.equal(releaseOutcome(view, deployCommit), "pending");
 });
 
 test("a deployer report may carry every report state", () => {

@@ -17,13 +17,13 @@ test("worker config bounds drain and health and rejects credential-bearing endpo
   for (const patch of [{ controlUrl: "http://user:pass@control/" }, { healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }, { controlNodeId: "control" }, { controlNodeId: ["nControl"] }]) assert.throws(() => parseWorkerConfig({ ...config, ...patch }));
 });
 
-test("wait outcome requires fresh health from every role and detects rollback and supersession", () => {
+test("wait outcome trusts the view's health from every role, whatever the caller's clock, and detects rollback and supersession", () => {
   const desired = { commit, requestedBy: "nMac", requestedAt: 0 };
-  const report = { node: "node", role: "control" as const, commit, target: commit, state: "healthy" as const, reason: null, observedAt: 100 };
-  assert.equal(releaseOutcome({ desired, nodes: [report] }, commit, 101), "healthy");
-  assert.equal(releaseOutcome({ desired, nodes: [report] }, commit, 100_000), "pending");
-  assert.equal(releaseOutcome({ desired, nodes: [{ ...report, state: "rolled-back" }] }, commit, 101), "failed");
-  assert.equal(releaseOutcome({ desired: null, nodes: [report] }, commit, 101), "superseded");
+  const report = { node: "node", role: "control" as const, commit, target: commit, state: "healthy" as const, reason: null, observedAt: Date.now() - 600_000 };
+  assert.equal(releaseOutcome({ desired, nodes: [report] }, commit), "healthy", "a clock ahead of the control plane's does not make its view stale");
+  assert.equal(releaseOutcome({ desired, nodes: [report, { ...report, role: "probe", state: "pending", reason: "deployer report is stale" }] }, commit), "pending");
+  assert.equal(releaseOutcome({ desired, nodes: [{ ...report, state: "rolled-back" }] }, commit), "failed");
+  assert.equal(releaseOutcome({ desired: null, nodes: [report] }, commit), "superseded");
 });
 
 test("the bootstrap that install-deployer.sh copies loads without the repo's node_modules", async (t) => {
@@ -229,8 +229,8 @@ for (const readiness of ["stale", "unhealthy", "unreachable"] as const) test(`pr
       return {
         desired: { commit, requestedBy: "nMac", requestedAt: 0 },
         nodes: [{ node: "control", role: "control", commit, target: commit, reason: null,
-          state: reads === 2 && readiness === "unhealthy" ? "failed" : "healthy",
-          observedAt: Date.now() - (reads === 2 && readiness === "stale" ? 90_001 : 0) }],
+          state: reads === 2 ? { stale: "pending", unhealthy: "failed", unreachable: "healthy" }[readiness] : "healthy",
+          observedAt: Date.now() }],
       };
     }
     if (path === "report") { reports.push(body.state); return { ok: true }; }
@@ -289,7 +289,8 @@ async function bothRoles(t: TestContext, linked: string) {
   const api = async (path: string, body?: any) => {
     if (path === "release") {
       control.reads++;
-      return { desired: control.desired, nodes: [...reports.values()].map((r) => ({ node: "node", ...r })) };
+      return { desired: control.desired, nodes: [...reports.values()].map((r) => ({ node: "node", ...r,
+        ...Date.now() - r.observedAt >= 90_000 ? { state: "pending", reason: "deployer report is stale" } : {} })) };
     }
     if (path === "drain") return { idle: true, expiresAt: Date.now() + 120_000 };
     if (path === "report") { reports.set(body.role, { ...body, observedAt: Date.now() }); posted.push(`${body.role} ${body.state}`); return { ok: true }; }
