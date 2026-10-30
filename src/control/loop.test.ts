@@ -8,7 +8,7 @@ import { nodePylons } from "./placement.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
-import { envelope, ingest as realIngest } from "../reconcile.ts";
+import { archivedDiskMs, envelope, ingest as realIngest } from "../reconcile.ts";
 import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type {
@@ -21,6 +21,7 @@ import { chatgptTokenGrant } from "../secret-grants.ts";
 import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ReportedEvent } from "../events.ts";
+import { transcriptStart } from "../claude-transcript.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, until, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
@@ -312,6 +313,81 @@ test("a thread's pylon follows its thread: spawn, pause on archive, resume on ac
   const resume = fake.submitted[2]!;
   assert.ok(resume.kind === "spawn" && resume.boot.source.kind === "resume");
   assert.equal(resume.boot.source.checkpoint, `ckpt-${thread.id}-1`);
+});
+
+/** A registry whose clock runs `shift.ms` off the loop's, so a test can stamp an archive in the past. */
+function shiftedRegistry(path = tempDb()) {
+  const shift = { ms: 0 };
+  return { registry: openRegistry(path, () => Date.now() + shift.ms), shift };
+}
+
+async function archivedAgo(registry: Registry, shift: { ms: number }, thread: Thread, ms: number) {
+  shift.ms = -ms;
+  registry.setThreadStatus(thread.id, "archived");
+  shift.ms = 0;
+}
+
+test("a pylon archived 23h59m ago only pauses, and no pass deletes it", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+
+  await archivedAgo(registry, shift, thread, archivedDiskMs - 60_000);
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
+  for (let i = 0; i < 5; i++) await settled(fake, loop);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"]);
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped");
+});
+
+test("a pylon archived 24 hours ago is deleted, its thread and conversation kept, and an unarchive boots it fresh", async (t) => {
+  const path = tempDb();
+  const { registry, shift } = shiftedRegistry(path);
+  seedRegistry(registry, { nodes: [node] });
+  const thread = addThread(registry, { node, boot: { image }, thread: { conversationId: "conv-1" as Thread["conversationId"] } });
+  const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
+  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
+  const fake = fakeNode({ autoFinish: true });
+  const first = startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+
+  await archivedAgo(registry, shift, thread, archivedDiskMs);
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  await first.close();
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete"]);
+  const kept = registry.thread(thread.id)!;
+  assert.deepEqual([kept.status, kept.conversationId], ["archived", "conv-1"]);
+  assert.deepEqual(registry.claudeEntries(thread.id), entries);
+  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, transcriptStart, "the session's new transcript reads from its start");
+  registry.close();
+
+  const after = openRegistry(path);
+  const loop = run(t, after, fake.probe);
+  for (let i = 0; i < 3; i++) await settled(fake, loop);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete"], "a restarted control plane sends nothing more");
+
+  after.setThreadStatus(thread.id, "active");
+  after.recordActivity(thread.id, { human: Date.now() });
+  await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete", "spawn fresh"]);
+  assert.equal(after.thread(thread.id)?.status, "active");
+});
+
+test("a pylon unarchived 23h59m after its archive is never deleted", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+
+  await archivedAgo(registry, shift, thread, archivedDiskMs - 60_000);
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  for (let i = 0; i < 3; i++) await settled(fake, loop);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);
 });
 
 test("each pass sends the template builds recorded for its node, before its pylons", async (t) => {
@@ -765,6 +841,25 @@ test("an unreachable node gets no jobs, is recorded offline after the grace peri
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.equal(registry.node(node)?.state, "online");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
+});
+
+test("an unreachable node gets no delete for a pylon archived 24 hours ago, and gets it once it returns", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  await archivedAgo(registry, shift, thread, archivedDiskMs);
+  const fake = fakeNode({ autoFinish: true });
+  fake.pylons.set(thread.pylonId, stoppedPylon(thread.pylonId, { checkpoint: `ckpt-${thread.id}-1` }));
+  fake.disconnect();
+  run(t, registry, fake.probe, { offlineAfterMs: 30 });
+
+  registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
+  await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
+  assert.equal(fake.submitted.length, 0);
+
+  fake.reconnect();
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId));
+  assert.deepEqual(kinds(fake.submitted), ["delete"]);
+  assert.equal(registry.thread(thread.id)?.status, "archived");
 });
 
 test("with the real ingest, a pylon's sessions reach the registry and a working one keeps the pylon up", async (t) => {

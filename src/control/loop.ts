@@ -31,7 +31,7 @@ import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "reportSession" | "savePylon" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
+type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "reportSession" | "restartTranscript" | "savePylon" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -196,7 +196,11 @@ export function startLoop(options: LoopOptions): Loop {
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
-        if (pylon.desired === "deleted" && step.kind === "done") registry.releasePreviews(pylon.pylonId);
+        if (pylon.desired === "deleted" && step.kind === "done") {
+          registry.releasePreviews(pylon.pylonId);
+          // The disk took the Claude transcript, so the session an unarchive brings back writes a new one under the same ID.
+          if (thread.status === "archived") registry.restartTranscript(thread.id);
+        }
       } catch (err) {
         log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);
       }

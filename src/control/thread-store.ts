@@ -470,6 +470,14 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         return true;
       });
     },
+    /**
+     * Reads the thread's transcript from the start again, after a deleted disk took the file, and keeps the stored
+     * entries, so the session's new file appends after them rather than reading as a replaced one.
+     */
+    restartTranscript(thread: ThreadId) {
+      sql("UPDATE claude_transcripts SET byte_offset = ?, skipping = ?, before_hash = ? WHERE thread = ? AND byte_offset <> 0")
+        .run(transcriptStart.offset, transcriptStart.skipping ? 1 : 0, transcriptStart.before, thread);
+    },
     claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
       const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
       return row === undefined ? undefined : row.state === "sent" ? { state: "sent", result: json<ClaudeSent>(row.result) } : { state: "sending" };

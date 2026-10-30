@@ -1183,6 +1183,24 @@ test("a Claude worker's transcript survives reopening, keeps its newest entries,
   assert.deepEqual(second.claudeTranscript(threadId), { session: "s2", cursor: cursorAt(0), dropped: 0, readAt: 400 });
 });
 
+test("a transcript restarted after its disk went keeps its entries, and the new file's first read appends after them", (t) => {
+  const registry = seeded(t, tempDb());
+  const read = (from: number, entries: ClaudeEntry[], to: number, reset = false) => ({ session: "s1", from: cursorAt(from), entries, cursor: cursorAt(to), reset, readAt: to });
+  assert.equal(registry.appendClaudeRead(threadId, read(0, [reply(0), reply(1)], 100)), true);
+  registry.restartTranscript(threadId);
+  assert.deepEqual(registry.claudeTranscript(threadId), { session: "s1", cursor: transcriptStart, dropped: 0, readAt: 100 });
+  registry.restartTranscript(threadId);
+  assert.deepEqual(registry.claudeTranscript(threadId), { session: "s1", cursor: transcriptStart, dropped: 0, readAt: 100 }, "a second restart changes nothing");
+  assert.deepEqual(registry.claudeEntries(threadId), [reply(0), reply(1)]);
+
+  assert.equal(registry.appendClaudeRead(threadId, read(0, [reply(2)], 50)), true);
+  assert.deepEqual(registry.claudeEntries(threadId), [reply(0), reply(1), reply(2)]);
+  assert.deepEqual(registry.claudeEntries(threadId, 2), [reply(2)], "the numbering goes on after the kept entries");
+
+  assert.equal(registry.appendClaudeRead(threadId, read(50, [reply(3)], 10, true)), true);
+  assert.deepEqual(registry.claudeEntries(threadId), [reply(3)], "a later replaced file still starts the transcript over");
+});
+
 test("a thread records when it was archived, keeps the first time across archives, and forgets it on any other status", (t) => {
   let now = 5_000;
   const registry = seeded(t, tempDb(), () => now);
