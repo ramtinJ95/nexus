@@ -18,7 +18,9 @@ import { settled, type Inspection } from "./pylon-vm/contracts.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
 import { asUser, imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import { chatgptTokenGrant, type BootInputs } from "./project.ts";
-import type { BrokenCause, PylonId } from "./protocol.ts";
+import { connectProbe, type BrokenCause, type NodeName, type ProbeEvent, type PylonId, type TailnetNodeId } from "./protocol.ts";
+import { startProbe } from "./probe/server.ts";
+import { nodeSecrets } from "./probe/config.ts";
 import { herdrOk, herdrPane, herdrSnapshot } from "./fake-guest.ts";
 import type { ImageId, TemplateBuildInputs, TemplateId, TemplateManifest } from "./images.ts";
 import type { ProjectId } from "./project.ts";
@@ -102,10 +104,10 @@ const field = (p: BackendPylon | undefined, key: "cause" | "logTail" | "sessions
 
 /**
  * A controller on the instance's control socket, as daemon.ts listens, answering each action from `answer`.
- * It always answers inspect with the instance in `state.current`.
+ * It always answers inspect with the instance in `state.current`, booted at `state.bootedAt`.
  */
 async function fakeController(dir: string, pylonId: string, answer: (action: Record<string, unknown>) => unknown = () => assert.fail("unexpected action")) {
-  const state = { current: "running" };
+  const state: { current: string; bootedAt?: string } = { current: "running", bootedAt: "2026-10-22T00:00:00Z" };
   const actions: Record<string, unknown>[] = [];
   const server = createServer(async (req, res) => {
     let body = "";
@@ -113,7 +115,7 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
     const action = JSON.parse(body) as Record<string, unknown>;
     try {
       const result = action.action === "inspect"
-        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 }, bootedAt: "2026-10-22T00:00:00Z" } }
+        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 }, ...state.bootedAt === undefined ? {} : { bootedAt: state.bootedAt } } }
         : (actions.push(action), await answer(action));
       res.end(JSON.stringify({ ok: true, result }));
     } catch (err) {
@@ -363,6 +365,26 @@ test("a pylon whose controller has yet to publish its PID is booting while its l
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["booting"]);
   await rm(join(dir, "launch.lock"), { recursive: true });
   assert.deepEqual((await backend.list()).map((p) => p.vm), ["broken"]);
+});
+
+test("a controller that reports running with no boot time is one broken pylon, and the probe's snapshot still reports the others", async (t) => {
+  const { backend, instances } = await backendWith();
+  await fakeController(await leftInstance(instances, "pylon-healthy", "running"), "pylon-healthy");
+  delete (await fakeController(await leftInstance(instances, "pylon-unbooted", "running"), "pylon-unbooted")).state.bootedAt;
+  assert.deepEqual((await backend.list()).map((p) => [p.pylonId, p.vm, field(p, "cause")]), [["pylon-healthy", "running", undefined], ["pylon-unbooted", "broken", "controller"]]);
+
+  const controlPlane = "nCONTROL" as TailnetNodeId;
+  const probe = await startProbe({
+    node: "unbooted-node" as NodeName, host: "127.0.0.1", port: 0, auth: { controlPlane, peers: [] }, whois: async () => controlPlane,
+    backend, secrets: nodeSecrets({ value: () => undefined, names: () => [] }), log: () => {},
+  });
+  t.after(() => probe.close());
+  const client = connectProbe("unbooted-node" as NodeName, "127.0.0.1", "nPROBE" as TailnetNodeId, { port: probe.port, whois: async () => "nPROBE" as TailnetNodeId });
+  const reads = new AbortController();
+  t.after(() => reads.abort());
+  const event: ProbeEvent | undefined = (await client.observe(reads.signal)[Symbol.asyncIterator]().next()).value;
+  assert.ok(event?.type === "snapshot");
+  assert.deepEqual(event.observation.pylons.map((p) => [p.pylonId, p.phase]), [["pylon-healthy", "running"], ["pylon-unbooted", "broken"]]);
 });
 
 test("a pylon holds its CPUs and memory while its VM is up, from launch on, and its disk until it is deleted", async () => {
