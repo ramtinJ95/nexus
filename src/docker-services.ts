@@ -13,6 +13,7 @@
 import type { PreviewOrigin } from "./backend.ts";
 import { docker, dockerExec } from "./docker-cli.ts";
 import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "./project.ts";
+import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "./preview-links.ts";
 import type { ServiceFact } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
 
@@ -156,9 +157,13 @@ export function dockerServices() {
     return Promise.all(names.map(async (name): Promise<ServiceFact> => {
       const decl = k.declared[name]!;
       const up = await running(container, name);
-      const state = up && await healthy(container, k, name) ? "ready" : k.failures.has(name) ? "failed" : up ? "starting" : "stopped";
+      const state = serviceState({ running: up, healthy: up && await healthy(container, k, name), failed: k.failures.has(name), watched: false });
       return { name, state, port: decl.port, declared: true, wantsPreview: wantsPreview(decl) };
     }));
+  }
+
+  function previewServices(k: Known): PreviewService[] {
+    return Object.entries(k.declared).map(([name, decl]) => ({ name, port: decl.port, previewed: wantsPreview(decl), declared: true }));
   }
 
   function selection(k: Known, name: string | undefined): string[] {
@@ -227,13 +232,13 @@ export function dockerServices() {
       return [...await facts(container, k, names), ...linkedFacts];
     },
 
-    /** As the pylon VM's attach: a port a declared service owns is previewed under that service. */
+    /** The pylon VM's rules, in src/preview-links.ts, then only a port Docker published. */
     async link(container: string, port: number): Promise<ServiceName> {
       const k = state(container);
-      const owner = Object.entries(k.declared).find(([, decl]) => decl.port === port);
-      if (owner !== undefined) {
-        if (!wantsPreview(owner[1])) throw new Error(`Port ${port} belongs to service ${owner[0]}, which has no preview. Declare one in ${servicesFile}`);
-        return owner[0];
+      const target = linkTarget(port, previewServices(k), servicesFile);
+      if (target !== "link") {
+        if ("refused" in target) throw new Error(target.refused);
+        return target.service;
       }
       if (!k.hostPorts.has(port)) throw new Error(`the Docker backend links only the ports docker run published, ${publishedPorts.first} to ${publishedPorts.last}, and ${port} is not one`);
       if (!k.linked.has(port)) {
@@ -243,14 +248,10 @@ export function dockerServices() {
       return linkedName(port);
     },
 
-    /** As the pylon VM's detach: a port that is not linked is left as it is, and a declared service's preview or name is refused, with why. */
+    /** A port that is not linked follows the pylon VM's rules, in src/preview-links.ts. */
     async unlink(container: string, port: number): Promise<string | null> {
       const k = state(container);
-      if (!k.linked.has(port)) {
-        const owner = Object.entries(k.declared).find(([, decl]) => decl.port === port && wantsPreview(decl));
-        if (owner !== undefined) return `Port ${port} is the preview of service ${owner[0]}, not a linked port. Remove the preview from ${servicesFile} to unpublish it`;
-        return k.declared[linkedName(port)] === undefined ? null : `Service ${linkedName(port)} is not a linked port, so port ${port} has no linked preview to unpublish. Rename the service`;
-      }
+      if (!k.linked.has(port)) return unlinkRefusal(port, previewServices(k), servicesFile);
       // printf with no ports writes one empty line, which `linked` skips.
       await checked(container, `mkdir -p ${root} && printf '%s\\n' "$@" > ${linkedFile}`, [...k.linked].filter((p) => p !== port).map(String));
       k.linked.delete(port);
