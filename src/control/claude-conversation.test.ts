@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { queryObjects } from "node:v8";
 import { claudeConversations } from "./claude-conversation.ts";
 import { openRegistry, type Registry, type Thread } from "./registry.ts";
-import { addThread, seedRegistry } from "./test-kit.ts";
+import { addThread, observeNode, seedRegistry } from "./test-kit.ts";
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
 import { claudeHook } from "../../images/pylon/nexus-contract.ts";
@@ -15,7 +15,7 @@ import type { LiveHash, NodeName } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { ImageId } from "../images.ts";
-import { until } from "../test-kit.ts";
+import { runningPylon, until } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";
@@ -32,15 +32,8 @@ function openOnline(): Registry {
 function claudeThread(registry: Registry): Thread {
   const { id, pylonId } = addThread(registry, { node, boot: { image }, claudePrompt: "hello" });
   registry.setClaudeWorker(id, "hello", "started", undefined, session);
-  const pylons = [...registry.node(node)?.observation?.pylons ?? [], {
-    pylonId, phase: "running" as const, liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null },
-    services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-  }];
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-  registry.ingested(
-    { node, observedAt: new Date().toISOString(), probeBootId: "boot-1", events: [], capacity, artifacts: [image], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] },
-    [{ record: "node", node, state: "online", capacity }],
-  );
+  const pylons = [...registry.node(node)?.observation?.pylons ?? [], runningPylon(pylonId, { liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null } })];
+  observeNode(registry, { node, probeBootId: "boot-1", artifacts: [image], pylons });
   return registry.thread(id)!;
 }
 
