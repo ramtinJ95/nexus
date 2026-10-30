@@ -41,7 +41,7 @@ import type { ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { checkoutDir } from "../sessions.ts";
+import { checkoutDir } from "../session-harness.ts";
 import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-kit.ts";

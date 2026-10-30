@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Guest } from "./backend.ts";
 import { parseJson } from "./parse.ts";
 import type { GitFacts } from "./protocol/observations.ts";
-import { checkoutDir } from "./sessions.ts";
+import { checkoutDir } from "./session-harness.ts";
 
 /** How long the probe reuses a pylon's git read, so a snapshot holds the branches pushed that long before it was taken. */
 export const gitPollMs = 60_000;

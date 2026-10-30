@@ -23,9 +23,6 @@ import type { CommandResult, InterruptClaudeOutcome } from "./protocol/commands.
 import { nonEmpty, parse, parseJson } from "./parse.ts";
 import { callTimeoutMs, checkoutDir, claudeCode, claudeSessionId, harnesses, home, sessionHarnessSchema, type Agent, type SessionHarness } from "./session-harness.ts";
 
-// Temporary: the harness table moved to session-harness.ts, and E1 deletes this re-export.
-export { checkoutDir, claudeSessionId, claudeTextProblem, harnesses, harnessNamed, sessionHarnessSchema, type SessionHarness } from "./session-harness.ts";
-
 export const herdrSession = "nexus";
 export const sessionsFile = "/home/user/.nexus/sessions.json";
 

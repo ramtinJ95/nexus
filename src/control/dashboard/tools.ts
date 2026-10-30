@@ -1,5 +1,5 @@
 /** Renders an agent's tool calls: each tool's look and diff, a run of steps, and screenshots. */
-import { checkoutDir } from "../../sessions.ts";
+import { checkoutDir } from "../../session-harness.ts";
 import { clock } from "./elapsed.ts";
 import { Html, html, icon, grows, type Part } from "./view.ts";
 import { prose } from "./markdown.ts";

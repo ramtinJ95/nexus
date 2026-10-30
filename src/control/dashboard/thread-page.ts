@@ -4,7 +4,7 @@
  */
 import { desiredPhase } from "../../reconcile.ts";
 import { linkedPort } from "../../services-file.ts";
-import { harnessNamed, type SessionHarness } from "../../sessions.ts";
+import { harnessNamed, type SessionHarness } from "../../session-harness.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { NodeRecord, Preview, Thread, ThreadAgent, ThreadId } from "../registry.ts";
 import { promptSenders } from "../inbox.ts";

@@ -15,7 +15,7 @@ import type { CommandResult } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { HarnessHost } from "../harness/host.ts";
-import { claudeTextProblem } from "../sessions.ts";
+import { claudeTextProblem } from "../session-harness.ts";
 import { harnessView } from "./agent-conversation.ts";
 import type { ClaudeConversations } from "./claude-conversation.ts";
 import { claudeFrames, viewFrames, type Frames, type Watch } from "./conversation-view.ts";
