@@ -1,0 +1,20 @@
+$ nexus show th-b8b367661074
+th-b8b367661074  Ask about a size
+project: sizes
+Claude worker: started, model claude-sonnet-5-5
+attention: decision
+status: active, agent working
+pylon: pylon-th-b8b367661074 on node-a, running, observed 56s ago
+attach: nexus attach th-b8b367661074
+size: 1 CPUs, 3 GiB memory, 5 GiB disk
+placement: node-a, the project's default node
+setup: fresh boot runs .nexus/setup, because the project is scratch, so it has no template
+session: claude-code "Ask about a size" in pane w1:p1, unknown
+port: 7470
+port: 7480
+port: 7489
+port: 37579
+PR watch: off (no control-plane GitHub token configured)
+question ask-toolu_01WcUjvQBz7LuhmG3ksQEprV: Size: Which size?
+  needs you
+[exit 0]

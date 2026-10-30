@@ -1,0 +1,1 @@
+branch: 44cfaa4 perf(control): ask the pylon which dialogs wait only after a session event or while an ask is open

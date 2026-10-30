@@ -1,0 +1,3 @@
+$ nexus project add sizes --scratch --node node-a --cpus 1 --memory 3 --disk 5
+Added scratch project sizes on node-a
+[exit 0]
