@@ -4,6 +4,8 @@ import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./gi
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
 
+/** How often the watch reads GitHub. */
+export const prWatchMs = 120_000;
 export const prWatchPrefix = "[Nexus PR watch — automated, not a message from the person]";
 export interface PrLink {
   pr: PullRequest;

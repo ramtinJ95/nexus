@@ -31,6 +31,7 @@ import { heldBy, landingHolds, legacyHoldCode, reservedNames, unwaived, waivable
 import { checkCaller, verifyCaller, type CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
+import { prWatchMs } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
 import { startedByNexus } from "./usage.ts";
@@ -442,6 +443,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   /** Whether the agent replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
   const answeredSince = (state: AgentState) => state.ended !== null || state.replied;
+  /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
+  let reads = new Map<string, Promise<PrSnapshot>>();
+  const prKey = (r: Pick<Review, "pr">) => `${r.pr.repo}:${r.pr.number}`;
+  const read = (r: Pick<Review, "pr">) => {
+    if (!reads.has(prKey(r))) reads.set(prKey(r), github.poll(r.pr.repo, r.pr.number));
+    return reads.get(prKey(r))!;
+  };
+  /** When the loop last read each capped held review's PR itself, in place of the PR watch. A restart reads it again. */
+  const cappedReads = new Map<string, number>();
   const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
     if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
     if (r.phase.kind === "verifying" && r.phase.thread !== null) live.discard(r.phase.thread);
@@ -459,7 +469,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
     state === "closed" || (state === "merged" && r.land === null) ? end(r, { kind: state }) : null;
   /** The PR watch reads GitHub only every two minutes, so the loop asks GitHub itself before it acts on an open PR. */
-  const endedOnGitHub = async (r: Review) => outside(r, (await github.poll(r.pr.repo, r.pr.number)).pr.state);
+  const endedOnGitHub = async (r: Review) => outside(r, (await read(r)).pr.state);
   /** The rounds ran out without an approval the checks passed, so the PR gets the label that asks for the person. */
   const ranOut = (r: Review, ...items: (Hold | string)[]): Review => end(r, { ...personPhase(...items), label: { state: "adding" } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
@@ -558,7 +568,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (unanswered.length) return waitOn(r, phase, state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
       const withAnswers = withRound(r, { answers: found.answers });
       const fixed = found.answers.some((a) => a.action === "fixed");
-      const snapshot = await github.poll(r.pr.repo, r.pr.number);
+      const snapshot = await read(r);
       if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
@@ -635,7 +645,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
     async merging(r, phase, builder) {
       const head = r.rounds.at(-1)!.head;
-      const snapshot = await github.poll(r.pr.repo, r.pr.number);
+      // The policy is checked again with what GitHub says now, before every attempt, so the step that merges does not
+      // act on the read of the step that authorized it.
+      reads.delete(prKey(r));
+      const snapshot = await read(r);
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
       // Landings deploy one at a time, so each deploy's rollback target is a release that was healthy. One that has
       // authorized its merge holds the turn, which every other waits for.
@@ -668,9 +681,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (left.length) return toPerson(r, ...all);
         if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
+        reads.delete(prKey(r));
         if (merged.kind !== "merged") {
           // GitHub may learn of a conflict only when asked to merge.
-          if (merged.kind === "refused" && (await github.poll(r.pr.repo, r.pr.number)).pr.conflict === true) return rebase(r, snapshot.detail.base);
+          if (merged.kind === "refused" && (await read(r)).pr.conflict === true) return rebase(r, snapshot.detail.base);
           return toPerson(r, merged.kind === "denied"
             ? `The control plane's GitHub token cannot merge (${merged.message}). Merging needs a token with write access to ${r.pr.repo}'s contents and pull requests, which only the person can grant.`
             : `GitHub refused the merge: ${merged.message}`);
@@ -750,14 +764,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
     if (held || r.phase.kind === "approved") {
       const watch = registry.prWatch(r.builder);
-      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review. One
-      // that stopped at approval is left to the landing, which reads GitHub before it merges.
+      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review, as
+      // often as the watch would. One that stopped at approval is left to the landing, which reads GitHub before it merges.
       const capped = (watch?.commentWakes ?? 0) >= 10;
-      const read = capped && held ? await github.poll(r.pr.repo, r.pr.number) : null;
-      const pr = read !== null ? { ...read.pr, head: read.detail.head } : capped ? undefined : watchedPr(r);
+      const due = capped && held && now() - (cappedReads.get(r.id) ?? -Infinity) >= prWatchMs;
+      const fresh = due ? await read(r) : null;
+      if (due) cappedReads.set(r.id, now());
+      const pr = fresh !== null ? { ...fresh.pr, head: fresh.detail.head } : capped ? undefined : watchedPr(r);
       if (held && pr?.state === "closed") return end(r, { kind: "closed" });
       // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
-      const moved = pushedHead(r, pr) === null ? null : pushedAfter(r, read ?? await github.poll(r.pr.repo, r.pr.number));
+      const moved = pushedHead(r, pr) === null ? null : pushedAfter(r, fresh ?? await read(r));
       if (moved !== null) return moved;
     }
     // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.
@@ -784,9 +800,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
     if (r.outbox !== null) {
+      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
       const gone = live ? await endedOnGitHub(r) : null;
       if (gone !== null) return gone;
-      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
       // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
       if (!registry.isCurrentReview(r)) return r;
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
@@ -808,6 +824,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
 
   async function pass() {
+    reads = new Map();
     const reviews = registry.reviews();
     // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
     // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.

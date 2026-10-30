@@ -28,7 +28,7 @@ import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
 import { digestPattern, tsNet } from "../deploy/model.ts";
-import { prWatcher } from "./pr-watch.ts";
+import { prWatcher, prWatchMs } from "./pr-watch.ts";
 import { threadQueue } from "./queue.ts";
 import { builderNudger } from "./nudge.ts";
 import { judgmentPass } from "./judgment.ts";
@@ -216,7 +216,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     log: (message) => console.error(message),
   });
   const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto });
-  const watchTimer = setInterval(() => { void watch.poll(); }, 120_000);
+  const watchTimer = setInterval(() => { void watch.poll(); }, prWatchMs);
   void watch.poll();
   const reviewTimer = setInterval(() => { void reviews?.poll(); }, 15_000);
   void reviews?.poll();
