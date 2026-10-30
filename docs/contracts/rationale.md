@@ -15,8 +15,13 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | [`src/reconcile.ts`](../../src/reconcile.ts) | The desired phase, the planner, the derived actual state, and record writes from observations | Control plane, pure |
 | [`src/probe/run.ts`](../../src/probe/run.ts) | `runJob`, `runCommand` and `commandPolicies` | Probe |
 | [`src/backend.ts`](../../src/backend.ts) | `VmBackend`, `Guest`, `ArtifactStore`, and the pi-sandbox fork's mapping and changes | Probe |
-| [`src/project.ts`](../../src/project.ts) | The `.amp/services.yaml` schema, `Project`, `BootInputs` and `LiveSpec`, the overlay, and the in-pylon API | Both |
-| [`src/images.ts`](../../src/images.ts) | The image recipe and build, template keys, template choice, and garbage | Both |
+| [`src/services-file.ts`](../../src/services-file.ts) | The `.nexus/services.yaml` schema and parser, the port rules, and `withPublicUrls` | Both. The pylon-vm controller loads it with type stripping |
+| [`src/spawn.ts`](../../src/spawn.ts) | What a spawn carries: `BootInputs`, `LiveSpec` and its hash, `RepoInit`, `GitIdentity` and `PylonResources` | Both |
+| [`src/secret-grants.ts`](../../src/secret-grants.ts) | `SecretGrant`, its name and host patterns, and the GitHub and ChatGPT grants | Both |
+| [`src/shell.ts`](../../src/shell.ts) | `shellQuote` and `installFileCommand` | Both |
+| [`src/project.ts`](../../src/project.ts) | `Project`, its effective allowlist, and the overlay with its PYLON.md guide | Control plane. No node code imports it |
+| [`src/images.ts`](../../src/images.ts) | The image recipe and ID, template keys and build inputs, and the artifact manifests | Both |
+| [`src/control/templates.ts`](../../src/control/templates.ts) | Template records, template choice, setup hashes, and garbage | Control plane |
 
 A reconcile tick traces through three files. `src/reconcile.ts` plans, `src/protocol/` carries, and `src/probe/run.ts` executes against `src/backend.ts`'s `VmBackend`.
 

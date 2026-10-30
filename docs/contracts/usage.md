@@ -1,6 +1,6 @@
 # Nexus contracts: usage
 
-Status: agreed on 2026-10-22. A first slice is implemented: the planner, the probe's job and observe routes, and the Docker test backend. The types are in [`src/protocol/`](../../src/protocol), [`src/reconcile.ts`](../../src/reconcile.ts), [`src/backend.ts`](../../src/backend.ts), [`src/project.ts`](../../src/project.ts) and [`src/images.ts`](../../src/images.ts). The reasons are in [rationale.md](rationale.md).
+Status: agreed on 2026-10-22. A first slice is implemented: the planner, the probe's job and observe routes, and the Docker test backend. The types are in [`src/protocol/`](../../src/protocol), [`src/reconcile.ts`](../../src/reconcile.ts), [`src/backend.ts`](../../src/backend.ts), [`src/services-file.ts`](../../src/services-file.ts), [`src/spawn.ts`](../../src/spawn.ts), [`src/project.ts`](../../src/project.ts), [`src/images.ts`](../../src/images.ts) and [`src/control/templates.ts`](../../src/control/templates.ts). The reasons are in [rationale.md](rationale.md).
 
 The control plane decides every lifecycle step. A probe runs explicit jobs and reports what it sees. A probe never dials the control plane, never decides to wake, pause or move a pylon, and writes no durable Nexus record. Every record in SQLite has one writer, the control plane.
 
@@ -88,7 +88,7 @@ services:
       API_URL: ${services.api.publicURL}
 ```
 
-The schema starts from pi-sandbox's `services` schema, and `parseServicesFile` in `src/project.ts` is its one parser: a real pylon, the Docker backend and the in-pylon API all accept exactly the same files. The file holds only `services`. A `cwd` is a relative path inside the repo. `PUBLIC_URL` is the `https://` tailnet address of the preview. `PORT`, `PUBLIC_URL` and every `NEXUS_*` name are managed, and a service may not set them. A service runs in a login shell, which sets Nexus's own `NEXUS_*` names again over any value the file gives. A fixed `port` may not be one of Nexus's own, 22 for sshd or 700 to 799 for the preview relay, and a file that fixes one is refused whole, as one with a duplicate fixed port is. A pylon that refuses the file starts none of its services, and reports why as a `services` startup failure.
+The schema starts from pi-sandbox's `services` schema, and `parseServicesFile` in `src/services-file.ts` is its one parser: a real pylon, the Docker backend and the in-pylon API all accept exactly the same files. The file holds only `services`. A `cwd` is a relative path inside the repo. `PUBLIC_URL` is the `https://` tailnet address of the preview. `PORT`, `PUBLIC_URL` and every `NEXUS_*` name are managed, and a service may not set them. A service runs in a login shell, which sets Nexus's own `NEXUS_*` names again over any value the file gives. A fixed `port` may not be one of Nexus's own, 22 for sshd or 700 to 799 for the preview relay, and a file that fixes one is refused whole, as one with a duplicate fixed port is. A pylon that refuses the file starts none of its services, and reports why as a `services` startup failure.
 
 ### In Nexus
 
