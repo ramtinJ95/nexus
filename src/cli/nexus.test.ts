@@ -2339,3 +2339,78 @@ test("a watch or events --follow whose parent is killed exits within about a sec
   s.registry.appendEvent("release.changed", null, { state: "pending" });
   assert.ok(await orphanLife(t, s, ["events", "--follow"], "release.changed") < 10_000, "events --follow exited");
 });
+
+test("deploy --wait polls over one connection through the proxy, and its PUT opens its own", async (t) => {
+  const s = await setup(t);
+  const asked = s.requests();
+  const waiting = s.nexus(["deploy", "main", "--wait", "--json"]);
+  await until("the wait polled a few times", () => s.requests() >= asked + 4);
+  for (const role of ["control", "probe"] as const) s.registry.reportRelease({ node, role, commit: "a".repeat(40), target: "a".repeat(40), state: "healthy", reason: null, observedAt: Date.now() });
+  const done = await waiting;
+  assert.equal(done.code, 0, done.stderr);
+  assert.ok(s.requests() >= asked + 5);
+  assert.equal(s.proxy.connects.length, 2, "one CONNECT for the PUT, and one the polls share");
+});
+
+/**
+ * A control plane whose pylon runs from the second read of its checkout, which `files` waits for without riding
+ * through a lost connection. `close` says what it does to a kept connection: hang up on it while idle, or on its
+ * next request without an answer. Answers the requests each connection carried.
+ */
+async function closingApi(t: TestContext, close: "idle" | "request") {
+  const carried: string[][] = [];
+  let reads = 0;
+  const of = new WeakMap<Socket, string[]>();
+  const idle = new WeakMap<Socket, NodeJS.Timeout>();
+  const server = createHttpServer((req, res) => {
+    const requests = of.get(req.socket)!;
+    if (close === "request" && requests.length > 0) return void req.socket.destroy();
+    requests.push(req.url!.split("?")[0]!);
+    clearTimeout(idle.get(req.socket));
+    if (close === "idle") res.on("finish", () => idle.set(req.socket, setTimeout(() => req.socket.destroy(), 200)));
+    // Without Node's keep-alive hint, which would tell the client when the server closes a connection.
+    const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json", connection: "keep-alive" }).end(JSON.stringify(body));
+    if (!req.url!.includes("/files")) return reply(200, { thread: { status: "active" } });
+    if (++reads === 1) return reply(409, { error: "pylon pylon-x is not running yet", code: "not-running" });
+    reply(200, { path: "", entries: [], truncated: false });
+  });
+  server.on("connection", (socket) => {
+    const requests: string[] = [];
+    of.set(socket, requests);
+    carried.push(requests);
+  });
+  return { port: await listening(t, server), carried };
+}
+
+test("a GET whose kept connection the server closed, idle or as the GET went out, goes out again on a new one without an error", { timeout: 60_000 }, async (t) => {
+  const s = await setup(t);
+  const [files, thread] = ["/v1/threads/th-0123456789ab/files", "/v1/threads/th-0123456789ab"];
+  const expected = { idle: [[files, thread], [files]], request: [[files], [thread], [files]] };
+  for (const close of ["idle", "request"] as const) {
+    const api = await closingApi(t, close);
+    const res = await s.nexus(["files", "th-0123456789ab"], { NEXUS_URL: `http://127.0.0.1:${api.port}`, NEXUS_SOCKS: "none" });
+    assert.deepEqual([res.code, res.stdout, res.stderr], [0, "the checkout is empty.\n", ""], close);
+    assert.deepEqual(api.carried.filter((requests) => requests.length > 0), expected[close], `${close}: the connections and what each carried`);
+  }
+});
+
+test("the CLI exits as soon as its command is done, though the server keeps the connection open", { timeout: 60_000 }, async (t) => {
+  const s = await setup(t);
+  const dir = await mkdtemp(join(tmpdir(), "nexus-keep-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const certificate = await testCertificate(dir, apiName);
+  let answered = 0;
+  const server = createHttpsServer(certificate, (_req, res) => {
+    res.on("finish", () => { answered = Date.now(); });
+    res.writeHead(200, { "content-type": "application/json" }).end("[]");
+  });
+  server.keepAliveTimeout = 60_000;
+  const open = new Set<Socket>();
+  server.on("secureConnection", (socket) => { open.add(socket); socket.on("close", () => open.delete(socket)); });
+  const port = await listening(t, server);
+  t.after(() => { for (const socket of open) socket.destroy(); });
+  const res = await s.nexus(["projects"], { NEXUS_URL: `https://${apiName}:${port}`, NODE_EXTRA_CA_CERTS: join(dir, "cert.pem") });
+  assert.deepEqual([res.code, res.stdout], [0, "No projects.\n"], res.stderr);
+  // The pool lets go of an idle connection after 4 s, so a socket that held the process would show here.
+  assert.ok(Date.now() - answered < 3_000, `the CLI exited ${Date.now() - answered} ms after its answer`);
+});

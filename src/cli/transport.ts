@@ -1,11 +1,11 @@
 /**
  * How the Mac CLI reaches the control plane's API. This Mac joins the home tailnet only through ts-home's
- * userspace tailscaled, which offers a SOCKS5 proxy and no routes, so each request opens a SOCKS5 CONNECT
- * tunnel to the API and speaks HTTP over it. The proxy resolves the name, as curl's --socks5-hostname does,
+ * userspace tailscaled, which offers a SOCKS5 proxy and no routes, so the CLI opens a SOCKS5 CONNECT tunnel to
+ * the API and speaks HTTP over it. The proxy resolves the name, as curl's --socks5-hostname does,
  * because only it knows MagicDNS. Without a proxy the CLI connects directly, as on a machine on the tailnet.
  * An https:// URL speaks TLS inside that connection, to the dashboard's port.
  */
-import { request } from "node:http";
+import { Agent, request } from "node:http";
 import { connect, isIP, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { WebSocket } from "ws";
@@ -48,14 +48,14 @@ const idleTimeoutMs = 30_000;
 
 const statusKinds: Readonly<Record<number, ErrorKind>> = { 400: "invalid", 413: "invalid", 403: "refused", 415: "refused", 404: "not-found", 409: "conflict" };
 
-async function open(endpoint: Endpoint, idleMs = idleTimeoutMs): Promise<Socket> {
+async function open(endpoint: Endpoint): Promise<Socket> {
   const secure = endpoint.url.protocol === "https:";
   const target: HostPort = { host: endpoint.url.hostname, port: Number(endpoint.url.port || (secure ? 443 : 80)) };
   const raw = await (endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target));
   const socket = secure ? await handshake(raw, target.host) : raw;
   // Once connected, a silence is the API's, such as a command queued behind a slow one in its pylon, not the proxy's.
   raw.removeAllListeners("timeout");
-  return withIdleTimeout(socket, `the control plane at ${endpoint.url.host}`, idleMs);
+  return withIdleTimeout(socket, `the control plane at ${endpoint.url.host}`);
 }
 
 /** The raw socket's idle timeout still covers a handshake that hangs. */
@@ -82,9 +82,29 @@ function handshake(raw: Socket, host: string): Promise<Socket> {
  * only once its work is done, such as a session open that waits for its agent, passes a longer `idleMs`.
  */
 export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = idleTimeoutMs): Promise<unknown> {
-  const socket = await open(endpoint, idleMs);
-  const { status, text } = await exchange(socket, endpoint.url.host, method, path, body);
+  // Only a GET shares a connection. An error on a reused one may hide a request that ran, and only a GET may run twice.
+  const via = method === "GET" ? pool(endpoint) : await open(endpoint);
+  const { status, text } = await exchange(via, endpoint.url.host, method, path, body, idleMs);
   return reply(method, path, status, text);
+}
+
+/** The API's server closes a connection idle for Node's default 5 s, so the pool lets go of one before that. */
+const pooledMs = 4_000;
+const pools = new WeakMap<Endpoint, Agent>();
+
+/** One keep-alive connection for the GETs of a process, so a poll every second or two costs no tunnel or handshake. */
+function pool(endpoint: Endpoint): Agent {
+  let agent = pools.get(endpoint);
+  if (agent === undefined) {
+    // The agent unrefs an idle socket, so the CLI still exits once its command is done.
+    agent = new Agent({ keepAlive: true, timeout: pooledMs });
+    agent.createConnection = (_options, done) => {
+      open(endpoint).then((socket) => done?.(null, socket), (err: Error) => done?.(err, null as never));
+      return undefined;
+    };
+    pools.set(endpoint, agent);
+  }
+  return agent;
 }
 
 function reply(method: string, path: string, status: number, text: string): unknown {
@@ -201,11 +221,13 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
   });
 }
 
-function exchange(socket: Socket, host: string, method: string, path: string, body: unknown): Promise<{ status: number; text: string }> {
+/** Through the pool, or on a connection of its own. */
+function exchange(via: Agent | Socket, host: string, method: string, path: string, body: unknown, idleMs: number, retried = false): Promise<{ status: number; text: string }> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {
+    let answered = false;
     const req = request({
-      method, path, createConnection: () => socket,
+      method, path, ...via instanceof Agent ? { agent: via } : { createConnection: () => via },
       // The API refuses a state change without a JSON content type, so a browser page cannot forge one. Node frames a
       // DELETE's body only with an explicit length, and without one the API reads it as a malformed next request.
       headers: {
@@ -213,13 +235,20 @@ function exchange(socket: Socket, host: string, method: string, path: string, bo
         ...(payload === undefined ? {} : { "content-length": Buffer.byteLength(payload) }),
       },
     }, (res) => {
+      answered = true;
       let text = "";
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => { text += chunk; });
       res.on("end", () => resolve({ status: res.statusCode!, text }));
       res.on("error", (err) => reject(lost(host, err)));
     });
-    req.on("error", (err) => reject(lost(host, err)));
+    // A reused socket holds the last request's timeout, or the pool's.
+    req.once("socket", (socket) => socket.setTimeout(idleMs));
+    req.on("error", (err) => {
+      // The server closed the pooled connection as the request went out. A silence is the API's, and is not tried again.
+      if (req.reusedSocket && !answered && !retried && !(err instanceof CliError)) resolve(exchange(via, host, method, path, body, idleMs, true));
+      else reject(lost(host, err));
+    });
     req.end(payload);
   });
 }

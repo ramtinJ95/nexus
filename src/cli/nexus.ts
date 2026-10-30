@@ -1190,9 +1190,12 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, _, v) {
       const project = str(v, "project");
       const query = project === undefined ? "" : `?project=${encodeURIComponent(project)}`;
-      const queued = (await queuedThreads(api, query)).filter((q) => v.all === true || q.status === "queued");
-      if (v.queued === true) return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
-      const threads = await api("GET", `/v1/threads${query}`) as ThreadRow[];
+      const queuing = queuedThreads(api, query).then((all) => all.filter((q) => v.all === true || q.status === "queued"));
+      if (v.queued === true) {
+        const queued = await queuing;
+        return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
+      }
+      const [queued, threads] = await Promise.all([queuing, api("GET", `/v1/threads${query}`) as Promise<ThreadRow[]>]);
       const shown = v.all === true ? threads : threads.filter((t) => t.status !== "deleted");
       const rows = [...shown.map(threadRow), ...queued.map(queuedRow)];
       return { json: shown, text: rows.length === 0 ? "No threads." : table(rows) };
