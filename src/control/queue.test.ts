@@ -7,7 +7,8 @@ import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts"
 import type { PullRequest } from "./github.ts";
 import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
 import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
-import { queuedView, threadQueue, waitOf, type QueuedRecord } from "./queue.ts";
+import { queuedView, threadQueue, waitOf } from "./queue.ts";
+import type { QueuedRecord } from "./queue-store.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import type { NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";

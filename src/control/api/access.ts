@@ -3,7 +3,7 @@
  * the route needs, and whether a person or a deployer calls.
  */
 import type { NodeName, TailnetNodeId } from "../../ids.ts";
-import type { QueuedRecord } from "../queue.ts";
+import type { QueuedRecord } from "../queue-store.ts";
 import type { Registry, Thread, ThreadId } from "../registry.ts";
 import type { ThreadStatus } from "../../reconcile.ts";
 import { HttpError } from "../http-error.ts";

@@ -10,7 +10,7 @@ import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { reviewPrefix } from "../agent-protocol.ts";
 import { seedRegistry, testPylon, testProject, testRegistry, testThread } from "./test-kit.ts";
 import { rewindTo, versionBefore } from "./schema-kit.ts";
-import type { QueuedRecord } from "./queue.ts";
+import type { QueuedRecord } from "./queue-store.ts";
 import type { PullRequest } from "./github.ts";
 import type { PylonRecord } from "../tick.ts";
 import { trackActivity } from "../harness/activity.ts";

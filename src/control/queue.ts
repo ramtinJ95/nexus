@@ -18,9 +18,6 @@ import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 import { checkStart, newThreadId, resourcesOf, type StartRequest } from "./threads.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 
-// Temporary: QueuedRecord moved to queue-store.ts, and E1 deletes this re-export.
-export type { QueuedRecord };
-
 /** What one predecessor means for the queued thread. */
 export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
 
