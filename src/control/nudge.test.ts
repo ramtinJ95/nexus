@@ -15,10 +15,9 @@ import { gitPollMs } from "../git-facts.ts";
 import { checkCaller, nudgePrefix, reviewerCaller } from "../agent-protocol.ts";
 import { turnGate } from "./drain.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import type { ProjectId } from "../project.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
 
 const node = "node" as NodeName;

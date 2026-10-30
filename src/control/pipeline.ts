@@ -11,7 +11,7 @@
 import { randomBytes } from "node:crypto";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { singleFlight } from "../single-flight.ts";
-import type { ProjectId } from "../project.ts";
+import type { ProjectId } from "../ids.ts";
 import { HttpError } from "./http-error.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { liveNote, phaseNote } from "./review-model.ts";

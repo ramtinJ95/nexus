@@ -10,8 +10,7 @@ import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { queuedView, threadQueue, waitOf, type QueuedRecord } from "./queue.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
-import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { ProjectId } from "../project.ts";
+import type { NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
 import { tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;

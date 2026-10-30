@@ -12,9 +12,8 @@ import type { AgentCall, Tokens } from "../agent-usage.ts";
 import { checkCaller, reviewerCaller, roleOf, verifyCaller } from "../agent-protocol.ts";
 import { processStream } from "../process-stream.ts";
 import type { ConversationId } from "../harness/host.ts";
-import type { LiveHash, NodeName, PylonId } from "../ids.ts";
+import type { LiveHash, NodeName, ProjectId, PylonId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
 import { runningPylon, tempDir } from "../test-kit.ts";
 

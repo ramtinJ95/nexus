@@ -21,8 +21,7 @@ import { createRegistry, Harness, type ConversationId } from "@earendil-works/pi
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
 import type { ImageId } from "../images.ts";
-import type { ProjectId } from "../project.ts";
-import type { NodeName, TailnetNodeId } from "../ids.ts";
+import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
 import { testImage } from "../test-kit.ts";
 import { startApi } from "./api.ts";
 import type { ThreadHarness } from "./thread-agent.ts";

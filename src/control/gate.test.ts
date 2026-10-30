@@ -10,9 +10,8 @@ import type { Thread, ThreadId } from "./registry.ts";
 import { testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { processStream } from "../process-stream.ts";
 import { checkoutDir } from "../sessions.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
-import type { ProjectId } from "../project.ts";
 import type { StartRequest } from "./threads.ts";
 import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 

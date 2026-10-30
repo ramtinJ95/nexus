@@ -6,9 +6,8 @@ import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageLimitPrefix } from "../agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import type { ProjectId } from "../project.ts";
 import { runningPylon, testCapacity, testObservation, watch } from "../test-kit.ts";
 
 const node = "node" as NodeName;

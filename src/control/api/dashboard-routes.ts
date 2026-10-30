@@ -15,8 +15,7 @@
  * the diffs are read by the client from the JSON API, because each read reaches into the pylon and counts as a
  * human's visit, so they are read when asked for rather than with every poll.
  */
-import type { NodeName, TailnetNodeId } from "../../ids.ts";
-import type { ProjectId } from "../../project.ts";
+import type { NodeName, ProjectId, TailnetNodeId } from "../../ids.ts";
 import type { ThreadRow } from "../wire.ts";
 import type { Thread, ThreadId } from "../registry.ts";
 import type { AgentView } from "../conversation-view.ts";
