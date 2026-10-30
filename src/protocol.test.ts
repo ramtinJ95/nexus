@@ -2,11 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import type { NodeName, PylonId, TailnetNodeId } from "./ids.ts";
+import { parseJobEnvelope, parseSubmitReply } from "./protocol/jobs.ts";
+import { brokenCauses, parseProbeEvent, upgradeObservation, type BrokenCause } from "./protocol/observations.ts";
 import {
-  brokenCauses, closeSessionOutcomes, connectProbe, interruptClaudeOutcomes, parseArtifactManifest, parseJobEnvelope, parseProbeEvent, parsePylonCommand, parseStreamRequest,
-  parseSubmitReply, probeErrorCodes, ProbeHttpError, sendClaudeOutcomes, upgradeObservation,
-  type BrokenCause, type CloseSessionOutcome, type InterruptClaudeOutcome, type NodeName, type ProbeError, type PylonCommand, type PylonId, type SendClaudeOutcome, type TailnetNodeId,
-} from "./protocol.ts";
+  closeSessionOutcomes, interruptClaudeOutcomes, parsePylonCommand, sendClaudeOutcomes, type CloseSessionOutcome, type InterruptClaudeOutcome,
+  type PylonCommand, type SendClaudeOutcome,
+} from "./protocol/commands.ts";
+import { parseStreamRequest } from "./protocol/streams.ts";
+import { probeErrorCodes, ProbeHttpError, type ProbeError } from "./protocol/http.ts";
+import { parseArtifactManifest } from "./protocol/artifacts.ts";
+import { connectProbe } from "./protocol/client.ts";
 
 const node = "test-node";
 const pylonId = "pylon-th-1";

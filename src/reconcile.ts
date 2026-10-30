@@ -12,8 +12,13 @@
  */
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { heldSecrets, retryable } from "./protocol.ts";
-import type { HerdrStatus, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PausedSession, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
+import { retryable } from "./protocol/jobs.ts";
+import { heldSecrets } from "./protocol/observations.ts";
+import type { JobId, LiveHash, NodeName, PylonId } from "./ids.ts";
+import type { Job, JobEnvelope, JobErrorCode, JobStatus } from "./protocol/jobs.ts";
+import type {
+  HerdrStatus, NodeObservation, PausedSession, ProbeEvent, PylonObservation, RunningFacts, SessionFact,
+} from "./protocol/observations.ts";
 import type { BootInputs, LiveSpec, PylonSource } from "./project.ts";
 import { harnessNamed, type SessionHarness } from "./sessions.ts";
 import type { ArtifactId, CheckpointId, PortableArtifactId } from "./images.ts";

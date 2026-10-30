@@ -7,7 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocket, WebSocketServer, type ClientOptions } from "ws";
 import { encodeMessage, type AttachRequest } from "../attach-wire.ts";
 import { terminalSize, type Terminal } from "../guest-terminal.ts";
-import type { StreamEnd } from "../protocol.ts";
+import type { StreamEnd } from "../protocol/streams.ts";
 import { maxQueuedKeys, maxQueuedWrites, serveAttach, type AttachTiming, type Ending, type Look, type PylonDoor } from "./attach.ts";
 
 const fast: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 10, hangUpMs: 5_000 };

@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { Guest } from "./backend.ts";
 import { parseJson } from "./parse.ts";
-import type { DeclaredOutput } from "./protocol.ts";
+import type { DeclaredOutput } from "./protocol/observations.ts";
 import { checkoutDir } from "./sessions.ts";
 
 export const outputsDir = "/home/user/.nexus/outputs";

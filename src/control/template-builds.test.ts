@@ -8,7 +8,10 @@ import { tickTemplateBuild } from "./template-builds.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { chooseTemplate, type BuildingTemplate, type ImageId, type TemplateKey, type TemplateRecord } from "../images.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
-import type { JobEnvelope, JobErrorCode, JobId, JobStatus, NodeName, NodeObservation, ProbeClient, SubmitReply } from "../protocol.ts";
+import type { JobId, NodeName } from "../ids.ts";
+import type { JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
+import type { NodeObservation } from "../protocol/observations.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";

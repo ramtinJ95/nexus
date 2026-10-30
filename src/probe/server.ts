@@ -11,13 +11,20 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { JobFailure, type BackendPylon, type VmBackend } from "../backend.ts";
+import { type BackendPylon, type VmBackend } from "../backend.ts";
 import { commandPolicies, runCommand, runJob, type CommandPolicy, type ProbeDeps } from "./run.ts";
+import { isPortableArtifactId, type JobId, type LiveHash, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
 import {
-  artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, heldSecrets, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, peersSchema, routeAuth, serveByteStream, streamUpgradeResponse,
-  type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
-  type DeclaredOutput, type GitFacts, type ListeningFact, type ProbeAuthConfig, type CommandResult, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation, type ServiceFact, type SessionFact, type Subject, type TailnetNodeId,
-} from "../protocol.ts";
+  encodeSubmitReply, jobDeadlineMs, JobFailure, jobSubject, parseJobEnvelope, type Job, type JobEnvelope, type JobStatus, type Subject,
+} from "../protocol/jobs.ts";
+import {
+  encodeProbeEvent, heldSecrets, type DeclaredOutput, type GitFacts, type ListeningFact, type NodeObservation, type ProbeEvent,
+  type PylonObservation, type ServiceFact, type SessionFact,
+} from "../protocol/observations.ts";
+import { parsePylonCommand, type CommandResult, type PylonCommand } from "../protocol/commands.ts";
+import { parseStreamRequest, serveByteStream, streamUpgradeResponse } from "../protocol/streams.ts";
+import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
+import { peersSchema, probePort, routeAuth, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../project.ts";
 import { attachedTerminals, sessionFacts } from "../sessions.ts";
 import { onePerClaudeSession } from "../session-wake.ts";

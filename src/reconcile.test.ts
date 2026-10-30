@@ -4,12 +4,12 @@ import {
   actualState, backoffMs, desiredPhase, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
+import type { JobId, LiveHash, NodeName, PylonId } from "./ids.ts";
+import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "./protocol/jobs.ts";
 import {
-  encodeProbeEvent, encodeSubmitReply, jobSubject, parseJobEnvelope, parseProbeEvent, parseSubmitReply, upgradeObservation,
-  type OlderObservation,
-  type Job, type JobErrorCode, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation, type ProbeEvent, type PylonId, type PylonObservation,
-  type PausedSession, type RunningFacts, type SessionFact,
-} from "./protocol.ts";
+  encodeProbeEvent, parseProbeEvent, upgradeObservation, type NodeObservation, type OlderObservation, type PausedSession, type ProbeEvent,
+  type PylonObservation, type RunningFacts, type SessionFact,
+} from "./protocol/observations.ts";
 import { chatgptTokenGrant, type BootInputs, type PylonSource } from "./project.ts";
 import type { ArtifactId, CheckpointId, ImageId, TemplateId } from "./images.ts";
 

@@ -11,7 +11,8 @@ import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
 import { processStream } from "../process-stream.ts";
 import { checkoutDir } from "../sessions.ts";
-import type { ByteStream, LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { ByteStream } from "../protocol/streams.ts";
 import type { ProjectId } from "../project.ts";
 import type { StartRequest } from "./threads.ts";
 

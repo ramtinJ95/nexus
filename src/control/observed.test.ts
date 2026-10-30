@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { NodeName, NodeObservation, PylonObservation } from "../protocol.ts";
+import type { NodeName } from "../ids.ts";
+import type { NodeObservation, PylonObservation } from "../protocol/observations.ts";
 import { observedPylon, runningProbe } from "./observed.ts";
 import { openRegistry } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";

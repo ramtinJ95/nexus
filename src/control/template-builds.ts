@@ -6,7 +6,9 @@
  */
 import { failureMessage } from "../reconcile.ts";
 import { jobOutcome, submitJob } from "../tick.ts";
-import { retryable, type JobErrorCode, type NodeObservation, type ProbeClient } from "../protocol.ts";
+import { retryable, type JobErrorCode } from "../protocol/jobs.ts";
+import type { NodeObservation } from "../protocol/observations.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import type { BuildingTemplate } from "../images.ts";
 import type { Registry } from "./registry.ts";
 

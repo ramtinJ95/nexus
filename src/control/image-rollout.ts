@@ -9,7 +9,10 @@
  * earlier pass meant to do, so a control plane that restarts mid-operation carries on from the stored operation.
  */
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
-import type { Job, JobId, NodeName, ProbeClient, ProbeError, TailnetNodeId } from "../protocol.ts";
+import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
+import type { Job } from "../protocol/jobs.ts";
+import type { ProbeError } from "../protocol/http.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight } from "../single-flight.ts";
 import { failureMessage } from "../reconcile.ts";
 import { jobOutcome, submitJob } from "../tick.ts";

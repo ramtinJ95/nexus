@@ -6,7 +6,9 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { connectProbe, nodeNameSchema, tailnetNodeIdSchema, type NodeName, type ProbeClient, type TailnetNodeId } from "../protocol.ts";
+import type { NodeName, TailnetNodeId } from "../ids.ts";
+import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
+import { connectProbe, type ProbeClient } from "../protocol/client.ts";
 import { canDeploy } from "./releases.ts";
 import { gitIdentitySchema, gitUrl } from "../project.ts";
 import { ingest } from "../reconcile.ts";

@@ -18,7 +18,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { Guest } from "./backend.ts";
-import type { CommandResult, HerdrStatus, InterruptClaudeOutcome, PausedSession, SessionFact, SessionIdentity } from "./protocol.ts";
+import type { HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "./protocol/observations.ts";
+import type { CommandResult, InterruptClaudeOutcome } from "./protocol/commands.ts";
 import { nonEmpty, parse, parseJson } from "./parse.ts";
 import { callTimeoutMs, checkoutDir, claudeCode, claudeSessionId, harnesses, home, sessionHarnessSchema, type Agent, type SessionHarness } from "./session-harness.ts";
 

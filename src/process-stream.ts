@@ -5,7 +5,7 @@
  */
 import { spawn } from "node:child_process";
 import { finished } from "node:stream/promises";
-import type { ByteStream, StreamEnd } from "./protocol.ts";
+import type { ByteStream, StreamEnd } from "./protocol/streams.ts";
 
 export function processStream(file: string, args: readonly string[], log: (text: string) => void): ByteStream {
   const child = spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });

@@ -7,7 +7,8 @@ import { readdir, readFile, statfs } from "node:fs/promises";
 import { availableParallelism, totalmem } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { NodeHealth, NodeName, PylonId } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
+import type { NodeHealth } from "../protocol/client.ts";
 
 const gib = 2 ** 30;
 

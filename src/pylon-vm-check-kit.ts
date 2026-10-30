@@ -5,7 +5,7 @@
 import { basename, dirname } from "node:path";
 import type { ImageId } from "./images.ts";
 import type { BootInputs, LiveSpec } from "./project.ts";
-import type { PylonId } from "./protocol.ts";
+import type { PylonId } from "./ids.ts";
 import { createPylonVmBackend, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 
 /** The backend over `imageDir`'s artifact store, holding no secrets, and the ID of the image in `imageDir`. */

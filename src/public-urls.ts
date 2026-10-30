@@ -1,6 +1,6 @@
-import { JobFailure } from "./backend.ts";
+import { JobFailure } from "./protocol/jobs.ts";
 import type { PreviewAssignment, ServiceName } from "./project.ts";
-import type { PylonId } from "./protocol.ts";
+import type { PylonId } from "./ids.ts";
 
 /**
  * Each previewed service's PUBLIC_URL: the https address `tailscale serve` publishes its assigned port at,

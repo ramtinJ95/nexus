@@ -19,7 +19,8 @@ import { readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConve
 import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-ask.ts";
 import { followEvents } from "./follow-events.ts";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
-import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";

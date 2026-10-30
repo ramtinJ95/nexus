@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/chord";
 import { GenerationTask, LiveDoc, defineDoc, hook, type ConversationId, type Extension, type Harness } from "@earendil-works/pi-durable";
 import { readThread } from "./thread-doc.ts";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
 
 const TurnSnapshotDoc = defineDoc<{ turn: string | null }>({
   kind: "nexus.turn-snapshot",

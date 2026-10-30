@@ -7,7 +7,8 @@
 import { join } from "node:path";
 import type { HarnessOptions } from "@earendil-works/pi-durable";
 import { Connection, RemoteExecutionEnv } from "@earendil-works/pi-env";
-import { jobDeadlineMs, type PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
+import { jobDeadlineMs } from "../protocol/jobs.ts";
 import type { BridgeTarget } from "./bridge.ts";
 import { readThread } from "./thread-doc.ts";
 

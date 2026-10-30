@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import type { Guest } from "../backend.ts";
 import { fakeGuest } from "../fake-guest.ts";
 import { renderOverlay, type ProjectId, type PylonOverlay, type ServiceDecl } from "../project.ts";
-import type { NodeName, PylonId, ServiceFact } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
+import type { ServiceFact } from "../protocol/observations.ts";
 import { createPylonApi, pylonInfoFile, type PylonApiDeps } from "./pylon-api.ts";
 import { until } from "../test-kit.ts";
 

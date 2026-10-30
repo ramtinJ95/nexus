@@ -1,5 +1,5 @@
 /**
- * Reading what a peer, a guest or a file sends. A leaf module, so protocol.ts and sessions.ts share it without
+ * Reading what a peer, a guest or a file sends. A leaf module, so the protocol/ codecs and sessions.ts share it without
  * importing each other.
  */
 import { z } from "zod";

@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openPython, pipeOutput, type OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
-import type { ByteStream } from "./protocol.ts";
+import type { ByteStream } from "./protocol/streams.ts";
 
-/** Runs argv on this machine, and refuses one the probe's request URL could not carry, as protocol.ts's streamPath encodes it. */
+/** Runs argv on this machine, and refuses one the probe's request URL could not carry, as protocol/streams.ts's streamPath encodes it. */
 const local: OpenPipe = async (argv) => {
   const encoded = encodeURIComponent(JSON.stringify({ argv })).length;
   if (encoded > 16 << 10) throw new Error(`a request URL of ${encoded} bytes`);

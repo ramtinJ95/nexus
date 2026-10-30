@@ -14,7 +14,8 @@ import type { AgentCall, Tokens } from "../agent-usage.ts";
 import { checkCaller, reviewerCaller, roleOf, verifyCaller } from "../agent-protocol.ts";
 import { processStream } from "../process-stream.ts";
 import type { ConversationId } from "../harness/host.ts";
-import type { LiveHash, NodeName, ProbeClient, PylonId } from "../protocol.ts";
+import type { LiveHash, NodeName, PylonId } from "../ids.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
 
@@ -69,7 +70,7 @@ function pylonHome() {
 /** A probe that runs each pipe as a local process, counting them. */
 const usageHelper = readFileSync(new URL("../agent-usage.py", import.meta.url), "utf8");
 
-/** Each stream runs on this machine. Its argv must fit the probe's request URL, as protocol.ts's streamPath encodes it. */
+/** Each stream runs on this machine. Its argv must fit the probe's request URL, as protocol/streams.ts's streamPath encodes it. */
 function localProbe() {
   const probe = {
     reads: 0,

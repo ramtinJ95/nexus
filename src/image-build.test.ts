@@ -6,14 +6,14 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile 
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { artifactDirectory, tarCodec } from "./artifacts.ts";
-import { JobFailure } from "./backend.ts";
+import { JobFailure } from "./protocol/jobs.ts";
 import {
   buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, loadImageRecipe, modeMismatches,
   parseDebugfsModes, parseModeListing, pylonRecipeDir, smokeChecks, smokeFailure,
 } from "./image-build.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
 import { agentSetupManifest, installedLayout, parseAgentSetup } from "../images/pylon/agent-setup/manifest.ts";
-import type { NodeName } from "./protocol.ts";
+import type { NodeName } from "./ids.ts";
 
 const pins: ImageRecipe["pins"] = {
   debianDigest: `sha256:${"a".repeat(64)}`,

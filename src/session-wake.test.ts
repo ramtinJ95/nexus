@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { seedClaudeState } from "./claude-state.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply } from "./fake-guest.ts";
-import type { PausedSession, PylonId } from "./protocol.ts";
+import type { PylonId } from "./ids.ts";
+import type { PausedSession } from "./protocol/observations.ts";
 import { finishRelaunch, onePerClaudeSession, pauseSessions, recordBeforePause, relaunchAfterWake, type RelaunchMark } from "./session-wake.ts";
 import { sendToClaude, sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
 

@@ -3,7 +3,8 @@
  * running while the node is online. The registry is in this process, so waiting is a cheap poll of it.
  */
 import { setTimeout as delay } from "node:timers/promises";
-import { probePort, type PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
+import { probePort } from "../protocol/routes.ts";
 import type { PylonLocator } from "../harness/pylon-env.ts";
 import { listsRunning } from "./observed.ts";
 import type { Registry } from "./registry.ts";

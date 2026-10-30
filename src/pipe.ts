@@ -2,7 +2,7 @@
  * Reading from a pylon over a raw pipe: a process the probe runs in the guest, whose stdin and stdout are a stream. A
  * pylon's output is untrusted, so a read is bounded in time and bytes.
  */
-import type { ByteStream } from "./protocol.ts";
+import type { ByteStream } from "./protocol/streams.ts";
 
 /** Opens a raw pipe to a process in the pylon, which runs argv. */
 export type OpenPipe = (argv: readonly string[]) => Promise<ByteStream>;

@@ -10,7 +10,10 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ConversationView, Submission } from "@earendil-works/pi-durable";
 import type { ClaudeConversation } from "../claude-transcript.ts";
-import type { CommandResult, ProbeClient, ProbeError, PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
+import type { CommandResult } from "../protocol/commands.ts";
+import type { ProbeError } from "../protocol/http.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { claudeTextProblem } from "../sessions.ts";
 import { harnessView } from "./agent-conversation.ts";

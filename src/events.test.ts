@@ -56,7 +56,7 @@ test("the probe journal survives restart and preserves bounded ordered replay", 
   const path = join(dir, "events.sqlite");
   let journal = eventJournal(path);
   try {
-    const first = journal.append("pylon-t1" as import("./protocol.ts").PylonId, { kind: "session.turn-started", session: "c1" });
+    const first = journal.append("pylon-t1" as import("./ids.ts").PylonId, { kind: "session.turn-started", session: "c1" });
     journal.close();
     journal = eventJournal(path);
     assert.deepEqual(journal.recent(), [first]);

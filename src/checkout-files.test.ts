@@ -14,7 +14,7 @@ import type { OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
 import { localPipes } from "./fake-guest.ts";
 import { claudeTurn, snapshotTurn } from "../images/pylon/nexus-turn.ts";
-import type { ByteStream, StreamEnd } from "./protocol.ts";
+import type { ByteStream, StreamEnd } from "./protocol/streams.ts";
 
 const run = promisify(execFile);
 

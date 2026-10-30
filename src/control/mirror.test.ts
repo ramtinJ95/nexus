@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { projectMirror } from "./mirror.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
-import type { NodeName } from "../protocol.ts";
+import type { NodeName } from "../ids.ts";
 
 const dir = await mkdtemp(join(tmpdir(), "nexus-mirror-test-"));
 after(() => rm(dir, { recursive: true }));

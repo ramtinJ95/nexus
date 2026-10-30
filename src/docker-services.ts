@@ -14,7 +14,7 @@ import type { PreviewOrigin } from "./backend.ts";
 import { docker, dockerExec } from "./docker-cli.ts";
 import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "./project.ts";
 import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "./preview-links.ts";
-import type { ServiceFact } from "./protocol.ts";
+import type { ServiceFact } from "./protocol/observations.ts";
 import { checkoutDir } from "./sessions.ts";
 
 /** Published on loopback by every `docker run` of the double. */

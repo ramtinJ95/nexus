@@ -5,7 +5,7 @@ import {
   type ArtifactId, type CheckpointId, type ImageId, type ImageRecipe, type SetupInputs, type TemplateBuildInputs, type TemplateKey, type TemplateRecord,
 } from "./images.ts";
 import type { ProjectId, RemoteProject } from "./project.ts";
-import type { NodeName } from "./protocol.ts";
+import type { NodeName } from "./ids.ts";
 
 const now = 1_800_000_000_000;
 const hour = 3_600_000;

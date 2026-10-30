@@ -23,7 +23,7 @@ import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../docker-backend.ts";
 import { nodeSecrets } from "../probe/config.ts";
 import { startProbe, type Probe } from "../probe/server.ts";
-import type { NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ImageId } from "../images.ts";
 import { checkoutDir } from "../sessions.ts";
 import { openHarnessHost, type HarnessHost } from "./host.ts";

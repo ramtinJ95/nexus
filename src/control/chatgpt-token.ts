@@ -5,7 +5,8 @@
  * refreshed has the current one by the next poll. A probe that has none, as one that just started, sets a poll off.
  */
 import { chatgptTokenGrant } from "../project.ts";
-import type { NodeObservation, ProbeClient } from "../protocol.ts";
+import type { NodeObservation } from "../protocol/observations.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight } from "../single-flight.ts";
 
 export function chatgptTokenHandoff(options: { probes(): readonly Pick<ProbeClient, "node" | "putSecret">[]; token(): Promise<string | undefined>; log?: (message: string) => void }) {

@@ -9,7 +9,7 @@ import { constants } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { JobFailure } from "./backend.ts";
+import { JobFailure } from "./protocol/jobs.ts";
 import type { ArtifactDirectory } from "./artifacts.ts";
 import type { ImageId, TemplateId, TemplateManifest } from "./images.ts";
 import { run } from "./pylon-vm/client.ts";

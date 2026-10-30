@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ProbeHttpError, type NodeName, type TailnetNodeId } from "../protocol.ts";
+import type { NodeName, TailnetNodeId } from "../ids.ts";
+import { ProbeHttpError } from "../protocol/http.ts";
 import { peerHandoff } from "./peers.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { seedRegistry } from "./test-kit.ts";

@@ -7,7 +7,10 @@
 import { createHash } from "node:crypto";
 import { senderPrefixes, type Sender } from "../agent-protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
-import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand } from "../protocol.ts";
+import type { NodeName } from "../ids.ts";
+import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
+import type { ProbeError } from "../protocol/http.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./observed.ts";
 import type { ClaudeSent, Registry, Thread, ThreadId } from "./registry.ts";
 

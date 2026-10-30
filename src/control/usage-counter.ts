@@ -9,7 +9,8 @@
 import { readAgentUsage, agentLogs, type FileCursor } from "../agent-usage.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ConversationId } from "../harness/host.ts";
-import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { EventKind } from "../events.ts";
 import { followEvents } from "./follow-events.ts";

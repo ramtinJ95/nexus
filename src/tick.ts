@@ -4,7 +4,11 @@
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
 import { envelope, failureMessage, planPylon, type Attempts, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
-import type { Job, JobEnvelope, JobId, JobStatus, NodeName, NodeObservation, ProbeClient, ProbeError } from "./protocol.ts";
+import type { JobId, NodeName } from "./ids.ts";
+import type { Job, JobEnvelope, JobStatus } from "./protocol/jobs.ts";
+import type { NodeObservation } from "./protocol/observations.ts";
+import type { ProbeError } from "./protocol/http.ts";
+import type { ProbeClient } from "./protocol/client.ts";
 import type { CheckpointId } from "./images.ts";
 
 export interface PylonRecord {

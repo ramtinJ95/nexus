@@ -3,7 +3,7 @@ import { fullCommit } from "../deploy/model.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { chooseTemplate, setupHashOf, type ImageId, type ProjectMirror, type SetupInputs, type TemplateId, type ThreadSetup } from "../images.ts";
 import { bootSecrets, effectiveAllowedHosts, hasRemote, liveHashOf, withHttpsHosts, type BootInputs, type Project, type ProjectId, type PylonOverlay, type RemoteProject, type RepoInit } from "../project.ts";
-import type { NodeName, PylonId } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
 import { placeAuto, placeNear, type Placement } from "./placement.ts";

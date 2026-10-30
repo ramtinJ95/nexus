@@ -19,7 +19,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { CheckpointId } from "./images.ts";
 import type { BootInputs } from "./project.ts";
-import type { PylonId } from "./protocol.ts";
+import type { PylonId } from "./ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 
 const [imageArg, stateArg, roundsArg, readersArg] = process.argv.slice(2);

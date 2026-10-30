@@ -10,10 +10,12 @@
  * instance has a detached controller that outlives the probe. The job shape stays Amp's, so an Amp
  * dispatch script can still back the lifecycle half later.
  *
- * The backend speaks its own types. Wire types from protocol.ts stop at probe/run.ts's runJob and runCommand.
+ * The backend speaks its own types. Wire types from src/protocol/ stop at probe/run.ts's runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { BrokenCause, ByteStream, JobErrorCode, NodeName, PausedSession, PylonId, ServiceFact } from "./protocol.ts";
+import type { NodeName, PylonId } from "./ids.ts";
+import type { BrokenCause, PausedSession, ServiceFact } from "./protocol/observations.ts";
+import type { ByteStream } from "./protocol/streams.ts";
 import { type BootInputs, type LiveSpec, type OverlayFile, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 import type { HostBridge } from "./host-bridge.ts";
@@ -137,16 +139,6 @@ export interface ArtifactStore {
 /** Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env. */
 /** `names` lists the secrets the node holds, which its probe reports. Values never leave the node. */
 export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
-
-export class JobFailure extends Error {
-  readonly code: JobErrorCode;
-  readonly logTail: string;
-  constructor(code: JobErrorCode, message: string, logTail = "") {
-    super(message);
-    this.code = code;
-    this.logTail = logTail;
-  }
-}
 
 // The pylon VM backend, createPylonVmBackend, lives in pylon-vm-backend.ts.
 
