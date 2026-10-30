@@ -6,7 +6,8 @@ import { z } from "zod";
 import { reviewPrefix } from "../agent-protocol.ts";
 import type { PullRequest } from "./github.ts";
 import { legacyHoldCode, reservedCases, type Hold, type HoldCode } from "./holds.ts";
-import type { Thread, ThreadId } from "./registry.ts";
+import type { ThreadId } from "../ids.ts";
+import type { ThreadStatus } from "../reconcile.ts";
 
 /** The most rounds a review runs, and how many it runs unless asked for fewer. */
 export const maxRounds = 5;
@@ -245,7 +246,7 @@ export const landable = (r: Review) => r.merged === null && (r.phase.kind === "a
  * Why `nexus land` refuses the review, or null when it takes it: its builder is not active, it merged, the PR watch
  * reads its PR as closed or merged outside it, or it is not landable. The dashboard offers Land by the same rule.
  */
-export function cannotLand(r: Review, builder: Pick<Thread, "status">, pr?: Pick<PullRequest, "state">): string | null {
+export function cannotLand(r: Review, builder: { status: ThreadStatus }, pr?: Pick<PullRequest, "state">): string | null {
   if (builder.status !== "active") return `thread ${r.builder} is ${builder.status}`;
   if (r.merged !== null) return `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`;
   if (pr !== undefined && pr.state !== "open") return `pull request #${r.pr.number} is ${pr.state} on GitHub outside this review, so there is nothing to land`;

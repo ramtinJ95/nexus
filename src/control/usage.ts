@@ -5,9 +5,8 @@
  */
 import type { ProjectId } from "../project.ts";
 import type { AgentCall, AgentKind, Tokens } from "../agent-usage.ts";
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import { HttpError } from "./http-error.ts";
-import type { ThreadId } from "./registry.ts";
 
 export interface UsageTotals extends Tokens { total: number; calls: number }
 export const breakdowns = ["model", "project", "kind", "role", "day"] as const;
