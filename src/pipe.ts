@@ -29,8 +29,9 @@ const bootstrap = [
  */
 export async function openPython(open: OpenPipe, source: Uint8Array, args: readonly string[], name: string): Promise<ByteStream> {
   const stream = await open(["python3", "-c", bootstrap, name, String(source.length), ...args]);
-  // A helper that is already gone fails this write, and `done` says how it ended.
-  await stream.write(source).catch(() => undefined);
+  // Not awaited, so the caller's deadline covers it: what the caller writes or closes next goes out after it. A helper
+  // that is already gone fails this write, and `done` says how it ended.
+  stream.write(source).catch(() => undefined);
   return stream;
 }
 

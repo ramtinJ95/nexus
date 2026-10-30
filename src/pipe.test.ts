@@ -36,6 +36,20 @@ test("a pipe's output is answered with its exit code, which must be one of okCod
   await assert.rejects(pipeOutput(await sh("exit 3"), read), /^Error: reading the test's output exited 3$/);
 });
 
+test("a helper whose source the pylon never takes fails at the read's deadline", async () => {
+  let aborted = false;
+  const stalled: ByteStream = {
+    async *[Symbol.asyncIterator]() { await new Promise(() => undefined); },
+    write: () => new Promise(() => undefined),
+    close: () => new Promise(() => undefined),
+    abort: () => { aborted = true; },
+    done: new Promise(() => undefined),
+  };
+  const stream = await openPython(async () => stalled, Buffer.from("pass\n"), [], "stalled.py");
+  await assert.rejects(pipeOutput(stream, { ...read, deadlineMs: 50, input: Buffer.from("{}") }), /did not read the test's output within 0.05 s/);
+  assert.equal(aborted, true);
+});
+
 test("a lost pipe fails", async () => {
   const lost: ByteStream = {
     async *[Symbol.asyncIterator]() {},
