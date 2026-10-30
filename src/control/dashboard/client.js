@@ -731,8 +731,14 @@ const counts = (additions, deletions) => additions === null ? el("span", { class
 const changesPane = document.getElementById("pane-changes");
 const thread = changesPane?.dataset.thread;
 const baseKey = "nexus.base";
+/** What the changes are read against: its label, its commit when that is the empty tree, an empty list and a diff's. */
+const bases = {
+  start: { label: "Since the pylon booted", emptyTree: "an empty repository", unchanged: "Nothing has changed since the pylon booted.", vs: "vs boot" },
+  head: { label: "Since the last commit", emptyTree: "no commit yet", unchanged: "No uncommitted changes.", vs: "vs last commit" },
+  turn: { label: "Since the latest turn began", emptyTree: "an empty repository", unchanged: "Nothing has changed since the latest turn began.", vs: "vs turn start" },
+};
 const checkout = {
-  base: ["head", "turn"].includes(localStorage.getItem(baseKey)) ? localStorage.getItem(baseKey) : "start",
+  base: Object.hasOwn(bases, localStorage.getItem(baseKey)) ? localStorage.getItem(baseKey) : "start",
   /** The last reply, kept so a fold the reader closed and the open tabs survive a read. */
   changes: null,
   /** Whether the reader asked to wake a paused pylon to read it, so the read happens once it runs. */
@@ -745,7 +751,6 @@ const factsNow = () => {
   const span = document.querySelector("#facts span");
   return span === null ? null : { pylon: span.dataset.pylon, turn: span.dataset.turn === "true", agentAt: span.dataset.agentAt, status: span.dataset.threadStatus };
 };
-const baseLabel = () => checkout.base === "turn" ? "Since the latest turn began" : checkout.base === "head" ? "Since the last commit" : "Since the pylon booted";
 
 function showChanges(...nodes) {
   document.getElementById("changes-body")?.replaceChildren(...present(nodes));
@@ -754,16 +759,21 @@ function showChanges(...nodes) {
 /** An archived or deleted thread, whose pylon stays paused, so its checkout cannot be read. */
 const threadClosed = (facts) => facts.status !== "active" && facts.status !== "idle";
 
-/** Why the changes cannot be read now, with a button to wake the pylon when that is what it takes. */
+/** Why `noun` of the checkout cannot be read now, with a button to wake the pylon when that is what it takes. */
+function unreadable(facts, noun, onWake) {
+  const say = (text) => el("p", { className: "empty", textContent: text });
+  if (facts.status === "deleted") return [say("The thread is deleted, so its checkout is gone.")];
+  if (facts.status === "archived") return [say(`An archived thread's pylon stays paused, so ${noun} can't be read until the thread is unarchived.`)];
+  if (checkout.wanted) return [say(`Waking the pylon to read ${noun}.`)];
+  const wake = el("button", { type: "button", className: "btn btn-xs", textContent: "Wake and read" });
+  wake.addEventListener("click", onWake);
+  return [say(`The pylon is ${facts.pylon}. Reading ${noun} wakes it.`), wake];
+}
+
 function changesUnreadable(facts) {
   // A closed thread keeps no reply, so nothing shows its stale tree again and an unarchive's start reads anew.
   if (threadClosed(facts)) checkout.changes = null;
-  if (facts.status === "deleted") return showChanges(el("p", { className: "empty", textContent: "The thread is deleted, so its checkout is gone." }));
-  if (facts.status === "archived") return showChanges(el("p", { className: "empty", textContent: "An archived thread's pylon stays paused, so its changes can't be read. Unarchive the thread to read them." }));
-  if (checkout.wanted) return showChanges(el("p", { className: "empty", textContent: "Waking the pylon. Its changes show once it runs." }));
-  const wake = el("button", { type: "button", className: "btn btn-xs", textContent: "Wake and read" });
-  wake.addEventListener("click", () => { void readChanges(true); });
-  showChanges(el("p", { className: "empty", textContent: `The pylon is ${facts.pylon}. Reading its changes wakes it.` }), wake);
+  showChanges(...unreadable(facts, "its changes", () => { void readChanges(true); }));
 }
 
 const canRead = (facts) => facts.pylon === "running" && !threadClosed(facts);
@@ -854,11 +864,9 @@ function renderChanges() {
   const added = files.reduce((n, f) => n + (f.additions ?? 0), 0);
   const deleted = files.reduce((n, f) => n + (f.deletions ?? 0), 0);
   // The base is the empty tree before a checkout's first commit, and at the start of a scratch project's pylon.
-  const commit = base.commit === null ? (checkout.base === "head" ? "no commit yet" : "an empty repository") : base.commit.slice(0, 7);
-  document.getElementById("changes-base").textContent = `${baseLabel()}, ${commit}`;
-  if (files.length === 0) {
-    return showChanges(el("p", { className: "empty", textContent: checkout.base === "turn" ? "Nothing has changed since the latest turn began." : checkout.base === "head" ? "No uncommitted changes." : "Nothing has changed since the pylon booted." }));
-  }
+  const shown = bases[checkout.base];
+  document.getElementById("changes-base").textContent = `${shown.label}, ${base.commit === null ? shown.emptyTree : base.commit.slice(0, 7)}`;
+  if (files.length === 0) return showChanges(el("p", { className: "empty", textContent: shown.unchanged }));
   const { root, merged } = treeOf(files);
   const branch = (dir, path) => {
     const items = [];
@@ -908,27 +916,21 @@ function noticeFacts() {
 }
 
 if (changesPane !== null) {
-  const head = document.getElementById("changes-head");
-  const turn = document.getElementById("changes-turn");
-  turn.checked = checkout.base === "turn";
-  head.checked = checkout.base === "head";
-  document.getElementById("changes-base").textContent = baseLabel();
-  head.addEventListener("change", () => {
-    turn.checked = false;
-    checkout.base = head.checked ? "head" : "start";
-    localStorage.setItem(baseKey, checkout.base);
+  // "Only uncommitted" and "Latest turn" are one choice of base, and with neither checked it is the boot.
+  const boxes = { head: document.getElementById("changes-head"), turn: document.getElementById("changes-turn") };
+  const setBase = (next) => {
+    for (const [base, box] of Object.entries(boxes)) box.checked = base === next;
+    checkout.base = next;
+    localStorage.setItem(baseKey, next);
     checkout.changes = null;
-    document.getElementById("changes-base").textContent = baseLabel();
+    document.getElementById("changes-base").textContent = bases[next].label;
     void readChanges();
-  });
-  turn.addEventListener("change", () => {
-    head.checked = false;
-    checkout.base = turn.checked ? "turn" : "start";
-    localStorage.setItem(baseKey, checkout.base);
-    checkout.changes = null;
-    document.getElementById("changes-base").textContent = baseLabel();
-    void readChanges();
-  });
+  };
+  for (const [base, box] of Object.entries(boxes)) {
+    box.checked = checkout.base === base;
+    box.addEventListener("change", () => setBase(box.checked ? base : "start"));
+  }
+  document.getElementById("changes-base").textContent = bases[checkout.base].label;
   document.getElementById("changes-reload").addEventListener("click", () => { void readChanges(true); });
 }
 
@@ -1149,20 +1151,15 @@ async function readDiff(path) {
   const dir = file.path.slice(0, file.path.lastIndexOf("/") + 1);
   const head = el("header", { className: "fv-head" }, badge(file.status),
     el("span", { className: "fv-path", title: file.path }, dir !== "" && el("span", { className: "fv-dir", textContent: dir }), el("span", { className: "fv-name", textContent: file.path.slice(dir.length) })),
-    el("span", { className: "dim small", textContent: checkout.base === "turn" ? "vs turn start" : checkout.base === "head" ? "vs last commit" : "vs boot" }), counts(file.additions, file.deletions), layoutPicker());
+    el("span", { className: "dim small", textContent: bases[checkout.base].vs }), counts(file.additions, file.deletions), layoutPicker());
   // A diff reaches into the pylon as the changes do, so a paused one is woken only when the reader says to, and
   // the read of the changes that wakes it reads the open diff again.
   const facts = factsNow();
   if (!canRead(facts)) {
-    const open = !threadClosed(facts);
-    const wake = el("button", { type: "button", className: "btn btn-xs", textContent: "Wake and read" });
-    wake.addEventListener("click", () => {
+    return fileView.replaceChildren(head, el("div", { className: "fv-note" }, ...unreadable(facts, "the diff", () => {
       void readChanges(true);
       void readDiff(path);
-    });
-    return fileView.replaceChildren(head, el("div", { className: "fv-note" },
-      el("p", { className: "empty", textContent: !open ? "The pylon stays paused, so the diff can't be read." : checkout.wanted ? "Waking the pylon. The diff shows once it runs." : `The pylon is ${facts.pylon}. Reading the diff wakes it.` }),
-      open && !checkout.wanted && wake));
+    })));
   }
   if (fileView.dataset.path !== path || fileView.querySelector(".diff-view") === null) fileView.replaceChildren(head, el("p", { className: "empty fv-note", textContent: "Reading the diff…" }));
   fileView.dataset.path = path;
