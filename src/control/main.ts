@@ -155,7 +155,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     ingest: (event, node, ...rest) => {
       if (event.type === "snapshot") {
         handoff?.observed(event.observation);
-        peers.observed(node);
+        peers.observed(node, event.observation.probeBootId);
       }
       return ingest(event, node, ...rest);
     },
