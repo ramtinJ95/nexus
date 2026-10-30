@@ -88,7 +88,7 @@ test("a check runs in a fresh bare check thread at the commit, and its verdict i
   const f = await fixture(t, "echo typecheck ok; echo tests ok");
   const runs = f.runs();
   const id = await runs.start(f.builder, "feature", f.head);
-  assert.deepEqual(f.started, [{ project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, node, branch: "feature", commit: f.head, bare: true }]);
+  assert.deepEqual(f.started, [{ project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, bare: true }]);
   assert.equal(f.registry.thread(id)!.startedBy, checkCaller);
   assert.deepEqual(runs.poll(id, f.head), { kind: "waiting" }, "nothing runs until the pylon does");
   f.running(f.registry.thread(id)!);
@@ -102,7 +102,7 @@ test("a live check runs .nexus/verify in a fresh verify pylon that asks for nest
   const runs = f.runs(verifyGate);
   const id = await runs.start(f.builder, "feature", f.head);
   assert.deepEqual(f.started, [{
-    project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, node: "auto", branch: "feature", commit: f.head, bare: true,
+    project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, near: node, node: "auto", branch: "feature", commit: f.head, bare: true,
     resources: { memoryGiB: verifyMemoryGiB, nestedVirtualization: true },
   }]);
   assert.equal(f.registry.thread(id)!.startedBy, verifyCaller);

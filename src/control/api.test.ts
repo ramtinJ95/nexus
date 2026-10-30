@@ -624,6 +624,25 @@ test("without --node a thread still boots on its project's default node, and a n
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "nowhere" })).status, 400);
 });
 
+test("a start near a node boots there while it has room, on the roomiest node once it has none, and there all the same when no node has room", async (t) => {
+  const s = await withImage(t);
+  observeNode(s, "big", { total: 64, committed: 0 });
+  observeNode(s, "full", { total: 32, committed: 40 });
+  const beside = await s.startThread({ project: "acme", title: "Beside", near: "big" as NodeName }, "nexus-review");
+  assert.deepEqual(beside.placement, { how: "named", node: "big" });
+  const spilled = await s.startThread({ project: "acme", title: "Spilled", near: "full" as NodeName }, "nexus-review");
+  assert.deepEqual(spilled.placement, {
+    how: "auto", node: "big", weighed: [
+      { node: "big", left: { cpus: 8, memoryGiB: 56, diskGiB: 180 } },
+      { node: "full", refused: "is overcommitted, with 40 of 32 GiB of memory committed" },
+      { node: "rj-firebat", refused: "is offline" },
+    ],
+  });
+  observeNode(s, "big", { total: 64, committed: 70 });
+  const stayed = await s.startThread({ project: "acme", title: "Stayed", near: "full" as NodeName }, "nexus-review");
+  assert.deepEqual(stayed.placement, { how: "named", node: "full" }, "no node has room, so it stays where it was asked to be near");
+});
+
 test("the first start of a setup builds its template on the node, the next waits for it, and one after it is ready boots from it at the commit read", async (t) => {
   const s = await withImage(t);
   observeNode(s, node, { total: 64, committed: 0 });

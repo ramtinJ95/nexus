@@ -6,7 +6,7 @@ import { bootSecrets, effectiveAllowedHosts, hasRemote, liveHashOf, withHttpsHos
 import type { NodeName, PylonId } from "../protocol.ts";
 import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
-import { placeAuto, type Placement } from "./placement.ts";
+import { placeAuto, placeNear, type Placement } from "./placement.ts";
 import { pylonLive } from "./live.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 
@@ -14,11 +14,12 @@ import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
  * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front
  * unless `raw`, as for the review loop's reviewers. A `bare` thread has neither agent, as a check thread needs only
  * its pylon. Only the control plane itself asks for `raw` or `bare`. `node` names a node, or is `auto` for the one
- * where the pylon fits best. `resources` overrides the project's size field by field.
+ * where the pylon fits best. `near` is a node to place the pylon on while it has room, which only the control plane asks
+ * for. `resources` overrides the project's size field by field.
  */
 export interface StartRequest {
   project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean;
-  resources?: { [K in keyof BootInputs["resources"]]?: BootInputs["resources"][K] | undefined } | undefined;
+  near?: NodeName | undefined; resources?: { [K in keyof BootInputs["resources"]]?: BootInputs["resources"][K] | undefined } | undefined;
 }
 
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
@@ -121,8 +122,10 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     const resources = resourcesOf(request.resources, project);
     const id = queuedId ?? newThreadId();
     const pylonId = `pylon-${id}` as PylonId;
+    const need = { image, resources, network, repo: freshRepo, dotfiles };
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }
-      : (request.node ?? project.defaultNode) === "auto" ? placeAuto(registry, { image, resources, network, repo: freshRepo, dotfiles })
+      : request.node === "auto" || (request.near === undefined && project.defaultNode === "auto") ? placeAuto(registry, need)
+      : request.near !== undefined ? placeNear(registry, need, request.near)
       : { how: "default", node: project.defaultNode as NodeName };
     const { node } = placement;
     const release = registry.reserve(pylonId, node, resources);

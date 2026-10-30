@@ -154,7 +154,7 @@ export function checkRuns(options: {
 
   return {
     async start(builder, branch, head) {
-      const t = await startThread({ node: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head) }, gate.caller);
+      const t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head) }, gate.caller);
       runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
       return t.id;
     },

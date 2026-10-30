@@ -23,6 +23,16 @@ export function placeAuto(registry: Registry, need: Need): Placement {
   return { how: "auto", node: best, weighed };
 }
 
+/**
+ * On `near` while it can run the pylon, as the review loop starts a builder's reviewer and checks beside it. Otherwise on
+ * the node with the most room left, and on `near` all the same when no node has room, so a review never waits for one.
+ */
+export function placeNear(registry: Registry, need: Need, near: NodeName): Placement {
+  const { best, weighed } = weighNodes(registry, need);
+  if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
+  return { how: "auto", node: best, weighed };
+}
+
 /** Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run it. */
 export function weighNodes(registry: Registry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
   const weighed = registry.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
