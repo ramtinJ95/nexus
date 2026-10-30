@@ -5,6 +5,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { probePort, type PylonId } from "../protocol.ts";
 import type { PylonLocator } from "../harness/pylon-env.ts";
+import { listsRunning } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 
 const pollMs = 250;
@@ -17,8 +18,7 @@ export function registryLocator(registry: Registry): PylonLocator {
         if (pylon === undefined) throw new Error(`the registry has no pylon ${pylonId}`);
         if (registry.threadStatus(pylon.thread) === "deleted") throw new Error(`the thread of ${pylonId} is deleted`);
         const node = registry.node(pylon.node)!;
-        const observed = node.observation?.pylons.find((p) => p.pylonId === pylonId);
-        if (node.state === "online" && observed?.phase === "running") {
+        if (node.state === "online" && listsRunning(node.observation, pylonId)) {
           return { node: node.name, host: node.tailnetHost, port: probePort, nodeId: node.tailnetNodeId };
         }
         if (Date.now() + pollMs > deadline) throw new Error(`${pylonId} on ${node.name} was not running by ${new Date(deadline).toISOString()}`);

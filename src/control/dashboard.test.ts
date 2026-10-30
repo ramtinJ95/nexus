@@ -24,7 +24,7 @@ import { githubTokenGrant } from "../project.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { testImage } from "../test-kit.ts";
-import { imagePaths, liveFrames } from "./dashboard.ts";
+import { imagePaths, liveFrames, liveStreams } from "./dashboard.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { usageLimitPrefix } from "./usage-limit.ts";
 import { startHint, type HintPart } from "./dashboard/start-hint.ts";
@@ -425,7 +425,7 @@ test("an answered AskUserQuestion leaves the dock and shows in the conversation 
     toolu_1: `Claude asked Drink Which drink? ✓ Tea Hot a cup of tea Coffee Strong Notes: no rush Extras What goes in it? ✓ Milk Sugar Own answer: Oat cream Answered from ${laptop}, just now .`,
     toolu_2: `Claude asked Drink Which drink? Tea Hot Coffee Strong Extras What goes in it? Milk Sugar ${terminal} Answered in the terminal.`,
   });
-  const frame = liveFrames(thread, null, Date.now, () => s.registry.questions(thread.id))({ kind: "claude", session: "s1", entries: s.registry.claudeEntries(thread.id), dropped: 0, readAt: 1, working: false, usageLimit: null });
+  const frame = liveFrames(thread, null, () => s.registry.questions(thread.id))({ kind: "claude", session: "s1", entries: s.registry.claudeEntries(thread.id), dropped: 0, readAt: 1, working: false, usageLimit: null });
   assert.equal(askCardsOf(`id="convo"${(frame as { convo: string }).convo}`)["toolu_1"], askCardsOf(page)["toolu_1"], "the page's stream shows the answer as the page does");
 });
 
@@ -1703,6 +1703,31 @@ test("a Claude worker's page stream names one view for one conversation, and ano
   assert.equal(frames({ ...view([reply("A")]), working: true }), null, "and a view named before gets none");
 });
 
+test("the page streams of one thread render each view once between them, and the last to leave drops the render", async (t) => {
+  const s = await seeded(t);
+  const thread = await claudeThread(s, []);
+  const view = (text: string): ClaudeConversation => ({ kind: "claude", session: "s1", entries: [{ kind: "reply", at: 1, text }], dropped: 0, readAt: 1, working: false, usageLimit: null });
+  let renders = 0;
+  const reader = liveStreams();
+  const join = () => reader(thread, null, () => { renders++; return []; }, () => () => null);
+  const [a, b] = [join(), join()];
+  const first = view("A");
+  assert.deepEqual(a.frames(first), b.frames(first));
+  assert.equal(renders, 1, "the second reader's frame reuses the first's render");
+  const next = view("B");
+  const frame = a.frames(next);
+  assert.deepEqual(b.frames(next), frame);
+  assert.ok(frame !== null && "convo" in frame && frame.convo.includes("B"));
+  assert.equal(renders, 2);
+  a.leave();
+  b.frames(view("C"));
+  assert.equal(renders, 3, "a reader that stays renders on its own");
+  b.leave();
+  const c = join();
+  c.frames(next);
+  assert.equal(renders, 4, "once every reader left, a new one renders afresh rather than reusing a dropped render");
+});
+
 test("an age the client ticks reads as a render of the page at the same time would", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-27T12:00:00Z") });
   const s = await seeded(t);
@@ -1984,7 +2009,7 @@ test("a Claude worker's prompt is Nexus's only when Nexus typed it, the usage li
   const rows = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text).rows;
   assert.ok(rows.includes(`Nexus usage limit ${continued}`), rows.join("\n"));
   assert.ok(rows.includes(`You ${theirs}`), rows.join("\n"));
-  const frame = liveFrames(thread, null, Date.now, () => [], () => promptSenders(s.registry, thread.id))({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
+  const frame = liveFrames(thread, null, () => [], () => promptSenders(s.registry, thread.id))({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
   assert.deepEqual(conversationOf(`id="convo"${(frame as { convo: string }).convo}<div class="dock"></main>`).rows, rows, "the page's stream names them as the page does");
 });
 
@@ -2345,6 +2370,20 @@ test("a harness tool result's image part and a written image file show as linked
     { route: `/v1/threads/${fix.id}/image`, query: { source: "harness", entry: "3", message: "0", part: "1", sha256: createHash("sha256").update(data).digest("hex") }, alt: "Image 1", caption: null },
     { route: `/v1/threads/${fix.id}/image`, query: { source: "file", path: "out/chart.webp" }, alt: "out/chart.webp", caption: "out/chart.webp" },
   ]);
+});
+
+test("the harness image link a thread page renders serves the image", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString("base64");
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push({ role: "toolResult", toolCallId: "c1", toolName: "screenshot", content: [{ type: "text", text: "taken" }, { type: "image", data: png, mimeType: "image/png" }], isError: false, timestamp: 0 });
+  s.fake.commit(fix.id);
+  const [shot] = shotsOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.equal(shot?.query.source, "harness");
+  const served = await s.call("GET", `${shot!.route}?${new URLSearchParams(shot!.query)}`);
+  assert.equal(served.status, 200, served.text);
+  assert.equal(served.headers["content-type"], "image/png");
 });
 
 test("image paths in prose are the checkout's, each once, at most six", () => {

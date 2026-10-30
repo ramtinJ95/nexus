@@ -47,6 +47,14 @@ export const resourcesOf = (size: StartRequest["resources"], project: Pick<Proje
   ...size?.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
 });
 
+/**
+ * The network a pylon boots with: its project's hosts and secrets. Every boot pulls the dotfiles through the
+ * allowlist. A template build pulls none, so their host stays out of the setup hash.
+ */
+export const bootNetwork = (project: Project, dotfilesRepo: string): BootInputs["network"] => ({
+  allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfilesRepo]), secrets: bootSecrets(project),
+});
+
 /** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
 
 /** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
@@ -108,8 +116,7 @@ export function threadStarter(options: { registry: Registry; harness: Pick<Harne
     const freshRepo: RepoInit = hasRemote(project)
       ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
       : { kind: "empty", branch };
-    // Every boot pulls the dotfiles through the allowlist. A template build pulls none, so their host stays out of the setup hash.
-    const network = { allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfiles.repo]), secrets: bootSecrets(project) };
+    const network = bootNetwork(project, dotfiles.repo);
 
     const resources = resourcesOf(request.resources, project);
     const id = queuedId ?? newThreadId();
