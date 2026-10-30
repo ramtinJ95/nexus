@@ -12,7 +12,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { commandPolicies, JobFailure, runCommand, runJob, type BackendPylon, type CommandPolicy, type ProbeDeps, type VmBackend } from "../backend.ts";
-import type { PortableArtifactId } from "../images.ts";
 import {
   artifactHeaders, encodeProbeEvent, encodeSubmitReply, fetchArtifact, heldSecrets, isPortableArtifactId, jobDeadlineMs, probePort, jobSubject, parseJobEnvelope, parsePylonCommand, parseStreamRequest, peersSchema, routeAuth, serveByteStream, streamUpgradeResponse,
   type Job, type JobEnvelope, type JobId, type JobStatus, type LiveHash, type NodeName, type NodeObservation,
@@ -405,7 +404,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
     const [listed, host] = await Promise.all([backend.list(), hostCapacity(storage)]);
-    const artifacts = await backend.artifacts.list(listed);
+    // A running pylon's disk has moved on from the checkpoint it booted from, so only stopped disks count.
+    const artifacts = [...await backend.artifacts.list(), ...listed.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : [])];
     const present = new Set(listed.map((p) => p.pylonId));
     // Not dropped: a spawn in flight compares `diverged` at its start and its end, and a list can miss its pylon.
     for (const [id, state] of pylons) if (!present.has(id)) notRunning(state);
@@ -611,10 +611,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
     const artifactMatch = /^\/v1\/artifacts\/([^/]+)$/.exec(path);
     if (artifactMatch && req.method === "GET") {
-      const id = decodeURIComponent(artifactMatch[1]!) as PortableArtifactId;
+      const id = decodeURIComponent(artifactMatch[1]!);
       const wanted = new URL(req.url ?? "/", "http://probe").searchParams.get("sha256");
       if (wanted === null) return send(res, 400, "name the sha256 the copy must have, as ?sha256=");
-      if (id.startsWith("ckpt-") || !(await backend.artifacts.list([])).includes(id)) return send(res, 404, `this node holds no image or template ${id}. A checkpoint never leaves its node`);
+      if (!isPortableArtifactId(id) || !await backend.artifacts.has(id)) return send(res, 404, `this node holds no image or template ${id}. A checkpoint never leaves its node`);
       const held = await backend.artifacts.manifest(id);
       if (held !== null && held.sha256 !== wanted) {
         const reason = `this node holds ${id} with sha256 ${held.sha256}, and the fetch asks for ${wanted}`;

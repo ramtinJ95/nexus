@@ -21,8 +21,8 @@ import { exit, output } from "./exec.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
 import type { OverlayFile } from "./project.ts";
-import { isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
-import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
+import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
+import type { CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "./session-wake.ts";
 import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
@@ -254,8 +254,11 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   const artifacts: ArtifactStore = {
     async list() {
       const images = await Promise.all(Object.entries(options.images).map(async ([id, ref]) => await imagePresent(ref) ? id as ImageId : null));
-      const checkpoints = (await checkpointImages(null)).map((img) => labelsOf(img)[label.checkpoint] as CheckpointId);
-      return [...images.filter((id): id is ImageId => id !== null), ...await store?.list() ?? [], ...new Set(checkpoints)] satisfies ArtifactId[];
+      return [...images.filter((id): id is ImageId => id !== null), ...await store?.list() ?? []];
+    },
+    async has(id) {
+      if (isImageId(id)) return options.images[id] !== undefined && await imagePresent(options.images[id]);
+      return store !== null && await store.manifest(id) !== null;
     },
     manifest: (id) => templates().manifest(templateId(id)),
     export: (id) => templates().export(templateId(id)),

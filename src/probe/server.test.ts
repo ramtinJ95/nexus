@@ -83,7 +83,8 @@ function fakeBackend(guest: Guest | null = null) {
       return unreachable.map((id) => ({ pylonId: id, reason: "its controller did not answer" }));
     },
     artifacts: {
-      list: async (listed) => [image, ...offered.keys(), ...imported.keys(), ...listed.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : [])],
+      list: async () => [image, ...offered.keys(), ...imported.keys()],
+      has: async (id) => id === image || offered.has(id) || imported.has(id),
       manifest: async (id) => imported.get(id)?.manifest ?? offered.get(id)?.manifest ?? null,
       async export(id) {
         const held = offered.get(id) ?? assert.fail(`export of ${id}, which the fake does not hold`);
@@ -138,6 +139,18 @@ test("callers that are not the configured node get 403", async (t) => {
   callAs(controlPlane);
   assert.equal((await fetch(`${base}/v1/artifacts/img-1`)).status, 403);
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
+});
+
+test("a peer's fetch of a checkpoint or of an artifact this node lacks is 404, and lists nothing", async (t) => {
+  const { base, fake, callAs } = await setup(t);
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-held-1", image, sessions: null });
+  let lists = 0;
+  fake.backend.artifacts.list = async () => { lists++; return [image]; };
+  callAs(peer);
+  const sha256 = "0".repeat(64);
+  assert.equal((await fetch(`${base}/v1/artifacts/ckpt-held-1?sha256=${sha256}`)).status, 404, "a checkpoint never leaves its node");
+  assert.equal((await fetch(`${base}/v1/artifacts/${template}?sha256=${sha256}`)).status, 404);
+  assert.equal(lists, 0);
 });
 
 test("the control plane's list of peers replaces probe.json's, and only the control plane may put it", async (t) => {
@@ -914,10 +927,10 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   const readsWait = await waiting(async () => {
     const held = Promise.withResolvers<void>();
     const reached = Promise.withResolvers<void>();
-    fake.backend.artifacts.list = async (listed) => {
+    fake.backend.artifacts.list = async () => {
       reached.resolve();
       await held.promise;
-      return artifacts(listed);
+      return artifacts();
     };
     void client.observe(reads.signal)[Symbol.asyncIterator]().next().catch(() => undefined);
     await reached.promise;

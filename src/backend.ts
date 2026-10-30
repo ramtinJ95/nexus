@@ -13,10 +13,10 @@
  * The backend speaks its own types. Wire types from protocol.ts stop at runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact } from "./protocol.ts";
+import { isPortableArtifactId, type ArtifactCopy, type BrokenCause, type ByteStream, type CommandResult, type Job, type JobErrorCode, type NodeName, type PausedSession, type PylonCommand, type PylonId, type ServiceFact } from "./protocol.ts";
 import { checkoutDir, closeSession, dropFailedSession, interruptClaude, openSession, sendToClaude } from "./sessions.ts";
 import { type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
-import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
+import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 import type { HostBridge } from "./probe/pylon-api.ts";
 
 export interface VmBackend {
@@ -116,8 +116,9 @@ export interface Guest {
  * logins and stays in its pylon's instance on its own node.
  */
 export interface ArtifactStore {
-  /** `pylons` is what the backend's list() returned. A backend whose checkpoints live in its pylons' instances lists theirs. */
-  list(pylons: readonly BackendPylon[]): Promise<readonly ArtifactId[]>;
+  /** The images and templates this node holds. The probe adds its stopped pylons' checkpoints. */
+  list(): Promise<readonly PortableArtifactId[]>;
+  has(id: PortableArtifactId): Promise<boolean>;
   /** The manifest of an image or template this node holds, or null. */
   manifest(id: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** The sparse archive a peer's GET /v1/artifacts/{id} streams, and the manifest whose sha256 it hashes to. */
@@ -196,8 +197,8 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         await deps.backend.buildTemplate(job.template, job.inputs, signal);
         return;
       case "fetch-artifact": {
-        if (job.artifact.startsWith("ckpt-")) throw new JobFailure("invalid", `${job.artifact} is a checkpoint, and a checkpoint never leaves its node`);
-        const artifact = job.artifact as PortableArtifactId;
+        const artifact = job.artifact;
+        if (!isPortableArtifactId(artifact)) throw new JobFailure("invalid", `${artifact} is a checkpoint, and a checkpoint never leaves its node`);
         const held = await deps.backend.artifacts.manifest(artifact);
         if (held !== null) {
           if (held.sha256 !== job.sha256) throw new JobFailure("invalid", `this node holds ${artifact} with sha256 ${held.sha256}, and the job asks for ${job.sha256}`);

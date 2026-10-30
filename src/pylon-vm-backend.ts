@@ -19,7 +19,7 @@ import { JobFailure, type ArtifactStore, type BackendPylon, type BackendVm, type
 import { buildImage as buildPylonImage } from "./image-build.ts";
 import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit, shellQuote as q } from "./project.ts";
 import { isImageId, isTemplateId, maxPylonIdLength, pylonIdSchema, type PausedSession, type PylonId } from "./protocol.ts";
-import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateManifest } from "./images.ts";
+import { imageIdOf, type CheckpointId, type ImageId, type PortableArtifactId, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
 import { requiredArtifacts } from "./reconcile.ts";
@@ -458,11 +458,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
 
   const artifacts: ArtifactStore = {
-    async list(pylons) {
-      // A running pylon's disk has moved on from the checkpoint it booted from, so only stopped disks count.
-      const checkpoints = pylons.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : []);
-      return [...await store.list(), ...checkpoints] satisfies ArtifactId[];
-    },
+    list: () => store.list(),
+    has: async (id) => existsSync(join(store.path(id), manifestFiles[isImageId(id) ? "image" : "template"])),
     manifest: (id) => store.manifest(id),
     export: (id) => store.export(id),
     // A template is a disk over its image, so its image is held until the template is published, where drop sees it.

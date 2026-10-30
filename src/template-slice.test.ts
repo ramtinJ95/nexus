@@ -239,7 +239,7 @@ const succeeded = async (side: Side, job: Job) => {
   const status = await runJob(side, job);
   assert.equal(status.state, "succeeded", JSON.stringify(status));
 };
-const held = async (side: Side) => fixture.backends[side].artifacts.list([]);
+const held = async (side: Side) => fixture.backends[side].artifacts.list();
 const manifestOn = async (side: Side, id: TemplateId | ImageId) =>
   JSON.parse(await readFile(join(fixture.stores[side], id, id.startsWith("tpl-") ? "template.json" : "image.json"), "utf8")) as { sha256: string };
 
