@@ -15,6 +15,7 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProjectId } from "../project.ts";
 import type { StartRequest } from "./threads.ts";
+import { runningPylon, testCapacity, testObservation } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 
@@ -59,10 +60,9 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
     return thread;
   }
   function running(...threads: Thread[]) {
-    const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-    registry.apply({ record: "node", node, state: "online", capacity });
-    const pylons = threads.map((th) => ({ pylonId: th.pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 }));
-    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+    registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+    const pylons = threads.map((th) => runningPylon(th.pylonId, { liveHash: "hash" as LiveHash }));
+    registry.ingested(testObservation(node, { pylons }), []);
   }
   const builder = add("person");
   const started: StartRequest[] = [];

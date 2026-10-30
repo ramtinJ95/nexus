@@ -9,7 +9,7 @@ import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProjectId } from "../project.ts";
-import { watch } from "../test-kit.ts";
+import { runningPylon, testCapacity, testObservation, watch } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
@@ -32,10 +32,8 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
     registry.appendClaudeRead(thread.id, { session, from: transcriptStart, entries: [stop], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
   }
   const thread = threads[0]!;
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
-  const running = (pylonId: PylonId) => ({ pylonId, phase: "running" as const, liveHash: "hash" as LiveHash, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as const, checkpoint: null }, services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0 });
-  registry.apply({ record: "node", node, state: "online", capacity });
-  registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: threads.map((th) => running(th.pylonId)), grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  registry.ingested(testObservation(node, { pylons: threads.map((th) => runningPylon(th.pylonId, { liveHash: "hash" as LiveHash })) }), []);
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
