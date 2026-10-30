@@ -2,8 +2,8 @@ import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
-import { planDeploy, quarantined, type Attempt, type ReleaseHealth, type Role } from "./plan.ts";
-import type { ReleaseReport, ReleaseView } from "./model.ts";
+import { planDeploy, quarantined, type Attempt, type ReleaseHealth } from "./plan.ts";
+import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "./model.ts";
 import { jsonRequest, urlHost } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois, tailnetNodeIdPattern } from "../tailscale.ts";
@@ -61,7 +61,7 @@ export async function reconcileRoles(roles: readonly Role[], config: WorkerConfi
   let view: Promise<ReleaseView> | undefined;
   const reporting: Api = async (path, body) => {
     const answer = await api(path, body);
-    const report = body as ReleaseReport;
+    const report = body as ReportBody;
     if (path === "report" && report.role === "control" && view !== undefined) {
       const shown = controlHealth(await view);
       if (shown.commit !== report.commit || shown.healthy !== (report.state === "healthy")) view = undefined;
@@ -95,7 +95,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     return false;
   };
   const report = async (state: ReleaseReport["state"], target: string | null, reason: string | null = null) => {
-    const wire = { role, commit: await commitAt(link), target, state, reason };
+    const wire: ReportBody = { role, commit: await commitAt(link), target, state, reason };
     const saved = await readJson(reportPath, null).catch(() => null) as ReleaseReport | null;
     if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
       await saveJson(reportPath, { ...wire, observedAt: Date.now() });
@@ -108,7 +108,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   let drainLost = false;
   const drain = async () => {
     if (desired === null) throw new Error("no desired release to drain");
-    return api("drain", { commit: desired }) as Promise<{ idle: boolean; expiresAt: number }>;
+    return api("drain", { commit: desired } satisfies DrainBody) as Promise<DrainReply>;
   };
   const installer = new ReleaseInstaller(prefix, role, {
     async prepare(commit) {
@@ -127,7 +127,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
           throw new WaitingForControl("control plane is not healthy on the desired release; retrying next poll");
         }
       }
-      if (role === "control" && !(await api("drain", { commit: desired, hold: true })).idle) throw new Error("agent turn entered after the drain lease expired; refusing restart");
+      if (role === "control" && !(await api("drain", { commit: desired!, hold: true } satisfies DrainBody)).idle) throw new Error("agent turn entered after the drain lease expired; refusing restart");
     },
     async activate() {
       if (role === "control") {
@@ -161,7 +161,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const held = quarantined(view.desired, attempts);
   if (held !== null) {
     await report(held.state, desired, held.reason);
-    if (role === "control") await api("drain", { commit: desired, release: true }).catch(() => {});
+    if (role === "control") await api("drain", { commit: desired!, release: true } satisfies DrainBody).catch(() => {});
     return;
   }
   const current = { commit: await commitAt(link), healthy: await healthy() };
@@ -169,7 +169,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");
-    if (role === "control" && desired !== null) await api("drain", { commit: desired, release: true }).catch(() => {});
+    if (role === "control" && desired !== null) await api("drain", { commit: desired, release: true } satisfies DrainBody).catch(() => {});
     return;
   }
   if (step.kind !== "install") { await report("waiting-for-control", desired); return; }
@@ -194,7 +194,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     await report(error instanceof WaitingForControl ? "waiting-for-control" : "failed", desired, String(error).slice(-20_000));
   } finally {
     clearInterval(renewal);
-    if (role === "control") await api("drain", { commit: desired, release: true }).catch(() => {});
+    if (role === "control") await api("drain", { commit: desired!, release: true } satisfies DrainBody).catch(() => {});
   }
 }
 

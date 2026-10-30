@@ -2304,7 +2304,8 @@ test("a root-authenticated drain blocks every turn-entry route and can be releas
   }
   assert.equal((await s.call("PUT", "/v1/release", { commit: "b".repeat(40) })).status, 409);
   s.callAs("nFIREBAT" as TailnetNodeId);
-  await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
+  const released = await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
+  assert.deepEqual(released.body, { idle: false, expiresAt: null });
   assert.equal(s.registry.drain(), null);
 });
 

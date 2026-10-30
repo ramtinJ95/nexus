@@ -1,7 +1,5 @@
-import type { ReleaseReport } from "./model.ts";
+import type { DesiredRelease, ReleaseReport, Role } from "./model.ts";
 
-export type Role = "control" | "probe";
-export interface DesiredRelease { commit: string; requestedBy: string; requestedAt: number }
 export interface ReleaseHealth { commit: string | null; healthy: boolean }
 /** An outcome the worker recorded at a commit: its journal's transaction, or the target of its last report. */
 export interface Attempt {

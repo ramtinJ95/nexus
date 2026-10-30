@@ -2,8 +2,7 @@ import { attentionOf, type Attention } from "./attention.ts";
 import { pylonEventSchema } from "../events.ts";
 import type { ReportedEvent } from "../events.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
-import type { DesiredRelease } from "../deploy/plan.ts";
-import type { Drain, ReleaseReport } from "../deploy/model.ts";
+import type { DesiredRelease, Drain, ReleaseReport } from "../deploy/model.ts";
 /**
  * The registry: every Nexus record, in one SQLite file. The control plane process is its only writer, and
  * it holds one connection, so every write is a synchronous statement and no two writes interleave.
