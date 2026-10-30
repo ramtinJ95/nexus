@@ -815,13 +815,14 @@ test("the watch stops after its comment cap of comment-only wakes in a row, and 
 });
 
 /** A GitHub that answers every path with an ETag of its own, 304 once asked with it, and records each request's If-None-Match. */
-function etagGitHub(answer: (path: string) => unknown = () => []) {
+function etagGitHub(answer: (path: string) => unknown = () => [], before: (path: string) => Promise<void> = async () => {}) {
   const asked: { path: string; etag: string | null }[] = [];
   const fake: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const path = url.pathname + url.search;
     const etag = new Headers(init?.headers).get("if-none-match");
     asked.push({ path, etag });
+    await before(path);
     const value = answer(url.pathname);
     const tag = `"${Buffer.from(`${path} ${JSON.stringify(value)}`).toString("base64")}"`;
     return etag === tag ? new Response(null, { status: 304 }) : Response.json(value, { headers: { etag: tag } });
@@ -841,10 +842,11 @@ test("a cached GitHub resource that is read again stays cached past 4096 newer o
   assert.equal(asked.at(-1)!.etag, null, "the least recently read one was");
 });
 
-test("a PR's commit resources leave the cache once its head moves", async () => {
+test("a PR's commit resources leave the cache once its head moves or it closes", async () => {
   let head = "a".repeat(40);
+  let state = "open";
   const { asked, client } = etagGitHub((path) => path.endsWith("/pulls/1")
-    ? { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state: "open", merged: false, mergeable_state: "clean", head: { sha: head, ref: "feature" }, base: { ref: "main" } }
+    ? { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state, merged: false, mergeable_state: "clean", head: { sha: head, ref: "feature" }, base: { ref: "main" } }
     : path.endsWith("/check-runs") ? { check_runs: [] } : []);
   const commits = () => asked.filter((a) => a.path.includes(`/commits/${"a".repeat(40)}/`));
   await client.poll("acme/repo", 1);
@@ -856,6 +858,12 @@ test("a PR's commit resources leave the cache once its head moves", async () => 
   const before = commits().length;
   await client.poll("acme/repo", 1);
   assert.deepEqual(commits().slice(before).map((a) => a.etag), [null, null], "the old head's check runs and statuses were dropped");
+  state = "closed";
+  await client.poll("acme/repo", 1);
+  state = "open";
+  const reopened = commits().length;
+  await client.poll("acme/repo", 1);
+  assert.deepEqual(commits().slice(reopened).map((a) => a.etag), [null, null], "a closed PR's were too");
 });
 
 test("a contents read waits out GitHub's rate limit like any other read", async (t) => {
@@ -870,4 +878,19 @@ test("a contents read waits out GitHub's rate limit like any other read", async 
   now += 60_000;
   assert.equal(await client.has("acme/repo", "abc", ".nexus/verify"), false);
   assert.equal(calls, 2);
+});
+
+test("a GitHub answer of not modified that comes after its resource was evicted still keeps the cache at 4096", async () => {
+  let held: Promise<void> | null = null;
+  const { asked, client } = etagGitHub(undefined, async (path) => { if (path.includes("kept") && held !== null) await held; });
+  await client.find("acme/repo", "kept");
+  for (let i = 0; i < 4095; i++) await client.find("acme/repo", `other-${i}`);
+  const release = Promise.withResolvers<void>();
+  held = release.promise;
+  const late = client.find("acme/repo", "kept");
+  await client.find("acme/repo", "newest");
+  release.resolve();
+  await late;
+  await client.find("acme/repo", "other-0");
+  assert.equal(asked.at(-1)!.etag, null, "the late answer evicted the least recently used resource");
 });

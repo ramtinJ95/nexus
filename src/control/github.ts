@@ -58,7 +58,7 @@ interface Status { id: number; context: string; state: string; target_url: strin
  */
 export function githubClient(token: string, request: typeof fetch = fetch): GitHub {
   const cache = new Map<string, { etag: string | null; value: unknown; next: string | null }>();
-  /** Each PR's head at its last read, by repository and number. */
+  /** Each open PR's head at its last read, by repository and number. */
   const heads = new Map<string, string>();
   let retryAt = 0;
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
@@ -80,12 +80,17 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
     return await request(`https://api.github.com${path}`, { ...init, headers: { ...headers, ...init.headers }, signal: AbortSignal.timeout(30_000), redirect: "error" });
   }
+  /** Makes `path` the most recently used entry, evicting the least recently used one when the cache is full. */
+  function remember(path: string, entry: { etag: string | null; value: unknown; next: string | null }) {
+    cache.delete(path);
+    if (cache.size >= 4096) cache.delete(cache.keys().next().value!);
+    cache.set(path, entry);
+  }
   async function get<T>(path: string): Promise<{ value: T; next: string | null }> {
     const old = cache.get(path);
     const response = await call(path, { headers: old?.etag ? { "If-None-Match": old.etag } : {} });
     if (response.status === 304 && old) {
-      cache.delete(path);
-      cache.set(path, old);
+      remember(path, old);
       return { value: old.value as T, next: old.next };
     }
     if (!response.ok) {
@@ -95,9 +100,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     const value = await response.json() as T;
     const nextUrl = response.headers.get("link")?.match(/<([^>]+)>; rel="next"/)?.[1];
     const next = nextUrl?.startsWith("https://api.github.com/") ? nextUrl.slice("https://api.github.com".length) : null;
-    cache.delete(path);
-    if (cache.size >= 4096) cache.delete(cache.keys().next().value!);
-    cache.set(path, { etag: response.headers.get("etag"), value, next });
+    remember(path, { etag: response.headers.get("etag"), value, next });
     return { value, next };
   }
   /** A write's answer. A rate limit throws, so the caller's step is retried, never reported as a refusal. */
@@ -127,11 +130,12 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     async poll(repo, number) {
       const base = `/repos/${repo}`;
       const { value: p } = await get<Pr>(`${base}/pulls/${number}`);
-      const before = heads.get(`${repo}#${number}`);
-      if (before !== undefined && before !== p.head.sha) for (const key of cache.keys()) if (key.startsWith(`${base}/commits/${before}/`)) cache.delete(key);
-      heads.set(`${repo}#${number}`, p.head.sha);
       const detail: PrDetail = { head: p.head.sha, branch: p.head.ref, base: p.base.ref, body: p.body ?? "", mergeCommit: p.merged ? p.merge_commit_sha : null };
       const pr: PullRequest = { repo, number, title: p.title, url: p.html_url, state: p.merged ? "merged" : p.state === "closed" ? "closed" : "open", checks: "none", review: "none", conflict: p.mergeable_state === "unknown" ? null : p.mergeable_state === "dirty" };
+      // Nothing reads an old head's commit resources again, nor a closed or merged PR's.
+      const before = heads.get(`${repo}#${number}`);
+      if (before !== undefined && (before !== p.head.sha || pr.state !== "open")) for (const key of cache.keys()) if (key.startsWith(`${base}/commits/${before}/`)) cache.delete(key);
+      if (pr.state === "open") heads.set(`${repo}#${number}`, p.head.sha); else heads.delete(`${repo}#${number}`);
       if (pr.state !== "open") return { pr, detail, failures: [], comments: [] };
       const [checks, statuses, reviews, inline, issue] = await Promise.all([
         list<Check>(`${base}/commits/${p.head.sha}/check-runs?filter=latest`, "check_runs"),
