@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import {
   brokenCauses, closeSessionOutcomes, connectProbe, interruptClaudeOutcomes, parseArtifactManifest, parseJobEnvelope, parseProbeEvent, parsePylonCommand, parseStreamRequest,
@@ -383,4 +384,10 @@ test("each union's list holds exactly its type's members, and the parser that re
   const causes = (cause: string) => (upgradeObservation({ pylons: [{ pylonId, phase: "broken", detail: "", cause }] } as never).pylons[0] as { cause: string }).cause;
   for (const cause of [...brokenCauses, "unknown"]) assert.equal(causes(cause), cause);
   assert.equal(causes("cosmic-ray"), "unknown", "a cause this control plane does not know");
+});
+
+test("ids.ts imports nothing, so every module can take its IDs from it without a cycle", () => {
+  const source = readFileSync(new URL("./ids.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /^\s*import\b|\bimport\s*\(/m);
+  assert.doesNotMatch(source, /^\s*export\b[^;]*\bfrom\s*["']/m);
 });
