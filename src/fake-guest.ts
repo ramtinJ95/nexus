@@ -18,18 +18,57 @@ export interface FakeGuest extends Guest {
   herdrCalls(): string[];
 }
 
-/** `script` gets the argv after `herdr --session nexus` for Herdr calls, and the whole argv for anything else. */
+/** A Herdr call read by name, as Herdr parses it, wherever Nexus puts each word. */
+export interface HerdrArgs {
+  /** The subcommand, such as "agent start". */
+  command: string;
+  /** Its other operands in order, such as the pane `pane close` closes. */
+  operands: string[];
+  /** Each `--flag value`, with "" for a flag that takes none, such as `--no-focus`. `--session` is one of them. */
+  flags: Record<string, string>;
+  /** The argv after `--`: the launched agent's own, asserted exactly and in order. */
+  rest: string[];
+}
+
+const valuelessFlags = new Set(["--no-focus"]);
+
+/** Reads Herdr's arguments: those after `herdr`, or after `herdr --session nexus` as fakeGuest's script gets them. */
+export function herdrArgs(args: readonly string[]): HerdrArgs {
+  const end = args.includes("--") ? args.indexOf("--") : args.length;
+  const words: string[] = [];
+  const flags: Record<string, string> = {};
+  for (let i = 0; i < end; i++) {
+    const word = args[i]!;
+    if (!word.startsWith("--")) words.push(word);
+    else flags[word] = valuelessFlags.has(word) ? "" : args[++i]!;
+  }
+  return { command: words.slice(0, 2).join(" "), operands: words.slice(2), flags, rest: args.slice(end + 1) };
+}
+
+/** Reads a guest exec as the Herdr call it makes, plain or claimed first as sessions.ts `herdr()` makes it, or null for any other exec. */
+export function herdrCall(argv: readonly string[]): (HerdrArgs & { marker: string | null; args: readonly string[] }) | null {
+  const marker = argv[0] === "sh" && argv[1] === "-c" ? argv[3] ?? null : null;
+  const words = marker === null ? argv : argv.slice(4);
+  if (words[0] !== "herdr") return null;
+  const call = herdrArgs(words.slice(1));
+  if (call.flags["--session"] === undefined) return null;
+  const session = words.indexOf("--session") - 1;
+  return { ...call, marker, args: words.slice(1).filter((_, i) => i !== session && i !== session + 1) };
+}
+
+/** `script` gets Herdr's arguments without `--session nexus` for Herdr calls, and the whole argv for anything else. */
 export function fakeGuest(script: (argv: readonly string[], herdr: boolean) => ExecReply): FakeGuest {
   const execs: (readonly string[])[] = [];
   const written: OverlayFile[] = [];
-  const isHerdr = (argv: readonly string[]) => argv[0] === "herdr" && argv[1] === "--session";
+  const plainHerdr = (argv: readonly string[]) => { const call = herdrCall(argv); return call?.marker === null ? call : null; };
   return {
     execs,
     written,
-    herdrCalls: () => execs.filter(isHerdr).map((argv) => argv.slice(3, 5).join(" ")),
+    herdrCalls: () => execs.flatMap((argv) => plainHerdr(argv)?.command ?? []),
     async exec(argv) {
       execs.push(argv);
-      const reply = isHerdr(argv) ? script(argv.slice(3), true) : script(argv, false);
+      const call = plainHerdr(argv);
+      const reply = call === null ? script(argv, false) : script(call.args, true);
       return { truncated: false, ...reply };
     },
     async writeFiles(files) { written.push(...files); },
