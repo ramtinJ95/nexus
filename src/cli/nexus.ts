@@ -169,6 +169,31 @@ function resourcesOf(v: Values): Partial<Project["resources"]> | undefined {
   return Object.keys(resources).length > 0 ? resources : undefined;
 }
 
+/** Where a thread's pylon runs and how big it is, which a start, an item and a project's defaults share. */
+const placementOptions = { node: { type: "string" }, branch: { type: "string" }, cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" } } as const;
+/** What briefs a worker, which `start` and `item add` share. */
+const workerOptions = {
+  ...placementOptions, model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" },
+  commit: { type: "string" }, after: { type: "string" },
+} as const;
+
+/** The worker flags that `start` and `item add` check alike. The title is undefined when no flag gives one. */
+function briefOf(v: Values, verb: string) {
+  const message = str(v, "message");
+  const claude = str(v, "claude");
+  if (v.model !== undefined && claude === undefined) throw new CliError("invalid", "--model requires --claude");
+  if (message !== undefined && claude !== undefined) throw new CliError("invalid", "--claude and --message are mutually exclusive");
+  const project = str(v, "project");
+  if (project === undefined) throw new CliError("invalid", `${verb} needs --project`);
+  const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
+  if (after?.length === 0) throw new CliError("invalid", "--after needs a thread");
+  return {
+    project, title: str(v, "title") ?? (message === undefined && claude === undefined ? undefined : titleOf(message ?? claude!)),
+    optional: Object.fromEntries((["node", "branch", "commit", "claude", "model", "message"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]])),
+    resources: resourcesOf(v), after,
+  };
+}
+
 function ago(at: number, now = Date.now()): string {
   const s = Math.max(0, Math.floor((now - at) / 1000));
   return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
@@ -681,20 +706,18 @@ function liveOf(id: string, view: View | null): WatchLive {
   };
 }
 
-const one = (n: number) => Number(n.toFixed(1));
-
 /** Null readings are what the node's host does not expose, so they print as unknown, never as zero. */
 function healthText(h: NodeHealth): string {
   const { load, memory, temperatures, pylons } = h;
   return [
     `node: ${h.node}, read ${h.readAt}`,
     `load: ${load === null ? "unknown" : `${load.one.toFixed(2)} ${load.five.toFixed(2)} ${load.fifteen.toFixed(2)} (1, 5, 15 min)`} on ${h.cpus} CPUs`,
-    `memory: ${memory === null ? "unknown" : `${one(memory.availableGiB)} of ${one(memory.totalGiB)} GiB available`}`,
-    `swap: ${memory === null ? "unknown" : memory.swapTotalGiB === 0 ? "none" : `${one(memory.swapTotalGiB - memory.swapFreeGiB)} of ${one(memory.swapTotalGiB)} GiB used`}`,
-    `disk: ${one(h.disk.freeGiB)} of ${one(h.disk.totalGiB)} GiB free at ${h.disk.path}`,
+    `memory: ${memory === null ? "unknown" : `${gib(memory.availableGiB)} of ${gib(memory.totalGiB)} GiB available`}`,
+    `swap: ${memory === null ? "unknown" : memory.swapTotalGiB === 0 ? "none" : `${gib(memory.swapTotalGiB - memory.swapFreeGiB)} of ${gib(memory.swapTotalGiB)} GiB used`}`,
+    `disk: ${gib(h.disk.freeGiB)} of ${gib(h.disk.totalGiB)} GiB free at ${h.disk.path}`,
     `temperatures: ${temperatures === null ? "unknown" : temperatures.map((t) => `${t.sensor} ${t.celsius.toFixed(1)} °C`).join(", ")}`,
     ...pylons === null ? ["pylons: unknown"] : pylons.length === 0 ? ["pylons: none running"]
-      : pylons.map((p) => `pylon: ${p.pylonId}, ${p.processes} ${p.processes === 1 ? "process" : "processes"}, ${one(p.cpuPercent)}% CPU, ${one(p.residentGiB)} GiB resident`),
+      : pylons.map((p) => `pylon: ${p.pylonId}, ${p.processes} ${p.processes === 1 ? "process" : "processes"}, ${gib(p.cpuPercent)}% CPU, ${gib(p.residentGiB)} GiB resident`),
   ].join("\n");
 }
 
@@ -1240,35 +1263,22 @@ const commands: Readonly<Record<string, Command>> = {
   },
   start: {
     args: [0, 0],
-    options: {
-      model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
-      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" }, "request-id": { type: "string" }, plan: { type: "boolean" },
-    },
+    options: { ...workerOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
     async run(api, _, v) {
-      const project = str(v, "project");
       if (v.plan === true && (v.claude !== undefined || v.after !== undefined)) throw new CliError("invalid", "--plan starts a Nexus agent thread now, so it takes neither --claude nor --after");
-      const message = str(v, "message");
-      const claude = str(v, "claude");
-      if (v.model !== undefined && claude === undefined) throw new CliError("invalid", "--model requires --claude");
-      if (message !== undefined && claude !== undefined) throw new CliError("invalid", "--claude and --message are mutually exclusive");
-      const title = str(v, "title") ?? (message === undefined && claude === undefined ? undefined : titleOf(message ?? claude!));
-      if (project === undefined) throw new CliError("invalid", "start needs --project");
+      const { project, title, optional, resources, after } = briefOf(v, "start");
       if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
-      const optional = Object.fromEntries((["node", "branch", "commit", "claude", "model"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
-      const resources = resourcesOf(v);
       const requestId = str(v, "request-id");
       // One request: the control plane sends the first message once the thread starts, as the person's.
-      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...message === undefined ? {} : { message }, ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true } : {} };
-      const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
+      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true } : {} };
       if (after !== undefined) {
-        if (after.length === 0) throw new CliError("invalid", "--after needs a thread");
         const q = await api("POST", "/v1/threads", { ...body, after }) as QueuedThread | Thread;
         // A repeat of the request ID after the queued thread started answers the thread.
         if (!("after" in q)) return { json: q, text: `Started ${q.id} on ${q.project}: ${q.title}` };
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
       const t = await api("POST", "/v1/threads", body) as Thread;
-      return { json: t, text: `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${message === undefined ? "" : "\nSent the first message."}` };
+      return { json: t, text: `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${v.message === undefined ? "" : "\nSent the first message."}` };
     },
   },
   items: {
@@ -1282,22 +1292,11 @@ const commands: Readonly<Record<string, Command>> = {
   },
   "item add": {
     args: [0, 0],
-    options: {
-      model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" }, node: { type: "string" }, branch: { type: "string" }, commit: { type: "string" },
-      cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" }, after: { type: "string" },
-    },
+    options: workerOptions,
     async run(api, _, v) {
-      const project = str(v, "project");
-      const message = str(v, "message");
-      const claude = str(v, "claude");
-      if (v.model !== undefined && claude === undefined) throw new CliError("invalid", "--model requires --claude");
-      if (message !== undefined && claude !== undefined) throw new CliError("invalid", "--claude and --message are mutually exclusive");
-      if (project === undefined) throw new CliError("invalid", "item add needs --project");
-      if (message === undefined && claude === undefined) throw new CliError("invalid", "item add needs a brief: --message, or --claude for a Claude worker");
-      const optional = Object.fromEntries((["node", "branch", "commit", "claude", "model", "message"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
-      const resources = resourcesOf(v);
-      const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
-      const i = await api("POST", "/v1/items", { project, title: str(v, "title") ?? titleOf(message ?? claude!), ...optional, ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after } }) as PipelineItem;
+      const { project, title, optional, resources, after } = briefOf(v, "item add");
+      if (v.message === undefined && v.claude === undefined) throw new CliError("invalid", "item add needs a brief: --message, or --claude for a Claude worker");
+      const i = await api("POST", "/v1/items", { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after } }) as PipelineItem;
       return { json: i, text: `Added ${i.id} to ${i.project}: ${i.title}. It is ${i.phase.kind}: ${i.phase.why}.` };
     },
   },
@@ -1383,7 +1382,7 @@ const commands: Readonly<Record<string, Command>> = {
   "project edit": {
     args: [1, 1],
     options: {
-      node: { type: "string" }, branch: { type: "string" }, cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
+      ...placementOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
       "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
@@ -1421,7 +1420,7 @@ const commands: Readonly<Record<string, Command>> = {
   "project add": {
     args: [1, 2],
     options: {
-      node: { type: "string" }, branch: { type: "string" }, cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" },
+      ...placementOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       scratch: { type: "boolean" },
     },

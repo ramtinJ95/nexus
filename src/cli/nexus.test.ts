@@ -2259,3 +2259,17 @@ test("node prints a node's health, unknown where the host exposes nothing, and -
   s.nodeHealth(async () => ({ ...health, load: null, memory: null, temperatures: null, pylons: null }));
   assert.match((await s.nexus(["node", node])).stdout, /^load: unknown on 16 CPUs\nmemory: unknown\nswap: unknown\n.*\ntemperatures: unknown\npylons: unknown\n$/m);
 });
+
+test("start and item add check their worker flags alike, and item add refuses an --after that names nothing without a request", async (t) => {
+  const s = await setup(t, { queue: true });
+  for (const command of [["start"], ["item", "add"]]) {
+    const res = await s.nexus([...command, "--project", "acme", "--message", "Build A", "--model", "claude-opus-5-5"]);
+    assert.deepEqual([res.code, res.stderr], [64, "nexus: --model requires --claude. Run nexus --help for usage\n"], command.join(" "));
+  }
+  await s.nexus(["project", "edit", "acme", "--pipeline", "start"]);
+  const asked = s.requests();
+  const empty = await s.nexus(["item", "add", "--project", "acme", "--message", "Build A", "--after", " , "]);
+  assert.deepEqual([empty.code, empty.stderr], [64, "nexus: --after needs a thread. Run nexus --help for usage\n"]);
+  assert.equal(s.requests(), asked, "nothing was sent");
+  assert.deepEqual(await s.json(["items"]), []);
+});
