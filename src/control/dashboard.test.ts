@@ -1,8 +1,7 @@
-import { after, test, type TestContext } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir, readFile } from "node:fs/promises";
 import { request } from "node:http";
 import { join } from "node:path";
 import { startApi, type ApiOptions } from "./api.ts";
@@ -14,19 +13,20 @@ import { turnGate } from "./drain.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
+import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Review } from "./review-model.ts";
 import type { ReviewLoop } from "./review.ts";
 import type { Judgment } from "./judgment.ts";
 import type { AgentCall } from "../agent-usage.ts";
 import type { JobId, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { PylonObservation, ServiceFact } from "../protocol/observations.ts";
+import type { ServiceFact } from "../protocol/observations.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { ImageId } from "../images.ts";
 import { defaultProjectResources } from "../project.ts";
 import { githubTokenGrant } from "../secret-grants.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
-import { testImage } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
 import { imagePaths } from "./dashboard/items.ts";
 import { liveFrames, liveStreams } from "./dashboard/live-frames.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
@@ -43,10 +43,9 @@ const project = (id: string) => ({
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 });
 const image = testImage();
-const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
+const capacity = testCapacity();
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-dashboard-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-dashboard-");
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; text: string }
 
@@ -109,12 +108,11 @@ async function setup(t: TestContext, options: Partial<ApiOptions> = {}) {
   /** As observe, with these services and listening ports in every pylon. */
   function observeWith(facts: { services?: ServiceFact[]; listening?: number[] }, ...threads: Thread[]) {
     registry.apply({ record: "node", node, state: "online", capacity });
-    const pylons = threads.map((t): PylonObservation => ({
-      pylonId: t.pylonId, phase: "running", liveHash: registry.pylon(t.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
-      bootedFrom: { image: image.id as `img-${string}`, checkpoint: null },
-      services: facts.services ?? [], listening: (facts.listening ?? []).map((port) => ({ port })), previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+    const pylons = threads.map((t) => runningPylon(t.pylonId, {
+      liveHash: registry.pylon(t.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null },
+      services: facts.services ?? [], listening: (facts.listening ?? []).map((port) => ({ port })),
     }));
-    registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+    registry.ingested(testObservation(node, { pylons }), []);
   }
   return {
     registry, fake, call, start, startThread, observe, observeWith, callAs(id: TailnetNodeId | null) { caller = id; },
@@ -246,11 +244,7 @@ test("the sidebar lists every project's threads with their state, folds the arch
 test("a review the person cancelled says which thread they archived, and asks nothing of them", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  s.registry.saveReview({
-    id: "rv-1", builder: fix.id, reviewer: "th-reviewer" as Thread["id"], pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
-    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "cancelled", who: "reviewer", status: "archived" },
-  });
+  s.registry.saveReview(testReview({ builder: fix.id, phase: { kind: "cancelled", who: "reviewer", status: "archived" } }));
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.match(page, /Nexus review rv-1: cancelled, round 1 of 5, by th-reviewer on gpt-6-astra, the reviewer thread th-reviewer was archived/);
 });
@@ -258,11 +252,7 @@ test("a review the person cancelled says which thread they archived, and asks no
 test("a running review's line offers to cancel it behind a confirm, and one that ended or began deploying offers nothing", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  const review: Review = {
-    id: "rv-1", builder: fix.id, reviewer: "th-reviewer" as Thread["id"], pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
-    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" },
-  };
+  const review = testReview({ builder: fix.id });
   s.registry.saveReview(review);
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.match(page, new RegExp(`<button type="button" class="btn btn-xs btn-ghost danger" data-action="cancel-review" data-thread="${fix.id}" data-confirm="Cancel review rv-1 of pull request #7\\? Its reviewer thread is archived, and this thread stays as it is\\.">Cancel review</button>`));
@@ -286,9 +276,8 @@ const landingOptions = (landed: string[] = []): Partial<ApiOptions> => ({
 });
 const head = "9f".repeat(20);
 /** A review of PR #7 whose reviewer approved `head` with one P3 note and whose check passed there. */
-const approvedReview = (builder: ThreadId, phase: Review["phase"], extra: Partial<Review> = {}): Review => ({
-  id: "rv-1", builder, reviewer: "th-reviewer" as ThreadId, pr: { repo: "acme/nexus", number: 7, url: "https://github.com/acme/nexus/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-  models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 3, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
+const approvedReview = (builder: ThreadId, phase: Review["phase"], extra: Partial<Review> = {}): Review => testReview({
+  builder, pr: { repo: "acme/nexus", number: 7, url: "https://github.com/acme/nexus/pull/7", title: "Cache", branch: "cache" }, sent: 3,
   rounds: [
     { head: "1".repeat(40), verdict: { token: "a", verdict: "changes", findings: [{ id: "F1", priority: "P1", where: "src/cache.ts:12", summary: "The cache never expires" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "" }] },
     { head, verdict: { token: "b", verdict: "approve", findings: [{ id: "F2", priority: "P3", where: null, summary: "Name the TTL" }], reserved: [], notCheckedLive: "The cache's behaviour under load could not be checked live." }, check: { passed: true, output: "ok 412 tests" }, live: { kind: "absent" }, answers: null },
@@ -464,7 +453,7 @@ test("a review is not offered for landing when its PR closed, or when the contro
   assert.ok(!off.includes('data-action="land"'));
   assert.match(textOf(off), /Land #7 Nexus cannot land it now: the review loop needs the control plane's GitHub token \(github\.tokenFile\), which is not configured\.$/);
 
-  const pr = { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "closed" as const, checks: "passing" as const, review: "none" as const, conflict: false };
+  const pr = testPr({ repo: "acme/nexus", number: 7, title: "Cache", state: "closed", checks: "passing" });
   s.registry.savePrWatch(fix.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   assert.equal(landingOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a closed PR has nothing to land");
   s.registry.savePrWatch(fix.id, { links: [{ pr: { ...pr, state: "merged" }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
@@ -477,7 +466,7 @@ test("a held review whose PR the watch read at a new head offers no Land for the
   const held = approvedReview(fix.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }), { land: { requestedBy: laptop } });
   s.registry.saveReview(held);
   const moved = "b3".repeat(20);
-  const pr = { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open" as const, checks: "passing" as const, review: "none" as const, conflict: false, head: moved };
+  const pr = testPr({ repo: "acme/nexus", number: 7, title: "Cache", checks: "passing", head: moved });
   s.registry.savePrWatch(fix.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const card = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.ok(!card.includes("<button"), "no Land for a head that is no longer the PR's");
@@ -544,7 +533,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const held = await s.start("acme", "Cache the list");
   s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }, { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } }));
-  s.registry.savePrWatch(held.id, { links: [{ pr: { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open", checks: "pending", review: "none", conflict: false, summary: "Caches the thread list between polls." }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  s.registry.savePrWatch(held.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 7, title: "Cache", checks: "pending", summary: "Caches the thread list between polls." }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const asked = await s.start("acme", "Rebuild the image");
   s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
   const claude = await claudeThread(s, [{ kind: "prompt", at: now, text: "Make me a drink", from: "person" }]);
@@ -598,7 +587,7 @@ const actionsOf = (html: string) => [...html.matchAll(/data-action="([^"]+)"|<a 
 test("every source of a thread's decision has a card on its page with the action that resolves it, and Needs you shows that card with the same actions", async (t) => {
   const s = await seeded(t, landingOptions());
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).status, 200);
-  const link = (number: number, state: "open" | "merged" | "closed") => ({ links: [{ pr: { repo: "acme/nexus", number, title: "Cache", url: `https://github.com/acme/nexus/pull/${number}`, state, checks: "passing" as const, review: "none" as const, conflict: false }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const link = (number: number, state: "open" | "merged" | "closed") => ({ links: [{ pr: testPr({ repo: "acme/nexus", number, title: "Cache", state, checks: "passing" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const silent = await s.start("acme", "Silent reviewer");
   const unread = "The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1.";
   const first = approvedReview(silent.id, personPhase("agent", unread), { land: { requestedBy: laptop, fromProject: true } });
@@ -795,10 +784,10 @@ test("a new thread whose node does not have its pylon yet reads as absent, not d
 test("the side nodes show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
   const s = await seeded(t);
   const [fix, docs] = [await s.start("acme", "Fix checkout"), await s.start("acme", "Write docs")];
-  const over = { ...capacity, memoryGiB: 22.8, committedMemoryGiB: 40, committedDiskGiB: 20 };
+  const over = testCapacity({ memoryGiB: 22.8, committedMemoryGiB: 40, committedDiskGiB: 20 });
   s.registry.apply({ record: "node", node, state: "online", capacity: over });
-  const stopped = (t: Thread): PylonObservation => ({ pylonId: t.pylonId, phase: "stopped", checkpoint: null, sessions: null });
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity: over, artifacts: [], jobs: [], pylons: [stopped(fix), stopped(docs)], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  const stopped = (t: Thread) => stoppedPylon(t.pylonId, { sessions: null });
+  s.registry.ingested(testObservation(node, { capacity: over, pylons: [stopped(fix), stopped(docs)] }), []);
   assert.equal((await s.call("POST", `/v1/threads/${docs.id}/archive`)).status, 200);
   const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
   assert.match(nodes, /<em>overcommitted<\/em>/, "the marker uses the offline marker's style");
@@ -1002,7 +991,7 @@ test("a paused pylon's preview keeps its link, labelled paused, unless the threa
   };
   assert.deepEqual(await previews(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", linked: false }, "a running pylon's preview that is not ready has no link yet");
 
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested(testObservation(node, { pylons: [stoppedPylon(fix.pylonId, { sessions: null })] }), []);
   assert.deepEqual(await previews(), { previews: "Previews 1 web paused Open ↗ rj-firebat.tail.ts.net:8443 Opening it wakes the pylon.", linked: true });
 
   await s.call("POST", `/v1/threads/${fix.id}/archive`);
@@ -1289,7 +1278,7 @@ test("a paused pylon's prompt box says a message wakes it", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  s.registry.ingested({ node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [{ pylonId: fix.pylonId, phase: "stopped", checkpoint: null, sessions: null }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] }, []);
+  s.registry.ingested(testObservation(node, { pylons: [stoppedPylon(fix.pylonId, { sessions: null })] }), []);
   assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, `Idle the pylon is paused, and a message wakes it nexus attach ${fix.id} Copy Send ⌘↵`);
 });
 
@@ -1407,10 +1396,7 @@ test("a failed pylon's thread offers no prompt box, but says why and offers a re
 test("a failed pylon whose disk holds a failed setup offers no retry, and says to start again", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  s.registry.ingested({
-    node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [],
-    pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup", logTail: "" }], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
-  }, []);
+  s.registry.ingested(testObservation(node, { pylons: [{ pylonId: fix.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup", logTail: "" }] }), []);
   s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.ok(!html.includes('id="retry-pylon"'), "a retry could not help");
@@ -1985,7 +1971,7 @@ test("a page's rendered reply marker cannot advance while its conversation is be
 test("PR outputs show GitHub metadata and automated entries are not labelled as the person", async (t) => {
   const s = await seeded(t);
   const thread = await s.start("acme", "Review");
-  const pr = { repo: "acme/repo", number: 42, title: "Fix <checkout>", url: "https://github.com/acme/repo/pull/42", state: "merged", checks: "passing", review: "approved", conflict: false } as const;
+  const pr = testPr({ number: 42, title: "Fix <checkout>", state: "merged", checks: "passing", review: "approved" });
   s.registry.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   s.fake.transcript(thread.id).entries = [{ id: 1, conversationId: 1, kind: "nexus.pr-watch", data: { sender: "Nexus PR watch" }, model: [{ role: "user", content: "Automated feedback", timestamp: 0 }] },
     { id: 2, conversationId: 1, kind: "nexus.nudge", data: { sender: "Nexus nudge" }, model: [{ role: "user", content: "Open a pull request", timestamp: 0 }] }] as never;

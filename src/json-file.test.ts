@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readJson, saveJson } from "./json-file.ts";
+import { tempDir } from "./test-kit.ts";
 
 async function dir(t: { after: (fn: () => Promise<void>) => void }): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "nexus-json-file-"));
-  t.after(() => rm(path, { recursive: true, force: true }));
+  const path = await tempDir("nexus-json-file-", t);
   return path;
 }
 

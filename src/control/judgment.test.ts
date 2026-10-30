@@ -1,26 +1,23 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openHarnessHost, type ConversationId, type HarnessHost } from "../harness/host.ts";
 import { scriptedModel, scriptedModels, type ScriptedRequest } from "../harness/test-fixture.ts";
 import { desiredPhase } from "../reconcile.ts";
-import { newPylonRecord } from "../tick.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { PylonObservation } from "../protocol/observations.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { ProjectId } from "../project.ts";
 import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
 import { briefOf, judgmentPass, type Judgment, type JudgmentPass } from "./judgment.ts";
-import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
+import { observeNode, testPylon, testThread } from "./test-kit.ts";
+import { tempDir } from "../test-kit.ts";
 import { rewindTo, versionBefore } from "./schema-kit.ts";
 
 const nodeA = "node-a" as NodeName;
 const nodeB = "node-b" as NodeName;
 const image = "img-000000000000" as const;
 const resources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
-const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 };
 const laptop = "nLAPTOP" as TailnetNodeId;
 const health = (node: NodeName): NodeHealth => ({
   node, readAt: "2027-01-01T00:00:00Z", cpus: 16, load: { one: 0.5, five: 0.4, fifteen: 0.3 }, memory: { totalGiB: 64, availableGiB: 40, swapTotalGiB: 8, swapFreeGiB: 8 },
@@ -29,15 +26,10 @@ const health = (node: NodeName): NodeHealth => ({
 /** The controller log a failure ends with, in which the scripted judgment finds its answer. */
 const brokenWith = (judge: string) => `pylon is broken: the controller exited\nqemu: terminating on signal 15\njudge: ${judge}`;
 
-function observe(registry: Registry, node: NodeName, pylons: PylonObservation[] = []) {
-  const observation = { node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity, artifacts: [image], jobs: [], pylons, grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] };
-  registry.ingested(observation, [{ record: "node", node, state: "online", capacity }]);
-}
-
 function seed(registry: Registry) {
   for (const node of [nodeA, nodeB]) {
     registry.upsertNode({ name: node, tailnetHost: `${node}.ts.net`, tailnetNodeId: `n${node.replace("-", "")}` as TailnetNodeId });
-    observe(registry, node);
+    observeNode(registry, { node, artifacts: [image] });
   }
   const project = (id: string, pipeline: { autoStart: boolean } | null) => ({
     id: id as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: nodeA, resources, allowedHosts: [], secrets: [], logins: [],
@@ -100,20 +92,18 @@ async function open(t: TestContext, dir: string, options: { held?: () => Promise
 }
 
 async function world(t: TestContext, options: Parameters<typeof open>[2] = {}) {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-judgment-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempDir("nexus-judgment-", t);
   return { dir, ...await open(t, dir, options) };
 }
 
 function builder(registry: Registry, id: string, options: { project?: string; startedBy?: string; firstBoot?: "template" } = {}): ThreadId {
-  const thread: Thread = {
-    id: id as ThreadId, title: `Build ${id}`, project: (options.project ?? "nexus") as ProjectId, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: "1",
-    startedBy: options.startedBy ?? laptop, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 0, lastAgentActivityAt: 0, agentTurnRunning: false, working: false,
+  const thread = testThread({
+    id: id as ThreadId, title: `Build ${id}`, project: (options.project ?? "nexus") as ProjectId, conversationId: "1", startedBy: options.startedBy ?? laptop, createdAt: 1, lastHumanActivityAt: 0,
     placement: { how: "default", node: nodeA }, setup: options.firstBoot === "template" ? { how: "template", template: "tpl-1" as never, builtAt: 1, commit: "c".repeat(40) } : { how: "fresh", reason: "no template yet" },
-  };
-  const { desired: _, ...pylon } = newPylonRecord({
-    thread: thread.id, pylonId: thread.pylonId, node: nodeA, desired: "running", liveHash: "hash" as LiveHash, live: { previews: [], overlay: [] },
-    boot: { pylonId: thread.pylonId, image, resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: "https://github.com/acme/repo.git", checkout: { branch: "main", commit: "origin/main" } }, dotfiles: { repo: "https://github.com/acme/dotfiles.git", ref: "main" } },
+  });
+  const pylon = testPylon(thread, {
+    node: nodeA, liveHash: "hash",
+    boot: { repo: { kind: "clone", url: "https://github.com/acme/repo.git", checkout: { branch: "main", commit: "origin/main" } }, dotfiles: { repo: "https://github.com/acme/dotfiles.git", ref: "main" } },
     firstBoot: options.firstBoot === "template" ? { kind: "template", template: "tpl-1" as never } : { kind: "fresh", preSetup: null },
   });
   registry.createThread(thread, pylon);
@@ -181,7 +171,7 @@ test("a move goes to the person when the failed node still lists the pylon or ho
   const w = await world(t);
   const listed = builder(w.registry, "th-listed");
   const paused = builder(w.registry, "th-paused");
-  observe(w.registry, nodeA, [{ pylonId: `pylon-${listed}` as PylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }]);
+  observeNode(w.registry, { node: nodeA, artifacts: [image], pylons: [{ pylonId: `pylon-${listed}` as PylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }] });
   fail(w.registry, listed, brokenWith("retry-elsewhere"));
   fail(w.registry, paused, brokenWith("retry-elsewhere"), 2);
   await w.until(() => phaseOf(w, listed) === "asked" && phaseOf(w, paused) === "asked");
@@ -259,8 +249,7 @@ test("a judgment that does not answer in time is closed and goes to the person, 
 });
 
 test("a judgment the control plane stopped before its answer goes on after a restart, briefed once and acted on once", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-judgment-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempDir("nexus-judgment-", t);
   const first = await open(t, dir, { held: () => new Promise(() => {}) });
   const id = builder(first.registry, "th-crash");
   fail(first.registry, id, brokenWith("retry"));
@@ -316,8 +305,7 @@ test("concurrent passes and a restart judge a failure once, a later failure gets
 });
 
 test("failures from before judgments, projects without the pipeline and threads no person started as builders are never judged", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-judgment-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempDir("nexus-judgment-", t);
   const first = await open(t, dir);
   const old = builder(first.registry, "th-old");
   fail(first.registry, old, brokenWith("retry"));

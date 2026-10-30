@@ -1,17 +1,16 @@
-import { after, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { projectMirror } from "./mirror.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { NodeName } from "../ids.ts";
+import { tempDir } from "../test-kit.ts";
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-mirror-test-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-mirror-test-");
 
 const origin = join(dir, "origin");
 const git = async (...args: string[]) => (await promisify(execFile)("git", ["-C", origin, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args])).stdout.trim();

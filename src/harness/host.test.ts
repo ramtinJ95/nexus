@@ -1,15 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openHarnessHost, type ConversationId } from "./host.ts";
 import { scriptedModel, scriptedModels, scriptedUsage, type ScriptedRequest } from "./test-fixture.ts";
 import type { PylonId } from "../ids.ts";
+import { tempDir } from "../test-kit.ts";
 
 test("the usage of a conversation's answers reads on from the last entry read, and stays readable after its thread is deleted", async (t) => {
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-host-usage-"));
-  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const scratch = await tempDir("nexus-host-usage-", t);
   const storagePath = join(scratch, "harness.sqlite");
   const replies: string[] = [];
   const open = (deleted: readonly ConversationId[]) => openHarnessHost({
@@ -45,8 +43,7 @@ test("the usage of a conversation's answers reads on from the last entry read, a
 });
 
 test("a judgment's conversation is offered no tools, needs no pylon, and has replies once its run ends, across a reopen", async (t) => {
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-host-judgment-"));
-  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const scratch = await tempDir("nexus-host-judgment-", t);
   const seen: ScriptedRequest[] = [];
   let hold: Promise<void> | null = new Promise<void>(() => {});
   let located = 0;
@@ -87,8 +84,7 @@ test("a judgment's conversation is offered no tools, needs no pylon, and has rep
 });
 
 test("each deleted conversation aborted, by a delete or at open, is told to onAborted", async (t) => {
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-host-aborted-"));
-  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const scratch = await tempDir("nexus-host-aborted-", t);
   const aborted: ConversationId[] = [];
   const open = (deleted: readonly ConversationId[]) => openHarnessHost({
     storagePath: join(scratch, "harness.sqlite"), models: scriptedModels(), model: scriptedModel, tailscaled: join(scratch, "none.sock"),

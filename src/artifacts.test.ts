@@ -2,13 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, open, readdir, rm, truncate, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readdir, rm, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { artifactArchive, artifactDirectory, fileCodec, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "./protocol/jobs.ts";
 import type { ImageId, ImageManifest, TemplateId, TemplateManifest } from "./images.ts";
+import { tempDir } from "./test-kit.ts";
 
 const gnuTar = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout?.includes("GNU tar") === true;
 const template: TemplateId = "tpl-0123456789ab";
@@ -20,8 +21,7 @@ const unhashed: Omit<TemplateManifest, "id" | "sha256"> = {
 };
 
 async function scratch(t: { after(fn: () => Promise<void>): void }): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-artifacts-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempDir("nexus-artifacts-", t);
   return dir;
 }
 

@@ -4,14 +4,12 @@ import type { NodeName } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
 import { observedPylon, runningProbe } from "./observed.ts";
-import { openRegistry } from "./registry.ts";
-import { addThread, seedRegistry } from "./test-kit.ts";
+import { addThread, seedRegistry, testRegistry } from "./test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 
 test("a pylon is observed as its node last listed it, online or not, and its probe is handed out only while it runs on an online node", (t) => {
-  const registry = seedRegistry(openRegistry(":memory:"), { nodes: [node] });
-  t.after(() => registry.close());
+  const registry = seedRegistry(testRegistry(t), { nodes: [node] });
   const thread = addThread(registry, { node });
   const pylon = registry.pylon(thread.pylonId)!;
   const probe = { name: "the probe" };

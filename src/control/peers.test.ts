@@ -3,14 +3,13 @@ import assert from "node:assert/strict";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import { ProbeHttpError } from "../protocol/http.ts";
 import { peerHandoff } from "./peers.ts";
-import { openRegistry, type Registry } from "./registry.ts";
-import { seedRegistry } from "./test-kit.ts";
+import type { Registry } from "./registry.ts";
+import { seedRegistry, testRegistry } from "./test-kit.ts";
 
 const names = ["rj-firebat", "infra-testbench", "rj-spare"] as NodeName[];
 
 test("each put reads the nodes' tailnet IDs once, without their records, and a snapshot puts the list again only to a restarted probe", async (t) => {
-  const registry = seedRegistry(openRegistry(":memory:"), { nodes: names });
-  t.after(() => registry.close());
+  const registry = seedRegistry(testRegistry(t), { nodes: names });
   let idReads = 0;
   let recordReads = 0;
   const counted: Registry = {
@@ -37,8 +36,7 @@ test("each put reads the nodes' tailnet IDs once, without their records, and a s
 });
 
 test("a probe that answers 404 is told once that it cannot learn its peers yet, and any other failure is logged each time", async (t) => {
-  const registry = seedRegistry(openRegistry(":memory:"), { nodes: names });
-  t.after(() => registry.close());
+  const registry = seedRegistry(testRegistry(t), { nodes: names });
   let failure = new ProbeHttpError("rj-firebat: PUT /v1/peers: HTTP 404: ", 404);
   const probes = new Map(names.map((name) => [name, { putPeers: async () => { if (name === "rj-firebat") throw failure; } }]));
   const logged: string[] = [];
@@ -58,8 +56,7 @@ test("a probe that answers 404 is told once that it cannot learn its peers yet, 
 });
 
 test("a put that failed is not remembered, so the next snapshot of the same probe boot puts the list again", async (t) => {
-  const registry = seedRegistry(openRegistry(":memory:"), { nodes: names });
-  t.after(() => registry.close());
+  const registry = seedRegistry(testRegistry(t), { nodes: names });
   let attempts = 0;
   const probes = new Map(names.map((name) => [name, { putPeers: async () => { if (name === "rj-firebat" && attempts++ === 0) throw new ProbeHttpError("rj-firebat: PUT /v1/peers: HTTP 500: ", 500); } }]));
   const logged: string[] = [];

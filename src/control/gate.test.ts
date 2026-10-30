@@ -1,21 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { checkCaller, verifyCaller } from "../agent-protocol.ts";
 import { checkRuns, imageEnv, verifyGate, verifyMemoryGiB, type CheckRuns, type CheckState } from "./gate.ts";
-import { openRegistry, type Thread, type ThreadId } from "./registry.ts";
-import { newPylonRecord } from "../tick.ts";
+import type { Thread, ThreadId } from "./registry.ts";
+import { testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { processStream } from "../process-stream.ts";
 import { checkoutDir } from "../sessions.ts";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProjectId } from "../project.ts";
 import type { StartRequest } from "./threads.ts";
-import { runningPylon, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 
@@ -25,8 +24,7 @@ const node = "node" as NodeName;
  * read from the file `image`, NUL-separated as /proc/1/environ is. `stream` can be replaced.
  */
 async function fixture(t: import("node:test").TestContext, check: string | null, verify: string | null = null) {
-  const root = await mkdtemp(join(tmpdir(), "nexus-gate-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await tempDir("nexus-gate-", t);
   const repo = join(root, "repo");
   const git = (...args: string[]) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { encoding: "utf8" }).trim();
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
@@ -46,16 +44,15 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
   const image = join(root, "environ");
   await writeFile(image, `PATH=${process.env.PATH}\0NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt\0HOME=/root\0`);
 
-  const registry = openRegistry(":memory:");
-  t.after(() => registry.close());
+  const registry = testRegistry(t);
   const project = { id: "p" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 1, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
   let count = 0;
   function add(caller: string): Thread {
     const id = `th-${++count}` as ThreadId;
-    const thread: Thread = { id, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: null, startedBy: caller, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
-    const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: head } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
+    const thread = testThread({ id, title: id, project: project.id, startedBy: caller, createdAt: 1, lastHumanActivityAt: 1 });
+    const pylon = testPylon(thread, { node, liveHash: "hash", boot: { resources: project.resources, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: head } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
     registry.createThread(thread, pylon);
     return thread;
   }

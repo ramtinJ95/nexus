@@ -3,9 +3,11 @@
  * the registry. The registry's fixtures are in src/control/test-kit.ts.
  */
 import { once } from "node:events";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { createServer, request } from "node:http";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { after, type TestContext } from "node:test";
 import type { ImageId, ImageManifest } from "./images.ts";
 import type { NodeName, PylonId } from "./ids.ts";
 import type { NodeCapacity, NodeObservation, PylonObservation } from "./protocol/observations.ts";
@@ -33,6 +35,13 @@ export async function freePort(): Promise<number> {
   const { port } = server.address() as { port: number };
   await new Promise((resolve) => server.close(resolve));
   return port;
+}
+
+/** A new directory under the system's temporary one, removed with all it holds once `t` ends. Without `t`, it goes once the test that makes it ends, or the file's tests when made outside any test. */
+export async function tempDir(prefix: string, t?: Pick<TestContext, "after">): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  (t?.after.bind(t) ?? after)(() => rm(dir, { recursive: true, force: true }));
+  return dir;
 }
 
 /** Each file under `root`, with its bytes, mode, owner and modification time. */

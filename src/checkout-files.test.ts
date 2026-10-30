@@ -1,8 +1,7 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -16,13 +15,13 @@ import { localPipes } from "./fake-guest.ts";
 import { claudeTurn } from "../images/pylon/nexus-contract.ts";
 import { snapshotTurn } from "../images/pylon/nexus-turn.ts";
 import type { ByteStream, StreamEnd } from "./protocol/streams.ts";
+import { tempDir } from "./test-kit.ts";
 
 const run = promisify(execFile);
 
 /** A checkout whose first commit is refs/nexus/base, as a pylon's first boot records it. */
 async function checkout(t: TestContext) {
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-checkout-"));
-  t.after(() => rm(scratch, { recursive: true }));
+  const scratch = await tempDir("nexus-checkout-", t);
   const dir = join(scratch, "repo");
   await mkdir(join(dir, "src"), { recursive: true });
   const git = async (...args: string[]) => (await run("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args])).stdout;

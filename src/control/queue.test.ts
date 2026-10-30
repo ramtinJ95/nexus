@@ -1,20 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
 import type { PullRequest } from "./github.ts";
-import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
+import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { queuedView, threadQueue, waitOf, type QueuedRecord } from "./queue.ts";
-import { personPhase, type Phase, type Review } from "./review-model.ts";
+import { personPhase, type Phase } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
-import { newPylonRecord } from "../tick.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ProjectId } from "../project.ts";
-import { testCapacity, testImage, testObservation } from "../test-kit.ts";
+import { tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const project = {
@@ -55,21 +53,20 @@ function fixture(t: import("node:test").TestContext, path = ":memory:") {
   });
   /** A predecessor thread with a row of its own, as any started thread has. */
   function thread(id: string, startedBy = laptop): ThreadId {
-    const t: Thread = { id: id as ThreadId, title: `Thread ${id}`, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: null, startedBy, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
-    const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: t.pylonId, node, desired: "running", boot: { pylonId: t.pylonId, image: image.id, resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "empty", branch: "main" }, dotfiles }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
+    const t = testThread({ id: id as ThreadId, title: `Thread ${id}`, project: project.id, startedBy, createdAt: 1, lastHumanActivityAt: 1 });
+    const pylon = testPylon(t, { node, liveHash: "hash", boot: { repo: { kind: "empty", branch: "main" } } });
     registry.createThread(t, pylon);
     return t.id;
   }
-  const pr = (number: number, state: PullRequest["state"]): PullRequest => ({ repo: "acme/acme", number, title: `PR ${number}`, url: `https://github.com/acme/acme/pull/${number}`, state, checks: "none", review: "none", conflict: false });
+  const pr = (number: number, state: PullRequest["state"]): PullRequest => testPr({ repo: "acme/acme", number, title: `PR ${number}`, state });
   function links(id: ThreadId, ...prs: PullRequest[]) {
     registry.savePrWatch(id, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null });
   }
   function review(id: ThreadId, phase: Phase, merged: string | null = null) {
-    const r: Review = {
+    registry.saveReview(testReview({
       id: `r-${id}`, expect: "", sent: 0, builder: id, reviewer: `${id}-reviewer` as ThreadId, pr: { repo: "acme/acme", number: 9, url: "", title: "", branch: "feature" },
-      models: { builder: "a", reviewer: "b" }, reviewerKind: "harness", maxRounds: 5, land: null, auto: false, waiver: null, rounds: [], merged, phase, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
-    };
-    registry.saveReview(r);
+      models: { builder: "a", reviewer: "b" }, rounds: [], merged, phase,
+    }));
   }
   const request = (over: Partial<StartRequest> = {}): StartRequest => ({ project: project.id, title: "After", ...over });
   return {
@@ -329,8 +326,7 @@ test("a Nexus agent thread's first message is sent once under its queued request
 });
 
 test("a queued thread survives a restart, and a pass after it starts the thread", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-queue-"));
-  t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-queue-", t);
   const path = join(dir, "registry.db");
   const before = fixture(t, path);
   const a = before.thread("th-a");

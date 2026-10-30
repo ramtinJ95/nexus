@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { NexusEvent } from "../events.ts";
 import { followEvents } from "./follow-events.ts";
 import { openRegistry, type Registry } from "./registry.ts";
+import { testRegistry } from "./test-kit.ts";
 import { until } from "../test-kit.ts";
 
 function following(t: { after(fn: () => void): void }) {
@@ -22,8 +23,7 @@ function following(t: { after(fn: () => void): void }) {
 }
 
 test("a follower delivers the events of its kinds appended after it starts, and none from before", async (t) => {
-  const registry = openRegistry(":memory:");
-  t.after(() => registry.close());
+  const registry = testRegistry(t);
   registry.appendEvent("session.turn-ended", null, { before: true });
   const delivered: NexusEvent[] = [];
   const stop = followEvents(registry, ["session.turn-ended"], 5, (events) => delivered.push(...events), () => assert.fail("no reset"));

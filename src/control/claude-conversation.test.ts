@@ -1,13 +1,12 @@
-import { after, test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { queryObjects } from "node:v8";
 import { claudeConversations } from "./claude-conversation.ts";
 import { openRegistry, type Registry, type Thread } from "./registry.ts";
-import { addThread, observeNode, seedRegistry } from "./test-kit.ts";
+import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
 import { claudeHook } from "../../images/pylon/nexus-contract.ts";
@@ -15,18 +14,17 @@ import type { LiveHash, NodeName } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { ImageId } from "../images.ts";
-import { runningPylon, until } from "../test-kit.ts";
+import { runningPylon, tempDir, until } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";
 const session = "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30";
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-claude-conversation-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-claude-conversation-");
 
 /** A registry whose node is online and runs the pylon of each Claude thread `claudeThread` adds. */
-function openOnline(): Registry {
-  return seedRegistry(openRegistry(join(dir, `${randomUUID()}.db`)), { nodes: [node] });
+function openOnline(t: Pick<TestContext, "after">): Registry {
+  return seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`)), { nodes: [node] });
 }
 
 function claudeThread(registry: Registry): Thread {
@@ -55,7 +53,7 @@ function readersBesides(active: Thread): number {
 }
 
 test("a transcript read that ends after the service and its registry closed settles without touching the registry", async () => {
-  const registry = openOnline();
+  const registry = seedRegistry(openRegistry(join(dir, `${randomUUID()}.db`)), { nodes: [node] });
   const t = claudeThread(registry);
   const { probe, held, lose } = heldProbe();
   const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 3_600_000 });
@@ -69,8 +67,7 @@ test("a transcript read that ends after the service and its registry closed sett
 });
 
 test("a deleted thread's reader stays while a read runs, so a refresh meanwhile waits for it rather than reading at once", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = claudeThread(registry);
   const { probe, held, reads, lose } = heldProbe();
   const conversations = claudeConversations({ registry, probes: new Map([[node, probe]]), followMs: 3_600_000 });
@@ -87,7 +84,7 @@ test("a deleted thread's reader stays while a read runs, so a refresh meanwhile 
 });
 
 test("a watch of a deleted thread keeps its reader, so closing the service still ends the watch", async () => {
-  const registry = openOnline();
+  const registry = seedRegistry(openRegistry(join(dir, `${randomUUID()}.db`)), { nodes: [node] });
   const thread = claudeThread(registry);
   const conversations = claudeConversations({ registry, probes: new Map(), followMs: 3_600_000 });
   const watch = await conversations.watch(thread);
@@ -100,8 +97,7 @@ test("a watch of a deleted thread keeps its reader, so closing the service still
 });
 
 test("a deleted thread's reader goes once its last read and its last watch end, and an active thread's stays", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const active = claudeThread(registry);
   const watched = claudeThread(registry);
   const read = claudeThread(registry);
@@ -126,8 +122,7 @@ test("a deleted thread's reader goes once its last read and its last watch end, 
 });
 
 test("a watched thread's view, which reads on from the last one, holds what the registry stores as reads append, drop, replace or change session", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = claudeThread(registry);
   const projects = await mkdtemp(join(dir, "projects-"));
   await mkdir(join(projects, "-home-user-workspace-repo"));
@@ -170,8 +165,7 @@ test("a watched thread's view, which reads on from the last one, holds what the 
 });
 
 test("a read asks the pylon's hook which dialogs wait while a turn runs or waits or an ask is open, and its report opens the worker's question though the transcript holds no call yet", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = claudeThread(registry);
   const projects = await mkdtemp(join(dir, "projects-"));
   await mkdir(join(projects, "-home-user-workspace-repo"));
@@ -222,8 +216,7 @@ test("a read asks the pylon's hook which dialogs wait while a turn runs or waits
  * and a reporter of the thread's session events.
  */
 async function askingThread(t: { after(fn: () => void): void }) {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = claudeThread(registry);
   const projects = await mkdtemp(join(dir, "projects-"));
   await mkdir(join(projects, "-home-user-workspace-repo"));

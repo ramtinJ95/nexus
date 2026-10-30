@@ -1,9 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
@@ -13,11 +12,12 @@ import { ProbeHttpError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { tokenDigest } from "../deploy/model.ts";
 import { joinControlPlane } from "../deploy/setup.ts";
-import { call as callJson, until } from "../test-kit.ts";
+import { call as callJson, tempDir, testObservation, until } from "../test-kit.ts";
 import { mintJoinToken } from "./join.ts";
 import { parseConfig, startControlPlane } from "./main.ts";
 import { openRegistry } from "./registry.ts";
 import { rewindTo, versionBefore } from "./schema-kit.ts";
+import { testRegistry } from "./test-kit.ts";
 
 const example = await readFile(new URL("../../deploy/control.example.json", import.meta.url), "utf8");
 const probeExample = await readFile(new URL("../../deploy/probe.example.json", import.meta.url), "utf8");
@@ -99,8 +99,7 @@ test("the image build node is optional, and one given must be a configured node"
 
 /** A control plane as `main` starts it, on loopback, with a fake tailscaled and a fake probe for each node it follows. */
 async function controlPlaneOf(t: import("node:test").TestContext, config: Record<string, unknown>, options: { before?: (db: string) => void; unaware?: readonly string[] } = {}) {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-main-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempDir("nexus-main-", t);
   let caller: string | null = null;
   const hosts = new Map<string, string>();
   const socket = join(dir, "tailscaled.sock");
@@ -127,10 +126,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
         peers.set(node.name, list);
       },
       async *observe(signal) {
-        yield { type: "snapshot", observation: {
-          events: [], node: node.name, observedAt: new Date().toISOString(), probeBootId: node.name, capacity: null, artifacts: [], jobs: [], pylons: [],
-          previewRoutes: [], grants: { secrets: [], gitSsh: false }, heldSecrets: [],
-        } };
+        yield { type: "snapshot", observation: testObservation(node.name, { probeBootId: node.name, capacity: null }) };
         await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
       },
     };
@@ -183,16 +179,14 @@ test("a registry and control.json from before join tokens come up with the same 
   const report = { role: "probe", commit: null, target: null, state: "pending", reason: null };
   assert.equal((await plane.call("nPeerProbeCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer bench-token" })).status, 200, "control.json's deploy key");
   assert.equal((await plane.call("nPeerProbeCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer firebat-token" })).status, 403);
-  const registry = openRegistry(plane.db);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, plane.db);
   assert.deepEqual(registry.joinedNodes(), []);
 });
 
 test("a machine that joins is followed without a restart, every probe learns it as a peer, and a probe that cannot learn peers keeps working", async (t) => {
   const plane = await controlPlaneOf(t, today, { unaware: ["infra-testbench"] });
   await until("rj-firebat has its peers", () => plane.peers.has("rj-firebat"));
-  const registry = openRegistry(plane.db);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, plane.db);
   const { token } = mintJoinToken(registry);
   plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
   const joined = await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("joiner-token"), name: "rj-firebat" });
@@ -223,8 +217,7 @@ test("a node that joined is followed again after a restart, beside control.json'
 
 test("the installer's join reaches only the control plane deployer.json names, and says why one is refused", async (t) => {
   const plane = await controlPlaneOf(t, today);
-  const registry = openRegistry(plane.db);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, plane.db);
   const { token } = mintJoinToken(registry);
   plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
   plane.as("nJoinerCNTRL");
@@ -255,8 +248,7 @@ test("a node that joined and was then added to control.json never joins again, a
     registry.joinNode(tokenDigest(token), { ...infra2, name: "infra-2" as NodeName, tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: tokenDigest("joiner-token") }, Date.now());
     registry.close();
   } });
-  const registry = openRegistry(plane.db);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, plane.db);
   const { token } = mintJoinToken(registry);
   plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
   assert.deepEqual(await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("another-token") }), { status: 409, body: { error: "infra-2.example.ts.net is a node in control.json, which sets its deploy key" } });

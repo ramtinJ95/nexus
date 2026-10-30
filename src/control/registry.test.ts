@@ -1,16 +1,14 @@
-import { after, test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { openRegistry, type StoredPylon, type ThreadId } from "./registry.ts";
+import { openRegistry, type Registry, type StoredPylon, type ThreadId } from "./registry.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { reviewPrefix } from "../agent-protocol.ts";
-import { seedRegistry, testPylon, testProject, testThread } from "./test-kit.ts";
+import { seedRegistry, testPylon, testProject, testRegistry, testThread } from "./test-kit.ts";
 import { rewindTo, versionBefore } from "./schema-kit.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { PullRequest } from "./github.ts";
@@ -23,7 +21,7 @@ import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { ProjectId } from "../project.ts";
 import type { TemplateRecord } from "./templates.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import { testImage } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
 import type { WaitingAsk } from "./questions.ts";
 
 const node = "rj-firebat" as NodeName;
@@ -35,19 +33,20 @@ const pylon = testPylon(thread, { node, boot: { network: { allowedHosts: ["a.exa
 const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
 
 // One directory for the file, so each test's registry is closed before it is removed.
-const dir = await mkdtemp(join(tmpdir(), "nexus-registry-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-registry-");
 const tempDb = () => join(dir, `${randomUUID()}.db`);
+const capacity = testCapacity({ committedMemoryGiB: 8, diskFreeGiB: 400 });
 
-function seeded(path: string, clock = Date.now) {
-  const registry = seedRegistry(openRegistry(path, clock), { project });
+function seed(registry: Registry) {
+  seedRegistry(registry, { project });
   registry.createThread(thread, pylon);
   return registry;
 }
+const seeded = (t: TestContext, path: string, clock?: () => number) => seed(testRegistry(t, path, clock));
 
 test("records survive closing and reopening the file", async (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   const submitted: Omit<PylonRecord, "desired"> = {
     ...pylon, pauses: 2, failed: null,
     submitted: { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z", job: { kind: "delete", pylonId } },
@@ -64,8 +63,7 @@ test("records survive closing and reopening the file", async (t) => {
   first.saveTemplate(template);
   first.close();
 
-  const second = openRegistry(path);
-  t.after(() => second.close());
+  const second = testRegistry(t, path);
   assert.deepEqual(second.projects(), [project]);
   assert.deepEqual(second.thread(threadId), thread);
   assert.deepEqual(second.threads(project.id), [thread]);
@@ -79,23 +77,20 @@ test("records survive closing and reopening the file", async (t) => {
 });
 
 test("a thread and its pylon must match", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const other = { ...thread, id: "th-2" as ThreadId, pylonId: "pylon-th-2" as PylonId };
   assert.throws(() => registry.createThread(other, pylon), /does not belong/);
   assert.equal(registry.thread(other.id), undefined);
 });
 
 test("only a recorded image can become current", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   assert.equal(registry.currentImage(), null);
   assert.throws(() => registry.setCurrentImage("img-ffffffffffff"), /no image/);
 });
 
 test("the image a new current one replaces becomes previous, and making it current again swaps them", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const next = { ...image, id: "img-111111111111" as const };
   registry.saveImage(image, null);
   registry.saveImage(next, null);
@@ -110,20 +105,18 @@ test("the image a new current one replaces becomes previous, and making it curre
 
 test("a Claude message recorded before senders were reads as unknown, and only its thread tells Nexus's prompts by their prefix", async (t) => {
   const path = tempDb();
-  seeded(path).close();
+  seed(openRegistry(path)).close();
   rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS claude_senders\b/));
   const db = new DatabaseSync(path);
   db.prepare("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, 'rv-1:1', 'sent', ?)").run(threadId, JSON.stringify({ session: "s1", outcome: "sent", resumed: false }));
   db.close();
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.claudeMessageSenders(threadId), [{ sender: "unknown", sha256: null }]);
   const review = `${reviewPrefix}\nReview pull request #7.`;
   assert.equal(promptSenders(registry, threadId)(review), "review", "a thread with sends from before the record keeps the prefix");
   assert.equal(promptSenders(registry, threadId)("build the cache"), null);
 
-  const fresh = seeded(tempDb());
-  t.after(() => fresh.close());
+  const fresh = seeded(t, tempDb());
   assert.equal(promptSenders(fresh, threadId)(review), null, "on a thread whose every send is recorded, an unrecorded prompt is the person's");
   await typeIntoClaude(fresh, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
   assert.equal(promptSenders(fresh, threadId)(review), "review");
@@ -131,18 +124,16 @@ test("a Claude message recorded before senders were reads as unknown, and only i
 
 test("an image recorded before images carried their release reads as of no known release", async (t) => {
   const path = tempDb();
-  seeded(path).close();
+  seed(openRegistry(path)).close();
   const db = new DatabaseSync(path);
   db.prepare("INSERT INTO images (id, manifest) VALUES (?, ?)").run(image.id, JSON.stringify(image));
   db.close();
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.images(), [{ ...image, release: null }]);
 });
 
 test("activity timestamps only move forward", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   registry.recordActivity(threadId, { human: 5_000, agent: 4_000, agentTurnRunning: true });
   registry.recordActivity(threadId, { human: 2_000, agent: 3_000 });
   registry.apply({ record: "activity", pylonId, human: 1_000, agent: 6_000 });
@@ -153,9 +144,7 @@ test("activity timestamps only move forward", async (t) => {
 });
 
 test("ingest writes fold into records, and applying one twice changes nothing", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
+  const registry = seeded(t, tempDb());
   const writes = [
     { record: "node", node, state: "online", capacity },
     { record: "sessions", pylonId, sessions: [
@@ -178,10 +167,8 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
 });
 
 test("an observation is stored only together with the writes derived from it", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
-  const first: NodeObservation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], pylons: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [] };
+  const registry = seeded(t, tempDb());
+  const first = testObservation(node, { observedAt: "2027-01-01T00:00:00Z", capacity });
   registry.ingested(first, [{ record: "node", node, state: "online", capacity }]);
   assert.deepEqual(registry.node(node)?.observation, first);
 
@@ -197,8 +184,7 @@ test("an observation is stored only together with the writes derived from it", a
 });
 
 test("a paused pylon's sessions keep their rows and last status, and the first list after its wake replaces them", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const review = { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" } as const;
   const plan = { id: "failed-0123456789ab", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan" } as const;
   registry.apply({ record: "sessions", pylonId, sessions: [{ ...review, state: "running", status: "working", message: null }] });
@@ -232,8 +218,7 @@ test("a paused pylon's sessions keep their rows and last status, and the first l
 });
 
 test("a job's result is not undone by an older report of it running", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const job = (jobId: string, state: "running" | "succeeded") => ({
     record: "job" as const,
     status: state === "running"
@@ -253,7 +238,7 @@ test("a registry from before failure messages keeps its pylons' attempts", (t) =
   /** A file at schema version 1, whose pylon's attempts are in the old shape. */
   const atVersion1 = (attempts: unknown): string => {
     const path = tempDb();
-    seeded(path).close();
+    seed(openRegistry(path)).close();
     rewindTo(path, 1);
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
@@ -261,8 +246,7 @@ test("a registry from before failure messages keeps its pylons' attempts", (t) =
     return path;
   };
   const reopened = (path: string) => {
-    const registry = openRegistry(path);
-    t.after(() => registry.close());
+    const registry = testRegistry(t, path);
     return registry.pylon(pylonId)!.attempts;
   };
   assert.deepEqual(reopened(atVersion1({ count: 0, lastFailedAt: null, lastCode: null })), { count: 0, last: null });
@@ -273,10 +257,9 @@ test("a registry from before failure messages keeps its pylons' attempts", (t) =
 
 test("a registry from before pylon retries opens with no retry under way, and a retry marks only a failed pylon", (t) => {
   const path = tempDb();
-  seeded(path).close();
+  seed(openRegistry(path)).close();
   rewindTo(path, 3);
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.equal(registry.pylon(pylonId)!.retrying, false);
 
   assert.equal(registry.retryPylon(pylonId), false, "a pylon that has not failed is left as it is");
@@ -307,7 +290,7 @@ const portsOf = (registry: ReturnType<typeof openRegistry>, of: PylonId) => regi
 
 test("preview ports are unique on a node, survive reopening the file, and asking again changes nothing", async (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   const peer = "infra-testbench" as NodeName;
   first.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const neighbour = addPylon(first, "th-2");
@@ -318,8 +301,7 @@ test("preview ports are unique on a node, survive reopening the file, and asking
   first.allocatePreviews(pylonId, ["api", "web", "docs"], ports);
   first.close();
 
-  const second = openRegistry(path);
-  t.after(() => second.close());
+  const second = testRegistry(t, path);
   assert.deepEqual(portsOf(second, pylonId), ["api 10201", "docs 10203", "web 10200"]);
   assert.deepEqual(portsOf(second, neighbour), ["web 10202"]);
   assert.deepEqual(portsOf(second, elsewhere), ["web 10200"], "another node has its own ports");
@@ -327,8 +309,7 @@ test("preview ports are unique on a node, survive reopening the file, and asking
 });
 
 test("a used-up port range fails naming the range, after allocating the services that fit", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const neighbour = addPylon(registry, "th-2");
   registry.allocatePreviews(neighbour, ["web"], { first: 10200, last: 10201 });
   assert.throws(() => registry.allocatePreviews(pylonId, ["web", "api"], { first: 10200, last: 10201 }),
@@ -337,8 +318,7 @@ test("a used-up port range fails naming the range, after allocating the services
 });
 
 test("releasing one service's preview frees only its port, which the next service that asks gets", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const neighbour = addPylon(registry, "th-2");
   registry.allocatePreviews(pylonId, ["web", "port-3000"], ports);
   registry.allocatePreviews(neighbour, ["port-3000"], ports);
@@ -352,8 +332,7 @@ test("releasing one service's preview frees only its port, which the next servic
 });
 
 test("released ports go to the next pylon that asks, and readiness marks only the port a pylon holds", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   registry.allocatePreviews(pylonId, ["web"], ports);
   registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10299, ready: true });
   assert.equal(registry.previews(pylonId)[0]!.ready, false);
@@ -370,23 +349,17 @@ test("released ports go to the next pylon that asks, and readiness marks only th
 });
 
 test("a published preview is ready only while its running pylon reports its service ready, or does not list it", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   registry.allocatePreviews(pylonId, ["api", "web"], ports);
   registry.apply({ record: "preview", pylonId, service: "api", httpsPort: 10200, ready: true });
   registry.apply({ record: "preview", pylonId, service: "web", httpsPort: 10201, ready: true });
-  const observe = (observed: NodeObservation["pylons"][number]) => registry.ingested({
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
-    artifacts: [], jobs: [], pylons: [observed], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
-  }, []);
-  const running = (webState: ServiceFact["state"] | null) => observe({
-    pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
+  const observe = (observed: NodeObservation["pylons"][number]) => registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", capacity, pylons: [observed] }), []);
+  const running = (webState: ServiceFact["state"] | null) => observe(runningPylon(pylonId, {
     services: [
       { name: "api", state: "ready", port: 8080, declared: true, wantsPreview: true },
       ...webState === null ? [] : [{ name: "web", state: webState, port: 8003, declared: true, wantsPreview: true }],
     ],
-    listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-  });
+  }));
   const states = () => registry.previews(pylonId).map((p) => [p.service, p.ready, p.failed]);
 
   running("failed");
@@ -400,33 +373,25 @@ test("a published preview is ready only while its running pylon reports its serv
   running(null);
   assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a service the read does not list is ready once published");
   running("failed");
-  observe({ pylonId, phase: "stopped", checkpoint: null, sessions: null });
+  observe(stoppedPylon(pylonId, { sessions: null }));
   assert.deepEqual(states(), [["api", true, null], ["web", true, null]], "a stopped pylon's services are not known to have failed");
 });
 
 test("a port the node routes is never handed out, though no row holds it", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const routed = (httpsPort: number, owner: string) => ({ httpsPort, pylonId: owner as PylonId, service: "web" });
-  registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [],
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)], heldSecrets: [] }, []);
+  registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", capacity, previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)] }), []);
   registry.allocatePreviews(pylonId, ["web", "api"], ports);
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");
 });
 
 test("previews and allocatePreviews answer the same with the node's observation passed, and use the routes of the one passed", async (t) => {
-  const withIt = seeded(tempDb());
-  const without = seeded(tempDb());
-  t.after(() => { withIt.close(); without.close(); });
-  const observation: NodeObservation = {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
-    artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [{ httpsPort: 10200, pylonId: "pylon-lost" as PylonId, service: "web" }], heldSecrets: [],
-    pylons: [{
-      pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
-      services: [{ name: "web", state: "failed", port: 8000, declared: true, wantsPreview: true }],
-      listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-    }],
-  };
+  const withIt = seeded(t, tempDb());
+  const without = seeded(t, tempDb());
+  const observation = testObservation(node, {
+    observedAt: "2027-01-01T00:00:00Z", capacity, previewRoutes: [{ httpsPort: 10200, pylonId: "pylon-lost" as PylonId, service: "web" }],
+    pylons: [runningPylon(pylonId, { services: [{ name: "web", state: "failed", port: 8000, declared: true, wantsPreview: true }] })],
+  });
   for (const registry of [withIt, without]) registry.ingested(observation, []);
   withIt.allocatePreviews(pylonId, ["web", "api"], ports, withIt.node(node)!.observation);
   without.allocatePreviews(pylonId, ["web", "api"], ports);
@@ -440,8 +405,7 @@ test("previews and allocatePreviews answer the same with the node's observation 
 });
 
 test("an observation stored from a probe older than route reporting routes no port", async (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   registry.ingested({ node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 400 }, artifacts: [], jobs: [], pylons: [] } as never, []);
   registry.allocatePreviews(pylonId, ["web", "api"], ports);
   assert.deepEqual(portsOf(registry, pylonId), ["api 10201", "web 10200"]);
@@ -449,13 +413,12 @@ test("an observation stored from a probe older than route reporting routes no po
 
 test("a registry from before session titles keeps its sessions, untitled until they are observed again", (t) => {
   const path = tempDb();
-  seeded(path).close();
+  seed(openRegistry(path)).close();
   rewindTo(path, 4);
   const db = new DatabaseSync(path);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'claude-code', NULL, 'idle')").run(pylonId);
   db.close();
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, status: "idle", title: null, message: null }]);
   registry.apply({ record: "sessions", pylonId, sessions: [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s", status: "idle", title: "review", message: null }] });
   assert.equal(registry.sessions(pylonId)[0]!.title, "review");
@@ -463,7 +426,7 @@ test("a registry from before session titles keeps its sessions, untitled until t
 
 test("a registry from before repository kinds reads every stored repo, booted or submitted, as a clone", (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };
   const spawning: Omit<PylonRecord, "desired"> = { ...pylon, submitted: { ...envelope, job: { kind: "spawn", pylonId, boot: { ...pylon.boot, source: pylon.firstBoot }, live: pylon.live, liveHash: pylon.liveHash } } };
   first.savePylon(spawning);
@@ -478,21 +441,19 @@ test("a registry from before repository kinds reads every stored repo, booted or
   assert.equal((db.prepare("SELECT count(*) AS n FROM pylons WHERE boot LIKE '%\"kind\":\"clone\"%' OR submitted LIKE '%\"clone\"%'").get() as { n: number }).n, 0, "the old shape has no kind");
   db.close();
 
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.pylon(pylonId), spawning);
   assert.deepEqual(registry.pylon(deleting), deletion);
 });
 
 test("a registry from before session states keeps its sessions as running in their panes, and holds each state to its fields", (t) => {
   const path = tempDb();
-  seeded(path).close();
+  seed(openRegistry(path)).close();
   rewindTo(path, 6);
   const db = new DatabaseSync(path);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'pi', 's.jsonl', 'working', 'plan')").run(pylonId);
   db.close();
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: "plan", message: null }]);
   const row = { id: "x", herdrPane: null, harness: "pi", harnessSessionId: null, title: null, status: null } as const;
   assert.throws(() => registry.apply({ record: "sessions", pylonId, sessions: [{ ...row, state: "failed", message: null } as never] }), /CHECK constraint/);
@@ -501,14 +462,13 @@ test("a registry from before session states keeps its sessions as running in the
 
 test("a registry from before node-unique preview ports keeps its previews", (t) => {
   const path = tempDb();
-  seeded(path).close();
+  seed(openRegistry(path)).close();
   rewindTo(path, 2);
   const db = new DatabaseSync(path);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();
 
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.previews(pylonId), [{ pylon: pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   registry.allocatePreviews(addPylon(registry, "th-2"), ["web"], ports);
   assert.deepEqual(portsOf(registry, "pylon-th-2" as PylonId), ["web 10201"]);
@@ -516,7 +476,7 @@ test("a registry from before node-unique preview ports keeps its previews", (t) 
 
 test("seen and reply timestamps migrate from null and persist without activity", (t) => {
   const path = tempDb();
-  seeded(path).close();
+  seed(openRegistry(path)).close();
   rewindTo(path, 7);
   const registry = openRegistry(path);
   assert.equal(registry.thread(threadId)!.seenAt, null);
@@ -526,15 +486,13 @@ test("seen and reply timestamps migrate from null and persist without activity",
   registry.recordReply(threadId, 2000);
   registry.markSeen(threadId, false, 3000);
   registry.close();
-  const reopened = openRegistry(path);
-  t.after(() => reopened.close());
+  const reopened = testRegistry(t, path);
   assert.deepEqual(reopened.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
   assert.deepEqual(reopened.pylon(pylonId), pylon);
 });
 
 test("a reply recorded after seen in the same millisecond is unread and has a new identity", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   registry.recordReply(threadId, 1000);
   registry.markSeen(threadId, false, 2000);
   registry.recordReply(threadId, 2000);
@@ -550,13 +508,12 @@ test("a reply recorded after seen in the same millisecond is unread and has a ne
 
 test("adding PR watches preserves the shared seen and reply markers from schema 8", (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   first.recordReply(threadId, 2000);
   first.markSeen(threadId, false, 3000);
   first.close();
   rewindTo(path, 8);
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
   assert.equal(registry.prWatch(threadId), null);
   const watch = { links: [], commentWakes: 0, pending: null, error: null };
@@ -566,8 +523,7 @@ test("adding PR watches preserves the shared seen and reply markers from schema 
 });
 
 test("a PR watch's save fires pull-request.linked once for each PR it has read, with the PR", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const pr: PullRequest = { repo: "acme/repo", number: 1, title: "Fix", url: "https://github.com/acme/repo/pull/1", state: "open", checks: "none", review: "none", conflict: null };
   const save = (...prs: PullRequest[]) => registry.savePrWatch(threadId, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null });
   const linked = () => registry.events("0", { kinds: ["pull-request.linked"] }).map((e) => [e.thread, e.payload]);
@@ -585,7 +541,7 @@ test("a PR watch's save fires pull-request.linked once for each PR it has read, 
 
 test("asking a question twice keeps one, its thread needs a decision until it is answered, and an answer is never replaced", (t) => {
   const path = tempDb();
-  const registry = seeded(path);
+  const registry = seed(openRegistry(path));
   const ask = { id: "qn-1", thread: threadId, text: "Rebuild the image?", options: ["Rebuild", "Not now"], reserved: "image-rebuild" as const, answerer: "deployer" as const, askedAt: 5 };
   const asked = registry.askQuestion(ask);
   assert.deepEqual(asked, { ...ask, answer: null });
@@ -599,8 +555,7 @@ test("asking a question twice keeps one, its thread needs a decision until it is
   assert.deepEqual(registry.answerQuestion("qn-1", { option: "Rebuild", by: "nPHONE" as TailnetNodeId, at: 8 }).answer, answer, "the first answer stays");
   assert.deepEqual(registry.events("0", { kinds: ["attention.changed"] }).map((e) => e.payload), [{ attention: "decision" }, { attention: null }]);
   registry.close();
-  const reopened = openRegistry(path);
-  t.after(() => reopened.close());
+  const reopened = testRegistry(t, path);
   assert.deepEqual(reopened.question("qn-1"), { ...asked, answer });
   assert.equal(reopened.question("qn-2"), null);
 });
@@ -624,8 +579,7 @@ test("desired release, reports and drain survive reopening the registry", () => 
 
 test("Claude turn events keep a pylon awake until it ends, independently of harness activity and seen", async (t) => {
   const { desiredPhase } = await import("../reconcile.ts");
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const event = (sequence: number, kind: "session.turn-started" | "session.turn-ended" | "session.waiting", session = "c1") => registry.reportSession(node, { sequence, pylon: pylonId, time: Date.now(), event: { kind, session } });
   event(1, "session.turn-started");
   registry.recordActivity(threadId, { agentTurnRunning: false });
@@ -650,8 +604,7 @@ test("a lost turn end expires while heartbeats keep a long turn awake", async (t
   const { desiredPhase } = await import("../reconcile.ts");
   const { sessionActivityTtlMs } = await import("../events.ts");
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
   const report = (kind: "session.turn-started" | "session.heartbeat") => registry.reportSession(node, {
     sequence: ++sequence, time: now + 1_000_000_000, pylon: pylonId, event: { kind, session: "long" },
@@ -682,7 +635,7 @@ test("session state is capped at sixteen, removed at end and pruned with event r
   const { sessionActivityTtlMs, maxActiveSessions } = await import("../events.ts");
   const path = tempDb();
   let now = 10_000_000;
-  const registry = seeded(path, () => now);
+  const registry = seed(openRegistry(path, () => now));
   const db = new DatabaseSync(path);
   t.after(() => { db.close(); registry.close(); });
   const rows = () => db.prepare("SELECT session FROM session_activity WHERE thread = ? ORDER BY rowid").all(threadId).map((r) => r.session);
@@ -708,8 +661,7 @@ test("session state is capped at sixteen, removed at end and pruned with event r
 test("waiting survives a day without activity, and clears on end, archive or delete", async (t) => {
   const { desiredPhase } = await import("../reconcile.ts");
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
   const report = (kind: "session.waiting" | "session.ended") => registry.reportSession(node, {
     sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "question", at: now },
@@ -741,7 +693,7 @@ test("waiting survives a day without activity, and clears on end, archive or del
 test("ended sessions reject late heartbeats and starts, including after registry restart", () => {
   const path = tempDb();
   let now = 10_000_000;
-  let registry = seeded(path, () => now);
+  let registry = seed(openRegistry(path, () => now));
   let sequence = 0;
   const report = (kind: import("../events.ts").PylonEvent["kind"], at: number) => {
     now++;
@@ -774,7 +726,7 @@ test("ended sessions reject late heartbeats and starts, including after registry
 
 test("an outbox event sent again under its ID has no effect, even after another event at its stamp", () => {
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
+  const registry = seed(openRegistry(tempDb(), () => now));
   let sequence = 0;
   const report = (kind: import("../events.ts").PylonEvent["kind"], at: number, id: string) => {
     now += 1000;
@@ -801,7 +753,7 @@ test("an outbox event sent again under its ID has no effect, even after another 
 
 test("distinct reports at the same stamp all apply, with or without IDs", () => {
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
+  const registry = seed(openRegistry(tempDb(), () => now));
   let sequence = 0;
   const at = now;
   try {
@@ -820,8 +772,7 @@ test("a newer heartbeat resumes waiting with a fresh lease, while older or equal
   const { desiredPhase } = await import("../reconcile.ts");
   const { sessionActivityTtlMs } = await import("../events.ts");
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
   const report = (kind: import("../events.ts").PylonEvent["kind"], at: number) => registry.reportSession(node, {
     sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at },
@@ -855,7 +806,7 @@ test("a newer heartbeat resumes waiting with a fresh lease, while older or equal
 
 test("a repeated parked report changes nothing, and a later process's report clears a stale one", (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   const changes = (registry: ReturnType<typeof openRegistry>) => registry.events().filter((e) => e.thread === threadId)
     .map((e) => e.kind === "attention.changed" ? `attention ${String(e.payload.attention)}` : e.kind);
   first.recordParked(threadId, true);
@@ -863,8 +814,7 @@ test("a repeated parked report changes nothing, and a later process's report cle
   assert.deepEqual(changes(first), ["thread.parked", "attention parked"]);
   first.close();
 
-  const second = openRegistry(path);
-  t.after(() => second.close());
+  const second = testRegistry(t, path);
   second.recordParked(threadId, false);
   second.recordParked(threadId, false);
   assert.deepEqual(changes(second), ["thread.parked", "attention parked", "attention null"]);
@@ -872,7 +822,7 @@ test("a repeated parked report changes nothing, and a later process's report cle
 
 test("opening the registry stores the attention of a thread whose attention was never stored", (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   first.recordReply(threadId, 1000);
   assert.equal(first.attention(threadId), "reply");
   first.close();
@@ -880,31 +830,28 @@ test("opening the registry stores the attention of a thread whose attention was 
   db.exec("DELETE FROM thread_attention");
   db.close();
 
-  const second = openRegistry(path);
-  t.after(() => second.close());
+  const second = testRegistry(t, path);
   assert.equal(second.attention(threadId), "reply");
   assert.equal(second.events("0", { kinds: ["attention.changed"], thread: threadId }).at(-1)!.payload.attention, "reply");
 });
 
 test("opening the registry clears the parked flag a thread deleted while parked kept", (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   first.recordParked(threadId, true);
   first.close();
   const db = new DatabaseSync(path);
   db.exec(`UPDATE threads SET status = 'deleted'`);
   db.close();
 
-  const second = openRegistry(path);
-  t.after(() => second.close());
+  const second = testRegistry(t, path);
   assert.equal(second.attention(threadId), null);
   assert.equal(second.events("0", { kinds: ["attention.changed"], thread: threadId }).at(-1)!.payload.attention, null);
 });
 
 test("a parked harness run that is retried is working since the retry, as the tracker reports it", async (t) => {
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => now);
   let listener: ((value: LiveState) => Promise<void>) | undefined;
   const observer = {
     watchDoc: async () => ({ value: {}, start: (l: typeof listener) => { listener = l; }, stop: async () => ({}) }),
@@ -925,8 +872,7 @@ test("a parked harness run that is retried is working since the retry, as the tr
 
 test("a thread is working since the earliest start of its running harness turn and live session turns", async (t) => {
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
   const report = (kind: import("../events.ts").PylonEvent["kind"], session: string) => registry.reportSession(node, {
     sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session, at: now },
@@ -964,8 +910,7 @@ test("a thread is working since the earliest start of its running harness turn a
 test("a thread works while its harness turn or a live session turn runs, such as a Claude worker's", async (t) => {
   const { sessionActivityTtlMs } = await import("../events.ts");
   let now = 10_000_000;
-  const registry = seeded(tempDb(), () => now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
   const report = (kind: import("../events.ts").PylonEvent["kind"]) => registry.reportSession(node, {
     sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at: now },
@@ -992,15 +937,14 @@ test("a thread works while its harness turn or a live session turn runs, such as
 test("a turn running before turn starts were recorded has no known start", (t) => {
   const now = 10_000_000;
   const path = tempDb();
-  const first = seeded(path, () => now);
+  const first = seed(openRegistry(path, () => now));
   first.reportSession(node, { sequence: 1, time: now, pylon: pylonId, event: { kind: "session.turn-started", session: "c1", at: now } });
   first.close();
   rewindTo(path, versionBefore(/agent_turn_started_at/));
   const db = new DatabaseSync(path);
   db.exec("UPDATE threads SET agent_turn_running = 1");
   db.close();
-  const registry = openRegistry(path, () => now);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path, () => now);
   registry.recordActivity(threadId, { agent: now, agentTurnRunning: true });
   registry.reportSession(node, { sequence: 2, time: now, pylon: pylonId, event: { kind: "session.heartbeat", session: "c1", at: now + 1 } });
   const upgraded = registry.thread(threadId)!;
@@ -1047,8 +991,7 @@ const backgroundShell = { id: "b6fh14jr7", type: "shell", status: "running", com
 test("a main turn that ends while a background subagent runs stays working until the turn its finish starts ends", async (t) => {
   const { desiredPhase } = await import("../reconcile.ts");
   const clock = { now: 10_000_000 };
-  const registry = seeded(tempDb(), () => clock.now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);
   const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
   hook("session.turn-started");
@@ -1076,8 +1019,7 @@ test("a background subagent that never reports its finish expires with the sessi
   const { desiredPhase } = await import("../reconcile.ts");
   const { sessionActivityTtlMs } = await import("../events.ts");
   const clock = { now: 10_000_000 };
-  const registry = seeded(tempDb(), () => clock.now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);
   hook("session.turn-started");
   hook("session.turn-ended", { background_tasks: [backgroundSubagent] });
@@ -1093,8 +1035,7 @@ test("a background subagent that never reports its finish expires with the sessi
 
 test("a late background subagent report after its session ended changes nothing", async (t) => {
   const clock = { now: 10_000_000 };
-  const registry = seeded(tempDb(), () => clock.now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);
   const start = clock.now;
   hook("session.turn-started", {}, start);
@@ -1112,8 +1053,7 @@ test("a late background subagent report after its session ended changes nothing"
 test("a main turn that ends while a background command runs stays working until the turn its finish starts ends", async (t) => {
   const { desiredPhase } = await import("../reconcile.ts");
   const clock = { now: 10_000_000 };
-  const registry = seeded(tempDb(), () => clock.now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);
   const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
   hook("session.turn-started");
@@ -1136,8 +1076,7 @@ test("a main turn that ends while a background command runs stays working until 
 test("a background command still running at the cap, such as a dev server, ends its turn and waits, saying why", async (t) => {
   const { backgroundShellCapMs, backgroundStillRunning } = await import("../../images/pylon/nexus-heartbeat.ts");
   const clock = { now: 10_000_000 };
-  const registry = seeded(tempDb(), () => clock.now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);
   const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
   hook("session.turn-started");
@@ -1158,13 +1097,12 @@ test("a background command still running at the cap, such as a dev server, ends 
 
 test("only the stalled worker's launch session restores normal reply and seen attention", (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   first.setClaudeWorker(threadId, "hello", "starting", undefined, "launch-session");
   first.setClaudeWorker(threadId, "hello", "stalled", "Choose the text style");
   first.appendEvent("thread.failed", threadId, { message: "Choose the text style" });
   first.close();
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   let sequence = 0;
   const report = (kind: "session.turn-started" | "session.turn-ended" | "session.ended", session: string) => registry.reportSession(node, {
     sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind, session },
@@ -1190,7 +1128,7 @@ const cursorAt = (offset: number, skipping = false) => offset === 0 ? transcript
 
 test("a Claude worker's transcript survives reopening, keeps its newest entries, and starts over for a new session or a replaced file", (t) => {
   const path = tempDb();
-  const first = seeded(path);
+  const first = seed(openRegistry(path));
   const read = (from: number, entries: ClaudeEntry[], to: number, extra: { session?: string; reset?: boolean; readAt?: number; skipping?: boolean } = {}) => ({
     session: extra.session ?? "s1", from: cursorAt(from), entries, cursor: cursorAt(to, extra.skipping), reset: extra.reset ?? false, readAt: extra.readAt ?? to,
   });
@@ -1198,8 +1136,7 @@ test("a Claude worker's transcript survives reopening, keeps its newest entries,
   assert.equal(first.appendClaudeRead(threadId, read(0, [reply(0), reply(1)], 100)), false, "a read applied twice changes nothing");
   first.close();
 
-  const second = openRegistry(path);
-  t.after(() => second.close());
+  const second = testRegistry(t, path);
   assert.deepEqual(second.claudeTranscript(threadId), { session: "s1", cursor: cursorAt(100), dropped: 0, readAt: 100 });
   assert.deepEqual(second.claudeEntries(threadId), [reply(0), reply(1)]);
 
@@ -1223,8 +1160,7 @@ test("a Claude worker's transcript survives reopening, keeps its newest entries,
 });
 
 test("a Claude worker's messages answer their resends, and its transcript and messages outlive an archive but not a delete", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const result = { session: "s1", outcome: "queued", resumed: false } as const;
   registry.setClaudeMessage(threadId, "msg:1", { state: "sending" });
   assert.deepEqual(registry.claudeMessage(threadId, "msg:1"), { state: "sending" });
@@ -1248,8 +1184,7 @@ test("a Claude worker's messages answer their resends, and its transcript and me
 });
 
 test("a Claude worker whose transcript ends on a usage limit is limited until a turn starts or a prompt follows, whichever arrives first", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
   let sequence = 0;
   let offset = 0;
@@ -1289,8 +1224,7 @@ test("a Claude worker whose transcript ends on a usage limit is limited until a 
 });
 
 test("a read that ends on a usage limit ends the turn that ran into it, though Claude Code reported no end, and not a later turn", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
   let sequence = 0;
   let offset = 0;
@@ -1327,8 +1261,7 @@ const askCall = (id: string, at: number): ClaudeEntry => ({ kind: "tool", at, id
 const answered = (id: string, at: number): ClaudeEntry => ({ kind: "result", at, toolUseId: id, output: 'User has answered your questions: "Which drink?"="Tea".', isError: false });
 
 test("a Claude worker's AskUserQuestion is a question while its pylon reports the dialog waiting, though the transcript holds no call yet, and is withdrawn once a report leaves it out or the transcript holds its result", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const { waiting, append, asks } = claudeAsking(registry);
   append({ kind: "prompt", at: 40, text: "Make me a drink", from: "person" });
   assert.equal(waiting(waitingAsk("t1", 50)), true);
@@ -1355,8 +1288,7 @@ test("a Claude worker's AskUserQuestion is a question while its pylon reports th
 });
 
 test("an answered ask stays answered whatever the pylon reports, and a withdrawn one is not asked again before the next report", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const { waiting, append, asks } = claudeAsking(registry);
   waiting(waitingAsk("t1", 50));
   registry.answerQuestion("ask-t1", { option: "Drink: Tea", by: "nLAPTOP" as TailnetNodeId, at: 55, choices: [{ picked: ["Tea"] }] });
@@ -1376,8 +1308,7 @@ test("an answered ask stays answered whatever the pylon reports, and a withdrawn
 });
 
 test("archiving or deleting a Claude worker's thread withdraws its asks, and a report that lands after asks nothing", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const { waiting, asks } = claudeAsking(registry);
   for (const status of ["archived", "deleted"] as const) {
     waiting(waitingAsk("t1", 50));
@@ -1392,8 +1323,7 @@ test("archiving or deleting a Claude worker's thread withdraws its asks, and a r
 
 test("a write waits while another process, such as a second open of the registry, holds its write lock", async (t) => {
   const path = tempDb();
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   const writing = `${path}.writing`;
   // The holder keeps the lock until this process says it is writing, so the write always meets the lock.
   const holder = spawn(process.execPath, ["-e", `
@@ -1430,8 +1360,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
 });
 
 test("a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing", (t) => {
-  const registry = openRegistry(":memory:");
-  t.after(() => registry.close());
+  const registry = testRegistry(t, ":memory:");
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   registry.createProject(project);
   const record: QueuedRecord = {
@@ -1467,14 +1396,13 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   upgraded.editProject("nexus" as ProjectId, (p) => ({ ...p, pipeline: null }));
   upgraded.close();
   rewind();
-  const again = openRegistry(path);
-  t.after(() => again.close());
+  const again = testRegistry(t, path);
   assert.equal(again.project("nexus" as ProjectId)?.pipeline, null, "the person turned it off, and a rewound registry keeps it off");
 });
 
 test("judgments begin at the newest event, so failures from before are never judged, and a rewound registry keeps that watermark", (t) => {
   const path = tempDb();
-  const registry = seeded(path);
+  const registry = seed(openRegistry(path));
   registry.savePylon({ ...pylon, failed: "gave up after 5 failed attempts" });
   const failed = Number(registry.events("0", { kinds: ["thread.failed"] })[0]!.id);
   const before = Number(registry.newestEvent());
@@ -1490,8 +1418,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const db = new DatabaseSync(path);
   db.exec(`PRAGMA user_version = ${versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/)}`);
   db.close();
-  const again = openRegistry(path);
-  t.after(() => again.close());
+  const again = testRegistry(t, path);
   assert.equal(again.judgmentSince(), before, "applied again, the migration keeps the first watermark");
   const raw = new DatabaseSync(path);
   t.after(() => raw.close());
@@ -1501,8 +1428,7 @@ test("judgments begin at the newest event, so failures from before are never jud
 
 test("a pylon's failure is the thread.failed event its pylon appended, until a retry clears it", (t) => {
   let now = 1_000;
-  const registry = seeded(tempDb(), () => now);
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb(), () => now);
   assert.equal(registry.failure(threadId), null, "a pylon that has not failed has none");
   registry.savePylon({ ...pylon, failed: "pylon is broken: the controller exited" });
   const first = registry.failure(threadId)!;
@@ -1518,8 +1444,7 @@ test("a pylon's failure is the thread.failed event its pylon appended, until a r
 });
 
 test("a judgment is saved only over the record as it was read, with what it does in the same transaction", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const judgment = {
     failure: 7, thread: threadId, node, failed: "broken", startedAt: 1, request: { brief: "Judge it.", token: "judgment:7:aa" }, conversation: null, reply: null,
     phase: { kind: "judging", deadline: null },
@@ -1535,8 +1460,7 @@ test("a judgment is saved only over the record as it was read, with what it does
 });
 
 test("a move takes a failed pylon to another node with a fresh boot, and its thread's placement and setup with it", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const other = "rj-other" as NodeName;
   registry.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
   const to = {
@@ -1558,15 +1482,13 @@ test("a registry from before join tokens keeps its nodes as they were, with none
   before.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   before.close();
   rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS join_tokens\b/));
-  const registry = openRegistry(path);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, path);
   assert.deepEqual(registry.nodes().map((n) => [n.name, n.tailnetHost, n.tailnetNodeId]), [[node, "rj-firebat.tail.ts.net", "nFIREBAT"]]);
   assert.deepEqual(registry.joinedNodes(), []);
 });
 
 test("a join token records one node, once, before it expires", (t) => {
-  const registry = openRegistry(":memory:");
-  t.after(() => registry.close());
+  const registry = testRegistry(t, ":memory:");
   registry.addJoinToken("hash", 2_000);
   const joining = { name: "infra-2" as NodeName, tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: "nINFRA2" as TailnetNodeId, deployKey: "a".repeat(64) };
   assert.equal(registry.joinNode("unknown", joining, 1_000), false);
@@ -1581,8 +1503,7 @@ test("a join token records one node, once, before it expires", (t) => {
 });
 
 test("a node by its tailnet ID carries the key it joined with, and a configured node none", (t) => {
-  const registry = openRegistry(":memory:");
-  t.after(() => registry.close());
+  const registry = testRegistry(t, ":memory:");
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   registry.addJoinToken("hash", 2_000);
   registry.joinNode("hash", { name: "infra-2" as NodeName, tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: "nINFRA2" as TailnetNodeId, deployKey: "a".repeat(64) }, 1_000);
@@ -1632,8 +1553,7 @@ function sessionFactThreads(registry: ReturnType<typeof seeded>) {
 }
 
 test("threads() reads each thread's session facts as thread() does, whichever facts it has", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const ids = sessionFactThreads(registry);
   const listed = registry.threads();
   assert.deepEqual(listed.map((l) => l.id), [...ids].sort(), "threads made in one millisecond, by ID");
@@ -1652,8 +1572,7 @@ test("threads() reads each thread's session facts as thread() does, whichever fa
 });
 
 test("storedThreads reads only the threads' own rows, by status and by who started them", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const ids = sessionFactThreads(registry);
   registry.createThread({ ...thread, id: "th-review" as ThreadId, pylonId: "pylon-th-review" as PylonId, startedBy: "nexus-review" },
     { ...pylon, thread: "th-review", pylonId: "pylon-th-review" as PylonId, boot: { ...pylon.boot, pylonId: "pylon-th-review" as PylonId } });
@@ -1672,8 +1591,7 @@ test("storedThreads reads only the threads' own rows, by status and by who start
 });
 
 test("a deploy drain set to null reads back as null, as does one never set", (t) => {
-  const registry = openRegistry(":memory:");
-  t.after(() => registry.close());
+  const registry = testRegistry(t, ":memory:");
   assert.equal(registry.drain(), null);
   assert.equal(registry.desiredRelease(), null);
   registry.setDrain({ commit: "c".repeat(40), expiresAt: 300 });
@@ -1683,8 +1601,7 @@ test("a deploy drain set to null reads back as null, as does one never set", (t)
 });
 
 test("the harness threads at start are those whose agent is a conversation, less deleted ones whose abort is recorded", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const start = (id: string, conversationId: string, claude?: string) => registry.createThread({ ...thread, id: id as ThreadId, pylonId: `pylon-${id}` as PylonId, conversationId },
     { ...pylon, thread: id, pylonId: `pylon-${id}` as PylonId, boot: { ...pylon.boot, pylonId: `pylon-${id}` as PylonId } }, claude);
   start("th-live", "1");
@@ -1705,8 +1622,7 @@ test("the harness threads at start are those whose agent is a conversation, less
 
 test("a node's tallies and room count each of its pylons by what it holds, and a pylon placed elsewhere as an orphan", async (t) => {
   const { nodePylons, roomLeft } = await import("./placement.ts");
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const other = "rj-other" as NodeName;
   registry.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
   const placed = (id: string, active: boolean, on = node) => {
@@ -1725,14 +1641,13 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
   registry.holdUsageBackfill("th-reading" as ThreadId, Date.now());
   const release = registry.reserve("pylon-th-starting" as PylonId, node, { cpus: 1, memoryGiB: 1, diskGiB: 1 });
   t.after(release);
-  const stopped = (pylonId: PylonId) => ({ pylonId, phase: "stopped" as const, checkpoint: null, sessions: null });
-  const capacity = { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 };
-  registry.ingested({
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity, artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [],
+  const stopped = (pylonId: PylonId) => stoppedPylon(pylonId, { sessions: null });
+  registry.ingested(testObservation(node, {
+    observedAt: "2027-01-01T00:00:00Z", capacity,
     pylons: [{ pylonId: up, phase: "booting" }, stopped(paused), stopped(waking), stopped(archived), stopped(reading),
       { pylonId: crashed, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" },
       { pylonId: "pylon-gone" as PylonId, phase: "booting" }, { pylonId: elsewhere, phase: "booting" }],
-  }, []);
+  }), []);
   const record = registry.node(node)!;
   assert.deepEqual(nodePylons(registry, record), {
     up: { pylons: 1, cpus: 2, memoryGiB: 4 }, paused: { pylons: 2, cpus: 4, memoryGiB: 8 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
@@ -1745,8 +1660,7 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
 });
 
 test("a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()", (t) => {
-  const registry = seeded(tempDb());
-  t.after(() => registry.close());
+  const registry = seeded(t, tempDb());
   const stopped = (id: string, after: number) => {
     addPylon(registry, id);
     registry.setClaudeWorker(id as ThreadId, "hello", "started", undefined, "s1");
