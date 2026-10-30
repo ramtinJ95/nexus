@@ -11,6 +11,7 @@ import { openRegistry, type StoredPylon, type ThreadId } from "./registry.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { reviewPrefix } from "../agent-protocol.ts";
 import { seedRegistry, testPylon, testProject, testThread } from "./test-kit.ts";
+import { rewindTo, versionBefore } from "./schema-kit.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { PullRequest } from "./github.ts";
 import type { PylonRecord } from "../tick.ts";
@@ -110,9 +111,8 @@ test("the image a new current one replaces becomes previous, and making it curre
 test("a Claude message recorded before senders were reads as unknown, and only its thread tells Nexus's prompts by their prefix", async (t) => {
   const path = tempDb();
   seeded(path).close();
+  rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS claude_senders\b/));
   const db = new DatabaseSync(path);
-  const version = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-  db.exec(`DROP TABLE claude_senders; PRAGMA user_version = ${version - 1}`);
   db.prepare("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, 'rv-1:1', 'sent', ?)").run(threadId, JSON.stringify({ session: "s1", outcome: "sent", resumed: false }));
   db.close();
   const registry = openRegistry(path);
@@ -249,19 +249,14 @@ test("a job's result is not undone by an older report of it running", async (t) 
   assert.deepEqual(registry.job(pylonId), job("j2", "running").status);
 });
 
-/** The sessions table as the first schema made it. */
-const untitledSessions = `DROP TABLE sessions; CREATE TABLE sessions (pylon TEXT NOT NULL REFERENCES pylons (id), herdr_pane TEXT NOT NULL,
-  harness TEXT NOT NULL, harness_session_id TEXT, status TEXT NOT NULL, PRIMARY KEY (pylon, herdr_pane)) STRICT;`;
-
-test("a registry from before failure messages keeps its pylons' attempts", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("a registry from before failure messages keeps its pylons' attempts", (t) => {
   /** A file at schema version 1, whose pylon's attempts are in the old shape. */
   const atVersion1 = (attempts: unknown): string => {
     const path = tempDb();
     seeded(path).close();
+    rewindTo(path, 1);
     const db = new DatabaseSync(path);
     db.prepare("UPDATE pylons SET attempts = ?").run(JSON.stringify(attempts));
-    db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 1`);
     db.close();
     return path;
   };
@@ -276,13 +271,10 @@ test("a registry from before failure messages keeps its pylons' attempts", async
   });
 });
 
-test("a registry from before pylon retries opens with no retry under way, and a retry marks only a failed pylon", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("a registry from before pylon retries opens with no retry under way, and a retry marks only a failed pylon", (t) => {
   const path = tempDb();
   seeded(path).close();
-  const db = new DatabaseSync(path);
-  db.exec(`ALTER TABLE pylons DROP COLUMN retrying; ${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 3`);
-  db.close();
+  rewindTo(path, 3);
   const registry = openRegistry(path);
   t.after(() => registry.close());
   assert.equal(registry.pylon(pylonId)!.retrying, false);
@@ -455,12 +447,11 @@ test("an observation stored from a probe older than route reporting routes no po
   assert.deepEqual(portsOf(registry, pylonId), ["api 10201", "web 10200"]);
 });
 
-test("a registry from before session titles keeps its sessions, untitled until they are observed again", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("a registry from before session titles keeps its sessions, untitled until they are observed again", (t) => {
   const path = tempDb();
   seeded(path).close();
+  rewindTo(path, 4);
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 4`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'claude-code', NULL, 'idle')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -470,8 +461,7 @@ test("a registry from before session titles keeps its sessions, untitled until t
   assert.equal(registry.sessions(pylonId)[0]!.title, "review");
 });
 
-test("a registry from before repository kinds reads every stored repo, booted or submitted, as a clone", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("a registry from before repository kinds reads every stored repo, booted or submitted, as a clone", (t) => {
   const path = tempDb();
   const first = seeded(path);
   const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };
@@ -481,9 +471,10 @@ test("a registry from before repository kinds reads every stored repo, booted or
   const deletion: StoredPylon = { ...first.pylon(deleting)!, submitted: { ...envelope, jobId: "j2" as JobId, job: { kind: "delete", pylonId: deleting } } };
   first.savePylon(deletion);
   first.close();
+  rewindTo(path, 5);
   const db = new DatabaseSync(path);
   db.exec(`UPDATE pylons SET boot = json_remove(boot, '$.repo.kind'), submitted = CASE WHEN json_extract(submitted, '$.job.kind') = 'spawn'
-    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 5`);
+    THEN json_remove(submitted, '$.job.boot.repo.kind') ELSE submitted END`);
   assert.equal((db.prepare("SELECT count(*) AS n FROM pylons WHERE boot LIKE '%\"kind\":\"clone\"%' OR submitted LIKE '%\"clone\"%'").get() as { n: number }).n, 0, "the old shape has no kind");
   db.close();
 
@@ -493,12 +484,11 @@ test("a registry from before repository kinds reads every stored repo, booted or
   assert.deepEqual(registry.pylon(deleting), deletion);
 });
 
-test("a registry from before session states keeps its sessions as running in their panes, and holds each state to its fields", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("a registry from before session states keeps its sessions as running in their panes, and holds each state to its fields", (t) => {
   const path = tempDb();
   seeded(path).close();
+  rewindTo(path, 6);
   const db = new DatabaseSync(path);
-  db.exec(`${untitledSessions} ALTER TABLE sessions ADD COLUMN title TEXT; ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 6`);
   db.prepare("INSERT INTO sessions VALUES (?, 'w1:p1', 'pi', 's.jsonl', 'working', 'plan')").run(pylonId);
   db.close();
   const registry = openRegistry(path);
@@ -509,16 +499,11 @@ test("a registry from before session states keeps its sessions as running in the
   assert.throws(() => registry.apply({ record: "sessions", pylonId, sessions: [{ ...row, state: "running", status: "idle", message: null } as never] }), /CHECK constraint/);
 });
 
-test("a registry from before node-unique preview ports keeps its previews", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("a registry from before node-unique preview ports keeps its previews", (t) => {
   const path = tempDb();
   seeded(path).close();
+  rewindTo(path, 2);
   const db = new DatabaseSync(path);
-  db.exec(`DROP TABLE previews;
-    CREATE TABLE previews (pylon TEXT NOT NULL REFERENCES pylons (id), service TEXT NOT NULL, https_port INTEGER NOT NULL, ready INTEGER NOT NULL, PRIMARY KEY (pylon, service)) STRICT;
-    ALTER TABLE pylons DROP COLUMN retrying;
-    ${untitledSessions}
-    ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 2;`);
   db.prepare("INSERT INTO previews VALUES (?, 'web', 10200, 1)").run(pylonId);
   db.close();
 
@@ -529,13 +514,10 @@ test("a registry from before node-unique preview ports keeps its previews", asyn
   assert.deepEqual(portsOf(registry, "pylon-th-2" as PylonId), ["web 10201"]);
 });
 
-test("seen and reply timestamps migrate from null and persist without activity", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("seen and reply timestamps migrate from null and persist without activity", (t) => {
   const path = tempDb();
   seeded(path).close();
-  const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE threads DROP COLUMN seen_at; ALTER TABLE threads DROP COLUMN last_reply_at; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 7");
-  db.close();
+  rewindTo(path, 7);
   const registry = openRegistry(path);
   assert.equal(registry.thread(threadId)!.seenAt, null);
   assert.equal(registry.thread(threadId)!.lastReplyAt, null);
@@ -566,16 +548,13 @@ test("a reply recorded after seen in the same millisecond is unread and has a ne
   assert.equal(registry.thread(threadId)!.lastReplyAt, 2002);
 });
 
-test("adding PR watches preserves the shared seen and reply markers from schema 8", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("adding PR watches preserves the shared seen and reply markers from schema 8", (t) => {
   const path = tempDb();
   const first = seeded(path);
   first.recordReply(threadId, 2000);
   first.markSeen(threadId, false, 3000);
   first.close();
-  const db = new DatabaseSync(path);
-  db.exec("ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; DROP TABLE reviews; DROP TABLE reviewed_prs; DROP TABLE claude_transcripts; DROP TABLE claude_entries; DROP TABLE claude_messages; DROP TABLE session_order; DROP TABLE session_order_floor; DROP TABLE events; DROP TABLE session_activity; DROP TABLE event_receipts; DROP TABLE claude_workers; DROP TABLE thread_attention; DROP TABLE release_reports; DROP TABLE pr_watches; PRAGMA user_version = 8");
-  db.close();
+  rewindTo(path, 8);
   const registry = openRegistry(path);
   t.after(() => registry.close());
   assert.deepEqual(registry.thread(threadId), { ...thread, lastReplyAt: 2000, seenAt: 3000 });
@@ -1010,15 +989,13 @@ test("a thread works while its harness turn or a live session turn runs, such as
   assert.equal(working(), false, "a session's turn stops working when its lease runs out");
 });
 
-test("a turn running before turn starts were recorded has no known start", async (t) => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("a turn running before turn starts were recorded has no known start", (t) => {
   const now = 10_000_000;
   const path = tempDb();
   seeded(path, () => now).reportSession(node, { sequence: 1, time: now, pylon: pylonId, event: { kind: "session.turn-started", session: "c1", at: now } });
+  rewindTo(path, versionBefore(/agent_turn_started_at/));
   const db = new DatabaseSync(path);
-  const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 24}`);
+  db.exec("UPDATE threads SET agent_turn_running = 1");
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1441,9 +1418,8 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   openRegistry(path).close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 14}`);
   db.close();
+  rewindTo(path, versionBefore(/DROP TABLE IF EXISTS passkeys\b/));
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
   t.after(() => reopened.close());
@@ -1480,12 +1456,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const registry = openRegistry(path);
   for (const id of ["nexus", "other"]) registry.createProject({ ...project, id: id as ProjectId });
   registry.close();
-  const rewind = () => {
-    const db = new DatabaseSync(path);
-    const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 8}`);
-    db.close();
-  };
+  const rewind = () => rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS pipeline_items\b/));
   rewind();
   const upgraded = openRegistry(path);
   assert.deepEqual(upgraded.project("nexus" as ProjectId)?.pipeline, { autoStart: true });
@@ -1506,12 +1477,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const failed = Number(registry.events("0", { kinds: ["thread.failed"] })[0]!.id);
   const before = Number(registry.newestEvent());
   registry.close();
-  const rewind = () => {
-    const db = new DatabaseSync(path);
-    const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 7}`);
-    db.close();
-  };
+  const rewind = () => rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/));
   rewind();
   const upgraded = openRegistry(path);
   assert.equal(upgraded.judgmentSince(), before, "the failure before the upgrade is at the watermark");
@@ -1520,8 +1486,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.savePylon({ ...upgraded.pylon(pylonId)!, failed: "gave up again" });
   upgraded.close();
   const db = new DatabaseSync(path);
-  const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 7}`);
+  db.exec(`PRAGMA user_version = ${versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/)}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());
@@ -1590,10 +1555,7 @@ test("a registry from before join tokens keeps its nodes as they were, with none
   const before = openRegistry(path);
   before.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   before.close();
-  const db = new DatabaseSync(path);
-  const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 4}`);
-  db.close();
+  rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS join_tokens\b/));
   const registry = openRegistry(path);
   t.after(() => registry.close());
   assert.deepEqual(registry.nodes().map((n) => [n.name, n.tailnetHost, n.tailnetNodeId]), [[node, "rj-firebat.tail.ts.net", "nFIREBAT"]]);
