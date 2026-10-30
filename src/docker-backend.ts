@@ -24,11 +24,12 @@ import type { OverlayFile } from "./project.ts";
 import { isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
 import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
-import { recordBeforePause, relaunchAfterWake, type PylonLog } from "./session-wake.ts";
+import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "./session-wake.ts";
 import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
 
 /** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
 const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;
+const encoded = (sessions: readonly PausedSession[] | null) => sessions === null ? "" : Buffer.from(JSON.stringify(sessions)).toString("base64url");
 const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {
   const sessions = labels[label.sessions] ?? "";
   return sessions === "" ? null : JSON.parse(Buffer.from(sessions, "base64url").toString("utf8")) as PausedSession[];
@@ -136,7 +137,15 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
    */
   const relaunchMark = "/var/lib/nexus/relaunch";
   const markRelaunch = (pylonId: PylonId) => docker(["exec", pylonId, "sh", "-c", 'mkdir -p "${1%/*}" && touch "$1"', "sh", relaunchMark]);
-  const relaunchPending = async (pylonId: PylonId) => await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) === "marked";
+  /** The last record is the sessions label of the checkpoint the container booted from, which it carries. */
+  const containerMark = (pylonId: PylonId): RelaunchMark => ({
+    pending: async () => await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) === "marked",
+    clear: async () => { await docker(["exec", pylonId, "rm", "-f", relaunchMark]); },
+    async lastRecorded() {
+      const found = await container(pylonId);
+      return found === null ? null : decoded(labelsOf(found));
+    },
+  });
 
   /** The sessions a stopped container's sessions file holds, by way of a host copy. None when it has no file. */
   async function stoppedSessions(id: string, signal: AbortSignal): Promise<readonly PausedSession[]> {
@@ -162,9 +171,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     // Before the services and sessions start, as in a pylon, so both read this spawn's files.
     await guest(pylonId).writeFiles(overlay);
     await services.apply(pylonId, urls, disk !== "running");
-    if (!relaunch || !await relaunchPending(pylonId)) return;
-    await relaunchAfterWake(pylonId, guest(pylonId), containerLog(pylonId));
-    await docker(["exec", pylonId, "rm", "-f", relaunchMark]);
+    await finishRelaunch(pylonId, guest(pylonId), containerLog(pylonId), containerMark(pylonId), relaunch);
   }
 
   function guest(pylonId: PylonId): Guest {
@@ -311,16 +318,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       const existing = await container(pylonId, signal);
       // No container: only checkpoints remain, or nothing does. Both are already paused.
       if (existing === null) return;
-      const encoded = (recorded: readonly PausedSession[] | null) => recorded === null ? "" : Buffer.from(JSON.stringify(recorded)).toString("base64url");
       let sessions: string;
       if (existing.State.Status !== "running") {
         // Such as a pause that died after its stop: the file on the disk is what the wake relaunches.
         sessions = encoded(await stoppedSessions(existing.Id, signal));
-      } else if (await relaunchPending(pylonId)) {
-        // Its sessions never came back, so Herdr would record none, and the checkpoint it booted from has their list.
-        sessions = labelsOf(existing)[label.sessions] ?? "";
       } else {
-        sessions = encoded(await recordBeforePause(guest(pylonId), containerLog(pylonId)));
+        sessions = encoded(await pauseSessions(guest(pylonId), containerLog(pylonId), containerMark(pylonId)));
+        // On the disk, so the checkpoint carries it to the wake.
         await markRelaunch(pylonId);
       }
       await docker(["stop", existing.Id], signal);

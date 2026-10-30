@@ -23,7 +23,7 @@ import { imageIdOf, type ArtifactId, type CheckpointId, type ImageId, type Porta
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
 import { requiredArtifacts } from "./reconcile.ts";
-import { recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
+import { finishRelaunch, pauseSessions, type RelaunchMark } from "./session-wake.ts";
 import { checkoutDir, sessionHarnessSchema } from "./sessions.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
@@ -281,6 +281,12 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     return sidecar === undefined ? { checkpoint: null } : sidecarSchema.parse(sidecar);
   }
   const writeSidecar = (pylonId: PylonId, sidecar: Sidecar) => saveJson(join(instanceDir(pylonId), checkpointFile), sidecar);
+  /** The mark as `sidecar` holds it. Clearing it drops the sidecar's sessions, which the relaunch brought back. */
+  const sidecarMark = (pylonId: PylonId, sidecar: Sidecar): RelaunchMark => ({
+    pending: async () => sidecar.relaunch === true,
+    clear: () => writeSidecar(pylonId, { checkpoint: sidecar.checkpoint }),
+    lastRecorded: async () => sidecar.sessions ?? null,
+  });
 
   /** Before a boot. A pause that reached stopped wrote its checkpoint. Any other pending pause did not. */
   async function settleSidecar(pylonId: PylonId, stopped: boolean): Promise<void> {
@@ -533,11 +539,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             // again in case they changed, and a changed URL restarts the services it reaches.
             await sandbox({ action: "write-files", name, files: live.overlay }, signal);
             await sandbox({ action: "public-urls", name, urls: publicUrls(pylonId, live.previews, options.previewHost) }, signal);
-            const sidecar = await readSidecar(pylonId);
-            if (sidecar.relaunch && relaunch) {
-              await relaunchAfterWake(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)));
-              await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint });
-            }
+            await finishRelaunch(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, await readSidecar(pylonId)), relaunch);
             return;
           }
           // The instance holds the pylon's newest disk whatever the boot source says, so it is started as it is.
@@ -578,9 +580,9 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         const sidecar = await readSidecar(pylonId);
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
-        const recorded = instance.status.state === "running" && !sidecar.relaunch
-          ? await recordBeforePause(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId))) : null;
-        await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(recorded ?? sidecar.sessions) });
+        const sessions = instance.status.state === "running"
+          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
+        await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
           case "running": case "interrupted": case "failed":

@@ -29,6 +29,32 @@ export async function recordBeforePause(guest: Guest, log: PylonLog): Promise<re
 }
 
 /**
+ * Where a backend keeps whether a disk's sessions are still to be relaunched, and what its last pause recorded. Each
+ * backend sets the mark itself, when its storage needs it: before a boot from an existing disk at the latest.
+ */
+export interface RelaunchMark {
+  pending(): Promise<boolean>;
+  clear(): Promise<void>;
+  lastRecorded(): Promise<readonly PausedSession[] | null>;
+}
+
+/**
+ * What a pause of a running guest keeps for its wake. A guest whose relaunch is still pending keeps the last record,
+ * because its sessions never came back and Herdr would record none. So does a guest whose sessions cannot be recorded.
+ */
+export async function pauseSessions(guest: Guest, log: PylonLog, mark: RelaunchMark): Promise<readonly PausedSession[] | null> {
+  if (await mark.pending()) return mark.lastRecorded();
+  return await recordBeforePause(guest, log) ?? mark.lastRecorded();
+}
+
+/** After a spawn brings the guest up. `relaunch` false leaves a pending relaunch for a later spawn. */
+export async function finishRelaunch(pylonId: PylonId, guest: Guest, log: PylonLog, mark: RelaunchMark, relaunch: boolean): Promise<void> {
+  if (!relaunch || !await mark.pending()) return;
+  await relaunchAfterWake(pylonId, guest, log);
+  await mark.clear();
+}
+
+/**
  * Calls that start a Claude session or type into it run one at a time per pylon and session: a launch, a send, and a
  * wake's relaunch, which holds every Claude session it brings back. Each finds the pane the call before it left the
  * session in, so none starts the session in a second pane. Two sends never interleave their chunks in its prompt, and

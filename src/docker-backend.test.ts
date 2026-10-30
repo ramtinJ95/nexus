@@ -33,7 +33,8 @@ if (argv[0] === "exec") {
   let i = 1, cwd = ${JSON.stringify(bin)};
   for (; argv[i].startsWith("--"); i++) if (argv[i] === "--workdir") cwd = argv[++i]; else if (argv[i] === "--env") i++;
   const remap = (arg) => arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))})
-    .replaceAll("/var/lib/nexus", ${JSON.stringify(join(root, "var"))}).replaceAll("/home/user/.nexus", ${JSON.stringify(join(root, "nexus"))});
+    .replaceAll("/var/lib/nexus", ${JSON.stringify(join(root, "var"))}).replaceAll("/home/user/.nexus", ${JSON.stringify(join(root, "nexus"))})
+    .replaceAll("/proc/1/fd/1", ${JSON.stringify(join(root, "container.log"))});
   const [program, ...args] = argv.slice(i + 1).map(remap);
   const child = spawn(program, args, { cwd, stdio: "inherit" });
   process.on("SIGTERM", () => { child.kill("SIGKILL"); process.exit(143); });
@@ -169,6 +170,19 @@ test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause aft
   await backend.ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(10_000));
   const calls = await docker.calls();
   assert.ok(!calls.some((argv) => argv.includes("herdr") || argv.some((arg) => arg.includes("sessions.json"))), "nothing read or recorded the sessions");
+  const commit = calls.find((argv) => argv[0] === "commit")!;
+  assert.ok(hasPair(commit, "--change", `LABEL nexus.sessions="${paused}"`) && hasPair(commit, "--change", 'LABEL nexus.checkpoint="ckpt-a-2"'), commit.join(" "));
+});
+
+test("a pause whose session record fails keeps the sessions its checkpoint's pause recorded", async (t) => {
+  const paused = Buffer.from(JSON.stringify([{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
+  const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
+  const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
+  // First on the PATH the container's commands run with, so the record fails as a guest without Herdr's server would.
+  await writeFile(join(docker.root, "..", "herdr"), "#!/bin/sh\necho 'herdr: broken on purpose' >&2\nexit 1\n", { mode: 0o755 });
+  await createDockerBackend({ images }).ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(10_000));
+  const calls = await docker.calls();
+  assert.match(await readFile(join(docker.root, "container.log"), "utf8"), /^sessions: recording failed, so the wake relaunches what the last record holds: .*herdr: broken on purpose/);
   const commit = calls.find((argv) => argv[0] === "commit")!;
   assert.ok(hasPair(commit, "--change", `LABEL nexus.sessions="${paused}"`) && hasPair(commit, "--change", 'LABEL nexus.checkpoint="ckpt-a-2"'), commit.join(" "));
 });
