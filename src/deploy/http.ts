@@ -1,5 +1,17 @@
 import { request } from "node:http";
+import { BodyTooLarge, readBody } from "../request-body.ts";
 import type { Whois } from "../tailscale.ts";
+
+/** A deployment API answer other than 200. `body` is the whole response, and the message only its start. */
+export class DeployHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+  constructor(status: number, body: string) {
+    super(`deployment API HTTP ${status}: ${body.slice(0, 1000)}`);
+    this.status = status;
+    this.body = body;
+  }
+}
 
 export async function jsonRequest(url: URL, method: string, body: unknown, token: string | null, peer?: { id: string; whois: Whois }, timeoutMs = 10_000): Promise<any> {
   if (url.protocol !== "http:") throw new Error("deployment endpoint must be tailnet HTTP");
@@ -10,13 +22,12 @@ export async function jsonRequest(url: URL, method: string, body: unknown, token
       ...(token === null ? {} : { authorization: `Bearer ${token}` }),
       ...(payload === undefined ? {} : { "content-length": Buffer.byteLength(payload) }),
     } }, (res) => {
-      let text = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { text += chunk; if (text.length > 1024 * 1024) req.destroy(new Error("deployment response too large")); });
-      res.on("error", reject);
-      res.on("end", () => {
-        if (res.statusCode !== 200) return reject(new Error(`deployment API HTTP ${res.statusCode}: ${text.slice(0, 1000)}`));
-        try { resolve(JSON.parse(text)); } catch (error) { reject(error); }
+      readBody(res).then((text) => {
+        if (res.statusCode !== 200) throw new DeployHttpError(res.statusCode!, text);
+        return JSON.parse(text);
+      }).then(resolve, (error: Error) => {
+        if (error instanceof BodyTooLarge) req.destroy(error);
+        reject(error);
       });
     });
     req.on("error", reject);

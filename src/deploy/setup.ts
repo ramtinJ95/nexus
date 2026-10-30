@@ -11,7 +11,7 @@ import { access, chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "
 import { dirname } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, gitKnownHosts, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
-import { jsonRequest } from "./http.ts";
+import { DeployHttpError, jsonRequest } from "./http.ts";
 import { localApiWhois, type Whois } from "../tailscale.ts";
 
 const exec = promisify(execFile);
@@ -486,9 +486,18 @@ export async function joinControlPlane(deployer: { controlUrl: string; controlNo
     const joined = await jsonRequest(new URL("v1/join", deployer.controlUrl), "POST", { token, deployKey: tokenDigest(deployer.token) }, null, { id: deployer.controlNodeId, whois }) as { node: string };
     return joined.node;
   } catch (err) {
-    const message = (err as Error).message;
-    const refusal = /^deployment API HTTP \d+: (\{"error":.*\})$/s.exec(message)?.[1];
-    throw new Error(`the control plane at ${deployer.controlUrl} did not take the join: ${refusal === undefined ? message : (JSON.parse(refusal) as { error: string }).error}`);
+    throw new Error(`the control plane at ${deployer.controlUrl} did not take the join: ${refusal(err) ?? (err as Error).message}`);
+  }
+}
+
+/** The control plane's own words when it refused with `{ "error": string }`. */
+function refusal(err: unknown): string | undefined {
+  if (!(err instanceof DeployHttpError)) return undefined;
+  try {
+    const { error } = JSON.parse(err.body) as { error?: unknown };
+    return typeof error === "string" ? error : undefined;
+  } catch {
+    return undefined;
   }
 }
 
