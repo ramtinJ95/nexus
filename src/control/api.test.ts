@@ -3,16 +3,15 @@ import { reportSchema, type DeploymentOptions } from "./releases.ts";
 import { attentionOf } from "./attention.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import { snapshotTurn } from "../../images/pylon/nexus-turn.ts";
-import { after, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { claudeProjects, maxRecordBytes, type ClaudeConversation } from "../claude-transcript.ts";
 import { claudeHook, claudeTurn } from "../../images/pylon/nexus-contract.ts";
-import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,7 +53,7 @@ import { attachScript, checkoutDir, focusScript } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
 import { releaseOutcome, reportStates, tokenDigest, type ReleaseReport } from "../deploy/model.ts";
-import { call as callJson, runningPylon, stoppedPylon, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
+import { call as callJson, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
 import type { JobId, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeObservation, PausedSession, ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";
@@ -74,8 +73,7 @@ const image = testImage();
 
 const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-api-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-api-");
 
 const claudeSession = "11111111-2222-4333-8444-555555555501";
 /** The lines of a real Claude Code 2.1.308 transcript, each with its newline. */
@@ -1117,8 +1115,7 @@ const git = promisify(execFile);
 
 /** A checkout on this machine whose first commit is refs/nexus/base, which the probe's pipes read in place of the pylon's. */
 async function localCheckout(t: import("node:test").TestContext, s: { probePipes(next: (argv: readonly string[]) => Promise<ByteStream>): void }) {
-  const repo = await mkdtemp(join(tmpdir(), "nexus-api-checkout-"));
-  t.after(() => rm(repo, { recursive: true }));
+  const repo = await tempDir("nexus-api-checkout-", t);
   const run = (...args: string[]) => git("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
   await mkdir(join(repo, "src"));
   await writeFile(join(repo, "src", "app.ts"), "export const a = 1;\n");
@@ -1271,8 +1268,7 @@ test("a harness conversation's image part is served by its hash, and a part that
 
 test("a scratch thread's changes and diff are against the empty tree, before its first commit and after", async (t) => {
   const s = await withThread(t);
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-api-scratch-"));
-  t.after(() => rm(scratch, { recursive: true }));
+  const scratch = await tempDir("nexus-api-scratch-", t);
   const repo = join(scratch, "repo");
   await git("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
   const run = (...args: string[]) => git("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
@@ -3001,8 +2997,7 @@ async function withClaude(t: import("node:test").TestContext) {
   assert.equal(started.status, 201, JSON.stringify(started.body));
   const thread = started.body as Thread;
   s.registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, claudeSession);
-  const projects = await mkdtemp(join(tmpdir(), "nexus-claude-projects-"));
-  t.after(() => rm(projects, { recursive: true }));
+  const projects = await tempDir("nexus-claude-projects-", t);
   await mkdir(join(projects, "-home-user-workspace-repo"));
   // The asks the pylon's hook reports waiting, which a test sets.
   const pylon = { asks: [] as unknown[] };

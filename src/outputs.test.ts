@@ -2,14 +2,14 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Guest } from "./backend.ts";
 import type { DeclaredOutput } from "./protocol/observations.ts";
 import { fakeGuest } from "./fake-guest.ts";
 import { addOutput, listOutputs, OutputRefused, outputsDir } from "./outputs.ts";
+import { tempDir } from "./test-kit.ts";
 
 const run = promisify(execFile);
 const home = "/home/user";
@@ -17,8 +17,7 @@ const repo = `${home}/workspace/repo`;
 
 /** Runs each exec on this machine with /home/user moved to a scratch directory, both ways. */
 async function localGuest(t: TestContext): Promise<{ guest: Guest; at(path: string): string }> {
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-outputs-"));
-  t.after(() => rm(scratch, { recursive: true }));
+  const scratch = await tempDir("nexus-outputs-", t);
   const inward = (s: string) => s.replaceAll(home, scratch);
   const guest = fakeGuest(() => { throw new Error("unused"); });
   guest.exec = (argv, { cwd, timeoutMs }) => new Promise((resolve) => {
@@ -93,8 +92,7 @@ test("a diff output before the first commit is against the empty tree, and appli
   assert.equal(output.base, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "git's empty tree");
   assert.equal((await run("git", ["-C", dir, "status", "--porcelain"])).stdout, "?? README.md\n?? src/\n", "the agent's index is unchanged");
 
-  const empty = await mkdtemp(join(tmpdir(), "nexus-apply-"));
-  t.after(() => rm(empty, { recursive: true }));
+  const empty = await tempDir("nexus-apply-", t);
   await run("git", ["apply", at(`${outputsDir}/${output.id}.diff`)], { cwd: empty });
   assert.equal(await readFile(join(empty, "README.md"), "utf8"), "# sketch\n");
   assert.equal(await readFile(join(empty, "src", "main.go"), "utf8"), "package main\n");
@@ -122,8 +120,7 @@ test("a diff output shows a rename as a rename, whatever the agent's config, and
   const file = at(`${outputsDir}/${output.id}.diff`);
   assert.match(await readFile(file, "utf8"), /^rename from app.txt\nrename to main.txt$/m);
 
-  const base = await mkdtemp(join(tmpdir(), "nexus-apply-"));
-  t.after(() => rm(base, { recursive: true }));
+  const base = await tempDir("nexus-apply-", t);
   await run("git", ["-C", dir, "worktree", "add", "-q", "--detach", base, output.base]);
   await run("git", ["apply", file], { cwd: base });
   await assert.rejects(readFile(join(base, "app.txt")));

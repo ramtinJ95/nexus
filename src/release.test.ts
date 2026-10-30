@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import { loadImageRecipe } from "./image-build.ts";
 import { imageIdOf } from "./images.ts";
+import { tempDir } from "./test-kit.ts";
 
 const root = resolve(import.meta.dirname, "..");
 
@@ -34,8 +34,7 @@ test("every file the services import is in the release that deploy/release.sh pa
  * as the test does not run as root. `stubs` defines shell functions that stand in for commands, to make one fail.
  */
 async function installRelease(t: TestContext, failing: string | null, stubs = "") {
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-release-"));
-  t.after(() => rm(scratch, { recursive: true, force: true }));
+  const scratch = await tempDir("nexus-release-", t);
   const bin = join(scratch, "bin");
   await mkdir(bin);
   await writeFile(join(bin, "npm"), `#!/bin/sh

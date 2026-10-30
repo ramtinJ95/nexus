@@ -1,8 +1,6 @@
-import { after, test, type TestContext } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startImageRollout, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { openRegistry, type Registry } from "./registry.ts";
@@ -10,7 +8,7 @@ import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from ".
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { testCapacity, testImage, testObservation, watch } from "../test-kit.ts";
+import { tempDir, testCapacity, testImage, testObservation, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const testbench = "infra-testbench" as NodeName;
@@ -25,8 +23,7 @@ const manifestOf = (id: ImageId, builtOn: NodeName): ImageManifest => ({
   id, gondolinBuildId: `gondolin-${id}`, builtOn, builtAt: "2027-01-01T00:00:00.000Z", sha256: createHash("sha256").update(`${id} on ${builtOn}`).digest("hex"), pins,
 });
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-image-rollout-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-image-rollout-");
 
 /**
  * Nodes as their probes present them, and as the reconcile loop records them. A job runs until the test finishes it.

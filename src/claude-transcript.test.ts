@@ -1,12 +1,12 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { maxRecordBytes, parseRecord, readTranscript, readTranscriptImage, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import { localPipes } from "./fake-guest.ts";
 import type { ByteStream } from "./protocol/streams.ts";
+import { tempDir } from "./test-kit.ts";
 
 const fixture = await readFile(new URL("./fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
 const lines = fixture.split("\n").filter((line) => line !== "");
@@ -197,8 +197,7 @@ test("long text is cut to its limit, marked as cut", () => {
 
 /** A projects directory like ~/.claude/projects, holding the session's transcript under a project slug. */
 async function projects(t: TestContext) {
-  const root = await mkdtemp(join(tmpdir(), "nexus-claude-"));
-  t.after(() => rm(root, { recursive: true }));
+  const root = await tempDir("nexus-claude-", t);
   await mkdir(join(root, "-home-user-workspace-repo"));
   await mkdir(join(root, "-other-project"));
   const file = join(root, "-home-user-workspace-repo", `${session}.jsonl`);

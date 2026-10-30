@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -16,11 +15,11 @@ import type { PylonId } from "../ids.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { scriptedModel, scriptedModels } from "./test-fixture.ts";
 import { writeThread } from "./thread-doc.ts";
+import { tempDir } from "../test-kit.ts";
 
 for (const fails of [false, true]) {
   test(`a whole reply keeps one snapshot across generation tasks${fails ? ", even after capture fails" : " and reopen"}`, async (t) => {
-    const scratch = await mkdtemp(join(tmpdir(), "nexus-turn-"));
-    t.after(() => rm(scratch, { recursive: true, force: true }));
+    const scratch = await tempDir("nexus-turn-", t);
     const dir = join(scratch, "repo");
     await mkdir(dir);
     const git = async (...args: string[]) => (await promisify(execFile)("git", ["-C", dir, ...args])).stdout.trim();

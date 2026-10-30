@@ -1,8 +1,6 @@
-import { after, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
@@ -23,7 +21,7 @@ import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
 import type { ReportedEvent } from "../events.ts";
-import { runningPylon, stoppedPylon, testCapacity, until, watch } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, until, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;
@@ -268,8 +266,7 @@ async function settled(fake: ReturnType<typeof fakeNode>, loop: Loop) {
 }
 
 // One directory for the file, so each test's registry is closed before it is removed.
-const dir = await mkdtemp(join(tmpdir(), "nexus-loop-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-loop-");
 const tempDb = () => join(dir, `${randomUUID()}.db`);
 
 function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt">> = {}): Thread {

@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, copyFile, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   agentSetupManifest, formatAgentSetup, herdrPiExtension, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
@@ -11,6 +10,7 @@ import { claudeHooks, installedPackage, installMismatches, pylonProfile } from "
 import { captureSummary, httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./image-build.ts";
 import type { ImageRecipe } from "./images.ts";
+import { tempDir } from "./test-kit.ts";
 
 const checkedIn = await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8");
 
@@ -501,7 +501,7 @@ async function piCapture(files: Record<string, string | { link: string }>): Prom
   }, leaveOuts);
 }
 async function scratchHome(files: Record<string, string | { link: string }>): Promise<string> {
-  const home = await realpath(await mkdtemp(join(tmpdir(), "agent-setup-home-")));
+  const home = await realpath(await tempDir("agent-setup-home-"));
   for (const [path, content] of Object.entries(files)) {
     const full = join(home, path);
     await mkdir(path.endsWith("/") ? full : dirname(full), { recursive: true });
@@ -599,7 +599,7 @@ test("pi skills: a -path entry is matched as pi matches it, from the root pi fou
 });
 
 test("the install check names a local pi package whose directory, declared resources or skills' SKILL.md files are missing", async () => {
-  const agentDir = await mkdtemp(join(tmpdir(), "agent-setup-pi-"));
+  const agentDir = await tempDir("agent-setup-pi-");
   const write = async (path: string, content: string) => {
     await mkdir(dirname(join(agentDir, path)), { recursive: true });
     await writeFile(join(agentDir, path), content);
@@ -622,8 +622,7 @@ test("the install check names a local pi package whose directory, declared resou
 });
 
 test("the image build installs and checks the agent setup without starting an agent, whose sessions and hook events the image would keep", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "agent-setup-build-"));
-  t.after(() => rm(root, { recursive: true }));
+  const root = await tempDir("agent-setup-build-", t);
   const setup = join(root, "setup");
   await mkdir(setup);
   for (const file of ["install.ts", "manifest.ts"]) await copyFile(join(pylonRecipeDir, "agent-setup", file), join(setup, file));

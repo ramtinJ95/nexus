@@ -1,14 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { buildDashboard } from "./build.ts";
+import { tempDir } from "../../test-kit.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
-const out = await mkdtemp(join(tmpdir(), "nexus-dashboard-build-"));
+const out = await tempDir("nexus-dashboard-build-");
 const { outputs } = await buildDashboard(out);
-test.after(() => rm(out, { recursive: true, force: true }));
 
 const entry = Object.keys(outputs).find((path) => path.endsWith("/client.js"))!;
 /** The outputs reached from `start` through imports of the given kinds. */

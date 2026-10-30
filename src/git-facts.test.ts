@@ -1,20 +1,19 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, type ExecFileOptions } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fakeGuest } from "./fake-guest.ts";
 import { gitFacts } from "./git-facts.ts";
 import { checkoutDir } from "./sessions.ts";
+import { tempDir } from "./test-kit.ts";
 
 const exec = promisify(execFile);
 const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 const run = (file: string, args: readonly string[], options: ExecFileOptions = {}) => exec(file, args, { ...options, env: { ...gitEnv, ...options.env }, encoding: "utf8" });
 async function checkout(t: TestContext) {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-git-facts-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dir = await tempDir("nexus-git-facts-", t);
   const git = (...args: string[]) => run("git", ["-C", dir, "-c", "user.name=test", "-c", "user.email=test@example.com", ...args]);
   await git("init", "-q", "--initial-branch=main");
   const guest = fakeGuest(() => { throw new Error("unused"); });
@@ -65,8 +64,7 @@ test("current and detached HEAD, staged, unstaged and ignored files leave the re
 
 test("a real push.default=current push with no upstream is discovered from its remote-tracking ref", async (t) => {
   const s = await checkout(t);
-  const remote = await mkdtemp(join(tmpdir(), "nexus-git-remote-"));
-  t.after(() => rm(remote, { recursive: true, force: true }));
+  const remote = await tempDir("nexus-git-remote-", t);
   await run("git", ["init", "--bare", "-q", remote]);
   await s.git("remote", "add", "origin", remote);
   await s.git("checkout", "-qb", "agent-deploys");
@@ -109,8 +107,7 @@ test("existing upstreams, same-named remote refs and ambiguity have deterministi
 
 test("a branch cloned, fetched or checked out from a remote is pushed only once this checkout pushes it", async (t) => {
   const s = await checkout(t);
-  const remote = await mkdtemp(join(tmpdir(), "nexus-git-remote-"));
-  t.after(() => rm(remote, { recursive: true, force: true }));
+  const remote = await tempDir("nexus-git-remote-", t);
   await run("git", ["init", "--bare", "-q", "--initial-branch=main", remote]);
   await s.git("remote", "add", "origin", remote);
   await s.commit();
@@ -129,8 +126,7 @@ test("a branch cloned, fetched or checked out from a remote is pushed only once 
 
 test("a push of a signed commit counts where the configuration shows signatures", async (t) => {
   const s = await checkout(t);
-  const remote = await mkdtemp(join(tmpdir(), "nexus-git-remote-"));
-  t.after(() => rm(remote, { recursive: true, force: true }));
+  const remote = await tempDir("nexus-git-remote-", t);
   await run("git", ["init", "--bare", "-q", remote]);
   await s.git("remote", "add", "origin", remote);
   await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(s.dir, ".git", "signing-key")]);

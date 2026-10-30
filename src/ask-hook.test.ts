@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "../images/pylon/nexus-ask.ts";
 import { answerExits, type AskAnswer } from "../images/pylon/nexus-contract.ts";
+import { tempDir } from "./test-kit.ts";
 
 const hook = new URL("../images/pylon/nexus-claude-hook", import.meta.url).pathname;
 
@@ -27,8 +27,7 @@ const answer = (session: string, { call = "toolu_1", extras = "Milk, Oat cream" 
 const waitingFile = (dir: string, session: string, texts = ["Which drink?", "What goes in it?"]) => join(dir, `${createHash("sha256").update(session).digest("hex")}.${askKey(session, texts)}.waiting`);
 
 async function asksDir(t: { after(fn: () => Promise<void>): void }) {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-asks-"));
-  t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-asks-", t);
   return dir;
 }
 

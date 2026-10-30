@@ -2,8 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { artifactDirectory, tarCodec } from "./artifacts.ts";
 import { JobFailure } from "./protocol/jobs.ts";
@@ -14,6 +13,7 @@ import {
 import { imageIdOf, type ImageRecipe } from "./images.ts";
 import { agentSetupManifest, installedLayout, parseAgentSetup } from "../images/pylon/agent-setup/manifest.ts";
 import type { NodeName } from "./ids.ts";
+import { tempDir } from "./test-kit.ts";
 
 const pins: ImageRecipe["pins"] = {
   debianDigest: `sha256:${"a".repeat(64)}`,
@@ -35,8 +35,7 @@ const pins: ImageRecipe["pins"] = {
 const manifest: ImageRecipe["files"][number] = { path: agentSetupManifest, mode: 0o644, content: await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8") };
 
 async function recipeDir(t: { after(fn: () => Promise<void>): void }, files: Record<string, string>): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-recipe-"));
-  t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-recipe-", t);
   for (const [path, content] of Object.entries(files)) {
     await mkdir(join(dir, path, ".."), { recursive: true });
     await writeFile(join(dir, path), content);
@@ -96,8 +95,7 @@ test("loading refuses pins with a missing or unknown field, a bad digest, and a 
 });
 
 test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus script or agent setup manifest are unsafe, before it writes anything", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nexus-image-out-"));
-  t.after(() => rm(root, { recursive: true }));
+  const root = await tempDir("nexus-image-out-", t);
   const store = artifactDirectory(root, tarCodec);
   const node = "infra-testbench" as NodeName;
   const bad: readonly ImageRecipe[] = [
@@ -120,8 +118,7 @@ test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus scr
 });
 
 test("a build job under the probe's 077 umask gives Docker each recipe file with its own mode, and directories 0755", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nexus-image-modes-"));
-  t.after(() => rm(root, { recursive: true }));
+  const root = await tempDir("nexus-image-modes-", t);
   const docker = join(root, "bin", "docker");
   await mkdir(join(root, "bin"));
   // The failed build's .partial is removed, so the context is copied out first.
@@ -150,8 +147,7 @@ test("a build job under the probe's 077 umask gives Docker each recipe file with
 });
 
 test("an image.json in the store that names the recipe's image but is no manifest fails the build before any docker call", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "nexus-image-held-"));
-  t.after(() => rm(root, { recursive: true }));
+  const root = await tempDir("nexus-image-held-", t);
   await mkdir(join(root, "bin"));
   await writeFile(join(root, "bin", "docker"), `#!/bin/sh\necho "$@" >> ${root}/calls\n`, { mode: 0o755 });
   const recipe = await loadImageRecipe();
@@ -253,8 +249,7 @@ test("the smoke boot refuses a home that carries a hook outbox or an agent sessi
   const checks = smokeChecks({ ...(await loadImageRecipe()), pins });
   const clean = checks.find((c) => c.name === "no build sessions")!;
   assert.ok(checks.indexOf(clean) < checks.findIndex((c) => c.name === "agent setup"), "pi, which starts Claude, runs in the agent setup check");
-  const home = await mkdtemp(join(tmpdir(), "nexus-smoke-home-"));
-  t.after(() => rm(home, { recursive: true }));
+  const home = await tempDir("nexus-smoke-home-", t);
   const run = () => execFileSync("sh", ["-c", clean.argv.at(-1)!], { cwd: home, encoding: "utf8" });
   assert.equal(smokeFailure(clean, 0, run()), undefined);
   await mkdir(join(home, ".nexus", "outbox"), { recursive: true });

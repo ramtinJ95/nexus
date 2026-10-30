@@ -1,7 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -14,7 +12,7 @@ import { agentReader } from "./agent-conversation.ts";
 import { threadStarter } from "./threads.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { ProjectId } from "../project.ts";
-import { testImage } from "../test-kit.ts";
+import { tempDir, testImage } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
@@ -79,7 +77,7 @@ async function fixture(t: import("node:test").TestContext, path = ":memory:", fa
 }
 
 test("a block makes each card once, read twice, by passes that overlap, or again after a restart cut its read short", async (t) => {
-  const path = join(await mkdtemp(join(tmpdir(), "nexus-planning-")), "registry.db");
+  const path = join(await tempDir("nexus-planning-"), "registry.db");
   const first = await fixture(t, path);
   const thread = await first.planner();
   const token = first.registry.planning(thread.id)!.token;
