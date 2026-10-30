@@ -1,0 +1,10 @@
+main: b636ea9 test: share test and check helpers through three kits (#320)
+observation bytes	19392
+node rows read from start until 50 pylons have previews	354
+node rows read by one pass over 50 running pylons	151
+orphans listed by nodePylons	pylon-stray-0 pylon-stray-1 pylon-stray-2 pylon-stray-3 pylon-stray-4
+node rows read to put 10 nodes their peers	90
+puts of an unchanged list over two snapshots	2
+harness reads by one sweep of 200 threads, 50 deleted	200
+usage cursor rows loaded by that sweep	40000
+orphans table	1 rows

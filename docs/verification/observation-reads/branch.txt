@@ -1,0 +1,10 @@
+branch: e822f28 fixup! perf(usage): read one harness cursor, and sweep only threads not deleted
+observation bytes	19392
+node rows read from start until 50 pylons have previews	1
+node rows read by one pass over 50 running pylons	0
+orphans listed by nodePylons	pylon-stray-0 pylon-stray-1 pylon-stray-2 pylon-stray-3 pylon-stray-4
+node rows read to put 10 nodes their peers	0
+puts of an unchanged list over two snapshots	2
+harness reads by one sweep of 200 threads, 50 deleted	150
+usage cursor rows loaded by that sweep	150
+orphans table	absent

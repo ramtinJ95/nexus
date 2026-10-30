@@ -119,7 +119,6 @@ export interface Preview { pylon: PylonId; service: string; httpsPort: number; r
 /** The https ports a node's previews are published on, both ends included. */
 export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
-export interface Orphan { node: NodeName; pylonId: PylonId }
 
 /**
  * How far a source of usage was read: a pylon's transcript, by its path, to a byte offset with the SHA-256 of the up
@@ -384,6 +383,9 @@ const migrations: readonly string[] = [
   // Each deleted thread's conversation the harness aborted, so a start aborts only those a crashed delete left. It
   // touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS aborted_conversations (conversation TEXT PRIMARY KEY) STRICT;`,
+  // The dashboard and the API list a node's orphans from its observation, so nothing read this table. Dropping it
+  // touches nothing an earlier migration needs, so a registry rewound past it applies it again unchanged.
+  `DROP TABLE IF EXISTS orphans;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -538,11 +540,12 @@ export function openRegistry(path: string, clock = Date.now) {
   const setting = (key: string): string | null => (sql("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null) as string | null;
   const setSetting = (key: string, value: string) => sql("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
 
-  function previews(pylon: PylonId): Preview[] {
+  /** `observation` is the pylon's node's latest, which a caller that holds it passes so it is not read again. */
+  function previews(pylon: PylonId, observation?: NodeObservation | null): Preview[] {
     const rows = sql("SELECT previews.*, nodes.tailnet_host FROM previews JOIN nodes ON nodes.name = previews.node WHERE pylon = ? ORDER BY service").all(pylon);
     if (rows.length === 0) return [];
     // A pylon's previews are all on its node.
-    const observed = node(rows[0]!.node as NodeName)!.observation?.pylons.find((p) => p.pylonId === pylon);
+    const observed = (observation === undefined ? node(rows[0]!.node as NodeName)!.observation : observation)?.pylons.find((p) => p.pylonId === pylon);
     // Only a running pylon's services are known. A paused one's preview shows the waking page, which answers.
     const facts = new Map(observed?.phase === "running" ? (observed.services ?? []).map((s) => [s.name, s]) : []);
     return rows.map((r): Preview => {
@@ -846,6 +849,10 @@ export function openRegistry(path: string, clock = Date.now) {
       return added;
     },
     /** Where each of the source's files or conversations was last read to. */
+    usageCursor(source: string, key: string): UsageCursor | undefined {
+      const r = sql("SELECT * FROM usage_cursors WHERE source = ? AND key = ?").get(source, key);
+      return r && { source, key, position: r.position as number, before: r.before as string };
+    },
     usageCursors: (source: string): Map<string, UsageCursor> =>
       new Map(sql("SELECT * FROM usage_cursors WHERE source = ?").all(source).map((r) => [r.key as string, { source, key: r.key as string, position: r.position as number, before: r.before as string }])),
     /** `since` is a UTC day's start, or null for all. */
@@ -1221,6 +1228,8 @@ export function openRegistry(path: string, clock = Date.now) {
     upsertNode,
     nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeRow),
     node,
+    /** Each node's tailnet node ID, without reading its observation. */
+    nodeIds: (): Map<NodeName, TailnetNodeId> => new Map(sql("SELECT name, tailnet_node_id FROM nodes").all().map((r) => [r.name as NodeName, r.tailnet_node_id as TailnetNodeId])),
     /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
     markOffline(name: NodeName) { sql("UPDATE nodes SET state = ? WHERE name = ?").run("offline", name); },
     addJoinToken(hash: string, expiresAt: number) { sql("INSERT INTO join_tokens (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt); },
@@ -1405,13 +1414,14 @@ export function openRegistry(path: string, clock = Date.now) {
      * holds and that the node's last observation does not route. A port the node routes without a row here is left
      * from records that were lost, so handing it out would publish two previews on one URL. A service keeps its port
      * until releasePreviews, so its URL survives pauses and restarts, and asking again changes nothing. Throws when
-     * the range is used up, after allocating the services before it.
+     * the range is used up, after allocating the services before it. `observation` is as for previews.
      */
-    allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange) {
+    allocatePreviews(pylonId: PylonId, services: readonly string[], range: PortRange, observation?: NodeObservation | null) {
       const on = pylon(pylonId)?.node;
       if (on === undefined) throw new Error(`no pylon ${pylonId} to allocate previews for`);
-      const routed = (node(on)!.observation?.previewRoutes ?? []).map((r) => r.httpsPort);
-      const held = new Set(previews(pylonId).map((p) => p.service));
+      const last = observation === undefined ? node(on)!.observation : observation;
+      const routed = (last?.previewRoutes ?? []).map((r) => r.httpsPort);
+      const held = new Set(previews(pylonId, last).map((p) => p.service));
       for (const service of services) {
         if (held.has(service)) continue;
         const taken = new Set([...routed, ...(sql("SELECT https_port FROM previews WHERE node = ?").all(on) as Row[]).map((r) => r.https_port as number)]);
@@ -1434,7 +1444,6 @@ export function openRegistry(path: string, clock = Date.now) {
         ...(watch ? watch.links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),
       ];
     },
-    orphans: () => (sql("SELECT * FROM orphans ORDER BY node, pylon_id").all() as Row[]).map((r): Orphan => ({ node: r.node as NodeName, pylonId: r.pylon_id as PylonId })),
 
     /** The latest job the node reported for a pylon or an artifact. */
     job(subject: Subject): JobStatus | undefined {
@@ -1526,9 +1535,6 @@ export function openRegistry(path: string, clock = Date.now) {
       case "preview":
         // A port the control plane no longer assigns, such as a released one, has no row to mark.
         sql("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?").run(write.ready ? 1 : 0, write.pylonId, write.service, write.httpsPort);
-        return;
-      case "orphan":
-        sql("INSERT INTO orphans (node, pylon_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(write.node, write.pylonId);
         return;
       case "job":
         // For the dashboard. The tick settles its own job against the observation, which may lag this. A snapshot read

@@ -1,0 +1,8 @@
+ℹ fail 0
+ℹ pass 6
+✔ a deleted thread's harness read in flight through a sweep still runs one at a time
+✔ a pass over several running pylons reads its node's record at most once
+✔ a pylon is observed as its node last listed it, online or not, and its probe is handed out only while it runs on an online node
+✔ a sweep reads an archived thread's Nexus agent from the harness, and a deleted thread's not at all
+✔ each put reads the nodes' tailnet IDs once, without their records, and every snapshot puts the list again
+✔ previews and allocatePreviews answer the same with the node's observation passed, and use the routes of the one passed

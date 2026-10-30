@@ -14,7 +14,8 @@ export function peerHandoff(options: { registry: Registry; probes: ReadonlyMap<N
   const flights = new Map<NodeName, SingleFlight>();
 
   async function put(node: NodeName) {
-    const peers = [...probes.keys()].filter((n) => n !== node).map((n) => registry.node(n)!.tailnetNodeId);
+    const ids = registry.nodeIds();
+    const peers = [...probes.keys()].filter((n) => n !== node).map((n) => ids.get(n)!);
     try {
       await probes.get(node)!.putPeers(peers);
       unaware.delete(node);

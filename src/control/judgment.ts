@@ -22,6 +22,7 @@ import type { NodeHealth, NodeName, ProbeClient, PylonObservation } from "../pro
 import { retryRefusal } from "../reconcile.ts";
 import { singleFlight } from "../single-flight.ts";
 import { pylonLive } from "./live.ts";
+import { observedPylon } from "./observed.ts";
 import { gib, refusals, weighNodes, type Weighed } from "./placement.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { latest, mint } from "./review.ts";
@@ -214,8 +215,7 @@ export function judgmentPass(options: {
   const errors = new Map<ThreadId, string>();
 
   const rule = (why: string): Verdict => ({ answer: "person", why, by: "control plane" });
-  const observed = (pylon: StoredPylon): PylonObservation | "absent" =>
-    registry.node(pylon.node)?.observation?.pylons.find((p) => p.pylonId === pylon.pylonId) ?? "absent";
+  const observed = (pylon: StoredPylon): PylonObservation | "absent" => observedPylon(registry, pylon) ?? "absent";
   const retriesSpent = (thread: ThreadId) => registry.judgments(thread).filter((j) => j.phase.kind === "done" && j.phase.outcome.kind !== "left" && j.phase.outcome.on === "verdict").length;
 
   /** A builder whose project the pipeline runs for, which a person started and has not archived. */
@@ -261,11 +261,10 @@ export function judgmentPass(options: {
   }
 
   async function facts(t: Thread, pylon: StoredPylon, failure: number, token: string): Promise<Facts> {
-    const node = registry.node(pylon.node);
     const agent = registry.agent(t).kind;
     return {
       token, thread: t, agent: agent === "harness" ? "a Nexus agent" : agent === "claude" ? "a Claude worker" : "none", pylon,
-      listed: node?.observation == null ? null : observed(pylon), online: node?.state === "online", health: await health(pylon.node),
+      listed: observedPylon(registry, pylon), online: registry.node(pylon.node)?.state === "online", health: await health(pylon.node),
       others: weighNodes(registry, pylon.boot, pylon.node).weighed, earlier: registry.judgments(t.id).filter((j) => j.failure < failure),
       retriesLeft: maxRetries - retriesSpent(t.id), retry: retryRefusal(observed(pylon)), move: move(pylon),
     };

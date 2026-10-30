@@ -14,6 +14,7 @@
  */
 import type { ByteStream, NodeName, ProbeClient, ProbeError } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
+import { runningProbe } from "./observed.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
 
@@ -169,9 +170,8 @@ export function checkRuns(options: {
       registry.recordActivity(id, { agent: Date.now() });
       wake(t);
       if (run.kind === "running") return { kind: "running" };
-      const node = registry.node(pylon.node);
-      const probe = probes.get(pylon.node);
-      if (probe !== undefined && node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === t.pylonId && p.phase === "running") === true) open(t, head, probe);
+      const probe = runningProbe(registry, probes, t);
+      if (probe !== null) open(t, head, probe);
       return { kind: runs.get(id)!.kind === "running" ? "running" : "waiting" };
     },
     discard(id) {

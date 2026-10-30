@@ -139,7 +139,6 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
     ] },
     { record: "sessions", pylonId, sessions: [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", title: null, status: "working", message: null }] },
     { record: "output", pylonId, kind: "branch", ref: "nexus/fix-it" },
-    { record: "orphan", node, pylonId: "pylon-stray" as PylonId },
     { record: "job", status: { jobId: "j" as JobId, subject: pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" } },
   ] as const;
   for (const write of [...writes, ...writes]) registry.apply(write);
@@ -148,7 +147,6 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
   assert.deepEqual(registry.node(node)?.capacity, capacity);
   assert.deepEqual(registry.sessions(pylonId), [{ pylon: pylonId, id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: null, message: null }]);
   assert.deepEqual(registry.outputs(threadId), [{ thread: threadId, kind: "branch", ref: "nexus/fix-it" }]);
-  assert.deepEqual(registry.orphans(), [{ node, pylonId: "pylon-stray" }]);
 
   registry.markOffline(node);
   assert.equal(registry.node(node)?.state, "offline");
@@ -397,6 +395,31 @@ test("a port the node routes is never handed out, though no row holds it", async
     grants: { secrets: [], gitSsh: false }, previewRoutes: [routed(10200, "pylon-lost"), routed(10201, pylonId)], heldSecrets: [] }, []);
   registry.allocatePreviews(pylonId, ["web", "api"], ports);
   assert.deepEqual(portsOf(registry, pylonId), ["api 10203", "web 10202"], "a route left to this pylon from a lost row is refused too");
+});
+
+test("previews and allocatePreviews answer the same with the node's observation passed, and use the routes of the one passed", async (t) => {
+  const withIt = seeded(tempDb());
+  const without = seeded(tempDb());
+  t.after(() => { withIt.close(); without.close(); });
+  const observation: NodeObservation = {
+    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 8, diskFreeGiB: 400, committedDiskGiB: 0 },
+    artifacts: [], jobs: [], grants: { secrets: [], gitSsh: false }, previewRoutes: [{ httpsPort: 10200, pylonId: "pylon-lost" as PylonId, service: "web" }], heldSecrets: [],
+    pylons: [{
+      pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null },
+      services: [{ name: "web", state: "failed", port: 8000, declared: true, wantsPreview: true }],
+      listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
+    }],
+  };
+  for (const registry of [withIt, without]) registry.ingested(observation, []);
+  withIt.allocatePreviews(pylonId, ["web", "api"], ports, withIt.node(node)!.observation);
+  without.allocatePreviews(pylonId, ["web", "api"], ports);
+  assert.deepEqual(withIt.previews(pylonId, withIt.node(node)!.observation), without.previews(pylonId));
+  assert.deepEqual(portsOf(without, pylonId), ["api 10202", "web 10201"]);
+  assert.equal(without.previews(pylonId).find((p) => p.service === "web")!.failed, "the service web failed. `nexus service logs web` in the pylon shows why");
+
+  const neighbour = addPylon(without, "th-2");
+  without.allocatePreviews(neighbour, ["web"], ports, { ...observation, previewRoutes: [...observation.previewRoutes, { httpsPort: 10203, pylonId: "pylon-lost" as PylonId, service: "api" }] });
+  assert.deepEqual(portsOf(without, neighbour), ["web 10204"], "a port the passed observation routes is not handed out");
 });
 
 test("an observation stored from a probe older than route reporting routes no port", async (t) => {
@@ -970,7 +993,7 @@ test("a turn running before turn starts were recorded has no known start", async
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`UPDATE threads SET agent_turn_running = 1; ALTER TABLE threads DROP COLUMN placement; ALTER TABLE threads DROP COLUMN setup; ALTER TABLE threads DROP COLUMN agent_turn_started_at; ALTER TABLE session_activity DROP COLUMN started_at; DROP TABLE reviews; DROP TABLE reviewed_prs;
-    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 22}`);
+    ALTER TABLE claude_workers DROP COLUMN turn_session; ALTER TABLE claude_workers DROP COLUMN turn_at; ALTER TABLE session_activity DROP COLUMN message; ALTER TABLE session_order DROP COLUMN event_ids; PRAGMA user_version = ${version - 23}`);
   db.close();
   const registry = openRegistry(path, () => now);
   t.after(() => registry.close());
@@ -1394,7 +1417,7 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
   db.exec(`CREATE TABLE passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
-    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 12}`);
+    CREATE TABLE passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT; PRAGMA user_version = ${version - 13}`);
   db.close();
   openRegistry(path).close();
   const reopened = new DatabaseSync(path);
@@ -1435,7 +1458,7 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 6}`);
+    db.exec(`DROP TABLE pipeline_items; PRAGMA user_version = ${version - 7}`);
     db.close();
   };
   rewind();
@@ -1461,7 +1484,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => {
     const db = new DatabaseSync(path);
     const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 5}`);
+    db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 6}`);
     db.close();
   };
   rewind();
@@ -1473,7 +1496,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`PRAGMA user_version = ${version - 5}`);
+  db.exec(`PRAGMA user_version = ${version - 6}`);
   db.close();
   const again = openRegistry(path);
   t.after(() => again.close());
@@ -1544,7 +1567,7 @@ test("a registry from before join tokens keeps its nodes as they were, with none
   before.close();
   const db = new DatabaseSync(path);
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 2}`);
+  db.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 3}`);
   db.close();
   const registry = openRegistry(path);
   t.after(() => registry.close());

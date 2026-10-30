@@ -261,6 +261,63 @@ test("the Nexus agent's calls are read from the harness after the last entry rea
   assert.equal(asked.at(-1), 3, "the turn's end reads on from the last entry read");
 });
 
+test("a sweep reads an archived thread's Nexus agent from the harness, and a deleted thread's not at all", async (t) => {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const deleted = addThread(registry, { conversationId: "7", phase: "paused" });
+  const archived = addThread(registry, { conversationId: "8", phase: "paused" });
+  const asked: ConversationId[] = [];
+  const harness = { usage: async (conversation: ConversationId, after: number | null) => { asked.push(conversation); return { calls: [], last: after }; } };
+  const counter = usageCounter({ registry, probes: new Map(), harness, sweepMs: 3_600_000 });
+  t.after(() => counter.close());
+  await counter.sweep();
+  assert.deepEqual(new Set(asked), new Set([7, 8]));
+  registry.setThreadStatus(deleted.id, "deleted");
+  registry.setThreadStatus(archived.id, "archived");
+  asked.length = 0;
+  await counter.sweep();
+  assert.deepEqual(asked, [8]);
+});
+
+test("a deleted thread's harness read in flight through a sweep still runs one at a time", async (t) => {
+  const registry = openOnline();
+  t.after(() => registry.close());
+  const thread = addThread(registry, { conversationId: "7", phase: "paused" });
+  let calls = 0;
+  let running = 0;
+  let most = 0;
+  let open = () => {};
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  let hold = false;
+  const harness = {
+    usage: async (_: ConversationId, after: number | null) => {
+      calls++;
+      most = Math.max(most, ++running);
+      if (hold) await gate;
+      running--;
+      return { calls: [], last: after };
+    },
+  };
+  const counter = usageCounter({ registry, probes: new Map(), harness, sweepMs: 3_600_000, followMs: 10 });
+  t.after(() => { open(); return counter.close(); });
+  await counter.sweep();
+  registry.setThreadStatus(thread.id, "deleted");
+  hold = true;
+  registry.recordReply(thread.id, Date.now());
+  for (let i = 0; i < 100 && running === 0; i++) await delay(10);
+  const before = calls;
+  void counter.sweep();
+  await delay(50);
+  registry.recordReply(thread.id, Date.now());
+  await delay(100);
+  assert.equal(calls, before, "the next turn's end waits for the read in flight");
+  hold = false;
+  open();
+  for (let i = 0; i < 100 && calls === before; i++) await delay(10);
+  assert.equal(calls, before + 1, "and then reads once more");
+  assert.equal(most, 1);
+});
+
 test("a forked pi session, a replaced transcript of the same size, and another thread's copy of a session count each call once", async (t) => {
   const registry = openOnline();
   t.after(() => registry.close());

@@ -17,6 +17,7 @@ import { drained, readTranscript, transcriptDeadlineMs, transcriptStart, type Cl
 import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-ask.ts";
 import type { OpenPipe } from "../checkout-files.ts";
 import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
+import { runningProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 
@@ -151,14 +152,6 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     return after.length === 0 && dropped === kept.dropped ? kept.entries : [...kept.entries.slice(dropped - kept.dropped), ...after];
   }
 
-  /** The probe that can read the thread's pylon now, or null while its node does not report it running. */
-  function probeOf(t: Thread): Pick<ProbeClient, "stream"> | null {
-    const pylon = registry.pylon(t.pylonId);
-    const node = pylon === undefined ? undefined : registry.node(pylon.node);
-    const running = node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === t.pylonId && p.phase === "running") === true;
-    return running ? probes.get(pylon!.node) ?? null : null;
-  }
-
   /**
    * Starts or stops the reads of a watched turn, and tells the watchers after a read that changed the transcript or
    * when a turn starts or ends.
@@ -185,7 +178,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
       const t = registry.thread(id);
       const session = registry.claudeWorker(id)?.session ?? null;
       if (t === undefined || t.status === "deleted" || session === null) return;
-      const probe = probeOf(t);
+      const probe = runningProbe(registry, probes, t);
       if (probe === null) return;
       const stored = registry.claudeTranscript(id);
       const startedAt = Date.now();

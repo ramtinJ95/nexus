@@ -25,6 +25,7 @@ import { isImageId, type NodeName, type NodeObservation, type ProbeClient, type 
 import type { ArtifactId } from "../images.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { pylonLive } from "./live.ts";
+import { listsRunning } from "./observed.ts";
 import type { PortRange, Registry, StoredPylon, Thread } from "./registry.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
@@ -69,6 +70,8 @@ interface Link {
   probe: ProbeClient;
   /** The planner acts on a node only while its observe stream is open. */
   up: boolean;
+  /** The node's latest observation, as the registry stores it. Only this link's follow() stores one. */
+  last: NodeObservation | null;
   snapshots: number;
   passes: SingleFlight;
   offline: NodeJS.Timeout | null;
@@ -87,15 +90,19 @@ export function startLoop(options: LoopOptions): Loop {
   const links = new Map<NodeName, Link>();
   const followers: Promise<void>[] = [];
   function followProbe(probe: ProbeClient) {
-    if (registry.node(probe.node) === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
+    const stored = registry.node(probe.node);
+    if (stored === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
     if (links.has(probe.node) || shutdown.signal.aborted) return;
-    const link: Link = { probe, up: false, snapshots: 0, passes: singleFlight(() => pass(probe.node, link), () => shutdown.signal.aborted), offline: null };
+    const link: Link = { probe, up: false, last: stored.observation, snapshots: 0, passes: singleFlight(() => pass(probe.node, link), () => shutdown.signal.aborted), offline: null };
     links.set(probe.node, link);
     linkDown(probe.node, link);
     followers.push(follow(probe.node, link));
   }
 
-  const observation = (node: NodeName): NodeObservation | null => links.get(node)?.up ? registry.node(node)?.observation ?? null : null;
+  const observation = (node: NodeName): NodeObservation | null => {
+    const link = links.get(node);
+    return link?.up === true ? link.last : null;
+  };
 
   const holders = (from: NodeName) => (artifact: ArtifactId): readonly NodeName[] =>
     [...links.keys()].filter((node) => node !== from && observation(node)?.artifacts.includes(artifact));
@@ -112,18 +119,18 @@ export function startLoop(options: LoopOptions): Loop {
    * leaves it out. Only the lists `pylons` read count, never one carried from an earlier read: that could still
    * list a port unlinked since.
    */
-  function reconcilePreviews(node: NodeName, pylons: readonly PylonObservation[]) {
+  function reconcilePreviews(node: NodeName, observation: NodeObservation, pylons: readonly PylonObservation[]) {
     for (const observed of pylons) {
       if (observed.phase !== "running" || observed.services === null) continue;
       const pylon = registry.pylon(observed.pylonId);
       // A pylon reported by a node the registry does not place it on is an orphan there.
       if (pylon?.node !== node || registry.threadStatus(pylon.thread) === "deleted") continue;
       const services = observed.services;
-      for (const { service } of registry.previews(pylon.pylonId)) {
+      for (const { service } of registry.previews(pylon.pylonId, observation)) {
         if (linkedPort(service) !== null && !services.some((s) => s.name === service)) registry.releasePreview(pylon.pylonId, service);
       }
       try {
-        registry.allocatePreviews(pylon.pylonId, services.filter((s) => s.wantsPreview).map((s) => s.name), previewPorts);
+        registry.allocatePreviews(pylon.pylonId, services.filter((s) => s.wantsPreview).map((s) => s.name), previewPorts, observation);
       } catch (err) {
         log(`${pylon.pylonId}: ${(err as Error).message}`);
       }
@@ -131,7 +138,7 @@ export function startLoop(options: LoopOptions): Loop {
   }
 
   /** The pylon with the LiveSpec its records give now, saved if that changed. */
-  function withLive(stored: StoredPylon, thread: Thread): StoredPylon {
+  function withLive(stored: StoredPylon, thread: Thread, link: Link): StoredPylon {
     const nodeObservation = observation(stored.node);
     const observed = nodeObservation?.pylons.find((p) => p.pylonId === stored.pylonId);
     if (nodeObservation !== null && (observed === undefined || observed.phase === "stopped") && stored.submitted === null) {
@@ -141,7 +148,8 @@ export function startLoop(options: LoopOptions): Loop {
         registry.savePylon(stored);
       }
     }
-    const live = pylonLive(stored, registry.project(thread.project)!, registry.previews(stored.pylonId));
+    // Not observation(node), which is null while the link is down: a preview's state stays as the node last reported it.
+    const live = pylonLive(stored, registry.project(thread.project)!, registry.previews(stored.pylonId, link.last));
     const liveHash = liveHashOf(live);
     if (liveHash === stored.liveHash) return stored;
     const updated = { ...stored, live, liveHash };
@@ -167,7 +175,7 @@ export function startLoop(options: LoopOptions): Loop {
       // A failed pylon a judgment moved meanwhile is its new node's to tick.
       if (found.node !== node) continue;
       const thread = registry.thread(found.thread)!;
-      const stored = withLive(found, thread);
+      const stored = withLive(found, thread, link);
       const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
       const nodeObservation = observation(node);
       const ctx: TickContext = {
@@ -179,7 +187,7 @@ export function startLoop(options: LoopOptions): Loop {
       };
       try {
         const worker = registry.claudeWorker(thread.id);
-        const running = nodeObservation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
+        const running = listsRunning(nodeObservation, pylonId);
         // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
         // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
         if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
@@ -259,8 +267,8 @@ export function startLoop(options: LoopOptions): Loop {
         for await (const event of link.probe.observe(AbortSignal.any([shutdown.signal, connection.signal]))) {
           clearTimeout(silence);
           silence = setTimeout(() => connection.abort(), silenceMs);
-          // The stored observation is the last one ingested, including the one from before a reconnect or a restart.
-          const last = registry.node(node)!.observation;
+          // The last one ingested, including the one from before a reconnect or a restart.
+          const last = link.last;
           const current = merge(last, event);
           // A pylon the last observation lists stays present for this event, so ingest clears its sessions when its node drops it.
           const present = [...last?.pylons ?? [], ...current.pylons, ...current.previewRoutes, ...event.type === "preview-hit" ? [event] : []].map((p) => p.pylonId);
@@ -276,8 +284,9 @@ export function startLoop(options: LoopOptions): Loop {
           if (event.type === "session-event") registry.reportSession(node, event.report);
           const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
           registry.ingested(current === last ? null : current, writes);
+          link.last = current;
           for (const w of writes) if (w.record === "sessions" || w.record === "sessions-paused") listed.add(w.pylonId);
-          reconcilePreviews(node, event.type === "snapshot" ? event.observation.pylons : event.type === "pylon" ? [event.pylon] : []);
+          reconcilePreviews(node, current, event.type === "snapshot" ? event.observation.pylons : event.type === "pylon" ? [event.pylon] : []);
           if (event.type === "snapshot") {
             link.snapshots++;
             linkUp(link);

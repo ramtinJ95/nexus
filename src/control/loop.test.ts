@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
+import { nodePylons } from "./placement.ts";
 import { openRegistry, type PortRange, type Registry, type Thread } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
@@ -718,6 +719,21 @@ test("a pylon moved to another node while a pass waits on the probe for another 
   assert.equal(registry.pylon(second!.pylonId)!.node, other);
 });
 
+test("a pass over several running pylons reads its node's record at most once", async (t) => {
+  const registry = openRegistry(tempDb());
+  const threads = [seed(registry), addThread(registry, { node, boot: { image } }), addThread(registry, { node, boot: { image } })];
+  let reads = 0;
+  const counted: Registry = { ...registry, node: (name) => { if (name === node) reads++; return registry.node(name); } };
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, counted, fake.probe, { intervalMs: 60_000 });
+  await until("every pylon runs", () => threads.every((th) => fake.pylons.get(th.pylonId)?.phase === "running"));
+  await settled(fake, loop);
+
+  reads = 0;
+  await loop.wake(node);
+  assert.ok(reads <= 1, `the pass read ${node}'s record ${reads} times`);
+});
+
 test("a pylon pauses once its agent turn ends and nobody has used it for a while", async (t) => {
   const registry = openRegistry(tempDb());
   const longAgo = Date.now() - 60 * 60_000;
@@ -774,7 +790,7 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
 
   fake.setSessions(thread.pylonId, []);
   await until("the closed session is removed", () => registry.sessions(thread.pylonId).length === 0);
-  assert.deepEqual(registry.orphans(), []);
+  assert.deepEqual(nodePylons(registry, registry.node(fake.probe.node)!)?.orphaned, []);
 });
 
 test("with the real ingest, a paused pylon lists its sessions as paused, and once it runs again they run, with the status each read gives", async (t) => {
@@ -1442,7 +1458,7 @@ test("a node reporting a pylon the registry places on another node gets no ports
 
   elsewhere.pylons.set(thread.pylonId, { ...home.pylons.get(thread.pylonId)!, services: [] } as PylonObservation);
   elsewhere.setServices(thread.pylonId, [web]);
-  await until("the copy is recorded as an orphan", () => registry.orphans().some((o) => o.node === peer));
+  await until("the copy is listed as an orphan", () => nodePylons(registry, registry.node(peer)!)?.orphaned.includes(thread.pylonId) === true);
   await loop.wake(firebat);
   assert.deepEqual(registry.previews(thread.pylonId), []);
   assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);
