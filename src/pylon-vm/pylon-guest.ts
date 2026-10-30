@@ -14,7 +14,7 @@ import type { PylonId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 import type { PylonLog } from "../session-wake.ts";
 import { statusSchema } from "./contracts.ts";
-import { shellQuote as q } from "../project.ts";
+import { shellQuote as q } from "../shell.ts";
 import { existsError } from "./storage.ts";
 
 /** A login shell as `user`, in `cwd`. The fork runs guest commands as root. */

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 import type { VM } from "@earendil-works/gondolin";
 import { commandOutcomeSchema, type GuestFile, type Service } from "./contracts.ts";
-import { installFileCommand, shellQuote as q } from "../project.ts";
+import { installFileCommand, shellQuote as q } from "../shell.ts";
 
 /**
  * Gondolin refuses a command once 64 are outstanding, and counts one until the guest answers it, also after the host

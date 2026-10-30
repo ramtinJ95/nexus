@@ -18,7 +18,7 @@ import { openTerminal } from "./portals.ts";
 import { commandsRoot, GuestProcesses } from "./processes.ts";
 import { startRelay } from "./relay.ts";
 import { GuestServices } from "./services.ts";
-import { shellQuote as q } from "../project.ts";
+import { shellQuote as q } from "../shell.ts";
 import { saveJson } from "../json-file.ts";
 import { serialQueue } from "../single-flight.ts";
 import { existsError } from "./storage.ts";

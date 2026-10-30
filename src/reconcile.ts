@@ -19,7 +19,7 @@ import type { Job, JobEnvelope, JobErrorCode, JobStatus } from "./protocol/jobs.
 import type {
   HerdrStatus, NodeObservation, PausedSession, ProbeEvent, PylonObservation, RunningFacts, SessionFact,
 } from "./protocol/observations.ts";
-import type { BootInputs, LiveSpec, PylonSource } from "./project.ts";
+import type { BootInputs, LiveSpec, PylonSource } from "./spawn.ts";
 import { harnessNamed, type SessionHarness } from "./sessions.ts";
 import type { ArtifactId, CheckpointId, PortableArtifactId } from "./images.ts";
 
@@ -145,7 +145,7 @@ const planRules: readonly Rule[] = [
     if (!i.retrying || refused !== null) return brokenFailure(i.observed, refused);
     return submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint });
   },
-  // 7b. Templates are built before planPylon runs. See chooseTemplate in images.ts.
+  // 7b. Templates are built before planPylon runs. See chooseTemplate in control/templates.ts.
   // A running VM ignores its boot inputs, so it needs no artifacts, even after its template is collected.
   (i) => {
     if (i.observed !== "absent" && i.observed.phase === "running") return null;

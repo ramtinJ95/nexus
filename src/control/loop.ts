@@ -17,7 +17,8 @@
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
-import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
+import { linkedPort } from "../services-file.ts";
+import { liveHashOf, type GitIdentity } from "../spawn.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import { tick, type TickContext } from "../tick.ts";
 import { isImageId, type NodeName, type PylonId } from "../ids.ts";

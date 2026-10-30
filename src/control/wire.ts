@@ -4,7 +4,7 @@
 import type { Submission } from "@earendil-works/pi-durable";
 import type { Attention } from "./attention.ts";
 import type { ActualState, DesiredPhase } from "../reconcile.ts";
-import type { BootInputs } from "../project.ts";
+import type { BootInputs } from "../spawn.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { SessionHarness } from "../session-harness.ts";
 import type { ClaudeSent, NodeRecord, Output, Preview, Session, Thread } from "./registry.ts";

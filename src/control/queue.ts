@@ -10,7 +10,8 @@
  */
 import { startedByNexus } from "../agent-protocol.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
-import type { BootInputs, ProjectId } from "../project.ts";
+import type { BootInputs } from "../spawn.ts";
+import type { ProjectId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";

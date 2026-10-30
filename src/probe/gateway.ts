@@ -8,7 +8,7 @@ import { STATUS_CODES, createServer, request, type IncomingHttpHeaders, type Inc
 import type { Socket } from "node:net";
 import { pipeline } from "node:stream";
 import type { PreviewOrigin } from "../backend.ts";
-import type { ServiceName } from "../project.ts";
+import type { ServiceName } from "../services-file.ts";
 import type { PylonId } from "../ids.ts";
 
 export interface PreviewRoute { pylonId: PylonId; service: ServiceName }

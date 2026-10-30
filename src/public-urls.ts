@@ -1,5 +1,6 @@
 import { JobFailure } from "./protocol/jobs.ts";
-import type { PreviewAssignment, ServiceName } from "./project.ts";
+import type { PreviewAssignment } from "./spawn.ts";
+import type { ServiceName } from "./services-file.ts";
 import type { PylonId } from "./ids.ts";
 
 /**

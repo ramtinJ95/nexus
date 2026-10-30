@@ -18,7 +18,9 @@ import type {
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { upgradeObservation } from "../protocol/observations.ts";
-import { chatgptTokenGrant, liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
+import { chatgptTokenGrant } from "../secret-grants.ts";
+import { liveHashOf, type LiveSpec } from "../spawn.ts";
+import type { ProjectId } from "../ids.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
 import type { ReportedEvent } from "../events.ts";
 import { until, watch } from "../test-kit.ts";

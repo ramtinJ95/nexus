@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../artifacts.ts";
 import { exit, type Exit } from "../exec.ts";
-import { shellQuote } from "../project.ts";
+import { shellQuote } from "../shell.ts";
 import { isImageId, type TailnetNodeId } from "../ids.ts";
 import { tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { probePort } from "../protocol/routes.ts";

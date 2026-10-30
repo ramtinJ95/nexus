@@ -7,7 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exit, type Exit } from "../exec.ts";
-import type { ProjectMirror } from "../images.ts";
+import type { ProjectMirror } from "./templates.ts";
 
 /** A thread's start waits on the read, so a slow remote boots the thread fresh instead of holding its start. */
 const readTimeoutMs = 15_000;

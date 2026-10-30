@@ -20,7 +20,7 @@ import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earen
 import type { JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { ProjectId } from "../project.ts";
-import type { TemplateRecord } from "../images.ts";
+import type { TemplateRecord } from "./templates.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { testImage } from "../test-kit.ts";
 import type { WaitingAsk } from "./questions.ts";

@@ -31,7 +31,7 @@ import type { ThreadDetail } from "../control/wire.ts";
 import type { Thread } from "../control/registry.ts";
 import { openTerminal, terminalSize, type Terminal, type TerminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
-import { shellQuote } from "../project.ts";
+import { shellQuote } from "../shell.ts";
 
 /** Threads people work in. The check refuses any command that names one. */
 const untouchable: readonly string[] = ["th-884e6960c34f", "th-9d91e1aa1625"];

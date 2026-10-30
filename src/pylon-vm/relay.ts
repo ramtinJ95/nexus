@@ -1,7 +1,7 @@
 /**
  * Gondolin's preview ingress always dials the guest's 127.0.0.1 (its guest tcp_forwarder offers no other address), so a
  * server bound to `::1` alone, as Node 17 and later bind `localhost`, could not be previewed. Instead of the app's port,
- * each ingress route points at a relay port of Nexus's own (relayPorts in src/project.ts), and the relay carries each
+ * each ingress route points at a relay port of Nexus's own (relayPorts in src/services-file.ts), and the relay carries each
  * connection on to the app's port on 127.0.0.1, or on `::1` when nothing listens there. The relay never binds an
  * app's port, so an app is free to bind it, rebind it, or move it between addresses.
  *
@@ -16,7 +16,7 @@
 import { z } from "zod";
 import type { VM } from "@earendil-works/gondolin";
 import { checked } from "./guest.ts";
-import { shellQuote as q } from "../project.ts";
+import { shellQuote as q } from "../shell.ts";
 
 export const relayMap = "/var/lib/pi-sandbox/relays.json";
 export const relayStatus = "/var/lib/pi-sandbox/relay-status.json";
