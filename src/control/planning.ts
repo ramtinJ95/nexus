@@ -15,12 +15,12 @@
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { mint, planningPrefix, tokenBlocks } from "../agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { ItemId, ItemRecord, Pipeline } from "./pipeline.ts";
 import type { Proposal, Question } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-import { mint, tokenBlocks } from "./review.ts";
 
 export interface PlanningRecord {
   thread: ThreadId;
@@ -36,7 +36,6 @@ export interface PlanningRecord {
 }
 
 export const planFence = "nexus-plan";
-export const planningPrefix = "[Nexus planning: automated, not a message from the person]";
 export const acceptOption = "accept";
 export const rejectOption = "reject";
 const itemIdPattern = /^it-[0-9a-f]{12}$/;

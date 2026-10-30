@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type StoredPylon, type ThreadId } from "./registry.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
-import { reviewPrefix } from "./review.ts";
+import { reviewPrefix } from "../agent-protocol.ts";
 import { seedRegistry, testPylon, testProject, testThread } from "./test-kit.ts";
 import type { QueuedRecord } from "./queue.ts";
 import type { PullRequest } from "./github.ts";

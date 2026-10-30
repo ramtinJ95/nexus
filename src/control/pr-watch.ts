@@ -3,10 +3,10 @@ import type { Inbox } from "./inbox.ts";
 import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./github.ts";
 import type { Registry, StoredThread, Thread, ThreadId } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
+import { prWatchPrefix } from "../agent-protocol.ts";
 
 /** How often the watch reads GitHub. */
 export const prWatchMs = 120_000;
-export const prWatchPrefix = "[Nexus PR watch — automated, not a message from the person]";
 /** How many comment-only wakes in a row stop a thread's watch, until a failed check or a conflict resets the count. */
 export const commentCap = 10;
 export interface PrLink {

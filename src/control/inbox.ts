@@ -5,14 +5,11 @@
  * for the twenty minutes a human visit does.
  */
 import { createHash } from "node:crypto";
-import type { HarnessHost, Sender } from "../harness/host.ts";
+import { senderPrefixes, type Sender } from "../agent-protocol.ts";
+import type { HarnessHost } from "../harness/host.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand } from "../protocol.ts";
-import { nudgePrefix } from "./nudge.ts";
 import { runningProbe } from "./observed.ts";
-import { prWatchPrefix } from "./pr-watch.ts";
 import type { ClaudeSent, Registry, Thread, ThreadId } from "./registry.ts";
-import { reviewPrefix } from "./review.ts";
-import { usageLimitPrefix } from "./usage-limit.ts";
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
 export interface AutomatedMessage { id: string; text: string; sender: Sender }
@@ -111,11 +108,8 @@ export function promptSenders(registry: Registry, thread: ThreadId): PromptSende
   };
 }
 
-/** Built when asked, since nudge.ts imports this module. */
-const prefixSender = (text: string): Sender | null => {
-  const prefixes: Readonly<Record<Sender, string>> = { "pr-watch": prWatchPrefix, review: reviewPrefix, nudge: nudgePrefix, "usage-limit": usageLimitPrefix };
-  return (Object.keys(prefixes) as Sender[]).find((sender) => text.startsWith(prefixes[sender])) ?? null;
-};
+const prefixSender = (text: string): Sender | null =>
+  (Object.keys(senderPrefixes) as Sender[]).find((sender) => text.startsWith(senderPrefixes[sender])) ?? null;
 
 /** GitHub text often ends lines with CRLF and indents with tabs, which Claude's prompt cannot take as typed. */
 export function typeable(text: string): string {

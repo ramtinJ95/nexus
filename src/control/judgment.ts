@@ -15,6 +15,7 @@
  * passes nor a pass after a crash judge one failure twice or act on it twice.
  */
 import { z } from "zod";
+import { judgmentPrefix, latest, mint, roleOf } from "../agent-protocol.ts";
 import type { ConversationId, HarnessHost } from "../harness/host.ts";
 import type { ThreadSetup } from "../images.ts";
 import { liveHashOf } from "../project.ts";
@@ -25,10 +26,7 @@ import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";
 import { gib, refusals, weighNodes, type Weighed } from "./placement.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
-import { latest, mint } from "./review.ts";
-import { roleOf } from "./usage.ts";
 
-const judgmentPrefix = "[Nexus judgment — automated, not a message from the person]";
 const answers = ["retry", "retry-elsewhere", "person"] as const;
 export type Answer = typeof answers[number];
 

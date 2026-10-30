@@ -12,16 +12,13 @@
  * Only this process knows that it opened a run's pipe, so a check thread it holds no run for, as after a restart, may
  * have run something already. It is thrown away, and the check starts again in a fresh one.
  */
+import { checkCaller, verifyCaller } from "../agent-protocol.ts";
 import type { ByteStream, NodeName, ProbeClient, ProbeError } from "../protocol.ts";
 import { checkoutDir } from "../sessions.ts";
 import { runningProbe } from "./observed.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./threads.ts";
 
-/** Who starts a check thread, as its `startedBy`. */
-export const checkCaller = "nexus-check";
-/** Who starts a verify pylon's thread, as its `startedBy`. */
-export const verifyCaller = "nexus-verify";
 /** pylon-vm's 3 GiB floor for each of two inner pylons, and 2 GiB for the verify stack's control plane and probe. */
 export const verifyMemoryGiB = 8;
 const tailBytes = 6_000;

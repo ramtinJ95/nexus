@@ -4,29 +4,11 @@
  * transcript again, a restart, or two readers that see the same call never count it twice.
  */
 import type { ProjectId } from "../project.ts";
-import { tailnetNodeIdSchema, type NodeName } from "../protocol.ts";
-import { checkCaller, verifyCaller } from "./gate.ts";
+import type { NodeName } from "../protocol.ts";
 import { HttpError } from "./http-error.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
-import { reviewerCaller } from "./review.ts";
+import type { ThreadId } from "./registry.ts";
 
 export type AgentKind = "claude" | "pi";
-export type ThreadRole = "builder" | "reviewer" | "check" | "verify" | "other";
-
-/** A reviewer, check or verify thread is one the review loop started, and a builder one a person started from a tailnet node. */
-export function roleOf(startedBy: string): ThreadRole {
-  if (startedBy === reviewerCaller) return "reviewer";
-  if (startedBy === checkCaller) return "check";
-  if (startedBy === verifyCaller) return "verify";
-  return tailnetNodeIdSchema.safeParse(startedBy).success ? "builder" : "other";
-}
-
-/** Whether the review loop started `t`, including a reviewer a later review of the same builder replaced. */
-export const startedByNexus = (registry: Pick<Registry, "isReviewer">, t: Pick<Thread, "id" | "startedBy">): boolean => {
-  const role = roleOf(t.startedBy);
-  return role === "reviewer" || role === "check" || role === "verify" || registry.isReviewer(t.id);
-};
-
 export interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
 
 /**

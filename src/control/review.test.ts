@@ -10,13 +10,14 @@ import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
-import { humanLabel, landable, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type HoldCause, type Review, type ReviewDeps } from "./review.ts";
+import { humanLabel, landable, phaseNote, reviewLoop, type HoldCause, type Review, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { watch } from "../test-kit.ts";
-import { checkCaller, verifyCaller, type CheckState } from "./gate.ts";
+import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "../agent-protocol.ts";
+import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
 import { HttpError } from "./http-error.ts";
 
