@@ -1009,7 +1009,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // admit lets only a node with its deployer key reach these.
     ["GET", /^\/v1\/deployer\/release$/, () => ok(releaseView(registry, options.deployment?.self))],
     ["POST", /^\/v1\/deployer\/report$/, { open: "admit lets only a reporter reach a deployer route" }, async (_, r) => {
-      const node = registry.nodes().find((n) => n.tailnetNodeId === r.caller)!;
+      const node = registry.nodeByTailnetId(r.caller)!;
       const report = parse(reportSchema, await r.body());
       if (report.role === "control" && r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node reports control health");
       registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });

@@ -1258,6 +1258,11 @@ export function openRegistry(path: string, clock = Date.now) {
     node,
     /** Each node's tailnet node ID, without reading its observation. */
     nodeIds: (): Map<NodeName, TailnetNodeId> => new Map(sql("SELECT name, tailnet_node_id FROM nodes").all().map((r) => [r.name as NodeName, r.tailnet_node_id as TailnetNodeId])),
+    /** The node with this tailnet ID and the deploy key it joined with, null for a configured node, without reading its observation. */
+    nodeByTailnetId(id: TailnetNodeId): { name: NodeName; deployKey: string | null } | undefined {
+      const row = sql("SELECT name, deploy_key FROM nodes LEFT JOIN joined_nodes USING (name) WHERE tailnet_node_id = ?").get(id);
+      return row === undefined ? undefined : { name: row.name as NodeName, deployKey: row.deploy_key as string | null };
+    },
     /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
     markOffline(name: NodeName) { sql("UPDATE nodes SET state = ? WHERE name = ?").run("offline", name); },
     addJoinToken(hash: string, expiresAt: number) { sql("INSERT INTO join_tokens (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt); },

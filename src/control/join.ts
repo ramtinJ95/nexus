@@ -43,7 +43,7 @@ export function joinNode(registry: Registry, admitted: ReadonlySet<TailnetNodeId
   if (!name.success) throw new HttpError(409, `tailscale names this machine ${caller.host}, whose first label is not a node name: ${name.error.issues[0]!.message}`);
   const named = registry.node(name.data);
   if (named !== undefined && named.tailnetNodeId !== caller.id) throw new HttpError(409, `a node named ${name.data} is already tailnet node ${named.tailnetNodeId}. Rename this machine in tailscale`);
-  const same = registry.nodes().find((n) => n.tailnetNodeId === caller.id);
+  const same = registry.nodeByTailnetId(caller.id);
   if (same !== undefined && same.name !== name.data) throw new HttpError(409, `this machine is already the node ${same.name}, and tailscale now names it ${name.data}`);
 
   const node = { name: name.data, tailnetHost: caller.host, tailnetNodeId: caller.id, deployKey: request.deployKey };

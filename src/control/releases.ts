@@ -24,15 +24,16 @@ export const reportSchema = z.strictObject({
  * deployment options the control node is unknown, so no caller is.
  */
 export function isPerson(registry: Registry, options: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
-  return options !== undefined && caller !== options.self && !registry.nodes().some((n) => n.tailnetNodeId === caller);
+  return options !== undefined && caller !== options.self && registry.nodeByTailnetId(caller) === undefined;
 }
 export function canDeploy(registry: Registry, options: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
   return options !== undefined && options.deployers.has(caller) && isPerson(registry, options, caller);
 }
 export function isReporter(registry: Registry, options: DeploymentOptions | undefined, caller: TailnetNodeId, authorization: string | undefined): boolean {
-  if (options === undefined || !registry.nodes().some((n) => n.tailnetNodeId === caller)) return false;
-  if (!authorization?.startsWith("Bearer ") || authorization.length > 256) return false;
-  const key = options.keys[caller] ?? registry.joinedNodes().find((n) => n.tailnetNodeId === caller)?.deployKey;
+  if (options === undefined || !authorization?.startsWith("Bearer ") || authorization.length > 256) return false;
+  const node = registry.nodeByTailnetId(caller);
+  if (node === undefined) return false;
+  const key = options.keys[caller] ?? node.deployKey;
   return tokenDigest(authorization.slice(7)) === key;
 }
 export function releaseView(registry: Registry, self: string | undefined, now = Date.now()): ReleaseView {

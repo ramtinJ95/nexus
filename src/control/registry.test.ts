@@ -1615,6 +1615,17 @@ test("a join token records one node, once, before it expires", (t) => {
   assert.equal(registry.node(joining.name)?.state, "offline");
 });
 
+test("a node by its tailnet ID carries the key it joined with, and a configured node none", (t) => {
+  const registry = openRegistry(":memory:");
+  t.after(() => registry.close());
+  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.addJoinToken("hash", 2_000);
+  registry.joinNode("hash", { name: "infra-2" as NodeName, tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: "nINFRA2" as TailnetNodeId, deployKey: "a".repeat(64) }, 1_000);
+  assert.deepEqual(registry.nodeByTailnetId("nFIREBAT" as TailnetNodeId), { name: node, deployKey: null });
+  assert.deepEqual(registry.nodeByTailnetId("nINFRA2" as TailnetNodeId), { name: "infra-2", deployKey: "a".repeat(64) });
+  assert.equal(registry.nodeByTailnetId("nLAPTOP" as TailnetNodeId), undefined);
+});
+
 /**
  * Threads that each take a different path through the session facts: a harness and a session turn running, a waiting
  * session with and without a message, a Claude worker stopped on its usage limit and one a later turn ended, one the
