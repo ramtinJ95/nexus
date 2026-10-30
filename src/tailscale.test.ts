@@ -21,6 +21,7 @@ test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node 
     if (addr === "[fd7a:115c:a1e0::7]:80") return res.end(JSON.stringify({ Node: { StableID: "nStable7v6" } }));
     if (addr === "100.64.0.9:1") return res.writeHead(500).end("boom");
     if (addr === "100.64.0.10:1") return res.end("not json");
+    if (addr === "100.64.0.11:1") return res.end("x".repeat((1 << 20) + 1));
     res.writeHead(404).end("no match for IP:port");
   });
   await new Promise<void>((resolve, reject) => {
@@ -39,6 +40,7 @@ test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node 
   assert.equal(await whois("100.64.0.8", 5), null);
   await assert.rejects(whois("100.64.0.9", 1), /HTTP 500: boom/);
   await assert.rejects(whois("100.64.0.10", 1), /tailscaled whois 100\.64\.0\.10:1: .*JSON/);
+  await assert.rejects(whois("100.64.0.11", 1), { message: "tailscaled whois 100.64.0.11:1 response too large" });
   assert.deepEqual(seen[0], { path: "/localapi/v0/whois?addr=100.64.0.7%3A41641", host: "local-tailscaled.sock" });
 
   const whoisNode = localApiWhoisNode(socketPath);

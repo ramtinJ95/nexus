@@ -340,6 +340,13 @@ test("a status a method gives no meaning rejects with its status, and with a Pro
   assert.deepEqual([stopped.status, stopped.code, stopped.message], [409, "not-running", `${node}: "the pylon is stopped"`]);
   const conflict = await rejection(client.putPeers([]));
   assert.ok(conflict instanceof ProbeHttpError && !("code" in conflict), "only a command or stream means not-running by 409");
+  for (const [status, code] of [[409, "not-running"], [403, "forbidden"], [500, undefined]] as const) {
+    answer("no stream", status);
+    const refused = await rejection(client.stream(at, ["cat"]));
+    assert.ok(refused instanceof ProbeHttpError && refused.status === status, `stream ${status}`);
+    assert.equal(refused.code, code, `stream ${status}`);
+    assert.equal("code" in refused, code !== undefined, `stream ${status}`);
+  }
 });
 
 test("each union's list holds exactly its type's members, and the parser that reads it takes those and no other", async (t) => {
