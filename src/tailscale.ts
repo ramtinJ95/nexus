@@ -5,7 +5,8 @@
 import { X509Certificate } from "node:crypto";
 import { createSecureContext } from "node:tls";
 import { request } from "node:http";
-import { isIPv6 } from "node:net";
+import { isIPv6, type Socket } from "node:net";
+import { BodyTooLarge, readBody } from "./request-body.ts";
 import type { TailnetNodeId } from "./protocol.ts";
 
 /** Resolves to null when tailscaled knows no tailnet node at that address. Rejects when tailscaled cannot answer. */
@@ -31,37 +32,20 @@ export function localApiWhoisNode(socketPath: string = linuxTailscaledSocket): W
   };
 }
 
-function whois(socketPath: string, address: string, port: number): Promise<{ id: TailnetNodeId; host: string | null } | null> {
-  return new Promise((resolve, reject) => {
-    const addr = hostPort(address, port);
-    const req = request({
-      socketPath,
-      method: "GET",
-      path: `/localapi/v0/whois?addr=${encodeURIComponent(addr)}`,
-      // tailscaled refuses LocalAPI requests with any other Host, as a DNS rebinding defence.
-      headers: { host: "local-tailscaled.sock" },
-    }, (res) => {
-      let body = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { body += chunk; });
-      res.on("error", reject);
-      res.on("end", () => {
-        if (res.statusCode === 404) return resolve(null);
-        if (res.statusCode !== 200) return reject(new Error(`tailscaled whois ${addr}: HTTP ${res.statusCode}: ${body.trim()}`));
-        let node: { StableID?: unknown; Name?: unknown } | undefined;
-        try {
-          node = (JSON.parse(body) as { Node?: { StableID?: unknown; Name?: unknown } }).Node;
-        } catch (err) {
-          return reject(new Error(`tailscaled whois ${addr}: ${(err as Error).message}`));
-        }
-        if (typeof node?.StableID !== "string" || node.StableID === "") return reject(new Error(`tailscaled whois ${addr}: response has no Node.StableID`));
-        const host = typeof node.Name === "string" && node.Name !== "" ? node.Name.replace(/\.$/, "") : null;
-        resolve({ id: node.StableID as TailnetNodeId, host });
-      });
-    });
-    req.on("error", reject);
-    req.end();
-  });
+async function whois(socketPath: string, address: string, port: number): Promise<{ id: TailnetNodeId; host: string | null } | null> {
+  const addr = hostPort(address, port);
+  const res = await localApiGet(socketPath, `/localapi/v0/whois?addr=${encodeURIComponent(addr)}`, `whois ${addr}`, 1 << 20);
+  if (res.status === 404) return null;
+  if (res.status !== 200) throw new Error(`tailscaled whois ${addr}: HTTP ${res.status}: ${res.body.trim()}`);
+  let node: { StableID?: unknown; Name?: unknown } | undefined;
+  try {
+    node = (JSON.parse(res.body) as { Node?: { StableID?: unknown; Name?: unknown } }).Node;
+  } catch (err) {
+    throw new Error(`tailscaled whois ${addr}: ${(err as Error).message}`);
+  }
+  if (typeof node?.StableID !== "string" || node.StableID === "") throw new Error(`tailscaled whois ${addr}: response has no Node.StableID`);
+  const host = typeof node.Name === "string" && node.Name !== "" ? node.Name.replace(/\.$/, "") : null;
+  return { id: node.StableID as TailnetNodeId, host };
 }
 
 function hostPort(address: string, port: number): string {
@@ -70,31 +54,58 @@ function hostPort(address: string, port: number): string {
   return isIPv6(ip) ? `[${ip}]:${port}` : `${ip}:${port}`;
 }
 
+/** A GET over tailscaled's Unix socket. `what` names the request in its errors: an answer over `limit` characters, or none within `timeoutMs`. */
+function localApiGet(socketPath: string, path: string, what: string, limit: number, timeoutMs?: number): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    // tailscaled refuses LocalAPI requests with any other Host, as a DNS rebinding defence.
+    const req = request({ socketPath, method: "GET", path, headers: { host: "local-tailscaled.sock" } }, (res) => {
+      readBody(res, limit).then((body) => resolve({ status: res.statusCode ?? 0, body }), (err: Error) => {
+        const error = err instanceof BodyTooLarge ? new Error(`tailscaled ${what} response too large`) : err;
+        req.destroy(error);
+        reject(error);
+      });
+    });
+    if (timeoutMs !== undefined) {
+      const deadline = setTimeout(() => req.destroy(new Error(`tailscaled ${what} request timed out`)), timeoutMs);
+      req.on("close", () => clearTimeout(deadline));
+    }
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
+ * Why verifyPeer refused a connection. `peer` is null when it closed before whois could ask, and otherwise the
+ * address it came from and the node whois named there, null for none.
+ */
+export class PeerRefused extends Error {
+  readonly peer: { address: string; port: number; id: TailnetNodeId | null } | null;
+  constructor(peer: PeerRefused["peer"]) {
+    super(peer === null ? "the connection closed before whois" : `${peer.address}:${peer.port} is tailnet node ${peer.id ?? "unknown"}`);
+    this.peer = peer;
+  }
+}
+
+/**
+ * Resolves once whois names the socket's peer as a node `accepts`, waiting first for a socket still connecting.
+ * Rejects with PeerRefused, or with whois's own error when tailscaled cannot answer.
+ */
+export async function verifyPeer(socket: Socket, whois: Whois, accepts: (id: TailnetNodeId) => boolean): Promise<void> {
+  if (socket.connecting) await new Promise((settled) => socket.once("connect", settled).once("close", settled));
+  const { remoteAddress: address, remotePort: port } = socket;
+  if (address === undefined || port === undefined) throw new PeerRefused(null);
+  const id = await whois(address, port);
+  if (id === null || !accepts(id)) throw new PeerRefused({ address, port, id });
+}
+
 
 export interface Certificate { key: string; cert: string }
 
 /** Cert-only LocalAPI permission comes from tailscaled's TS_PERMIT_CERT_UID, not operator access. */
 export async function localApiCertificate(hostname: string, socketPath = linuxTailscaledSocket): Promise<Certificate> {
-  const pem = await new Promise<string>((resolve, reject) => {
-    const req = request({
-      socketPath,
-      path: `/localapi/v0/cert/${encodeURIComponent(hostname)}?type=pair&min_validity=168h`,
-      headers: { host: "local-tailscaled.sock" },
-    }, (res) => {
-      let body = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => {
-        body += chunk;
-        if (body.length > 128 * 1024) req.destroy(new Error("tailscaled certificate response too large"));
-      });
-      res.on("error", reject);
-      res.on("end", () => res.statusCode === 200 ? resolve(body) : reject(new Error(`tailscaled certificate: HTTP ${res.statusCode}`)));
-    });
-    const deadline = setTimeout(() => req.destroy(new Error("tailscaled certificate request timed out")), 60_000);
-    req.on("close", () => clearTimeout(deadline));
-    req.on("error", reject);
-    req.end();
-  });
+  const res = await localApiGet(socketPath, `/localapi/v0/cert/${encodeURIComponent(hostname)}?type=pair&min_validity=168h`, "certificate", 128 * 1024, 60_000);
+  if (res.status !== 200) throw new Error(`tailscaled certificate: HTTP ${res.status}`);
+  const pem = res.body;
   const cert = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g)?.join("\n");
   const key = pem.match(/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC )?PRIVATE KEY-----/)?.[0];
   if (!cert || !key) throw new Error("tailscaled certificate response has no certificate/key pair");

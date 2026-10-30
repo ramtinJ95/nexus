@@ -83,7 +83,7 @@ export function parseServicesFile(yamlText: string): ServicesFile {
   });
   const parsed = servicesFileSchema.safeParse(document.toJS({ maxAliasCount: 20 }));
   if (!parsed.success) throw new Error(`invalid .nexus/services.yaml:\n${z.prettifyError(parsed.error)}`);
-  // Zod types an optional field as `T | undefined`, but it never adds a key the file lacks.
+  // Zod types an optional field as `T | undefined`, but it never adds a key the file lacks. ParsesTo below checks the rest.
   return parsed.data as ServicesFile;
 }
 
@@ -106,6 +106,13 @@ const previewUrl = previewText.refine((s) => {
   return URL.canParse(s) && ["http:", "https:"].includes(new URL(s).protocol);
 }, "must be a path starting with / or an http(s) URL");
 const previewLink = z.strictObject({ url: previewUrl, title: previewText.min(1), description: previewText.optional() });
+/**
+ * True when `Schema` parses to exactly `T`, field for field. Zod types an omitted field as `T | undefined`, which
+ * exactOptionalPropertyTypes tells apart from an omitted key, so the check drops that `undefined` first.
+ */
+export type ParsesTo<Schema extends z.ZodType, T> =
+  (<U>() => U extends Declared<z.output<Schema>> ? 1 : 2) extends (<U>() => U extends T ? 1 : 2) ? true : false;
+type Declared<T> = T extends readonly (infer E)[] ? readonly Declared<E>[] : T extends object ? { [K in keyof T]: Declared<Exclude<T[K], undefined>> } : T;
 /** One service as the services file declares it. The in-pylon API parses `service-start` with it too. */
 export const serviceDecl = z.strictObject({
   command: z.string().min(1),
@@ -126,6 +133,7 @@ export const serviceDecl = z.strictObject({
   platforms: z.array(z.enum(["linux", "darwin"])).min(1).optional(),
   timeoutMs: z.int().min(100).max(120_000).optional(),
 });
+true satisfies ParsesTo<typeof serviceDecl, ServiceDecl> & ParsesTo<typeof previewLink, PreviewLink>;
 
 /** Matches every `${services.`. The group is set only for a whole reference, so a typo or a missing `}` cannot pass as a literal. */
 export const serviceReference = /\$\{services\.(?:([a-z0-9][a-z0-9-]{0,31})\.publicURL\})?/g;

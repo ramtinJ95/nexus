@@ -6,9 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import type { VM } from "@earendil-works/gondolin";
+import { z } from "zod";
 import { actionSchema } from "./pylon-vm/contracts.ts";
 import { GuestServices } from "./pylon-vm/services.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, secretHostPattern, secretNamePattern, serviceDecl, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
+import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, parseServicesFile, renderOverlay, secretHostPattern, secretNamePattern, serviceDecl, type ParsesTo, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
 import type { NodeName, PylonId } from "./protocol.ts";
 
 const usageExample = `
@@ -398,4 +399,13 @@ test("a secret grant names an upper-case variable and sends it to hostnames of t
   assert.ok(secretHostPattern.test("api.github.com"));
   assert.ok(!secretNamePattern.test("gh_token"), "a lower-case name");
   assert.ok(!secretHostPattern.test("localhost"), "a single-label host");
+});
+
+test("a schema and an interface that differ by one field fail the typecheck's ParsesTo check", () => {
+  const link = z.strictObject({ url: z.string(), title: z.string(), description: z.string().optional() });
+  true satisfies ParsesTo<typeof link, { url: string; title: string; description?: string }>;
+  // @ts-expect-error the interface lacks the schema's optional description
+  true satisfies ParsesTo<typeof link, { url: string; title: string }>;
+  // @ts-expect-error the interface requires what the schema leaves optional
+  true satisfies ParsesTo<typeof link, { url: string; title: string; description: string }>;
 });

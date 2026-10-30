@@ -27,7 +27,7 @@ import { Agent, request, type IncomingMessage } from "node:http";
 import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { localApiWhois, tailnetNodeIdPattern, type Whois } from "./tailscale.ts";
+import { localApiWhois, PeerRefused, tailnetNodeIdPattern, verifyPeer, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPortMessage, reservedPorts, type BootInputs, type LiveSpec, type ProjectId } from "./project.ts";
 import { claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
 import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
@@ -215,9 +215,10 @@ export type PylonObservation =
  * declared service did not start. `controller`: the VM stopped outside a completed pause, and its disk is its last
  * checkpoint.
  */
-export type BrokenCause = "setup" | "saved-setup" | "services" | "controller";
+export const brokenCauses = ["setup", "saved-setup", "services", "controller"] as const;
+export type BrokenCause = typeof brokenCauses[number];
 /** `unknown`: a backend that cannot tell why, or a cause this control plane does not know, or none, from a probe older or newer than it. */
-const brokenCauses: ReadonlySet<unknown> = new Set(["setup", "saved-setup", "services", "controller", "unknown"] satisfies (BrokenCause | "unknown")[]);
+const reportedCauses: readonly unknown[] = [...brokenCauses, "unknown"];
 
 export interface RunningFacts {
   liveHash: LiveHash | null; // null until the probe has applied a LiveSpec since its own start or its last withdrawn preview route
@@ -314,8 +315,12 @@ export type PylonCommand =
   /** Stops previewing a linked port. A port not linked succeeds, and a port a service's preview owns is refused. */
   | { kind: "unlink-port"; port: number };
 
-export type SendClaudeOutcome = "sent" | "queued" | "blocked" | "starting" | "moved";
-export type InterruptClaudeOutcome = "interrupted" | "idle" | "blocked" | "unknown" | "not-running";
+export const sendClaudeOutcomes = ["sent", "queued", "blocked", "starting", "moved"] as const;
+export type SendClaudeOutcome = typeof sendClaudeOutcomes[number];
+export const interruptClaudeOutcomes = ["interrupted", "idle", "blocked", "unknown", "not-running"] as const;
+export type InterruptClaudeOutcome = typeof interruptClaudeOutcomes[number];
+export const closeSessionOutcomes = ["closed", "not-open", "moved"] as const;
+export type CloseSessionOutcome = typeof closeSessionOutcomes[number];
 
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
@@ -324,7 +329,7 @@ export type CommandResult =
    * `not-open`: no such pane is open. `moved`: the pane runs another session than the command names, such as one a wake
    * put there after moving the named one. Both leave every pane as it was. A probe older than the field sends none.
    */
-  | { kind: "close-session"; outcome: "closed" | "not-open" | "moved" }
+  | { kind: "close-session"; outcome: CloseSessionOutcome }
   /** `dropped` is false when the pylon holds no such failed session. */
   | { kind: "drop-failed-session"; dropped: boolean }
   /**
@@ -375,9 +380,28 @@ export interface ByteStream extends AsyncIterable<Uint8Array> {
   readonly done: Promise<StreamEnd>;
 }
 
-export type ProbeError = { code: "unreachable" | "not-running" | "forbidden"; message: string };
+export const probeErrorCodes = ["unreachable", "not-running", "forbidden"] as const;
+export type ProbeError = { code: typeof probeErrorCodes[number]; message: string };
 
-/** The control plane's handle on one probe. All methods reject with ProbeError. */
+/**
+ * A probe answered with a status its method gives no meaning, other than in a reply the method parses. `code` is set
+ * only for a status that means a ProbeError: 403 is `forbidden`, and 409 to a command or stream `not-running`.
+ */
+export class ProbeHttpError extends Error {
+  readonly status: number;
+  declare readonly code?: Extract<ProbeError["code"], "forbidden" | "not-running">;
+  constructor(message: string, status: number, code?: ProbeHttpError["code"]) {
+    super(message);
+    this.status = status;
+    if (code !== undefined) this.code = code;
+  }
+}
+
+/**
+ * The control plane's handle on one probe. Methods reject with ProbeError when the probe cannot be reached or is not
+ * the node whois must name, with ProbeHttpError for a status the method gives no meaning, and with a plain Error for
+ * a reply that fails its checks.
+ */
 export interface ProbeClient {
   readonly node: NodeName;
   /** PUT /v1/jobs/{jobId}. Retry the same envelope on a transport error until it is accepted or expires. */
@@ -448,7 +472,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const req = request({ host: tailnetHost, port, method, path, agent, timeout: timeoutMs, ...(signal ? { signal } : {}) }, (res) => {
         if (res.statusCode === 403) {
           res.destroy();
-          return reject(probeError("forbidden", `${node} refused this caller`));
+          return reject(statusError(method, path, 403, ""));
         }
         resolve(res);
       });
@@ -457,18 +481,26 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (body !== null) req.setHeader("content-type", contentType);
       // A body can be a secret, so not even the request line goes out until whois names the connected peer.
       req.once("socket", (socket) => {
-        const verify = () => {
-          const { remoteAddress, remotePort } = socket;
-          if (remoteAddress === undefined || remotePort === undefined) return req.destroy(probeError("unreachable", `${node}: the connection closed before whois`));
-          whois(remoteAddress, remotePort).then((id) => {
-            if (id !== expected) return req.destroy(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
-            req.end(body ?? undefined);
-          }, (err: Error) => req.destroy(err));
-        };
-        if (socket.connecting) socket.once("connect", verify);
-        else verify();
+        verifyPeer(socket, whois, (id) => id === expected).then(() => req.end(body ?? undefined), (err: Error) => req.destroy(refusal(err, "connection")));
       });
     });
+  }
+
+  /** A ProbeError for verifyPeer's refusal, and whois's own error as it is. */
+  function refusal(err: Error, what: "connection" | "stream"): Error {
+    if (!(err instanceof PeerRefused)) return err;
+    return err.peer === null ? probeError("unreachable", `${node}: the ${what} closed before whois`) : probeError("forbidden", `${node}: ${err.message}, expected ${expected}`);
+  }
+
+  function statusError(method: string, path: string, status: number, body: string, conflict?: "not-running"): ProbeHttpError {
+    if (status === 403) return new ProbeHttpError(`${node} refused this caller`, 403, "forbidden");
+    if (status === 409 && conflict !== undefined) return new ProbeHttpError(`${node}: ${body}`, 409, conflict);
+    return new ProbeHttpError(`${node}: ${method} ${path}: HTTP ${status}: ${body}`, status);
+  }
+
+  /** Throws for any status but `expected`. `conflict` is what a 409 means to a method that gives it one. */
+  function expectStatus(method: string, path: string, res: { status: number; body: string }, expected: number, conflict?: "not-running"): void {
+    if (res.status !== expected) throw statusError(method, path, res.status, res.body, conflict);
   }
 
   async function call(method: "GET" | "PUT" | "POST", path: string, body: string | null = null, timeoutMs = requestTimeoutMs, contentType?: string): Promise<{ status: number; body: string }> {
@@ -496,12 +528,12 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     async job(jobId) {
       const res = await call("GET", `/v1/jobs/${encodeURIComponent(jobId)}`);
       if (res.status === 404) return "unknown";
-      if (res.status !== 200) throw new Error(`${node}: GET /v1/jobs/${jobId}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("GET", `/v1/jobs/${jobId}`, res, 200);
       return parseJson(asSent(jobStatusSchema), res.body, "status");
     },
     async *observe(signal) {
       const res = await open("GET", "/v1/observe", null, signal);
-      if (res.statusCode !== 200) throw new Error(`${node}: GET /v1/observe: HTTP ${res.statusCode}: ${await text(res)}`);
+      if (res.statusCode !== 200) expectStatus("GET", "/v1/observe", { status: res.statusCode ?? 0, body: await text(res) }, 200);
       // The first snapshot arrives with the headers. After that, events can be a minute apart.
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
@@ -510,23 +542,22 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     async command(pylonId, command) {
       const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
       const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);
-      if (res.status === 409) throw probeError("not-running", `${node}: ${res.body}`);
-      if (res.status !== 200) throw new Error(`${node}: POST ${path}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("POST", path, res, 200, "not-running");
       return parseCommandResult(command, res.body);
     },
     async health() {
       const res = await call("GET", "/v1/node-health");
-      if (res.status !== 200) throw new Error(`${node}: GET /v1/node-health: HTTP ${res.status}: ${res.body}`);
+      expectStatus("GET", "/v1/node-health", res, 200);
       return parseJson(asSent(nodeHealthSchema), res.body, "health");
     },
     async putSecret(name, value) {
       const path = `/v1/secrets/${encodeURIComponent(name)}`;
       const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
-      if (res.status !== 204) throw new Error(`${node}: PUT ${path}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("PUT", path, res, 204);
     },
     async putPeers(peers) {
       const res = await call("PUT", "/v1/peers", JSON.stringify(peers));
-      if (res.status !== 204) throw new Error(`${node}: PUT /v1/peers: HTTP ${res.status}: ${res.body}`);
+      expectStatus("PUT", "/v1/peers", res, 204);
     },
     stream(pylonId, argv) {
       const path = streamPath(pylonId, argv);
@@ -535,27 +566,14 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
         req.on("upgrade", (_res, socket, head) => {
           // Node hands over an upgraded socket without its error handler. A reset ends the stream as lost.
           socket.on("error", () => undefined);
-          const { remoteAddress, remotePort } = socket;
-          if (remoteAddress === undefined || remotePort === undefined) {
-            socket.destroy();
-            return reject(probeError("unreachable", `${node}: the stream closed before whois`));
-          }
-          whois(remoteAddress, remotePort).then((id) => {
-            if (id !== expected) {
-              socket.destroy();
-              return reject(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
-            }
+          verifyPeer(socket, whois, (id) => id === expected).then(() => {
             // pi-env pings every 5 s, but a terminal can be silent for hours.
             socket.setTimeout(0);
             resolve(clientByteStream(socket, head));
-          }, (err: unknown) => { socket.destroy(); reject(err); });
+          }, (err: Error) => { socket.destroy(); reject(refusal(err, "stream")); });
         });
         req.on("response", (res) => {
-          text(res).then((body) => reject(
-            res.statusCode === 409 ? probeError("not-running", `${node}: ${body}`)
-              : res.statusCode === 403 ? probeError("forbidden", `${node} refused this caller`)
-              : new Error(`${node}: GET ${path}: HTTP ${res.statusCode}: ${body}`),
-          ), reject);
+          text(res).then((body) => reject(statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
         });
         req.on("timeout", () => req.destroy(new Error(`no answer within ${requestTimeoutMs} ms`)));
         req.on("error", (err) => reject(probeError("unreachable", `${node}: ${err.message}`)));
@@ -566,7 +584,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const path = `/v1/manifests/${encodeURIComponent(artifact)}`;
       const res = await call("GET", path);
       if (res.status === 404) return null;
-      if (res.status !== 200) throw new Error(`${node}: GET ${path}: HTTP ${res.status}: ${res.body}`);
+      expectStatus("GET", path, res, 200);
       return parseArtifactManifest(JSON.parse(res.body));
     },
   };
@@ -576,7 +594,7 @@ function probeError(code: ProbeError["code"], message: string): Error & ProbeErr
   return Object.assign(new Error(message), { code });
 }
 function isProbeError(err: unknown): err is Error & ProbeError {
-  return err instanceof Error && "code" in err && (err.code === "unreachable" || err.code === "not-running" || err.code === "forbidden");
+  return err instanceof Error && "code" in err && (probeErrorCodes as readonly unknown[]).includes(err.code);
 }
 
 /** Ends quietly when the link drops or the caller aborts: that is how observe reports a lost link. */
@@ -958,15 +976,15 @@ export function parsePylonCommand(body: string): PylonCommand {
   return parseJson(asSent(pylonCommandSchema), body, "command");
 }
 
-const sendSchema = z.looseObject({ outcome: z.enum(["sent", "queued", "blocked", "starting", "moved"] satisfies SendClaudeOutcome[]), herdrPane: nonEmpty, resumed: z.boolean() });
+const sendSchema = z.looseObject({ outcome: z.enum(sendClaudeOutcomes), herdrPane: nonEmpty, resumed: z.boolean() });
 const commandResultSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), exitCode: unchecked<number | null>(), output: unchecked<string>(), truncated: unchecked<boolean>() }),
   z.looseObject({ kind: z.literal("open-session"), herdrPane: nonEmpty }),
-  z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(["closed", "not-open", "moved"]).nullish() }),
+  z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(closeSessionOutcomes).nullish() }),
   z.looseObject({ kind: z.literal("drop-failed-session"), dropped: z.boolean() }),
   z.looseObject({ kind: z.literal("send-claude"), ...sendSchema.shape }),
   z.looseObject({ kind: z.literal("send-claude-outcome"), send: z.union([z.enum(["failed", "unknown"]), sendSchema], { error: "expected failed, unknown or what the send became" }) }),
-  z.looseObject({ kind: z.literal("interrupt-claude"), outcome: z.enum(["interrupted", "idle", "blocked", "unknown", "not-running"] satisfies InterruptClaudeOutcome[]) }),
+  z.looseObject({ kind: z.literal("interrupt-claude"), outcome: z.enum(interruptClaudeOutcomes) }),
   z.looseObject({ kind: z.literal("service"), services: unchecked<readonly ServiceFact[]>(), logs: unchecked<string>() }),
   z.looseObject({ kind: z.literal("link-port"), service: nonEmpty }),
   z.looseObject({ kind: z.literal("unlink-port"), refused: nonEmpty.nullable() }),
@@ -1033,7 +1051,7 @@ function upgradePylon(p: OlderPylonObservation): PylonObservation {
       sessions: p.sessions?.map((s): SessionFact => s.state === undefined ? { ...s, state: "running", id: s.herdrPane } : s) ?? null,
     };
     case "stopped": return { ...p, sessions: p.sessions ?? null };
-    case "broken": return { ...p, cause: brokenCauses.has(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown", logTail: p.logTail ?? "" };
+    case "broken": return { ...p, cause: reportedCauses.includes(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown", logTail: p.logTail ?? "" };
     default: return p;
   }
 }
@@ -1062,18 +1080,9 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
   const where = `${peer.host}:${peer.port}`;
   return new Promise((resolve, reject) => {
     const req = request({ host: peer.host, port: peer.port, method: "GET", path, agent: false, timeout: artifactIdleMs, signal }, (res) => {
-      const { remoteAddress, remotePort } = res.socket;
-      if (remoteAddress === undefined || remotePort === undefined) {
-        res.destroy();
-        return reject(probeError("unreachable", `${where}: the connection closed before whois`));
-      }
-      check.whois(remoteAddress, remotePort).then((id) => {
-        if (id === null || !check.peers.includes(id)) {
-          res.destroy();
-          return reject(probeError("forbidden", `${where} is tailnet node ${id ?? "unknown"}, which is not a configured peer`));
-        }
+      verifyPeer(res.socket, check.whois, (id) => check.peers.includes(id)).then(() => {
         if (res.statusCode === 409) return text(res).then((refused) => resolve({ refused }), reject);
-        if (res.statusCode !== 200) return text(res).then((body) => reject(new Error(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`)), reject);
+        if (res.statusCode !== 200) return text(res).then((body) => reject(new ProbeHttpError(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`, res.statusCode ?? 0)), reject);
         let manifest: ArtifactManifest;
         try {
           manifest = parseArtifactManifest(JSON.parse(Buffer.from(String(res.headers[manifestHeader]), "base64url").toString("utf8")));
@@ -1082,7 +1091,11 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
           return reject(new Error(`${where}: GET ${path} sent no readable manifest: ${(err as Error).message}`));
         }
         resolve({ manifest, stream: res });
-      }, (err: unknown) => { res.destroy(); reject(err); });
+      }, (err: Error) => {
+        res.destroy();
+        if (!(err instanceof PeerRefused)) return reject(err);
+        reject(err.peer === null ? probeError("unreachable", `${where}: the connection closed before whois`) : probeError("forbidden", `${where} is tailnet node ${err.peer.id ?? "unknown"}, which is not a configured peer`));
+      });
     });
     req.on("timeout", () => req.destroy(new Error(`${where} sent nothing for ${artifactIdleMs} ms`)));
     req.on("error", (err) => reject(signal.aborted ? err : probeError("unreachable", `${where}: ${err.message}`)));
