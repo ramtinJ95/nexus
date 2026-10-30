@@ -27,7 +27,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { relayPorts } from "../project.ts";
 import { relayLog, relayStatus } from "../pylon-vm/relay.ts";
-import type { ThreadDetail } from "./api.ts";
+import type { ThreadDetail } from "./wire.ts";
 import { defaultPreviewPorts } from "./main.ts";
 import { apiClient, fetchUntil, openNodeCheck, passLogger, toolText, until } from "./on-node-kit.ts";
 

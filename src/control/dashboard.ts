@@ -26,15 +26,14 @@ import { defaultProjectResources, githubTokenGrant, linkedPort, type Project, ty
 import { defaultClaudeModel } from "../claude-state.ts";
 import { isImage } from "../image-types.ts";
 import { checkoutDir, harnessNamed, type SessionHarness } from "../sessions.ts";
-import type { ThreadDetail, ThreadRow } from "./api.ts";
+import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import { attentions, needsPerson, type Attention } from "./attention.ts";
 import type { NodeRecord, Output, Preview, Registry, Thread, ThreadAgent, ThreadId } from "./registry.ts";
-import { agentView, type AgentView } from "./thread-agent.ts";
 import type { TailnetNodeId } from "../protocol.ts";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource, type TranscriptImage } from "../claude-transcript.ts";
 import type { Sender } from "../agent-protocol.ts";
 import { promptSenders, type PromptSenders } from "./inbox.ts";
-import { queuedOf } from "./claude-conversation.ts";
+import { agentView, queuedOf, type AgentView } from "./conversation-view.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review-model.ts";
 import { holdRule, reservedNames } from "./holds.ts";
 import { heldBy } from "./policy.ts";

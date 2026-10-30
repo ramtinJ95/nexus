@@ -23,7 +23,6 @@ import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchem
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
-import type { Attention } from "./attention.ts";
 import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
@@ -33,24 +32,24 @@ import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
-import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase, type ThreadStatus } from "../reconcile.ts";
+import { actualState, desiredPhase, retryRefusal, type ThreadStatus } from "../reconcile.ts";
 import { chatgptTokenGrant, gitIdentitySchema, gitUrl, linkedName, reservedPorts, secretHostPattern, secretNamePattern, type BootInputs, type Project, type ProjectId } from "../project.ts";
 import { isImageId, type CommandResult, type NodeHealth, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
-import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
-import type { JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, StoredPylon, Thread, ThreadId } from "./registry.ts";
+import type { JoinedNode, PortRange, Preview, Registry, StartKey, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveStreams, partHash } from "./dashboard.ts";
-import { attachScript, checkoutDir, focusScript, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
+import { attachScript, checkoutDir, focusScript, herdrSession, sessionHarnessSchema } from "../sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
-import { agentView, noConversation, threadAgents, type AgentView, type Frames, type ThreadAgents, type Watch } from "./thread-agent.ts";
+import { agentView, type AgentView, type Frames, type Watch } from "./conversation-view.ts";
+import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } from "./thread-agent.ts";
+import type { NodeSummary, OpenedSession, ThreadDetail, ThreadRow, Whoami } from "./wire.ts";
 import { usageFilter } from "./usage.ts";
 import type { UsageBackfillJob } from "./usage-backfill.ts";
 import { maxRecordBytes, readTranscriptImage } from "../claude-transcript.ts";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, herdrPanePattern, parseAttachQuery } from "../attach-wire.ts";
-import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { promptSenders } from "./inbox.ts";
@@ -63,12 +62,12 @@ import { bootNetwork, startKey, type StartRequest } from "./threads.ts";
 import { itemView, type ItemId, type Pipeline } from "./pipeline.ts";
 import type { Planning } from "./planning.ts";
 import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
-import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
+import { nodePylons, overcommitted } from "./placement.ts";
 import { listsRunning, observedPylon } from "./observed.ts";
-import { maxRounds, type Review } from "./review-model.ts";
+import { maxRounds } from "./review-model.ts";
 import type { ReviewLoop } from "./review.ts";
 import { watchStopped } from "./pr-watch.ts";
-import { judgmentView, type JudgmentView } from "./judgment.ts";
+import { judgmentView } from "./judgment.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -114,67 +113,12 @@ export interface ApiOptions {
   closeWaitMs?: number;
 }
 
-/** A session `POST /v1/threads/<id>/sessions` opened. Its observed state shows in ThreadDetail.sessions. */
-export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
-
-export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity" | "latestTurn">;
-
 export interface Api {
   readonly port: number;
   readonly httpsPort: number | undefined;
   close(): Promise<void>;
 }
 
-export interface ThreadDetail {
-  claudeWorker?: { model: string | null; state: string; message?: string };
-  attention: Attention;
-  seenAt: number | null;
-  lastReplyAt: number | null;
-  thread: Thread;
-  /** What the planner wants of the pylon now, from the thread's status and activity. */
-  desired: DesiredPhase;
-  pylon: {
-    grantsOutdated: boolean;
-    id: PylonId; node: NodeName; actualState: ActualState; failed: string | null; observedAt: string | null;
-    /** The size the pylon boots with, fixed when its thread started. */
-    resources: BootInputs["resources"];
-    /** Why a retry of the pylon, as its node last reported it, cannot help. Null when a retry can. */
-    retryRefused: string | null;
-  };
-  sessions: readonly Session[];
-  previews: readonly Preview[];
-  /**
-   * The TCP ports the pylon listens on that a preview can reach, as its node last reported them, in order. Empty
-   * while the pylon is not running, and null when its node could not read them.
-   */
-  ports: readonly ListeningPort[] | null;
-  outputs: readonly Output[];
-  prWatch: { enabled: boolean; stopped: boolean; error: string | null };
-  pullRequests: readonly PullRequest[];
-  /** The thread's latest review as a builder, or null. */
-  review: Review | null;
-  /** Every question the thread asked, answered or not, in the order they were asked. */
-  questions: readonly Question[];
-  /** Every judgment of the thread's failed pylon, oldest failure first. */
-  judgments: readonly JudgmentView[];
-  /** A planning thread's proposals become questions, and the items the person accepts. */
-  planning: boolean;
-  /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
-  attach: string;
-  /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
-  agent: { parkedTasks: number } | null;
-}
-
-/**
- * `service` is the service the port belongs to: declared, ad hoc, or `port-<port>` once it is linked. `preview` is
- * that service's preview, or null while it has none, which `POST /v1/threads/<id>/previews` gives it.
- */
-export interface ListeningPort { port: number; service: string | null; preview: Preview | null }
-
-/** A thread as the list reports it, with what the planner wants of its pylon and what its node last reported. */
-export type ThreadRow = Thread & { attention: Attention; desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
-
-export type { Frames, ViewFrame } from "./thread-agent.ts";
 type EventBatch = ReturnType<Registry["eventBatch"]>;
 
 /** Streams open at once, across threads and callers. Each holds a watch, and the streams of one thread page share its renders. */
@@ -184,15 +128,6 @@ export const maxStreams = 16;
  * first, so what a frame shows of the time, such as how long ago the thread started, stays true.
  */
 const pingMs = 15_000;
-
-/** What `GET /v1/whoami` tells a caller about itself: its tailnet node, and what this control plane lets it do. */
-export interface Whoami { node: TailnetNodeId; allowed: boolean; person: boolean; deployer: boolean }
-
-/**
- * A node without its probe's latest observation, which thread detail already reports per pylon. `pylons` sorts the
- * observation's pylons by what they hold, and is null for a node never observed.
- */
-export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string | null; overcommitted: boolean; pylons: NodePylons | null };
 
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();

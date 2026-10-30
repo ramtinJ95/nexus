@@ -21,7 +21,7 @@ import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { parseServeStatus, tailscaleCli } from "../probe/serve.ts";
 import { localApiWhois } from "../tailscale.ts";
 import { callText } from "../test-kit.ts";
-import type { ThreadDetail } from "./api.ts";
+import type { ThreadDetail } from "./wire.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
 import { openRegistry, type PortRange } from "./registry.ts";
 

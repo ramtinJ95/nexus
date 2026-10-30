@@ -23,7 +23,7 @@ import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import { runningProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-import type { Watch } from "./thread-agent.ts";
+import type { Watch } from "./conversation-view.ts";
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
@@ -33,50 +33,6 @@ export interface ClaudeConversations {
   /** The view now, then the view after each read that changed it and whenever a turn starts or ends, until `stop`. */
   watch(t: Thread): Promise<Watch<ClaudeConversation>>;
   close(): void;
-}
-
-/**
- * The messages Claude Code queued and has not taken, oldest first. A removal names the message it takes by its text,
- * or names none and takes the oldest.
- */
-export function queuedOf(entries: readonly ClaudeEntry[]): Extract<ClaudeEntry, { kind: "queue" }>[] {
-  const queued: Extract<ClaudeEntry, { kind: "queue" }>[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== "queue") continue;
-    if (entry.op === "enqueue") queued.push(entry);
-    else {
-      const taken = entry.text === null ? 0 : queued.findIndex((q) => q.text === entry.text);
-      if (taken !== -1) queued.splice(taken, 1);
-    }
-  }
-  return queued;
-}
-
-/**
- * One event of `GET /v1/threads/:id/claude/events`. The first, and any after the transcript was replaced, has
- * `reset` and every entry kept. Each later one has the entries appended since the one before.
- */
-export interface ClaudeFrame { reset: boolean; session: string | null; entries: readonly ClaudeEntry[]; dropped: number; working: boolean }
-
-/**
- * The frames of one client of a Claude worker's transcript stream, or null when no entry came and `working` held.
- * The CLI's watch passes the frames it gets through one too, so the whole transcript that each reconnect sends
- * prints only what it has not printed.
- */
-export function claudeFrames(): (view: Omit<ClaudeFrame, "reset">) => ClaudeFrame | null {
-  let sent: { session: string | null; total: number; last: string | undefined; working: boolean } | null = null;
-  return (view) => {
-    const total = view.dropped + view.entries.length;
-    // Where the entries not sent yet start. The registry keeps no generation, so a replaced transcript shows as a
-    // different entry where the last one sent stood.
-    const start = sent === null ? -1 : sent.total - view.dropped;
-    const appended = sent !== null && sent.session === view.session && start >= 0 && start <= view.entries.length
-      && (sent.total === 0 || (start > 0 && JSON.stringify(view.entries[start - 1]) === sent.last));
-    const entries = appended ? view.entries.slice(start) : view.entries;
-    if (appended && entries.length === 0 && view.working === sent!.working) return null;
-    sent = { session: view.session, total, last: JSON.stringify(view.entries.at(-1)), working: view.working };
-    return { reset: !appended, session: view.session, entries, dropped: view.dropped, working: view.working };
-  };
 }
 
 /** A watch's listener is null until it starts. */
