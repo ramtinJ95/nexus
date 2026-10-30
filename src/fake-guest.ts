@@ -4,7 +4,10 @@
  * exit 0, or `{ id, error }` with exit 1.
  */
 import type { Guest } from "./backend.ts";
+import type { OpenPipe } from "./pipe.ts";
+import { processStream } from "./process-stream.ts";
 import type { OverlayFile } from "./project.ts";
+import type { SessionRecord } from "./sessions.ts";
 
 export type ExecReply = { exitCode: number | null; output: string; truncated?: boolean };
 
@@ -30,13 +33,36 @@ export function fakeGuest(script: (argv: readonly string[], herdr: boolean) => E
       return { truncated: false, ...reply };
     },
     async writeFiles(files) { written.push(...files); },
-    stream: () => Promise.reject(new Error("unused")),
-    services: () => Promise.reject(new Error("unused")),
-    startService: () => Promise.reject(new Error("unused")),
-    linkPort: () => Promise.reject(new Error("unused")),
-    unlinkPort: () => Promise.reject(new Error("unused")),
-    previewOrigin: () => { throw new Error("unused"); },
+    ...unusedGuest,
   };
+}
+
+/** The Guest calls a session test never makes. */
+export const unusedGuest: Omit<Guest, "exec" | "writeFiles"> = {
+  stream: () => Promise.reject(new Error("unused")),
+  services: () => Promise.reject(new Error("unused")),
+  startService: () => Promise.reject(new Error("unused")),
+  linkPort: () => Promise.reject(new Error("unused")),
+  unlinkPort: () => Promise.reject(new Error("unused")),
+  previewOrigin: () => { throw new Error("unused"); },
+};
+
+/** Each pipe runs its argv on this machine, as a pylon would over its raw pipe. */
+export function localPipes(): { open: OpenPipe; requests: (readonly string[])[]; stderr: string[] } {
+  const requests: (readonly string[])[] = [];
+  const stderr: string[] = [];
+  return {
+    requests, stderr,
+    open: async (argv) => {
+      requests.push(argv);
+      return processStream(argv[0]!, argv.slice(1), (text) => { stderr.push(text); });
+    },
+  };
+}
+
+/** The read of a sessions file that records `records` and no failed sessions. */
+export function sessionsFileReply(records: readonly SessionRecord[]): ExecReply {
+  return { exitCode: 0, output: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
 }
 
 export function herdrOk(result: unknown): ExecReply {

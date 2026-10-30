@@ -3,16 +3,8 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { openTerminal, terminalSize, type Terminal } from "./guest-terminal.ts";
-import { processStream } from "./process-stream.ts";
+import { localPipes } from "./fake-guest.ts";
 import { attachScript } from "./sessions.ts";
-
-/** Each terminal runs the relay on this machine, as a pylon would over its raw pipe. */
-function local(argvs: (readonly string[])[] = [], stderr: string[] = []) {
-  return async (argv: readonly string[]) => {
-    argvs.push(argv);
-    return processStream(argv[0]!, argv.slice(1), (text) => { stderr.push(text); });
-  };
-}
 
 /** Everything the terminal printed so far, read as it arrives. */
 function screen(terminal: Terminal) {
@@ -48,7 +40,7 @@ test("a size outside 1 to 9999 on either side, or not whole, is refused", () => 
 });
 
 test("the program starts at the opening size, with TERM set, and its exit code passes through", async () => {
-  const terminal = await openTerminal(local(), size, "xterm-test", ["sh", "-c", 'stty size; echo "term=$TERM"; exit 3']);
+  const terminal = await openTerminal(localPipes().open, size, "xterm-test", ["sh", "-c", 'stty size; echo "term=$TERM"; exit 3']);
   const out = screen(terminal);
   await out.read;
   assert.equal(out.text, "30 100\r\nterm=xterm-test\r\n");
@@ -56,7 +48,7 @@ test("the program starts at the opening size, with TERM set, and its exit code p
 });
 
 test("a resize reaches the program as SIGWINCH with the new size", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'trap "stty size; exit 0" WINCH; echo ready; while :; do sleep 0.05; done']);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["sh", "-c", 'trap "stty size; exit 0" WINCH; echo ready; while :; do sleep 0.05; done']);
   const out = screen(terminal);
   await out.until(/ready/);
   await terminal.resize(terminalSize(140, 40));
@@ -66,7 +58,7 @@ test("a resize reaches the program as SIGWINCH with the new size", async () => {
 });
 
 test("keys and output pass byte for byte through a terminal in raw mode", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", "stty raw -echo; printf 'ready\\000\\377'; head -c 6 | od -An -tx1; exit 0"]);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["sh", "-c", "stty raw -echo; printf 'ready\\000\\377'; head -c 6 | od -An -tx1; exit 0"]);
   const out = screen(terminal);
   await out.until(/ready/);
   await terminal.write(Buffer.from([0x00, 0xff, 0x03, 0x1b, 0x0d, 0x0a]));
@@ -88,7 +80,7 @@ while n < ${paste.length}:
     h.update(chunk)
     n += len(chunk)
 os.write(1, h.hexdigest().encode())`;
-  const terminal = await openTerminal(local(), size, "xterm", ["python3", "-c", reader]);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["python3", "-c", reader]);
   const out = screen(terminal);
   await out.until(/ready/);
   for (let at = 0; at < paste.length; at += 64 << 10) await terminal.write(paste.subarray(at, at + (64 << 10)));
@@ -98,7 +90,7 @@ os.write(1, h.hexdigest().encode())`;
 });
 
 test("a hang-up sends the program SIGHUP, and is safe to repeat", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'trap "exit 42" HUP; echo ready; while :; do sleep 0.05; done']);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["sh", "-c", 'trap "exit 42" HUP; echo ready; while :; do sleep 0.05; done']);
   const out = screen(terminal);
   await out.until(/ready/);
   await terminal.hangUp();
@@ -107,7 +99,7 @@ test("a hang-up sends the program SIGHUP, and is safe to repeat", async () => {
 });
 
 test("a program that stops reading its keys still hangs up when stdin ends", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'trap "exit 42" HUP; echo ready; while :; do sleep 0.05; done']);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["sh", "-c", 'trap "exit 42" HUP; echo ready; while :; do sleep 0.05; done']);
   const out = screen(terminal);
   await out.until(/ready/);
   await terminal.write(Buffer.alloc(2 << 20, "k"));
@@ -116,7 +108,7 @@ test("a program that stops reading its keys still hangs up when stdin ends", asy
 });
 
 test("a program that ignores the hang-up is killed, which reads as 128 plus SIGKILL", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'trap "" HUP; echo ready; while :; do sleep 0.05; done']);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["sh", "-c", 'trap "" HUP; echo ready; while :; do sleep 0.05; done']);
   const out = screen(terminal);
   await out.until(/ready/);
   await terminal.hangUp();
@@ -124,7 +116,7 @@ test("a program that ignores the hang-up is killed, which reads as 128 plus SIGK
 });
 
 test("output written right before the program exits is not lost", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", 'printf "%0200000d" 0; exit 5']);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["sh", "-c", 'printf "%0200000d" 0; exit 5']);
   const out = screen(terminal);
   await out.read;
   assert.equal(out.bytes.length, 200_000);
@@ -133,7 +125,7 @@ test("output written right before the program exits is not lost", async () => {
 
 test("a background process that still holds the terminal does not keep it open once the program exits", async () => {
   // Holds the terminal for longer than `ended` waits.
-  const terminal = await openTerminal(local(), size, "xterm", ["sh", "-c", "sleep 90 & echo bye; exit 4"]);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["sh", "-c", "sleep 90 & echo bye; exit 4"]);
   const out = screen(terminal);
   assert.deepEqual(await ended(terminal), { kind: "exited", code: 4 });
   await out.read;
@@ -141,7 +133,7 @@ test("a background process that still holds the terminal does not keep it open o
 });
 
 test("a program that cannot start exits 127 and says why on the terminal", async () => {
-  const terminal = await openTerminal(local(), size, "xterm", ["nexus-no-such-program"]);
+  const terminal = await openTerminal(localPipes().open, size, "xterm", ["nexus-no-such-program"]);
   const out = screen(terminal);
   await out.read;
   assert.match(out.text, /guest-terminal: cannot run nexus-no-such-program: .*No such file/);
@@ -149,10 +141,10 @@ test("a program that cannot start exits 127 and says why on the terminal", async
 });
 
 test("the relay goes in on stdin, so Herdr's attach fits the probe's request URL with room to spare", async () => {
-  const argvs: (readonly string[])[] = [];
-  const terminal = await openTerminal(local(argvs), size, "xterm-256color", ["sh", "-c", "exit 0"]);
+  const pipes = localPipes();
+  const terminal = await openTerminal(pipes.open, size, "xterm-256color", ["sh", "-c", "exit 0"]);
   assert.deepEqual(await terminal.done, { kind: "exited", code: 0 });
-  const attach = [...argvs[0]!.slice(0, -3), "sh", "-c", attachScript];
+  const attach = [...pipes.requests[0]!.slice(0, -3), "sh", "-c", attachScript];
   // As protocol.ts's streamPath encodes a stream request.
   const encoded = encodeURIComponent(JSON.stringify({ argv: attach })).length;
   assert.ok(encoded < 2048, `the attach request is ${encoded} bytes`);

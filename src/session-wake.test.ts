@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { seedClaudeState } from "./claude-state.ts";
-import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
+import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply } from "./fake-guest.ts";
 import type { PausedSession, PylonId } from "./protocol.ts";
 import { finishRelaunch, onePerClaudeSession, pauseSessions, recordBeforePause, relaunchAfterWake, type RelaunchMark } from "./session-wake.ts";
 import { sendToClaude, sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
@@ -19,7 +19,7 @@ function withRecords(records: readonly SessionRecord[], herdr: (sub: string, arg
     if (isHerdr) return herdr(argv.slice(0, 2).join(" "), argv);
     if (argv.at(-1) !== sessionsFile && other) return other(argv);
     assert.equal(argv.at(-1), sessionsFile);
-    return { exitCode: 0, output: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
+    return sessionsFileReply(records);
   });
 }
 
@@ -49,7 +49,7 @@ test("a wake whose Herdr server does not start still succeeds, and its pylon lis
     if (isHerdr) return herdrError("server_not_running");
     if (argv.at(-1) !== sessionsFile) return { exitCode: 127, output: "tini: not found" }; // the detached server start
     const last = guest.written.findLast((f) => f.path === sessionsFile)?.content;
-    return { exitCode: 0, output: last ?? JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [shell], failed: [] }) };
+    return last === undefined ? sessionsFileReply([shell]) : { exitCode: 0, output: last };
   });
   const { lines, log } = logged();
   const why = "starting the Herdr server failed with exit 127: tini: not found";

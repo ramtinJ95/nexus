@@ -6,7 +6,7 @@ import { chmod, mkdir, mkdtemp, open, readdir, rm, truncate, utimes, writeFile }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { artifactArchive, artifactDirectory, fileCodec, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
+import { artifactArchive, artifactDirectory, fileCodec, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "./backend.ts";
 import type { ImageId, ImageManifest, TemplateId, TemplateManifest } from "./images.ts";
 
@@ -26,12 +26,6 @@ async function scratch(t: { after(fn: () => Promise<void>): void }): Promise<str
   return dir;
 }
 
-async function digest(stream: Readable): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of stream) hash.update(chunk as Buffer);
-  return hash.digest("hex");
-}
-
 /** A store holding one template whose archive is a single file, as the Docker double's is. */
 async function published(t: { after(fn: () => Promise<void>): void }, content = "saved image bytes") {
   const root = await scratch(t);
@@ -49,7 +43,7 @@ test("a published template is listed with the sha256 of the archive it exports",
   assert.equal(manifest.sha256, createHash("sha256").update("saved image bytes").digest("hex"));
   const exported = await store.export(template);
   assert.deepEqual(exported.manifest, manifest);
-  assert.equal(await digest(exported.stream), manifest.sha256);
+  assert.equal(await sha256Of(exported.stream), manifest.sha256);
   await assert.rejects(store.export("tpl-000000000000"), (err) => err instanceof JobFailure && err.code === "artifact-missing");
 });
 
@@ -70,7 +64,7 @@ test("an import verifies the copy, then holds the same artifact as the exporter"
   await peer.import(manifest, stream, AbortSignal.timeout(5_000));
   assert.deepEqual(await peer.list(), [template]);
   assert.deepEqual(await peer.manifest(template), manifest);
-  assert.equal(await digest((await peer.export(template)).stream), manifest.sha256);
+  assert.equal(await sha256Of((await peer.export(template)).stream), manifest.sha256);
   assert.deepEqual(await leftovers(peer), []);
 });
 
@@ -92,7 +86,7 @@ test("a copy that differs by one byte or breaks off is thrown away, and nothing 
 test("an import of an artifact already held is a no-op, unless the sha256 disagrees", async (t) => {
   const { store, manifest } = await published(t);
   await store.import(manifest, Readable.from([Buffer.from("never read")]), AbortSignal.timeout(5_000));
-  assert.equal(await digest((await store.export(template)).stream), manifest.sha256);
+  assert.equal(await sha256Of((await store.export(template)).stream), manifest.sha256);
   await assert.rejects(
     store.import({ ...manifest, sha256: "0".repeat(64) }, Readable.from([]), AbortSignal.timeout(5_000)),
     (err) => err instanceof JobFailure && err.code === "invalid",
@@ -157,9 +151,9 @@ test("the archive is byte-stable across copies and leaves the manifest out", { s
   const b = await dirWith({ "rootfs.ext4": "root", "image.json": "second", "manifest.json": "{}" });
   const earlier = new Date("2020-01-01T00:00:00Z");
   for (const path of ["rootfs.ext4", "image.json", "manifest.json", "."]) await utimes(join(b, path), earlier, earlier);
-  assert.equal(await digest(artifactArchive(a, "image.json")), await digest(artifactArchive(b, "image.json")));
+  assert.equal(await sha256Of(artifactArchive(a, "image.json")), await sha256Of(artifactArchive(b, "image.json")));
   await writeFile(join(b, "rootfs.ext4"), "changed");
-  assert.notEqual(await digest(artifactArchive(a, "image.json")), await digest(artifactArchive(b, "image.json")));
+  assert.notEqual(await sha256Of(artifactArchive(a, "image.json")), await sha256Of(artifactArchive(b, "image.json")));
 });
 
 test("the archive does not depend on the permissions the store gave the directory or its files, only on what is executable", { skip: !gnuTar && "needs GNU tar" }, async (t) => {
@@ -170,9 +164,9 @@ test("the archive does not depend on the permissions the store gave the director
     await chmod(dir, dirMode);
     return dir;
   };
-  const built = await digest(artifactArchive(await dirWith(0o755, 0o644), "image.json"));
-  assert.equal(await digest(artifactArchive(await dirWith(0o700, 0o600), "image.json")), built);
-  assert.notEqual(await digest(artifactArchive(await dirWith(0o755, 0o755), "image.json")), built);
+  const built = await sha256Of(artifactArchive(await dirWith(0o755, 0o644), "image.json"));
+  assert.equal(await sha256Of(artifactArchive(await dirWith(0o700, 0o600), "image.json")), built);
+  assert.notEqual(await sha256Of(artifactArchive(await dirWith(0o755, 0o755), "image.json")), built);
 });
 
 test("the archive stream errors when tar fails", async () => {
@@ -191,12 +185,12 @@ test("a tar copy of a sparse image keeps its holes and archives again to the man
   await truncate(join(dir, "rootfs.ext4"), 1 << 30);
   const manifest: ImageManifest = {
     id: image, gondolinBuildId: "b", builtOn: "n" as ImageManifest["builtOn"], builtAt: "2027-01-01T00:00:00.000Z",
-    pins: {} as ImageManifest["pins"], sha256: await digest(artifactArchive(dir, "image.json")),
+    pins: {} as ImageManifest["pins"], sha256: await sha256Of(artifactArchive(dir, "image.json")),
   };
   await writeFile(join(dir, "image.json"), JSON.stringify(manifest));
   const peer = artifactDirectory(join(root, "b"), tarCodec);
   await peer.import(manifest, (await store.export(image)).stream, AbortSignal.timeout(30_000));
-  assert.equal(await digest((await peer.export(image)).stream), manifest.sha256);
+  assert.equal(await sha256Of((await peer.export(image)).stream), manifest.sha256);
   const du = spawnSync("du", ["-k", join(peer.path(image), "rootfs.ext4")], { encoding: "utf8" }).stdout;
   assert.ok(Number(du.split("\t")[0]) < 1024, `the 1 GiB sparse rootfs takes ${du.trim()} after the copy`);
   const file = await open(join(peer.path(image), "rootfs.ext4"));

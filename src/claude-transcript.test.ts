@@ -5,8 +5,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maxRecordBytes, parseRecord, readTranscript, readTranscriptImage, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
-import type { OpenPipe } from "./pipe.ts";
-import { processStream } from "./process-stream.ts";
+import { localPipes } from "./fake-guest.ts";
 import type { ByteStream } from "./protocol.ts";
 
 const fixture = await readFile(new URL("./fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
@@ -195,18 +194,6 @@ test("long text is cut to its limit, marked as cut", () => {
   assert.equal((tool.input.content as string).length, 4 << 10);
   assert.deepEqual((tool.input.nested as { edits: string[] }).edits.map((e) => e.length), [4 << 10]);
 });
-
-/** Each pipe runs on this machine, as a pylon would over its raw pipe. */
-function localPipes(): { open: OpenPipe; requests: (readonly string[])[] } {
-  const requests: (readonly string[])[] = [];
-  return {
-    requests,
-    open: async (argv) => {
-      requests.push(argv);
-      return processStream(argv[0]!, argv.slice(1), () => undefined);
-    },
-  };
-}
 
 /** A projects directory like ~/.claude/projects, holding the session's transcript under a project slug. */
 async function projects(t: TestContext) {

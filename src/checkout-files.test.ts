@@ -12,23 +12,11 @@ import { imageTypes } from "./image-types.ts";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipes, pathsFit } from "./checkout-files.ts";
 import type { OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
+import { localPipes } from "./fake-guest.ts";
 import { claudeTurn, snapshotTurn } from "../images/pylon/nexus-turn.ts";
 import type { ByteStream, StreamEnd } from "./protocol.ts";
 
 const run = promisify(execFile);
-
-/** Each pipe runs the helper on this machine, as a pylon would over its raw pipe. */
-function localPipes(): { open: OpenPipe; requests: (readonly string[])[]; stderr: string[] } {
-  const requests: (readonly string[])[] = [];
-  const stderr: string[] = [];
-  return {
-    requests, stderr,
-    open: async (argv) => {
-      requests.push(argv);
-      return processStream(argv[0]!, argv.slice(1), (text) => { stderr.push(text); });
-    },
-  };
-}
 
 /** A checkout whose first commit is refs/nexus/base, as a pylon's first boot records it. */
 async function checkout(t: TestContext) {

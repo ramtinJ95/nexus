@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { attachedTerminals, attachScript, claudeTextProblem, focusScript, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
-import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply, type FakeGuest } from "./fake-guest.ts";
+import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type FakeGuest } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
 const agentStarted = herdrOk({ type: "agent_started", agent: {}, argv: [] });
@@ -264,7 +264,7 @@ function withSessionsFile(records: readonly SessionRecord[] | null, herdr: (argv
     const lookup = transcriptLookup(argv, true);
     if (lookup) return lookup;
     assert.equal(argv.at(-1), sessionsFile);
-    return records === null ? { exitCode: 3, output: "" } : { exitCode: 0, output: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
+    return records === null ? { exitCode: 3, output: "" } : sessionsFileReply(records);
   });
 }
 
@@ -412,7 +412,7 @@ function pylon(records: readonly SessionRecord[], panes: FakePane[], refuse: (ar
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) {
       const last = guest.written.findLast((f) => f.path === sessionsFile)?.content;
-      return { exitCode: 0, output: last ?? JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
+      return last === undefined ? sessionsFileReply(records) : { exitCode: 0, output: last };
     }
     if (!herdr) return transcriptLookup(argv, true) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
     const sub = argv.slice(0, 2).join(" ");
