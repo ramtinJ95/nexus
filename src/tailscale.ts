@@ -7,7 +7,7 @@ import { createSecureContext } from "node:tls";
 import { request } from "node:http";
 import { isIPv6, type Socket } from "node:net";
 import { BodyTooLarge, readBody } from "./request-body.ts";
-import type { TailnetNodeId } from "./protocol.ts";
+import type { TailnetNodeId } from "./ids.ts";
 
 /** Resolves to null when tailscaled knows no tailnet node at that address. Rejects when tailscaled cannot answer. */
 export type Whois = (address: string, port: number) => Promise<TailnetNodeId | null>;

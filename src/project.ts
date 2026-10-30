@@ -14,10 +14,10 @@ import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { isScalar, parseDocument, visit } from "yaml";
 import { z } from "zod";
-import type { LiveHash, NodeName, PylonId } from "./protocol.ts";
-import type { CheckpointId, ImageId, TemplateId } from "./images.ts";
+import type { CheckpointId, ImageId, LiveHash, NodeName, ProjectId, PylonId, TemplateId } from "./ids.ts";
 
-export type ProjectId = string & { readonly __project: unique symbol };
+// Temporary: ProjectId moved to ids.ts, and E1 deletes this re-export.
+export type { ProjectId } from "./ids.ts";
 
 // The services file, .nexus/services.yaml.
 

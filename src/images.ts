@@ -6,21 +6,12 @@
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
 import { z } from "zod";
-import { canonicalSha256, effectiveAllowedHosts, type Checkout, type Project, type ProjectId, type RemoteProject } from "./project.ts";
-import { isImageId, isTemplateId, type JobEnvelope, type NodeName } from "./protocol.ts";
+import { canonicalSha256, effectiveAllowedHosts, type Checkout, type Project, type RemoteProject } from "./project.ts";
+import type { JobEnvelope } from "./protocol.ts";
+import { isImageId, isTemplateId, type ArtifactId, type ImageId, type NodeName, type PortableArtifactId, type ProjectId, type TemplateId } from "./ids.ts";
 
-/** img-<sha256 of the recipe>[:12]. The same inputs give the same ID, so a rebuild of unchanged inputs is a no-op. */
-export type ImageId = `img-${string}`;
-/**
- * tpl-<sha256 of the TemplateKey, the node that builds it and the build's start time in ms>[:12]. An ID names one build,
- * not one key: the same key built twice, or on two nodes at once, gives two IDs, so a node's bytes under one ID never change.
- */
-export type TemplateId = `tpl-${string}`;
-/** ckpt-<thread id>-<n>, minted by the control plane for each pause. */
-export type CheckpointId = `ckpt-${string}`;
-export type ArtifactId = ImageId | TemplateId | CheckpointId;
-/** What drop-artifact may name. A checkpoint leaves a node only through delete of its pylon. */
-export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
+// Temporary: the artifact IDs moved to ids.ts, and E1 deletes this re-export.
+export type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./ids.ts";
 
 // The base image.
 
