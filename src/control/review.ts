@@ -386,6 +386,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // `left` is what the person's waiver does not get past. A landing that holds goes to the person with every hold,
       // those it waived too, so the person's next confirmation can name them all.
       const holds = async () => {
+        if (snapshot.checksUnread) throw new Error("GitHub's checks for the head could not be read");
         const all = [...unauthorized(r, builder), ...landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) })];
         return { all, left: unwaived(r, all) };
       };
