@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { planDeploy, quarantined, type Attempt, type ReleaseHealth, type Role } from "./plan.ts";
 import type { ReleaseReport, ReleaseView } from "./model.ts";
-import { jsonRequest } from "./http.ts";
+import { jsonRequest, urlHost } from "./http.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois, tailnetNodeIdPattern } from "../tailscale.ts";
 
@@ -50,10 +50,10 @@ class WaitingForControl extends Error {}
 type Api = (path: string, body?: unknown) => Promise<any>;
 const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged };
 
-/** What a probe plans from: control's report in the view, healthy only while fresh. */
+/** What a probe plans from: control's report in the view. */
 function controlHealth(view: ReleaseView): ReleaseHealth {
   const control = view.nodes.find((r) => r.role === "control");
-  return { commit: control?.commit ?? null, healthy: control?.state === "healthy" && Date.now() - control.observedAt < 90_000 };
+  return { commit: control?.commit ?? null, healthy: control?.state === "healthy" };
 }
 
 /** One poll. Its roles share one read of the release view, read again once control's report would change what it shows. */
@@ -81,7 +81,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const reportPath = join(prefix, `${role}-deploy-report.json`);
   const repo = join(prefix, "deployer", "repo");
   const local = await readJson(join(etc, `${role}.json`), null) as { listen: { host: string; port: number } };
-  const healthUrl = new URL(`http://${local.listen.host.includes(":") ? `[${local.listen.host}]` : local.listen.host}:${local.listen.port}/v1/health`);
+  const healthUrl = new URL(`http://${urlHost(local.listen.host)}:${local.listen.port}/v1/health`);
   const healthy = async () => {
     const expected = await commitAt(link);
     const until = Date.now() + config.healthTimeoutMs;
@@ -123,8 +123,8 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
         try { view = await api("release") as ReleaseView; }
         catch { throw new WaitingForControl("control readiness could not be read; retrying next poll"); }
         if (view.desired?.commit !== desired) throw new WaitingForControl("release superseded before activation; retrying next poll");
-        if (!view.nodes.some((r) => r.role === "control" && r.commit === desired && r.state === "healthy" && Date.now() - r.observedAt < 90_000)) {
-          throw new WaitingForControl("control plane is not freshly healthy on the desired release; retrying next poll");
+        if (!view.nodes.some((r) => r.role === "control" && r.commit === desired && r.state === "healthy")) {
+          throw new WaitingForControl("control plane is not healthy on the desired release; retrying next poll");
         }
       }
       if (role === "control" && !(await api("drain", { commit: desired, hold: true })).idle) throw new Error("agent turn entered after the drain lease expired; refusing restart");

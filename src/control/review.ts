@@ -727,7 +727,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async deploying(r, phase) {
       if (!phase.requested) return requestRelease(r, phase, phase.commit, `nexus review ${r.id}`);
       const view = releaseView(registry, release.self, now());
-      const outcome = releaseOutcome(view, phase.commit, now());
+      const outcome = releaseOutcome(view, phase.commit);
       if (outcome === "healthy") return { ...r, phase: { kind: "landed", commit: phase.commit } };
       if (outcome === "superseded") return toPerson(r, `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
       if (outcome === "pending" && now() < phase.deadline) return r;
@@ -740,7 +740,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async "rolling-back"(r, phase) {
       if (!phase.requested) return requestRelease(r, phase, phase.previous, `nexus review ${r.id} rollback`);
       const view = releaseView(registry, release.self, now());
-      const outcome = releaseOutcome(view, phase.previous, now());
+      const outcome = releaseOutcome(view, phase.previous);
       const revert = `${phase.commit} is still on the default branch, so revert it before the next deploy.`;
       if (outcome === "healthy") return toPerson(r, phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
       if (outcome === "superseded") return toPerson(r, phase.why, `Another release, ${view.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
@@ -767,7 +767,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     // A landing whose deploy and rollback both failed, or one with no release to roll back to, leaves its release
     // desired, which must not become the next landing's rollback target.
     const desired = registry.desiredRelease();
-    if (desired !== null && releaseOutcome(releaseView(registry, release.self, now()), desired.commit, now()) !== "healthy") return `not every service reports ${desired.commit.slice(0, 12)} healthy`;
+    if (desired !== null && releaseOutcome(releaseView(registry, release.self, now()), desired.commit) !== "healthy") return `not every service reports ${desired.commit.slice(0, 12)} healthy`;
     return null;
   }
 

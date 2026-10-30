@@ -21,14 +21,8 @@ take_deployer_lock
 prepare_control "$repo"
 link_release "$prefix/control-current"
 
-signed_in() {
-  PATH=$service_path node -e '
-    const { readFileSync } = require("node:fs");
-    const { harness } = JSON.parse(readFileSync(process.argv[1], "utf8"));
-    process.exit(Object.keys(JSON.parse(readFileSync(harness.credentials, "utf8")).credentials ?? {}).length > 0 ? 0 : 1);
-  ' "$etc/control.json" 2>/dev/null
-}
-if signed_in; then
+# A credentials file that is not JSON also leaves the unit stopped, and says why on stderr.
+if PATH=$service_path node "$repo/src/deploy/setup.ts" signed-in "$etc/control.json"; then
   start_unit nexus-control.service "$prefix/control-active-release" "$etc/control.json"
 else
   echo "nexus-control.service is installed and waits for the harness's ChatGPT login"

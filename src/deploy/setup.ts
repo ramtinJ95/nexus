@@ -3,15 +3,18 @@
  * join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person:
  * `node src/deploy/setup.ts write|join|credentials|left [--node <control device>] [--join <token>] [--admit <device>]...
  * [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]`.
- * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins.
+ * `node src/deploy/setup.ts signed-in <control.json>` exits 0 when the harness that config names is signed in.
+ * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins and modules that do too.
  */
 import { execFile } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { access, chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
+import { readdir } from "node:fs/promises";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
-import { claudeNames, gitKnownHosts, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
-import { jsonRequest } from "./http.ts";
+import { claudeNames, gitKnownHosts, harnessSignedIn, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
+import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
+import { digestPattern, tokenDigest, tsNet } from "./model.ts";
+import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
+import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois, type Whois } from "../tailscale.ts";
 
 const exec = promisify(execFile);
@@ -152,15 +155,6 @@ export interface FileWrite {
 }
 
 export type Setup = { ok: false; errors: readonly string[] } | { ok: true; files: readonly FileWrite[] };
-
-const digestPattern = /^[0-9a-f]{64}$/;
-const tsNet = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/;
-
-export const tokenDigest = (token: string): string => createHash("sha256").update(token).digest("hex");
-
-function urlHost(host: string): string {
-  return host.includes(":") ? `[${host}]` : host;
-}
 
 function file(path: string, mode: number, existing: Json | undefined, generated: Json, derived: readonly string[] = []): FileWrite {
   const changes: Change[] = [];
@@ -392,41 +386,24 @@ export function formatLeft(items: readonly Item[]): string {
 }
 
 async function readJsonFile(path: string, errors: string[]): Promise<Json | undefined> {
-  let text: string;
   try {
-    text = await readFile(path, "utf8");
+    return await readJson(path) as Json | undefined;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw err;
-  }
-  try {
-    return JSON.parse(text) as Json;
-  } catch (err) {
-    errors.push(`${path} is not valid JSON: ${(err as Error).message}`);
+    if (!(err instanceof SyntaxError)) throw err;
+    errors.push(`${path} is not valid JSON: ${err.message}`);
     return undefined;
   }
 }
-
-const exists = (path: string) => access(path).then(() => true, () => false);
 
 async function tailnet(): Promise<Tailnet> {
   const { stdout } = await exec("tailscale", ["status", "--json"], { maxBuffer: 16 * 1024 * 1024 });
   return parseTailnet(stdout);
 }
 
-async function writeAtomic(path: string, value: Json, mode: number): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o755 });
-  const temporary = `${path}.${process.pid}.tmp`;
-  await rm(temporary, { force: true });
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode, flag: "wx" });
-  await chmod(temporary, mode);
-  await rename(temporary, path);
-}
-
 async function write(flags: Flags): Promise<number> {
   const errors: string[] = [];
   const existing: Existing = {
-    gitKey: await exists(paths.gitKey),
+    gitKey: await system.exists(paths.gitKey),
     ...await readJsonFile(paths.control, errors).then((control) => control === undefined ? {} : { control }),
     ...await readJsonFile(paths.probe, errors).then((probe) => probe === undefined ? {} : { probe }),
     ...await readJsonFile(paths.deployer, errors).then((deployer) => deployer === undefined ? {} : { deployer }),
@@ -436,7 +413,7 @@ async function write(flags: Flags): Promise<number> {
     for (const error of result.errors) console.error(`install: ${error}`);
     return 1;
   }
-  for (const f of result.files) if (f.state !== "unchanged") await writeAtomic(f.path, f.value, f.mode);
+  for (const f of result.files) if (f.state !== "unchanged") await saveJson(f.path, f.value, { mode: f.mode, mkdir: true });
   console.log(report(result.files));
   return 0;
 }
@@ -454,26 +431,23 @@ async function dockerSource(): Promise<Docker> {
 async function gather(flags: Flags): Promise<Facts> {
   const net = await tailnet();
   const at = await locations(system);
-  const names = await readFile(at.secrets, "utf8").then(secretNames, () => []);
-  const common = { self: net.self, secretNames: names, gitKey: await exists(at.gitKey) };
+  const names = secretNames(await system.read(at.secrets).catch(() => undefined) ?? "");
+  const common = { self: net.self, secretNames: names, gitKey: await system.exists(at.gitKey) };
   if (flags.node !== undefined) {
     const errors: string[] = [];
     const control = resolve(net, "--node", flags.node, errors);
     if (control === undefined) throw new Error(errors.join("; "));
     return { ...common, role: "node", control, joined: flags.join !== undefined };
   }
-  const config = JSON.parse(await readFile(paths.control, "utf8")) as { callers: string[]; harness: { credentials: string } };
-  const credentials = await readFile(config.harness.credentials, "utf8").then(
-    (text) => Object.keys((JSON.parse(text) as { credentials?: object }).credentials ?? {}).length > 0,
-    () => false,
-  );
+  const { callers } = await readJson(paths.control) as { callers: string[] };
+  const credentials = await system.read(at.harness).catch(() => undefined);
   const groups = await exec("id", ["-nG", "nexus"]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
   const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: "/usr/local/bin:/usr/bin" } }).then(() => true, () => false);
   const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource();
   const image = await readdir(paths.artifacts).then((entries) => entries.some((e) => e.startsWith("img-")), () => false);
   return {
-    ...common, role: "control", signedIn: credentials,
-    admitted: config.callers.length > 0, docker, dockerGroup: groups.includes("docker"), image,
+    ...common, role: "control", signedIn: credentials !== undefined && harnessSignedIn(credentials),
+    admitted: callers.length > 0, docker, dockerGroup: groups.includes("docker"), image,
   };
 }
 
@@ -481,14 +455,34 @@ async function gather(flags: Flags): Promise<Facts> {
  * Sends the join token and this node's deploy key digest to the control plane deployer.json names, once tailscaled says
  * the endpoint is that tailnet node. The control plane records this node as its own whois of the caller says.
  */
-export async function joinControlPlane(deployer: { controlUrl: string; controlNodeId: string; token: string }, token: string, whois: Whois): Promise<string> {
+export async function joinControlPlane(deployer: Pick<WorkerConfig, "controlUrl" | "controlNodeId" | "token">, token: string, whois: Whois): Promise<string> {
   try {
     const joined = await jsonRequest(new URL("v1/join", deployer.controlUrl), "POST", { token, deployKey: tokenDigest(deployer.token) }, null, { id: deployer.controlNodeId, whois }) as { node: string };
     return joined.node;
   } catch (err) {
-    const message = (err as Error).message;
-    const refusal = /^deployment API HTTP \d+: (\{"error":.*\})$/s.exec(message)?.[1];
-    throw new Error(`the control plane at ${deployer.controlUrl} did not take the join: ${refusal === undefined ? message : (JSON.parse(refusal) as { error: string }).error}`);
+    throw new Error(`the control plane at ${deployer.controlUrl} did not take the join: ${refusal(err) ?? (err as Error).message}`);
+  }
+}
+
+/** The control plane's own words when it refused with `{ "error": string }`. */
+function refusal(err: unknown): string | undefined {
+  if (!(err instanceof DeployHttpError)) return undefined;
+  try {
+    const { error } = JSON.parse(err.body) as { error?: unknown };
+    return typeof error === "string" ? error : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether the harness the control.json at `path` names is signed in. A missing credentials file is not. */
+async function signedIn(path: string): Promise<boolean> {
+  const { harness } = await readJson(path) as { harness: { credentials: string } };
+  const text = await system.read(harness.credentials);
+  try {
+    return text !== undefined && harnessSignedIn(text);
+  } catch (err) {
+    throw new Error(`${harness.credentials} is not valid JSON: ${(err as Error).message}`);
   }
 }
 
@@ -496,7 +490,7 @@ async function main(args: readonly string[]): Promise<number> {
   const { command, flags } = parseFlags(args);
   if (command === "write") return await write(flags);
   if (command === "join" && flags.join !== undefined) {
-    const deployer = JSON.parse(await readFile(paths.deployer, "utf8")) as { controlUrl: string; controlNodeId: string; token: string };
+    const deployer = parseWorkerConfig(await readJson(paths.deployer));
     console.log(`joined the control plane as node ${await joinControlPlane(deployer, flags.join, localApiWhois())}. It follows this node's probe from now on`);
     return 0;
   }
@@ -511,11 +505,12 @@ async function main(args: readonly string[]): Promise<number> {
     }
     return 0;
   }
+  if (command === "signed-in" && args[1] !== undefined) return await signedIn(args[1]) ? 0 : 1;
   if (command === "left") {
     console.log(formatLeft(left(await gather(flags))));
     return 0;
   }
-  console.error("usage: node src/deploy/setup.ts write|join|credentials|left [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
+  console.error("usage: node src/deploy/setup.ts write|join|credentials|left|signed-in [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
   return 1;
 }
 

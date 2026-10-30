@@ -17,7 +17,7 @@ install -d -o root -g root -m 0700 "$bootstrap/src/deploy"
 rm -f "$bootstrap"/src/deploy/*.test.ts
 # The worker's runtime sources. A file the worker imports must be listed here.
 cd "$repo"
-for source in src/deploy/*.ts src/tailscale.ts src/json-file.ts; do
+for source in src/deploy/*.ts src/tailscale.ts src/json-file.ts src/request-body.ts; do
   [[ "$source" = *.test.ts ]] || install -o root -g root -m 0600 "$source" "$bootstrap/$source"
 done
 printf '{"type":"module"}\n' > "$bootstrap/package.json"

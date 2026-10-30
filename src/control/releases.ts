@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { TailnetNodeId } from "../protocol.ts";
 import type { Registry } from "./registry.ts";
-import { fullCommit, type ReleaseView } from "../deploy/model.ts";
+import { fullCommit, reportStates, tokenDigest, type ReleaseView } from "../deploy/model.ts";
+import type { Role } from "../deploy/plan.ts";
 import { command, repository } from "../deploy/install.ts";
 
 export interface DeploymentOptions {
@@ -14,8 +14,8 @@ export interface DeploymentOptions {
 }
 export const commitSchema = z.string().regex(fullCommit);
 export const reportSchema = z.strictObject({
-  role: z.enum(["control", "probe"]), commit: commitSchema.nullable(), target: commitSchema.nullable(),
-  state: z.enum(["pending", "waiting-for-control", "waiting-for-idle", "installing", "healthy", "rolled-back", "failed"]),
+  role: z.enum(["control", "probe"] satisfies Role[]), commit: commitSchema.nullable(), target: commitSchema.nullable(),
+  state: z.enum(reportStates),
   reason: z.string().max(20_000).nullable(),
 });
 
@@ -33,7 +33,7 @@ export function isReporter(registry: Registry, options: DeploymentOptions | unde
   if (options === undefined || !registry.nodes().some((n) => n.tailnetNodeId === caller)) return false;
   if (!authorization?.startsWith("Bearer ") || authorization.length > 256) return false;
   const key = options.keys[caller] ?? registry.joinedNodes().find((n) => n.tailnetNodeId === caller)?.deployKey;
-  return createHash("sha256").update(authorization.slice(7)).digest("hex") === key;
+  return tokenDigest(authorization.slice(7)) === key;
 }
 export function releaseView(registry: Registry, self: string | undefined, now = Date.now()): ReleaseView {
   const desired = registry.desiredRelease();

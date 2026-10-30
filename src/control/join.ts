@@ -6,12 +6,13 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { nodeNameSchema, type TailnetNodeId } from "../protocol.ts";
+import { digestPattern } from "../deploy/model.ts";
 import { HttpError } from "./http-error.ts";
 import type { JoinedNode, Registry } from "./registry.ts";
 
 export const joinTokenTtlMs = 60 * 60_000;
 /** Not strict, so a name or node ID in the body is dropped rather than read. */
-export const joinRequestSchema = z.object({ token: z.string().min(1).max(256), deployKey: z.string().regex(/^[0-9a-f]{64}$/, "must be the 64 lower-case hex characters of the deployer token's sha256") });
+export const joinRequestSchema = z.object({ token: z.string().min(1).max(256), deployKey: z.string().regex(digestPattern, "must be the 64 lower-case hex characters of the deployer token's sha256") });
 
 const hashOf = (token: string) => createHash("sha256").update(token).digest("hex");
 const mint = "Mint another with sudo deploy/install.sh --join-token on the control plane's machine";

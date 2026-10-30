@@ -206,10 +206,11 @@ test("two pylons that each want the port the other still routes drop their own f
 test("a withdraw whose write failed writes the table when it is asked again", async (t) => {
   const { serve, signal, routesFile } = await setup(t);
   await serve.converge(a, [{ service: "web", httpsPort: 10000 }, { service: "port-6006", httpsPort: 10001 }], signal);
-  // A directory where the write's temporary file goes makes the write fail.
-  await mkdir(`${routesFile}.${process.pid}.tmp`);
+  // A directory with a file in it where the table goes makes the write's rename fail.
+  await rm(routesFile);
+  await mkdir(join(routesFile, "held"), { recursive: true });
   await assert.rejects(serve.withdraw(a, "port-6006"), { code: "EISDIR" });
-  await rm(`${routesFile}.${process.pid}.tmp`, { recursive: true });
+  await rm(routesFile, { recursive: true });
   await serve.withdraw(a, "port-6006");
   assert.deepEqual(await readRoutes(routesFile), new Map([[10000, { pylonId: a, service: "web" }]]));
 });

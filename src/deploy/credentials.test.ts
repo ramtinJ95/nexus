@@ -7,7 +7,7 @@ import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
 import { harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
-import { provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
+import { harnessSignedIn, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
 import { snapshot } from "../test-kit.ts";
 
 const exec = promisify(execFile);
@@ -298,4 +298,11 @@ test("without a terminal the answers come from NEXUS_* variables or the files th
     await assert.rejects(provision("control", fresh.host, scripted(env), silent), wrong);
     assert.deepEqual(await snapshot(fresh.root), before);
   }
+});
+
+test("the harness is signed in when its credentials file holds a login, and a file that is not JSON is refused", () => {
+  for (const [file, signedIn] of [[{}, false], [{ deviceId: "d" }, false], [{ credentials: null }, false], [{ credentials: {} }, false], [{ credentials: { openai: { type: "oauth" } } }, true]] as const) {
+    assert.equal(harnessSignedIn(JSON.stringify(file)), signedIn, JSON.stringify(file));
+  }
+  assert.throws(() => harnessSignedIn("{ not json"), SyntaxError);
 });
