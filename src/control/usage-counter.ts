@@ -12,6 +12,7 @@ import type { ConversationId } from "../harness/host.ts";
 import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { EventKind } from "../events.ts";
+import { followEvents } from "./follow-events.ts";
 import { runningProbe } from "./observed.ts";
 import type { Registry, ThreadId } from "./registry.ts";
 
@@ -132,25 +133,15 @@ export function usageCounter(options: {
   }
 
   // From the newest event, as the sweep at start reads what came before.
-  const kinds = [...pylonKinds, ...harnessKinds];
-  let cursor = registry.eventBatch("0", { kinds }).watermark;
-  const follow = setInterval(() => {
-    let batch: ReturnType<Registry["eventBatch"]>;
-    try {
-      batch = registry.eventBatch(cursor, { kinds });
-    } catch (err) {
-      log(`following turn ends for token usage: ${(err as Error).message}. Reading every thread and following from the newest`);
-      cursor = registry.eventBatch("0", { kinds }).watermark;
-      void sweep();
-      return;
-    }
-    cursor = batch.watermark;
-    for (const e of batch.events) {
+  const stopFollowing = followEvents(registry, [...pylonKinds, ...harnessKinds], followMs, (events) => {
+    for (const e of events) {
       if (e.thread === null) continue;
       void (pylonKinds.includes(e.kind) ? readPylon : readHarness)(e.thread as ThreadId);
     }
-  }, followMs);
-  follow.unref();
+  }, (err) => {
+    log(`following turn ends for token usage: ${err.message}. Reading every thread and following from the newest`);
+    void sweep();
+  });
   const timer = setInterval(() => void sweep(), sweepMs);
   timer.unref();
   void sweep();
@@ -160,7 +151,7 @@ export function usageCounter(options: {
     readWhole,
     async close() {
       closed = true;
-      clearInterval(follow);
+      stopFollowing();
       clearInterval(timer);
       await Promise.all([...reads.values()].map((r) => r.settled()));
     },

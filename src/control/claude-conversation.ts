@@ -15,11 +15,13 @@
 import { sessionKinds } from "../events.ts";
 import { drained, readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "../claude-transcript.ts";
 import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-ask.ts";
+import { followEvents } from "./follow-events.ts";
 import type { OpenPipe } from "../checkout-files.ts";
 import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import { runningProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Watch } from "./thread-agent.ts";
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
@@ -27,16 +29,8 @@ export interface ClaudeConversations {
   /** Reads what the transcript gained since the last read. It never rejects: a failed read keeps what is stored. */
   refresh(t: Thread): Promise<void>;
   /** The view now, then the view after each read that changed it and whenever a turn starts or ends, until `stop`. */
-  watch(t: Thread): Promise<ClaudeWatch>;
+  watch(t: Thread): Promise<Watch<ClaudeConversation>>;
   close(): void;
-}
-
-export interface ClaudeWatch {
-  readonly value: ClaudeConversation;
-  start(listener: (view: ClaudeConversation) => void | Promise<void>): void;
-  stop(): Promise<void>;
-  /** Settles once the watch is stopped, or the service closed. */
-  readonly closed: Promise<unknown>;
 }
 
 /**
@@ -254,24 +248,13 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
   }
 
   // From the newest event, so a restart reads each thread at its next event or watch rather than every thread at once.
-  let cursor = registry.eventBatch("0", { kinds: sessionKinds }).watermark;
-  const follow = setInterval(() => {
-    let batch: ReturnType<Registry["eventBatch"]>;
-    try {
-      batch = registry.eventBatch(cursor, { kinds: sessionKinds });
-    } catch (err) {
-      console.error(`following session events for Claude transcripts: ${(err as Error).message}. Following from the newest`);
-      cursor = registry.eventBatch("0", { kinds: sessionKinds }).watermark;
-      return;
-    }
-    cursor = batch.watermark;
-    for (const id of new Set(batch.events.flatMap((e) => e.thread === null ? [] : [e.thread as ThreadId]))) {
+  const stopFollowing = followEvents(registry, sessionKinds, followMs, (events) => {
+    for (const id of new Set(events.flatMap((e) => e.thread === null ? [] : [e.thread as ThreadId]))) {
       if (registry.claudeWorker(id) === undefined) continue;
       update(id, readerOf(id), false);
       void refreshOf(id);
     }
-  }, followMs);
-  follow.unref();
+  }, (err) => console.error(`following session events for Claude transcripts: ${err.message}. Following from the newest`));
 
   return {
     view,
@@ -300,7 +283,7 @@ export function claudeConversations(options: { registry: Registry; probes: Reado
     },
     close() {
       closed = true;
-      clearInterval(follow);
+      stopFollowing();
       for (const r of readers.values()) {
         clearInterval(r.timer ?? undefined);
         r.timer = null;
