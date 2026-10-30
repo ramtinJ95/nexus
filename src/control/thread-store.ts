@@ -4,7 +4,8 @@
  * `session_activity`, `session_order` and `session_order_floor`, its Claude worker, in `claude_workers`,
  * `claude_transcripts`, `claude_entries`, `claude_messages` and `claude_senders`, its attention, in `thread_attention`,
  * each start's request ID, in `start_requests`, the harness conversations aborted, in `aborted_conversations`, and when
- * each archived thread was archived, in `thread_archives`. The
+ * each archived thread was archived, in `thread_archives`, and the pylons whose disk that cleanup deletes, in
+ * `disk_cleanups`. The
  * features with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention } from "./attention.ts";
@@ -334,7 +335,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       if (status === "deleted") {
         // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
         sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
-        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
+        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders", "disk_cleanups"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
       }
       reconcile(id);
       updateAttention(id);
@@ -470,14 +471,28 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         return true;
       });
     },
-    /**
-     * Reads the thread's transcript from the start again, after a deleted disk took the file, and keeps the stored
-     * entries, so the session's new file appends after them rather than reading as a replaced one.
-     */
-    restartTranscript(thread: ThreadId) {
-      sql("UPDATE claude_transcripts SET byte_offset = ?, skipping = ?, before_hash = ? WHERE thread = ? AND byte_offset <> 0")
-        .run(transcriptStart.offset, transcriptStart.skipping ? 1 : 0, transcriptStart.before, thread);
+    /** Records, before the archived-disk cleanup sends its delete, that the pylon's disk is going. */
+    requestCleanup(pylonId: PylonId, thread: ThreadId) {
+      sql("INSERT OR IGNORE INTO disk_cleanups (pylon, thread, requested_at) VALUES (?, ?, ?)").run(pylonId, thread, clock());
     },
+    cleanupRequested: (pylonId: PylonId): boolean => sql("SELECT 1 FROM disk_cleanups WHERE pylon = ?").get(pylonId) !== undefined,
+    /**
+     * Once the node no longer has the pylon, the disk took the Claude transcript and whatever failed on it. The thread's
+     * transcript is read from the start again, keeping the stored entries, so the session's new file appends after them
+     * rather than reading as a replaced one, and the pylon's failure is cleared, so an unarchive boots it fresh.
+     */
+    finishCleanup(pylonId: PylonId) {
+      transaction(() => {
+        const thread = sql("DELETE FROM disk_cleanups WHERE pylon = ? RETURNING thread").get(pylonId)?.thread as ThreadId | undefined;
+        if (thread === undefined) return;
+        sql("UPDATE claude_transcripts SET byte_offset = ?, skipping = ?, before_hash = ? WHERE thread = ?")
+          .run(transcriptStart.offset, transcriptStart.skipping ? 1 : 0, transcriptStart.before, thread);
+        sql("UPDATE pylons SET failed = NULL WHERE id = ?").run(pylonId);
+        updateAttention(thread);
+      });
+    },
+    /** An unarchive came before the delete ran, so the disk stays and nothing of it is forgotten. */
+    dropCleanup(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
     claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
       const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
       return row === undefined ? undefined : row.state === "sent" ? { state: "sent", result: json<ClaudeSent>(row.result) } : { state: "sending" };
