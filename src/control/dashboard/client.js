@@ -1290,7 +1290,7 @@ function noteCard(note, entry = null, range = null) {
     saveReview();
     decorate();
   });
-  const card = el("div", { className: `note note-${note.kind}` },
+  const card = el("div", { className: `rnote rnote-${note.kind}` },
     el("div", { className: "note-head" }, el("span", { className: "note-kind", textContent: kinds[note.kind].label }),
       el("span", { className: "dim small", textContent: `${range === null ? `${note.path} ` : ""}${linesLabel(note.lines)}` }), edit, remove),
     range === null && el("pre", { className: "note-quote", textContent: note.quote.join("\n") }),
@@ -1340,7 +1340,7 @@ function draftCard(draft, entry = null, range = null) {
   });
   save.addEventListener("click", saveDraft);
   cancel.addEventListener("click", cancelDraft);
-  const card = el("div", { className: `note note-draft note-${draft.kind}` },
+  const card = el("div", { className: `rnote note-draft rnote-${draft.kind}` },
     el("div", { className: "note-head" }, title, choice),
     range === null && el("pre", { className: "note-quote", textContent: draft.quote.join("\n") }),
     text, el("div", { className: "note-actions" }, cancel, save));
