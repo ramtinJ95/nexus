@@ -15,20 +15,25 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
-import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type VmBackend } from "./backend.ts";
+import { JobFailure, type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type VmBackend } from "./backend.ts";
 import { dockerBridgeRunArgs, dockerHostBridge, labelFilters } from "./docker-host-bridge.ts";
 import { exit, output } from "./exec.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "./process-stream.ts";
 import type { OverlayFile } from "./project.ts";
-import { isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
-import type { ArtifactId, CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
+import { isImageId, isTemplateId, type PausedSession, type PylonId } from "./protocol.ts";
+import type { CheckpointId, ImageId, PortableArtifactId, TemplateId } from "./images.ts";
 import { publicUrls } from "./public-urls.ts";
-import { recordBeforePause, relaunchAfterWake, type PylonLog } from "./session-wake.ts";
+import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "./session-wake.ts";
 import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
 
 /** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
 const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;
+const encoded = (sessions: readonly PausedSession[] | null) => sessions === null ? "" : Buffer.from(JSON.stringify(sessions)).toString("base64url");
+const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {
+  const sessions = labels[label.sessions] ?? "";
+  return sessions === "" ? null : JSON.parse(Buffer.from(sessions, "base64url").toString("utf8")) as PausedSession[];
+};
 const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
 
@@ -132,7 +137,15 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
    */
   const relaunchMark = "/var/lib/nexus/relaunch";
   const markRelaunch = (pylonId: PylonId) => docker(["exec", pylonId, "sh", "-c", 'mkdir -p "${1%/*}" && touch "$1"', "sh", relaunchMark]);
-  const relaunchPending = async (pylonId: PylonId) => await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) === "marked";
+  /** The last record is the sessions label of the checkpoint the container booted from, which it carries. */
+  const containerMark = (pylonId: PylonId): RelaunchMark => ({
+    pending: async () => await docker(["exec", pylonId, "sh", "-c", 'test -e "$1" && echo marked || true', "sh", relaunchMark]) === "marked",
+    clear: async () => { await docker(["exec", pylonId, "rm", "-f", relaunchMark]); },
+    async lastRecorded() {
+      const found = await container(pylonId);
+      return found === null ? null : decoded(labelsOf(found));
+    },
+  });
 
   /** The sessions a stopped container's sessions file holds, by way of a host copy. None when it has no file. */
   async function stoppedSessions(id: string, signal: AbortSignal): Promise<readonly PausedSession[]> {
@@ -158,9 +171,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     // Before the services and sessions start, as in a pylon, so both read this spawn's files.
     await guest(pylonId).writeFiles(overlay);
     await services.apply(pylonId, urls, disk !== "running");
-    if (!relaunch || !await relaunchPending(pylonId)) return;
-    await relaunchAfterWake(pylonId, guest(pylonId), containerLog(pylonId));
-    await docker(["exec", pylonId, "rm", "-f", relaunchMark]);
+    await finishRelaunch(pylonId, guest(pylonId), containerLog(pylonId), containerMark(pylonId), relaunch);
   }
 
   function guest(pylonId: PylonId): Guest {
@@ -243,8 +254,11 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   const artifacts: ArtifactStore = {
     async list() {
       const images = await Promise.all(Object.entries(options.images).map(async ([id, ref]) => await imagePresent(ref) ? id as ImageId : null));
-      const checkpoints = (await checkpointImages(null)).map((img) => labelsOf(img)[label.checkpoint] as CheckpointId);
-      return [...images.filter((id): id is ImageId => id !== null), ...await store?.list() ?? [], ...new Set(checkpoints)] satisfies ArtifactId[];
+      return [...images.filter((id): id is ImageId => id !== null), ...await store?.list() ?? []];
+    },
+    async has(id) {
+      if (isImageId(id)) return options.images[id] !== undefined && await imagePresent(options.images[id]);
+      return store !== null && await store.manifest(id) !== null;
     },
     manifest: (id) => templates().manifest(templateId(id)),
     export: (id) => templates().export(templateId(id)),
@@ -307,16 +321,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       const existing = await container(pylonId, signal);
       // No container: only checkpoints remain, or nothing does. Both are already paused.
       if (existing === null) return;
-      const encoded = (recorded: readonly PausedSession[] | null) => recorded === null ? "" : Buffer.from(JSON.stringify(recorded)).toString("base64url");
       let sessions: string;
       if (existing.State.Status !== "running") {
         // Such as a pause that died after its stop: the file on the disk is what the wake relaunches.
         sessions = encoded(await stoppedSessions(existing.Id, signal));
-      } else if (await relaunchPending(pylonId)) {
-        // Its sessions never came back, so Herdr would record none, and the checkpoint it booted from has their list.
-        sessions = labelsOf(existing)[label.sessions] ?? "";
       } else {
-        sessions = encoded(await recordBeforePause(guest(pylonId), containerLog(pylonId)));
+        sessions = encoded(await pauseSessions(guest(pylonId), containerLog(pylonId), containerMark(pylonId)));
+        // On the disk, so the checkpoint carries it to the wake.
         await markRelaunch(pylonId);
       }
       await docker(["stop", existing.Id], signal);
@@ -353,18 +364,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
           ...containerState(c),
           checkpoint: (labels[label.bootedFrom] || null) as CheckpointId | null,
           image: labels[label.image] as ImageId,
-          bootedAt: c.State.Status === "running" ? c.State.StartedAt : null,
         });
       }
       for (const img of checkpoints) {
         const labels = labelsOf(img);
         const pylonId = labels[label.pylon] as PylonId;
         if (pylons.has(pylonId)) continue;
-        const sessions = labels[label.sessions] ?? "";
-        pylons.set(pylonId, {
-          pylonId, vm: "stopped", checkpoint: labels[label.checkpoint] as CheckpointId, image: labels[label.image] as ImageId, bootedAt: null,
-          sessions: sessions === "" ? null : JSON.parse(Buffer.from(sessions, "base64url").toString("utf8")) as PausedSession[],
-        });
+        pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: labels[label.checkpoint] as CheckpointId, image: labels[label.image] as ImageId, sessions: decoded(labels) });
       }
       return [...pylons.values()];
     },
@@ -418,9 +424,9 @@ async function execIn(container: string, cwd: string, argv: readonly string[], t
  * removed it: a probe that died mid-pause or mid-boot, or a Docker restart. It reports as broken, so a desired
  * pause finishes the job and a desired run waits for a human, as for a VM the backend saw fail.
  */
-function containerState(c: ContainerInfo): Pick<BackendPylon, "vm" | "detail" | "cause"> {
+function containerState(c: ContainerInfo): BackendVm {
   switch (c.State.Status) {
-    case "running": return { vm: "running" };
+    case "running": return { vm: "running", bootedAt: c.State.StartedAt };
     case "restarting": return { vm: "booting" };
     case "removing": return { vm: "deleting" };
     default: return { vm: "broken", detail: `container is ${c.State.Status} (exit code ${c.State.ExitCode}) outside a completed pause`, cause: "controller" };

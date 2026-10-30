@@ -13,10 +13,10 @@
  * The backend speaks its own types. Wire types from protocol.ts stop at runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { ArtifactCopy, BrokenCause, ByteStream, CommandResult, Job, JobErrorCode, NodeName, PausedSession, PylonCommand, PylonId, ServiceFact } from "./protocol.ts";
+import { isPortableArtifactId, type ArtifactCopy, type BrokenCause, type ByteStream, type CommandResult, type Job, type JobErrorCode, type NodeName, type PausedSession, type PylonCommand, type PylonId, type ServiceFact } from "./protocol.ts";
 import { checkoutDir, closeSession, dropFailedSession, interruptClaude, openSession, sendToClaude } from "./sessions.ts";
 import { type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
-import type { ArtifactId, ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
+import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 import type { HostBridge } from "./probe/pylon-api.ts";
 
 export interface VmBackend {
@@ -62,28 +62,31 @@ export interface VmBackend {
   processes?(): Promise<readonly { pylonId: PylonId; pid: number }[]>;
 }
 
-export interface BackendPylon {
+/** What every backend reports of a pylon, whatever its VM's state. */
+interface BackendPylonBase {
   pylonId: PylonId;
-  vm: "booting" | "running" | "stopping" | "stopped" | "deleting" | "broken";
   checkpoint: CheckpointId | null; // the checkpoint the current disk was last written as
   image: ImageId; // the image the disk is an overlay on. Observations report it as bootedFrom.image
-  bootedAt: string | null; // set while the VM runs
-  detail?: string;
-  /** Set exactly when `vm` is broken. `unknown` when the backend cannot tell why. */
-  cause?: BrokenCause | "unknown";
-  /** Set when `vm` is broken, from a backend that keeps a log of the VM's controller: that log's last lines, as read. */
-  logTail?: string;
-  /**
-   * Set exactly when `vm` is stopped: the sessions its last pause recorded, which the backend keeps beside the
-   * checkpoint because the checkpoint cannot be read while paused. Null when that pause recorded none.
-   */
-  sessions?: readonly PausedSession[] | null;
   /**
    * What the pylon reserves on its node: CPUs and memory while its VM is up, and its disk for as long as it exists,
    * paused or not. Absent from a backend that reserves nothing, such as Docker's.
    */
   holds?: Pick<BootInputs["resources"], "cpus" | "memoryGiB" | "diskGiB">;
 }
+
+/** A pylon's VM state, with what each state carries. */
+export type BackendVm =
+  | { vm: "running"; bootedAt: string }
+  /**
+   * `sessions` is what its last pause recorded, which the backend keeps beside the checkpoint because the checkpoint
+   * cannot be read while paused. Null when that pause recorded none.
+   */
+  | { vm: "stopped"; sessions: readonly PausedSession[] | null }
+  /** `unknown` when the backend cannot tell why. `logTail` is from a backend that keeps a log of the VM's controller: that log's last lines, as read. */
+  | { vm: "broken"; detail: string; cause: BrokenCause | "unknown"; logTail?: string }
+  | { vm: "booting" | "stopping" | "deleting" };
+
+export type BackendPylon = BackendPylonBase & BackendVm;
 
 /** Every call runs as `user`. */
 export interface Guest {
@@ -113,8 +116,9 @@ export interface Guest {
  * logins and stays in its pylon's instance on its own node.
  */
 export interface ArtifactStore {
-  /** `pylons` is what the backend's list() returned. A backend whose checkpoints live in its pylons' instances lists theirs. */
-  list(pylons: readonly BackendPylon[]): Promise<readonly ArtifactId[]>;
+  /** The images and templates this node holds. The probe adds its stopped pylons' checkpoints. */
+  list(): Promise<readonly PortableArtifactId[]>;
+  has(id: PortableArtifactId): Promise<boolean>;
   /** The manifest of an image or template this node holds, or null. */
   manifest(id: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** The sparse archive a peer's GET /v1/artifacts/{id} streams, and the manifest whose sha256 it hashes to. */
@@ -193,8 +197,8 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         await deps.backend.buildTemplate(job.template, job.inputs, signal);
         return;
       case "fetch-artifact": {
-        if (job.artifact.startsWith("ckpt-")) throw new JobFailure("invalid", `${job.artifact} is a checkpoint, and a checkpoint never leaves its node`);
-        const artifact = job.artifact as PortableArtifactId;
+        const artifact = job.artifact;
+        if (!isPortableArtifactId(artifact)) throw new JobFailure("invalid", `${artifact} is a checkpoint, and a checkpoint never leaves its node`);
         const held = await deps.backend.artifacts.manifest(artifact);
         if (held !== null) {
           if (held.sha256 !== job.sha256) throw new JobFailure("invalid", `this node holds ${artifact} with sha256 ${held.sha256}, and the job asks for ${job.sha256}`);

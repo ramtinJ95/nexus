@@ -8,21 +8,15 @@
 import { constants } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { JobFailure } from "./backend.ts";
 import type { ArtifactDirectory } from "./artifacts.ts";
 import type { ImageId, TemplateId, TemplateManifest } from "./images.ts";
 import { run } from "./pylon-vm/client.ts";
-import { statusSchema, type BootSpec, type SandboxConfig } from "./pylon-vm/contracts.ts";
+import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { directory, readLogTail } from "./pylon-vm/storage.ts";
 
 const diskFile = "disk.qcow2";
-const imageLabel = "nexus.image";
-const pollMs = 500;
-
-const preparedSchema = z.object({ name: z.string(), labels: z.record(z.string(), z.string()), status: statusSchema });
-type Prepared = z.infer<typeof preparedSchema>;
 
 export interface TemplatePrepare {
   /** The fork's config for the build: the image, the disk size, and setup as the clone, preSetup and `.nexus/setup`. */
@@ -43,7 +37,7 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
       await destroy();
       return;
     }
-    const found = await settled(stateRoot, name, signal);
+    const found = await settled(async () => (await builds(stateRoot)).find((b) => b.name === name) ?? null, ["starting", "unavailable"], signal);
     if (found?.status.state === "prepared") {
       await store.publish({ ...prepare.manifest, builtAt: new Date().toISOString() }, (into) => copyFile(join(dir, diskFile), join(into, diskFile), constants.COPYFILE_FICLONE), signal);
       continue;
@@ -86,14 +80,4 @@ export async function buildsFrom(stateRoot: string, image: ImageId): Promise<str
   return (await builds(stateRoot)).filter((b) => b.labels[imageLabel] === image).map((b) => `template build ${b.name}`);
 }
 
-const builds = async (stateRoot: string): Promise<Prepared[]> => z.array(preparedSchema).parse(await run(stateRoot, { action: "list", kind: "templates" }));
-
-/** Waits out a build whose controller still runs. The deadline only ends the wait, never the build. */
-async function settled(stateRoot: string, name: string, signal: AbortSignal): Promise<Prepared | null> {
-  for (;;) {
-    signal.throwIfAborted();
-    const found = (await builds(stateRoot)).find((b) => b.name === name) ?? null;
-    if (found === null || !["starting", "unavailable"].includes(found.status.state)) return found;
-    await delay(pollMs, undefined, { signal });
-  }
-}
+const builds = async (stateRoot: string): Promise<Inspection[]> => z.array(inspectionSchema).parse(await run(stateRoot, { action: "list", kind: "templates" }));

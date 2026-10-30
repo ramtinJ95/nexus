@@ -16,7 +16,7 @@ import { heldSecrets, retryable } from "./protocol.ts";
 import type { HerdrStatus, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, LiveHash, NodeName, NodeObservation, PausedSession, ProbeEvent, PylonId, PylonObservation, RunningFacts, SessionFact } from "./protocol.ts";
 import type { BootInputs, LiveSpec, PylonSource } from "./project.ts";
 import { harnessNamed, type SessionHarness } from "./sessions.ts";
-import type { ArtifactId, CheckpointId } from "./images.ts";
+import type { ArtifactId, CheckpointId, PortableArtifactId } from "./images.ts";
 
 export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
 /** `reading` runs an archived thread's pylon for the usage backfill without bringing its sessions back. */
@@ -197,7 +197,7 @@ export function planPylon(input: PlanInput, now: number): PlanStep {
 }
 
 /** The image first, because a template or checkpoint is an overlay on it. */
-export function requiredArtifacts(boot: BootInputs): readonly ArtifactId[] {
+export function requiredArtifacts(boot: BootInputs): readonly PortableArtifactId[] {
   return boot.source.kind === "template" ? [boot.image, boot.source.template] : [boot.image];
 }
 

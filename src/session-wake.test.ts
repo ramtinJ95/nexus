@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { seedClaudeState } from "./claude-state.ts";
 import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply } from "./fake-guest.ts";
-import type { PylonId } from "./protocol.ts";
-import { onePerClaudeSession, recordBeforePause, relaunchAfterWake } from "./session-wake.ts";
+import type { PausedSession, PylonId } from "./protocol.ts";
+import { finishRelaunch, onePerClaudeSession, pauseSessions, recordBeforePause, relaunchAfterWake, type RelaunchMark } from "./session-wake.ts";
 import { sendToClaude, sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
 
 const pylonId = "pyl-session-wake" as PylonId;
@@ -89,6 +89,51 @@ test("a pause logs what it recorded and returns it for the backend to keep, and 
   const missing = logged();
   assert.equal(await recordBeforePause(fakeGuest(() => ({ exitCode: 127, output: "sh: herdr: not found\n" })), missing.log), null);
   assert.deepEqual(missing.lines, ["sessions: recording failed, so the wake relaunches what the last record holds: herdr api snapshot exited 127 without a JSON reply: sh: herdr: not found\n"]);
+});
+
+/** A mark held in memory, as a backend's storage would hold it. */
+function markOf(pending: boolean, lastRecorded: readonly PausedSession[] | null) {
+  const state = { pending, cleared: 0 };
+  const mark: RelaunchMark = {
+    pending: async () => state.pending,
+    clear: async () => { state.pending = false; state.cleared++; },
+    lastRecorded: async () => lastRecorded,
+  };
+  return { state, mark };
+}
+const lastRecord: PausedSession[] = [{ id: "w9:p1", herdrPane: "w9:p1", harness: "shell", harnessSessionId: null, title: "kept" }];
+
+test("a pause whose relaunch is still pending keeps the last record without recording", async () => {
+  const guest = fakeGuest(() => assert.fail("nothing is recorded"));
+  const { lines, log } = logged();
+  assert.deepEqual(await pauseSessions(guest, log, markOf(true, lastRecord).mark), lastRecord);
+  assert.deepEqual(lines, []);
+});
+
+test("a pause that cannot record its sessions keeps the last record, and one that records keeps what it recorded", async () => {
+  const failing = fakeGuest(() => ({ exitCode: 127, output: "sh: herdr: not found\n" }));
+  assert.deepEqual(await pauseSessions(failing, logged().log, markOf(false, lastRecord).mark), lastRecord);
+  assert.deepEqual(await pauseSessions(fakeGuest(() => herdrError("server_not_running")), logged().log, markOf(false, lastRecord).mark), lastRecord);
+  const up = fakeGuest((_argv, isHerdr) => isHerdr ? herdrOk(herdrSnapshot([{ id: "w1", label: "sh" }], [herdrPane("w1:p1", "w1", null, "unknown")])) : { exitCode: 3, output: "" });
+  assert.deepEqual(await pauseSessions(up, logged().log, markOf(false, lastRecord).mark), [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }]);
+});
+
+test("a spawn relaunches and clears the mark only when a relaunch is pending and the spawn asks for one", async () => {
+  for (const [pending, relaunch] of [[false, true], [true, false], [false, false]] as const) {
+    const { state, mark } = markOf(pending, null);
+    await finishRelaunch(pylonId, fakeGuest(() => assert.fail("nothing is relaunched")), logged().log, mark, relaunch);
+    assert.deepEqual(state, { pending, cleared: 0 }, `pending ${pending}, relaunch ${relaunch}`);
+  }
+  const guest = withRecords([shell], (sub) => {
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "sh" }], [herdrPane("w1:p1", "w1", null, "unknown", null, "/home/user")]));
+    throw new Error(`unscripted ${sub}`);
+  });
+  const { lines, log } = logged();
+  const { state, mark } = markOf(true, null);
+  await finishRelaunch(pylonId, guest, log, mark, true);
+  assert.deepEqual(lines, ['sessions: "sh" (shell) was already running in w1:p1']);
+  assert.deepEqual(state, { pending: false, cleared: 1 });
 });
 
 /**
