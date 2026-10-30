@@ -9,7 +9,7 @@ import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts"
 import type { PullRequest } from "./github.ts";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { queuedView, threadQueue, waitOf, type QueuedRecord } from "./queue.ts";
-import { personPhase, type Phase, type Review } from "./review.ts";
+import { personPhase, type Phase, type Review } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import { newPylonRecord } from "../tick.ts";
 import type { LiveHash, NodeName, NodeObservation, PylonId, TailnetNodeId } from "../protocol.ts";

@@ -9,7 +9,7 @@ import type { PullRequest } from "./github.ts";
 import { itemPhase, itemThread, itemView, pipeline, type ItemId } from "./pipeline.ts";
 import { threadQueue } from "./queue.ts";
 import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
-import { personPhase, type Phase, type Review } from "./review.ts";
+import { personPhase, type Phase, type Review } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import type { NodeName, TailnetNodeId } from "../protocol.ts";
 import type { PipelineSetting, ProjectId } from "../project.ts";

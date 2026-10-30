@@ -11,7 +11,8 @@ import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, reservedNames, type HoldCode } from "./holds.ts";
 import { landingHolds } from "./policy.ts";
-import { humanLabel, landable, phaseNote, reviewLoop, type HoldCause, type Review, type ReviewDeps } from "./review.ts";
+import { humanLabel, landable, phaseNote, type HoldCause, type Review } from "./review-model.ts";
+import { reviewLoop, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";

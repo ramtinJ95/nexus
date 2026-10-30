@@ -28,7 +28,7 @@ import type { SessionHarness } from "../sessions.ts";
 import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";
 import type { PylonRecord } from "../tick.ts";
 import type { ImageOperation } from "./image-rollout.ts";
-import { needsPerson, storedReview, type Review } from "./review.ts";
+import { needsPerson, storedReview, type Review } from "./review-model.ts";
 import { reviewerCaller, roleOf } from "../agent-protocol.ts";
 import { claudeTurn } from "../../images/pylon/nexus-turn.ts";
 import { defaultClaudeModel } from "../claude-state.ts";

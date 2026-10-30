@@ -13,7 +13,7 @@
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, findingsOf, type Review } from "./review.ts";
+import { answered, blocks, findingsOf, type Review } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;

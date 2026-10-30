@@ -121,7 +121,7 @@ A linked PR contributes an `Output` with `kind: "pull-request"` and `ref` equal 
 
 ## Review records
 
-`reviews` stores a builder thread's latest review, one JSON record per builder, with its reviewer thread in a unique column. The PR watch skips every thread started by `nexus-review`, so a reviewer stays skipped after a later review replaces the record that named it. `Review` in `src/control/review.ts` is the shape, and `ThreadDetail.review` serves it. A record is upgraded as it is read: a finding stored with `severity` reads `serious` as `P1` and `minor` as `P3`, and a `maxRounds` above 5 reads as 5.
+`reviews` stores a builder thread's latest review, one JSON record per builder, with its reviewer thread in a unique column. The PR watch skips every thread started by `nexus-review`, so a reviewer stays skipped after a later review replaces the record that named it. `Review` in `src/control/review-model.ts` is the shape, and `ThreadDetail.review` serves it. A record is upgraded as it is read: a finding stored with `severity` reads `serious` as `P1` and `minor` as `P3`, and a `maxRounds` above 5 reads as 5.
 
 - `id` is `rv-` and eight hex digits. It starts every token the agents echo and every request ID the loop sends under. `expect` is the token the awaited answer must echo, random per request, and `sent` counts the review's messages, numbering their request IDs `<id>:<n>`.
 - `builder`, `reviewer`, `pr` (`repo`, `number`, `url`, `title`, `branch`) and `models` (`builder`, `reviewer`) say who reviews what. `reviewerKind` is `harness` or `claude`, and only a harness reviewer's approval can land. `maxRounds` is 1 to 5, 5 by default. A record stored with a higher cap reads as 5.
