@@ -227,7 +227,8 @@ export class GuestProcesses {
 			});
 		command.cursor = consume;
 		const result = await consume;
-		if (!result.running) await this.pruneCompleted();
+		// The output is consumed and its directory gone, so a failed prune must not lose the result. The next launch prunes again.
+		if (!result.running) await this.pruneCompleted().catch((error: unknown) => console.error(error));
 		return result;
 	}
 	async kill(pid: string): Promise<unknown> {

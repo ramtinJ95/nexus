@@ -143,3 +143,22 @@ test("a command the guest could not spawn fails its launch with the exit code an
 	const processes = new GuestProcesses(guest(files), new AbortController().signal);
 	await assert.rejects(processes.launch("x", "/missing"), /could not start.*127.*No such file or directory: 'x'/s);
 });
+
+test("a finished command's status is answered although forgetting older handles fails on another one's read", async (t) => {
+	t.mock.method(console, "error", () => {});
+	const done = new Set<string>();
+	const { vm } = fakeVm();
+	vm.fs.readFile = (async (path: string) => {
+		if (path.endsWith("/pid")) return Buffer.from("42");
+		if (path.endsWith("/output")) return Buffer.from("out");
+		if (path.endsWith("/done") && done.has(path)) return Buffer.from(exited(0));
+		if (path.endsWith("/done") && done.size > 0) throw new Error("failed to read guest file: file_read_failed: InputOutput");
+		throw fileNotFound(path);
+	}) as unknown as VM["fs"]["readFile"];
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	const pids = [];
+	for (let i = 0; i < 129; i++) pids.push(await processes.launch("sleep 600", "/"));
+	const last = pids.at(-1)!;
+	done.add(`/var/lib/pi-sandbox/commands/${last}/done`);
+	assert.deepEqual(await processes.status(last, 0), { pid: last, running: false, output: "out", exitCode: 0, truncated: false });
+});

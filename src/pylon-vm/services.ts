@@ -112,7 +112,7 @@ export class GuestServices {
 	}
 	/** A repo without the file declares no services. The file is parsed again only once its size, inode or mtime changed. */
 	private async declaredFile(): Promise<Record<string, Service>> {
-		const stat = await direct(this.vm, ["stat", "-c", "%s %i %y", this.configPath]);
+		const stat = await direct(this.vm, ["stat", "-L", "-c", "%s %i %y", this.configPath]);
 		if (stat.exitCode !== 0) {
 			if (stat.stderr.includes("No such file or directory")) return {};
 			throw new Error(`${this.configPath} could not be read: ${stat.stderr.trim()}`);
