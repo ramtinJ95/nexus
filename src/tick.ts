@@ -51,6 +51,8 @@ export interface TickContext {
   artifactSha256: PlanInput["artifactSha256"];
   /** Called after every change to the record, including just before a submit. */
   save(pylon: PylonRecord): void;
+  /** The desired phase as it stands now, read again after the waits on the probe, so no plan acts on one they overturned. */
+  desired?: () => DesiredPhase;
 }
 
 export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanStep> {
@@ -75,6 +77,10 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
       if ((err as ProbeError).code !== "unreachable") throw err;
       observation = null;
     }
+  }
+  if (ctx.desired !== undefined) {
+    pylon.desired = ctx.desired();
+    if (pylon.failed !== null && pylon.desired !== "deleted") return { kind: "fail", code: pylon.attempts.last?.code ?? "backend", reason: pylon.failed };
   }
 
   const step = planPylon({

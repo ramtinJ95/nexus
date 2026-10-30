@@ -390,6 +390,114 @@ test("a pylon unarchived 23h59m after its archive is never deleted", async (t) =
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);
 });
 
+test("an unarchive while a pass waits on the probe gets no delete, though the pass began with the archive a day old", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  let hold: PromiseWithResolvers<void> | null = null;
+  const began = Promise.withResolvers<void>();
+  const probe: ProbeClient = {
+    ...fake.probe,
+    async job(jobId) {
+      if (hold !== null) {
+        began.resolve();
+        await hold.promise;
+      }
+      return fake.probe.job(jobId);
+    },
+  };
+  const loop = run(t, registry, probe, { intervalMs: 600_000 });
+  await until("the pylon runs", () => { void loop.wake(node); return fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null; });
+  await settled(fake, loop);
+
+  // An envelope the probe never took, as a control plane that died mid-submit leaves, sends the pass to the probe.
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, submitted: envelope({ kind: "pause", pylonId: thread.pylonId, checkpoint: `ckpt-${thread.id}-1` }, node, Date.now() - 60_000) });
+  await archivedAgo(registry, shift, thread, archivedDiskMs);
+  hold = Promise.withResolvers();
+  const pass = loop.wake(node);
+  await began.promise;
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  hold.resolve();
+  await pass;
+  await settled(fake, loop);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
+});
+
+test("a thread unarchived while its pylon's delete runs boots fresh, its Claude entries kept for the new transcript", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
+  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
+  const fake = fakeNode({ autoFinish: false });
+  run(t, registry, fake.probe);
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+
+  await archivedAgo(registry, shift, thread, archivedDiskMs);
+  await until("the delete runs", () => fake.running().length === 1);
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  fake.finish(fake.running()[0]!);
+  await until("the fresh spawn runs", () => fake.running().length === 1);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete", "spawn fresh"]);
+  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, transcriptStart);
+  assert.deepEqual(registry.claudeEntries(thread.id), entries);
+});
+
+test("only a failed pylon the archived-disk cleanup deleted loses its failure and boots fresh on unarchive", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  seedRegistry(registry, { nodes: [node] });
+  const add = (id: string) => {
+    const thread = addThread(registry, { node, boot: { image }, thread: { id: id as Thread["id"] } });
+    registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts" });
+    return thread;
+  };
+  const deleted = add("th-deleted");
+  const diskless = add("th-diskless");
+  const recent = add("th-recent");
+  await archivedAgo(registry, shift, deleted, archivedDiskMs);
+  await archivedAgo(registry, shift, diskless, archivedDiskMs);
+  await archivedAgo(registry, shift, recent, archivedDiskMs - 60_000);
+  const fake = fakeNode({ autoFinish: true });
+  for (const { pylonId } of [deleted, recent]) fake.pylons.set(pylonId, { pylonId, phase: "broken", detail: "setup failed", cause: "services", logTail: "" });
+  const loop = run(t, registry, fake.probe);
+  await until("the cleanup's delete is folded in", () => !fake.pylons.has(deleted.pylonId) && registry.pylon(deleted.pylonId)?.submitted === null);
+  assert.equal(registry.pylon(deleted.pylonId)?.failed, null);
+
+  for (const thread of [deleted, diskless, recent]) {
+    registry.setThreadStatus(thread.id, "active");
+    registry.recordActivity(thread.id, { human: Date.now() });
+  }
+  await until("the deleted pylon boots fresh", () => fake.pylons.get(deleted.pylonId)?.phase === "running");
+  for (let i = 0; i < 3; i++) await settled(fake, loop);
+  const jobsOf = (pylonId: PylonId) => kinds(fake.submitted.filter((job) => (job.kind === "spawn" ? job.boot.pylonId : "pylonId" in job ? job.pylonId : null) === pylonId));
+  assert.deepEqual(jobsOf(deleted.pylonId), ["delete", "spawn fresh"]);
+  for (const kept of [diskless, recent]) {
+    assert.deepEqual(jobsOf(kept.pylonId), [], `${kept.id} gets no job`);
+    assert.equal(registry.pylon(kept.pylonId)?.failed, "gave up after 5 failed attempts", `${kept.id} keeps its failure`);
+  }
+});
+
+test("a fresh spawn the cleanup did not cause, as a retry of a failed setup, keeps the transcript's read where it stands", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const cursor = { ...transcriptStart, offset: 9 };
+  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
+  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.retryPylon(thread.pylonId), true);
+  void loop.wake(node);
+  await until("a fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "spawn fresh"]);
+  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, cursor);
+});
+
 test("each pass sends the template builds recorded for its node, before its pylons", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

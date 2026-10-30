@@ -180,15 +180,26 @@ export function startLoop(options: LoopOptions): Loop {
       // A failed pylon a judgment moved meanwhile is its new node's to tick.
       if (found.node !== node) continue;
       const thread = registry.thread(found.thread)!;
-      const stored = withLive(found, thread, link);
-      const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
+      let stored = withLive(found, thread, link);
       const nodeObservation = observation(node);
+      // Only the archived-disk cleanup sends a delete for a thread that is not deleted, so one the node finished took the
+      // disk, with the Claude transcript the thread's session writes anew and whatever failed on it.
+      const submitted = stored.submitted;
+      if (thread.status !== "deleted" && submitted?.job.kind === "delete" && nodeObservation?.jobs.some((j) => j.jobId === submitted.jobId && j.state === "succeeded") === true) {
+        registry.restartTranscript(thread.id);
+        if (stored.failed !== null) {
+          stored = { ...stored, failed: null };
+          registry.savePylon(stored);
+        }
+      }
+      const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
       const ctx: TickContext = {
         probe: link.probe,
         observation: nodeObservation,
         holders: holders(node),
         artifactSha256,
         save: (p) => registry.savePylon(p),
+        desired: () => desiredPhase(registry.thread(found.thread)!, Date.now()),
       };
       try {
         const launch = launches.step(thread, pylonId, nodeObservation, link);
@@ -196,11 +207,7 @@ export function startLoop(options: LoopOptions): Loop {
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
-        if (pylon.desired === "deleted" && step.kind === "done") {
-          registry.releasePreviews(pylon.pylonId);
-          // The disk took the Claude transcript, so the session an unarchive brings back writes a new one under the same ID.
-          if (thread.status === "archived") registry.restartTranscript(thread.id);
-        }
+        if (pylon.desired === "deleted" && step.kind === "done") registry.releasePreviews(pylon.pylonId);
       } catch (err) {
         log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);
       }
