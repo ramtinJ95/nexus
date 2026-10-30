@@ -476,6 +476,9 @@ process plus working status is fallback startup evidence. Never roll back an
 uncertain first-prompt launch: retaining an empty pane is safer than killing work.
 For unprompted launches, close only after confirming no Claude process runs. Missing proof leaves the
 pane open and records stalled state, pane text, thread.failed and failed attention.
+The probe answers such a launch with its pane and a `stalled` diagnostic in the
+open-session result, not an error, so the control plane never reads a stall from
+error text. A probe from before that field reports a stall as a failed launch.
 The launch fence forbids any other automatic retry.
 Persist its session ID before launch so a late turn-started report can clear
 stalled attention without another session clearing it; retain the diagnostic

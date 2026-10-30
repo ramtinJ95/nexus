@@ -21,7 +21,7 @@ import { desiredPhase, type RegistryWrite } from "../reconcile.ts";
 import { linkedPort, liveHashOf, type GitIdentity } from "../project.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import { tick, type TickContext } from "../tick.ts";
-import { isImageId, type NodeName, type NodeObservation, type ProbeClient, type ProbeError, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation } from "../protocol.ts";
+import { isImageId, type CommandResult, type NodeName, type NodeObservation, type ProbeClient, type ProbeError, type ProbeEvent, type PylonCommand, type PylonId, type PylonObservation } from "../protocol.ts";
 import type { ArtifactId } from "../images.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { pylonLive } from "./live.ts";
@@ -198,14 +198,20 @@ export function startLoop(options: LoopOptions): Loop {
           // Fence the launch under its session before sending: a launch sent again must name the same session, or it could submit the task twice.
           const session = worker.state === "starting" ? worker.session! : randomUUID();
           registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
-          try {
-            await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
-            registry.setClaudeWorker(thread.id, worker.prompt, "started");
-          } catch (err) {
-            if (registry.claudeWorker(thread.id)?.state === "started" || shutdown.signal.aborted) continue;
-            const message = `Claude launch did not complete; attach to check before starting another session: ${(err as Error).message}`;
-            registry.setClaudeWorker(thread.id, worker.prompt, message.includes("Claude launch stalled") ? "stalled" : "failed", message);
+          // Neither a worker its session's turn started meanwhile nor a launch a shutdown cut off has failed.
+          const unfinished = (state: "stalled" | "failed", why: string) => {
+            if (registry.claudeWorker(thread.id)?.state === "started" || shutdown.signal.aborted) return false;
+            const message = `Claude launch did not complete; attach to check before starting another session: ${why}`;
+            registry.setClaudeWorker(thread.id, worker.prompt, state, message);
             registry.appendEvent("thread.failed", thread.id, { message });
+            return true;
+          };
+          try {
+            const { stalled } = await launchClaude(node, link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
+            if (stalled === undefined) registry.setClaudeWorker(thread.id, worker.prompt, "started");
+            else unfinished("stalled", stalled);
+          } catch (err) {
+            if (!unfinished("failed", (err as Error).message)) continue;
             throw err;
           }
         }
@@ -225,12 +231,11 @@ export function startLoop(options: LoopOptions): Loop {
    * probe that answers it is one that came back. Sending it again is safe, because the probe reads from the pylon how
    * far the launch got (sessions.ts openSession).
    */
-  async function launchClaude(node: NodeName, link: Link, pylonId: PylonId, command: Extract<PylonCommand, { kind: "open-session" }>): Promise<void> {
+  async function launchClaude(node: NodeName, link: Link, pylonId: PylonId, command: Extract<PylonCommand, { kind: "open-session" }>): Promise<Extract<CommandResult, { kind: "open-session" }>> {
     const until = Date.now() + claudeLaunchRetryMs;
     for (;;) {
       try {
-        await link.probe.command(pylonId, command);
-        return;
+        return await link.probe.command(pylonId, command) as Extract<CommandResult, { kind: "open-session" }>;
       } catch (err) {
         if ((err as Partial<ProbeError>).code !== "unreachable") throw err;
         const seen = link.snapshots;

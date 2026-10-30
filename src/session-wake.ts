@@ -7,7 +7,7 @@
  */
 import type { Guest } from "./backend.ts";
 import type { PausedSession, PylonId } from "./protocol.ts";
-import { harnesses, recordSessions, relaunchSessions, type RelaunchOutcome } from "./sessions.ts";
+import { harnesses, recordSessions, relaunchSessions, toPaused, type RelaunchOutcome } from "./sessions.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
 export type PylonLog = (line: string) => Promise<void>;
@@ -25,7 +25,7 @@ export async function recordBeforePause(guest: Guest, log: PylonLog): Promise<re
     return null;
   }
   await log(recorded === null ? "sessions: no Herdr server runs, so the last record stands" : `sessions: recorded ${recorded.length} for the wake`);
-  return recorded?.map(({ id, herdrPane, harness, harnessSessionId, title }) => ({ id, herdrPane, harness, harnessSessionId, title })) ?? null;
+  return recorded?.map(toPaused) ?? null;
 }
 
 /**

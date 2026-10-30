@@ -272,6 +272,7 @@ test("a command result is read as the probe sent it, a close without an outcome 
   const results: [PylonCommand, unknown][] = [
     [commands[0]!, { kind: "exec", exitCode: null, output: "", truncated: true, ...unknown }],
     [commands[4]!, { kind: "open-session", herdrPane: "w2:p1", ...unknown }],
+    [commands[4]!, { kind: "open-session", herdrPane: "w2:p1", stalled: "Claude launch stalled: no UserPromptSubmit within 30 seconds" }],
     [commands[5]!, { kind: "close-session", outcome: "moved" }],
     [commands[8]!, { kind: "drop-failed-session", dropped: false }],
     [commands[9]!, { kind: "send-claude", ...send, ...unknown }],
@@ -293,7 +294,7 @@ test("a command result is read as the probe sent it, a close without an outcome 
     assert.deepEqual(await client.command(at, commands[5]!), { kind: "close-session", outcome: "closed", ...unknown });
   }
   const bad: [PylonCommand, unknown][] = [
-    [commands[0]!, { kind: "open-session", herdrPane: "w1:p1" }], [commands[0]!, null], [commands[4]!, { kind: "open-session" }], [commands[5]!, { kind: "close-session", outcome: "gone" }],
+    [commands[0]!, { kind: "open-session", herdrPane: "w1:p1" }], [commands[0]!, null], [commands[4]!, { kind: "open-session" }], [commands[4]!, { kind: "open-session", herdrPane: "w2:p1", stalled: "" }], [commands[5]!, { kind: "close-session", outcome: "gone" }],
     [commands[8]!, { kind: "drop-failed-session" }], [commands[9]!, { kind: "send-claude", ...send, outcome: "lost" }], [commands[9]!, { kind: "send-claude", ...send, herdrPane: "" }],
     [commands[9]!, { kind: "send-claude", ...send, resumed: "no" }], [commands[11]!, { kind: "send-claude-outcome", send: "pending" }], [commands[11]!, { kind: "send-claude-outcome" }],
     [commands[14]!, { kind: "link-port", service: "" }], [commands[15]!, { kind: "unlink-port" }], [commands[15]!, { kind: "unlink-port", refused: "" }],

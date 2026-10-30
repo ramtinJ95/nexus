@@ -15,36 +15,29 @@
  * file alone. In both, each agent pane must then run its agent with the flag that resumes its session.
  */
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Guest } from "./backend.ts";
+import { exit } from "./exec.ts";
+import { unusedGuest } from "./fake-guest.ts";
 import type { SessionFact } from "./protocol.ts";
 import { closeSession, herdrSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 
 const cwd = "/home/user";
 const shellCwd = "/home/user/check-shell-cwd";
 const guest: Guest = {
-  exec: (argv, opts) => new Promise((resolve) => {
-    execFile(argv[0]!, argv.slice(1), { cwd: opts.cwd, timeout: opts.timeoutMs }, (err, stdout, stderr) => {
-      const killed = err !== null && "killed" in err && err.killed;
-      const code = err === null ? 0 : typeof err.code === "number" ? err.code : 127;
-      resolve({ exitCode: killed ? null : code, output: stdout + stderr, truncated: false });
-    });
-  }),
+  async exec(argv, opts) {
+    const { code, stdout, stderr } = await exit(argv[0]!, argv.slice(1), { cwd: opts.cwd, timeout: opts.timeoutMs });
+    return { exitCode: code, output: stdout + stderr, truncated: false };
+  },
   async writeFiles(files) {
     for (const f of files) {
       await mkdir(dirname(f.path), { recursive: true });
       await writeFile(f.path, f.content, { mode: f.mode });
     }
   },
-  stream: () => Promise.reject(new Error("unused")),
-  services: () => Promise.reject(new Error("unused")),
-  startService: () => Promise.reject(new Error("unused")),
-  linkPort: () => Promise.reject(new Error("unused")),
-  unlinkPort: () => Promise.reject(new Error("unused")),
-  previewOrigin: () => { throw new Error("unused"); },
+  ...unusedGuest,
 };
 
 const step = (name: string, value: unknown) => console.log(`${name}: ${JSON.stringify(value, null, 2)}`);

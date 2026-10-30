@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { attachedTerminals, attachScript, claudeTextProblem, focusScript, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
-import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, type ExecReply, type FakeGuest } from "./fake-guest.ts";
+import { fakeGuest, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type FakeGuest } from "./fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
 const agentStarted = herdrOk({ type: "agent_started", agent: {}, argv: [] });
@@ -35,7 +35,7 @@ function herdrUp(overrides: Record<string, (argv: readonly string[]) => ExecRepl
     if (sub === "agent start") return agentStarted;
     if (sub === "workspace close") return herdrOk({ type: "ok" });
     if (sub === "pane process-info") return processInfo({})(argv);
-    if (sub === "pane read") return herdrOk({ type: "pane_read", read: { text: "user@pylon:~$ " } });
+    if (sub === "pane read") return { exitCode: 0, output: "user@pylon:~$ \n" };
     throw new Error(`unscripted herdr ${argv.join(" ")}`);
   });
 }
@@ -89,7 +89,7 @@ test("a fresh Claude Code session starts under an ID of its own, and a fresh pi 
 test("a harness that fails to start rolls its workspace back, and the failure shows the pane's screen", async () => {
   const guest = herdrUp({
     "agent start": () => herdrError("timeout", "timed out waiting for agent"),
-    "pane read": () => herdrOk({ type: "pane_read", read: { text: "No conversation found with session ID: d778fc1b\nuser@pylon:~$ " } }),
+    "pane read": () => ({ exitCode: 0, output: "No conversation found with session ID: d778fc1b\nuser@pylon:~$ \n" }),
   });
   await assert.rejects(openSession(guest, { harness: "claude-code", title: "t", cwd: "/home/user" }), /timed out waiting for agent.*No conversation found with session ID: d778fc1b/s);
   const close = guest.execs.at(-1)!;
@@ -237,7 +237,7 @@ test("Herdr's own report of a Claude Code session wins over its command line, wh
   assert.equal(guest.herdrCalls().filter((c) => c === "pane process-info").length, 1, "only the explicit model is read from the command line");
 });
 
-test("recording reads the session ID and model back from a Claude Code pane's command line, and never from a pi pane's", async () => {
+test("recording reads the session ID and model back from one read of a Claude Code pane's command line, and never from a pi pane's", async () => {
   const snapshot = herdrSnapshot([{ id: "w1", label: "review" }, { id: "w2", label: "plan" }], [herdrPane("w1:p1", "w1", "claude", "idle"), herdrPane("w2:p1", "w2", "pi", "idle")]);
   const guest = herdrUp({
     "api snapshot": () => herdrOk(snapshot),
@@ -248,7 +248,7 @@ test("recording reads the session ID and model back from a Claude Code pane's co
     { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", model: "opus", harnessSessionId: "bd2c2d6b" },
     { herdrPane: "w2:p1", harness: "pi", title: "plan", cwd: "/home/user/workspace/repo", harnessSessionId: null },
   ]);
-  assert.deepEqual(guest.execs.filter((a) => a[4] === "process-info").map((a) => a.at(-1)), ["w1:p1", "w1:p1"], "pi's pane is never inspected");
+  assert.deepEqual(guest.execs.filter((a) => a[4] === "process-info").map((a) => a.at(-1)), ["w1:p1"], "Claude's pane is read once, and pi's never");
 });
 
 test("recording with no Herdr server leaves the last sessions file in place", async () => {
@@ -264,9 +264,48 @@ function withSessionsFile(records: readonly SessionRecord[] | null, herdr: (argv
     const lookup = transcriptLookup(argv, true);
     if (lookup) return lookup;
     assert.equal(argv.at(-1), sessionsFile);
-    return records === null ? { exitCode: 3, output: "" } : { exitCode: 0, output: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
+    return records === null ? { exitCode: 3, output: "" } : sessionsFileReply(records);
   });
 }
+
+test("a relaunch seeds Claude state once for every Claude session it starts, in a restored pane or a new one", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" }, // Herdr restored its shell
+    { herdrPane: "w2:p1", harness: "claude-code", title: "plan", cwd: "/home/user/workspace/repo", harnessSessionId: "d778fc1b" },
+  ];
+  const live = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", null, "unknown")]);
+  const guest = withSessionsFile(records, (argv) => {
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "api snapshot") return herdrOk(live);
+    if (sub === "pane process-info") return processInfo({})(argv);
+    if (sub === "workspace create") return created("w3", "w3:p1");
+    if (sub === "agent start") return agentStarted;
+    throw new Error(`unscripted ${sub}`);
+  });
+  const outcomes = await relaunchSessions(guest);
+  assert.deepEqual(outcomes.map((o) => [o.record.title, o.result, o.herdrPane]), [["review", "relaunched", "w1:p1"], ["plan", "relaunched", "w3:p1"]]);
+  assert.equal(guest.execs.filter((a) => a[2] === seedClaudeState).length, 1);
+  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 2);
+});
+
+test("a relaunch whose Claude seed fails fails only its Claude sessions", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" },
+    { herdrPane: "w2:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+  ];
+  const guest = fakeGuest((argv, isHerdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 1, output: "invalid JSON" };
+    if (!isHerdr) return sessionsFileReply(records);
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([], []));
+    if (sub === "workspace create") return created("w3", "w3:p1");
+    throw new Error(`unscripted ${sub}`);
+  });
+  const outcomes = await relaunchSessions(guest);
+  assert.deepEqual(outcomes.map((o) => [o.record.title, o.result, o.result === "failed" ? o.message : null]), [["review", "failed", "seeding Claude state failed: invalid JSON"], ["sh", "relaunched", null]]);
+});
 
 test("relaunch opens only the recorded sessions that are not already live, into their prompt", async () => {
   const records: SessionRecord[] = [
@@ -412,7 +451,7 @@ function pylon(records: readonly SessionRecord[], panes: FakePane[], refuse: (ar
     if (argv[2] === seedClaudeState) return { exitCode: 0, output: "" };
     if (!herdr && argv.at(-1) === sessionsFile) {
       const last = guest.written.findLast((f) => f.path === sessionsFile)?.content;
-      return { exitCode: 0, output: last ?? JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
+      return last === undefined ? sessionsFileReply(records) : { exitCode: 0, output: last };
     }
     if (!herdr) return transcriptLookup(argv, true) ?? assert.fail(`unexpected exec ${argv.join(" ")}`);
     const sub = argv.slice(0, 2).join(" ");
@@ -445,7 +484,7 @@ function pylon(records: readonly SessionRecord[], panes: FakePane[], refuse: (ar
       case "pane close":
         panes.splice(0, panes.length, ...panes.filter((p) => p.pane !== argv[2]));
         return herdrOk({ type: "ok" });
-      case "pane read": return herdrOk({ type: "pane_read", read: { text: "user@pylon:~$ " } });
+      case "pane read": return { exitCode: 0, output: "user@pylon:~$ \n" };
     }
     throw new Error(`unscripted herdr ${argv.join(" ")}`);
   });
@@ -644,7 +683,7 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
         if (options.starts !== false && options.submits !== false) files.set(/touch (\S+)$/.exec(hook)![1]!, "");
         return options.typeReply ?? { exitCode: 0, output: "" };
       }
-      case "pane read": return herdrOk({ type: "pane_read", read: { text: options.screen ?? "user@pylon:~$ " } });
+      case "pane read": return { exitCode: 0, output: `${options.screen ?? "user@pylon:~$ "}\n` };
     }
     throw new Error(`unscripted herdr ${argv.join(" ")}`);
   }
@@ -1162,14 +1201,14 @@ test("a message Claude's prompt cannot take exactly is refused with a reason, an
   assert.match(claudeTextProblem(" \n \n")!, /blank/);
 });
 
-test("a sessions file is read as the sessions it records, without fields Nexus does not know, and one that fails a check is refused", () => {
+test("a sessions file is read as the sessions it records, without its models or fields Nexus does not know, and one that fails a check is refused", () => {
   const unknown = { zzUnknown: 1 };
   const claude = { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "s-1", model: "opus" };
   const shell = { herdrPane: "w2:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
   const failed = { record: { herdrPane: "w3:p1", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inPane: false, message: "pi did not start" };
   const file = { version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [{ ...claude, ...unknown }, { ...shell, ...unknown }], failed: [{ ...failed, record: { ...failed.record, ...unknown }, ...unknown }], ...unknown };
   assert.deepEqual(pausedSessionsIn(JSON.stringify(file)), [
-    { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", title: "review", harnessSessionId: "s-1", model: "opus" },
+    { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", title: "review", harnessSessionId: "s-1" },
     { id: "w2:p1", herdrPane: "w2:p1", harness: "shell", title: "sh", harnessSessionId: null },
     { id: "failed-f513fc00e70b", herdrPane: null, harness: "pi", title: "plan", harnessSessionId: "/s.jsonl" },
   ]);

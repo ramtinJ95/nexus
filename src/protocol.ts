@@ -324,7 +324,11 @@ export type CloseSessionOutcome = typeof closeSessionOutcomes[number];
 
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
-  | { kind: "open-session"; herdrPane: string }
+  /**
+   * `stalled`: a prompted launch showed no sign its first prompt went in, so its pane stays open for a person to check,
+   * and this says why. A probe from before the field throws a stall as an error instead.
+   */
+  | { kind: "open-session"; herdrPane: string; stalled?: string }
   /**
    * `not-open`: no such pane is open. `moved`: the pane runs another session than the command names, such as one a wake
    * put there after moving the named one. Both leave every pane as it was. A probe older than the field sends none.
@@ -979,7 +983,7 @@ export function parsePylonCommand(body: string): PylonCommand {
 const sendSchema = z.looseObject({ outcome: z.enum(sendClaudeOutcomes), herdrPane: nonEmpty, resumed: z.boolean() });
 const commandResultSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), exitCode: unchecked<number | null>(), output: unchecked<string>(), truncated: unchecked<boolean>() }),
-  z.looseObject({ kind: z.literal("open-session"), herdrPane: nonEmpty }),
+  z.looseObject({ kind: z.literal("open-session"), herdrPane: nonEmpty, stalled: nonEmpty.exactOptional() }),
   z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(closeSessionOutcomes).nullish() }),
   z.looseObject({ kind: z.literal("drop-failed-session"), dropped: z.boolean() }),
   z.looseObject({ kind: z.literal("send-claude"), ...sendSchema.shape }),
