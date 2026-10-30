@@ -31,6 +31,7 @@ import { gitFacts, gitPollMs } from "../git-facts.ts";
 import { rawResponse, startGateway } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
 import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
+import { serialQueue, singleFlight } from "../single-flight.ts";
 import type { NodeSecrets } from "./config.ts";
 
 export interface ProbeOptions {
@@ -82,6 +83,39 @@ const sessionReadTimeoutMs = 3_000;
 const serviceReadTimeoutMs = 5_000;
 const claudeSendMemoryMs = 60 * 60_000;
 
+type FactKind = "sessions" | "attached" | "services" | "listening" | "outputs" | "git";
+
+/** What the probe holds for one pylon, in memory only. A delete drops it all, and named resets in startProbe clear parts. */
+interface PylonState {
+  /** Cleared, with `published` and `reportedListening`, when a pause starts. */
+  liveHash?: LiveHash;
+  /** The previews of the pylon's last successful spawn in this process, which published and warmed them. */
+  published?: Extract<Job, { kind: "spawn" }>["live"]["previews"];
+  /** The listening ports the pylon's last observation reported, so a poll can tell when they changed. */
+  reportedListening?: string;
+  /**
+   * Bumped when the pylon's routes stop matching a spawn's live spec, so a spawn in flight across it does not count as
+   * applied. It outlives a pause, so a services read that a withdraw and then a pause overlapped still sees a change.
+   */
+  diverged: number;
+  /**
+   * The services that were unlinked and not linked again. No spawn routes them: one that carries them was planned
+   * before the unlink, whenever it reaches the probe. Only a delete forgets them.
+   */
+  unlinked: Set<ServiceName>;
+  /** Whether the last snapshot saw the pylon running, which a listening poll reads instead of listing every pylon. */
+  running: boolean;
+  /** The last git read, which later snapshots reuse for gitPollMs while the pylon stays on the same boot. Cleared, with `logged`, once the pylon is seen not running. */
+  git?: { bootedAt: string; at: number; facts: GitFacts | null };
+  /** The fact kinds whose failure was logged since their last successful read. */
+  logged: Set<FactKind>;
+  /**
+   * Reads still outstanding, timed out or not, so later snapshots cannot pile up RPCs behind one the controller has yet
+   * to answer. Each removes itself when it settles, also across a pause.
+   */
+  reads: Map<FactKind, Promise<unknown>>;
+}
+
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
   async converge(_pylonId, previews) {
@@ -109,41 +143,48 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       onHit: (hit) => emit({ type: "preview-hit", ...hit }),
     }),
   };
-  const liveHashes = new Map<PylonId, LiveHash>();
-  /** The previews of each pylon's last successful spawn in this process, which published and warmed them. */
-  const published = new Map<PylonId, Extract<Job, { kind: "spawn" }>["live"]["previews"]>();
-  /**
-   * Each pylon's services that were unlinked and not linked again. No spawn routes them: one that carries them was
-   * planned before the unlink, whenever it reaches the probe.
-   */
-  const unlinked = new Map<PylonId, Set<ServiceName>>();
-  /** Bumped when a pylon's routes stop matching a spawn's live spec, so a spawn in flight across it does not count as applied. */
-  const diverged = new Map<PylonId, number>();
-  const diverge = (pylonId: PylonId) => diverged.set(pylonId, (diverged.get(pylonId) ?? 0) + 1);
-  const relinked = (pylonId: PylonId, service: ServiceName) => unlinked.get(pylonId)?.delete(service);
+  const pylons = new Map<PylonId, PylonState>();
+  function pylon(pylonId: PylonId): PylonState {
+    let state = pylons.get(pylonId);
+    if (state === undefined) pylons.set(pylonId, state = { diverged: 0, unlinked: new Set(), running: false, logged: new Set(), reads: new Map() });
+    return state;
+  }
+  /** A pause ends the pylon's run, so nothing it applied or reported still holds. */
+  function runEnded(state: PylonState) {
+    delete state.liveHash;
+    delete state.published;
+    delete state.reportedListening;
+  }
+  /** Observed not running, or missing from the backend's list: the next boot's reads start fresh, and log a failure again. */
+  function notRunning(state: PylonState) {
+    state.running = false;
+    delete state.git;
+    state.logged.clear();
+  }
+  const relinked = (pylonId: PylonId, service: ServiceName) => pylons.get(pylonId)?.unlinked.delete(service);
   const serve = previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get });
   const deps: ProbeDeps = {
     backend,
     secrets: options.secrets,
     serve: {
       converge(pylonId, assigned, signal) {
-        const gone = unlinked.get(pylonId);
+        const gone = pylons.get(pylonId)?.unlinked;
         const routed = assigned.filter((p) => !gone?.has(p.service));
-        if (routed.length < assigned.length) diverge(pylonId);
+        if (routed.length < assigned.length) pylon(pylonId).diverged++;
         return serve.converge(pylonId, routed, signal);
       },
       // The pylon no longer has what its last spawn applied, so the planner spawns again. A port linked again before
       // a snapshot saw it unlinked gets its route back that way, as its registry row and live hash did not change.
       // Recorded first, so a converge that starts while the route is withdrawn leaves the service out.
       async withdraw(pylonId, service) {
-        let gone = unlinked.get(pylonId);
-        if (gone === undefined) unlinked.set(pylonId, gone = new Set());
-        gone.add(service);
-        diverge(pylonId);
+        const state = pylon(pylonId);
+        state.unlinked.add(service);
+        state.diverged++;
         await serve.withdraw(pylonId, service);
-        liveHashes.delete(pylonId);
-        const kept = published.get(pylonId)?.filter((p) => p.service !== service);
-        if (kept !== undefined) published.set(pylonId, kept);
+        const current = pylons.get(pylonId);
+        if (current === undefined) return;
+        delete current.liveHash;
+        if (current.published !== undefined) current.published = current.published.filter((p) => p.service !== service);
       },
     },
     ports: { link: linkPort, unlink: unlinkPort },
@@ -157,14 +198,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const log = options.log ?? console.error;
   /** Upgraded sockets, which the HTTP server no longer tracks, so close() ends them itself. */
   const streamSockets = new Set<Duplex>();
-  /** The listening ports each pylon's last observation reported, so a poll can tell when they changed. */
-  const reportedListening = new Map<PylonId, string>();
 
   const emit = (event: ProbeEvent) => { if (!shutdown.signal.aborted) for (const observer of observers) observer.write(event); };
   const api = createPylonApi({
     event: (pylon, event) => emit({ type: "session-event", report: journal.append(pylon, event) }),
     guest: (pylonId) => backend.guest(pylonId),
-    published: (pylonId) => published.get(pylonId) ?? [],
+    published: (pylonId) => pylons.get(pylonId)?.published ?? [],
     changed: () => void publishSnapshot(),
     ports: deps.ports,
     async previewUrls() {
@@ -185,144 +224,108 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return [...jobs.values()].map((job) => job.status);
   }
 
-  // Keep timed-out reads registered until the controller answers, so later snapshots cannot pile up RPCs.
-  const factReads = new Map<string, Promise<unknown>>();
-  async function readFact<T>(pylonId: PylonId, kind: string, timeoutMs: number, read: () => Promise<T>): Promise<T> {
-    const key = `${pylonId}:${kind}`;
-    if (factReads.has(key)) throw new Error(`${kind} read is still outstanding`);
-    const pending = Promise.resolve().then(read);
-    factReads.set(key, pending);
-    void pending.then(() => factReads.delete(key), () => factReads.delete(key));
+  /**
+   * A failed, late or still outstanding read answers `fallback`. `log.line` is logged once until a read succeeds, or on
+   * every failure with `log.every`. Without `log` nothing is.
+   */
+  async function readFact<T>(pylonId: PylonId, kind: FactKind, timeoutMs: number, read: () => Promise<T>, options: {
+    fallback: T; log?: { line: (reason: string) => string; every?: true };
+  }): Promise<T> {
+    const { reads, logged } = pylon(pylonId);
     let timer: NodeJS.Timeout | undefined;
     try {
-      return await Promise.race([pending, new Promise<never>((_, reject) => {
+      if (reads.has(kind)) throw new Error(`${kind} read is still outstanding`);
+      const pending = Promise.resolve().then(read);
+      reads.set(kind, pending);
+      void pending.then(() => reads.delete(kind), () => reads.delete(kind));
+      const facts = await Promise.race([pending, new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(`${kind} read exceeded ${timeoutMs} ms`)), timeoutMs);
       })]);
+      logged.delete(kind);
+      return facts;
+    } catch (err) {
+      if (options.log !== undefined && (options.log.every === true || !logged.has(kind))) log(options.log.line((err as Error).message));
+      logged.add(kind);
+      return options.fallback;
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** The pylons whose last sessions read failed, so each failure is logged once, not on every read. */
-  const unreadSessions = new Set<PylonId>();
   /**
    * Costs one guest exec (`herdr api snapshot`) per running pylon per snapshot, so a snapshot waits for the
-   * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions", and is logged once,
-   * until a read succeeds again.
+   * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions".
    */
-  async function sessions(pylonId: PylonId): Promise<readonly SessionFact[] | null> {
-    try {
-      const facts = await readFact(pylonId, "sessions", sessionReadTimeoutMs, () => sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs));
-      unreadSessions.delete(pylonId);
-      return facts;
-    } catch (err) {
-      if (!unreadSessions.has(pylonId)) log(`${pylonId} sessions: ${(err as Error).message}. The control plane keeps the last list read until a read succeeds`);
-      unreadSessions.add(pylonId);
-      return null;
-    }
-  }
+  const sessions = (pylonId: PylonId): Promise<readonly SessionFact[] | null> =>
+    readFact(pylonId, "sessions", sessionReadTimeoutMs, () => sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs), {
+      fallback: null, log: { line: (reason) => `${pylonId} sessions: ${reason}. The control plane keeps the last list read until a read succeeds` },
+    });
 
-  /** The pylons whose last count of attached terminals failed, so each failure is logged once, not on every read. */
-  const uncounted = new Set<PylonId>();
   /**
    * Terminals attached to the pylon's Herdr session. A count that fails reads as none, so it never keeps a pylon
-   * awake nor fails the rest of the observation. It is logged once, until a count succeeds again.
+   * awake nor fails the rest of the observation.
    */
-  async function attached(pylonId: PylonId): Promise<number> {
-    try {
-      const count = await readFact(pylonId, "attached", sessionReadTimeoutMs, () => attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs));
-      uncounted.delete(pylonId);
-      return count;
-    } catch (err) {
-      if (!uncounted.has(pylonId)) log(`${pylonId} attached terminals: ${(err as Error).message}. They count as none until a count succeeds`);
-      uncounted.add(pylonId);
-      return 0;
-    }
-  }
+  const attached = (pylonId: PylonId): Promise<number> =>
+    readFact(pylonId, "attached", sessionReadTimeoutMs, () => attachedTerminals(backend.guest(pylonId), sessionReadTimeoutMs), {
+      fallback: 0, log: { line: (reason) => `${pylonId} attached terminals: ${reason}. They count as none until a count succeeds` },
+    });
 
-  /** A failed or late read reports null, never "no services", and is logged. */
+  /** A failed or late read reports null, never "no services". */
   async function services(pylonId: PylonId): Promise<readonly ServiceFact[] | null> {
-    const since = diverged.get(pylonId);
-    try {
-      const facts = (await readFact(pylonId, "services", serviceReadTimeoutMs, () => backend.guest(pylonId).services("list"))).services;
-      // A service that wants a preview under an unlinked name, linked again or declared, may be routed again. Not
-      // from a read that a withdraw overlapped, which may predate the unlink.
-      if (diverged.get(pylonId) === since) for (const fact of facts) if (fact.wantsPreview) relinked(pylonId, fact.name);
-      return facts;
-    } catch (err) {
-      log(`${pylonId} services: ${(err as Error).message}`);
-      return null;
-    }
+    const since = pylon(pylonId).diverged;
+    const facts = await readFact(pylonId, "services", serviceReadTimeoutMs, async () => (await backend.guest(pylonId).services("list")).services, {
+      fallback: null, log: { line: (reason) => `${pylonId} services: ${reason}`, every: true },
+    });
+    // A service that wants a preview under an unlinked name, linked again or declared, may be routed again. Not
+    // from a read that a withdraw overlapped, which may predate the unlink.
+    if (facts !== null && pylons.get(pylonId)?.diverged === since) for (const fact of facts) if (fact.wantsPreview) relinked(pylonId, fact.name);
+    return facts;
   }
 
   /** A failed read reports null, never "nothing listens". */
-  async function listening(pylonId: PylonId): Promise<readonly ListeningFact[] | null> {
-    try {
-      return await readFact(pylonId, "listening", sessionReadTimeoutMs, () => listeningFacts(backend.guest(pylonId), sessionReadTimeoutMs));
-    } catch {
-      return null;
-    }
-  }
+  const listening = (pylonId: PylonId): Promise<readonly ListeningFact[] | null> =>
+    readFact(pylonId, "listening", sessionReadTimeoutMs, () => listeningFacts(backend.guest(pylonId), sessionReadTimeoutMs), { fallback: null });
 
   /**
-   * An app that starts or stops listening gives the probe no event, so every running pylon's ports are read again
-   * between snapshots, and a change publishes one. Without observers nobody would see it, so nothing is read.
+   * An app that starts or stops listening gives the probe no event, so the ports of every pylon the last snapshot saw
+   * running are read again between snapshots, and a change publishes one. Without observers nobody would see it, so
+   * nothing is read.
    */
-  let polling = false;
-  async function pollListening() {
-    if (polling || observers.size === 0) return;
-    polling = true;
-    try {
-      const changed = await Promise.all((await backend.list()).filter((p) => p.vm === "running").map(async (p) => {
-        const ports = await listening(p.pylonId);
-        return ports !== null && JSON.stringify(ports) !== reportedListening.get(p.pylonId);
-      }));
-      if (changed.some(Boolean)) await publishSnapshot();
-    } catch (err) {
-      log(`listening ports: ${(err as Error).message}`);
-    } finally {
-      polling = false;
-    }
-  }
+  const listeningPoll = singleFlight(async () => {
+    if (observers.size === 0) return;
+    const changed = await Promise.all([...pylons].filter(([, state]) => state.running).map(async ([pylonId, state]) => {
+      const ports = await listening(pylonId);
+      return ports !== null && JSON.stringify(ports) !== state.reportedListening;
+    }));
+    if (changed.some(Boolean)) await publishSnapshot();
+  }, () => shutdown.signal.aborted);
 
   /** Declared outputs only accumulate in the control plane, so a failed read reported as none loses nothing. `nexus output list` shows the failure. */
-  async function declaredOutputs(pylonId: PylonId): Promise<readonly DeclaredOutput[]> {
-    try {
-      return await readFact(pylonId, "outputs", sessionReadTimeoutMs, () => listOutputs(backend.guest(pylonId), sessionReadTimeoutMs));
-    } catch {
-      return [];
-    }
-  }
+  const declaredOutputs = (pylonId: PylonId): Promise<readonly DeclaredOutput[]> =>
+    readFact(pylonId, "outputs", sessionReadTimeoutMs, () => listOutputs(backend.guest(pylonId), sessionReadTimeoutMs), { fallback: [] });
 
   const storage = backend.storage ?? "/";
 
   /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
   const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
 
-  const gitReads = new Map<PylonId, { bootedAt: string; at: number; facts: GitFacts | null }>();
-  const unreadGit = new Set<PylonId>();
   async function git(pylonId: PylonId, bootedAt: string): Promise<GitFacts | null> {
-    const previous = gitReads.get(pylonId);
+    const state = pylon(pylonId);
+    const previous = state.git;
     const at = Date.now();
     if (previous?.bootedAt === bootedAt && at - previous.at < gitPollMs) return previous.facts;
-    let facts: GitFacts | null = null;
-    try {
-      facts = await readFact(pylonId, "git", sessionReadTimeoutMs, () => gitFacts(backend.guest(pylonId)));
-      unreadGit.delete(pylonId);
-    } catch {
-      if (!unreadGit.has(pylonId)) log(`${pylonId} git: checkout facts unavailable; retrying on the next git poll`);
-      unreadGit.add(pylonId);
-    }
-    gitReads.set(pylonId, { bootedAt, at, facts });
+    const facts = await readFact(pylonId, "git", sessionReadTimeoutMs, () => gitFacts(backend.guest(pylonId)), {
+      fallback: null, log: { line: () => `${pylonId} git: checkout facts unavailable; retrying on the next git poll` },
+    });
+    state.git = { bootedAt, at, facts };
     return facts;
   }
 
   async function observation(p: BackendPylon): Promise<PylonObservation> {
     const { pylonId } = p;
-    if (p.vm !== "running") {
-      gitReads.delete(pylonId);
-      unreadSessions.delete(pylonId);
-    }
+    const state = pylon(pylonId);
+    if (p.vm === "running") state.running = true;
+    else notRunning(state);
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
       case "stopped":
@@ -336,11 +339,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         const [ports, serviceFacts, sessionFacts, checkout, outputs, attachedClients] = await Promise.all([
           listening(pylonId), services(pylonId), sessions(pylonId), git(pylonId, p.bootedAt), declaredOutputs(pylonId), attached(pylonId),
         ]);
-        if (ports !== null) reportedListening.set(pylonId, JSON.stringify(ports));
+        // Looked up again, as a delete may have started while the guest was read.
+        const current = pylons.get(pylonId);
+        if (ports !== null && current !== undefined) current.reportedListening = JSON.stringify(ports);
         return {
-          pylonId, phase: "running", liveHash: liveHashes.get(pylonId) ?? null, bootedAt: p.bootedAt,
+          pylonId, phase: "running", liveHash: current?.liveHash ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
-          services: serviceFacts, listening: ports, previews: published.get(pylonId) ?? [], sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
+          services: serviceFacts, listening: ports, previews: current?.published ?? [], sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
           attachedClients,
         };
       }
@@ -351,17 +356,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
    * Reads run one at a time, so snapshots resolve, and are published, in the order they were read. Otherwise a
    * slow periodic read could publish a pylon as running after a later read reported it paused.
    */
-  let snapshots: Promise<unknown> = Promise.resolve();
   function snapshot(): Promise<NodeObservation> {
     return betweenReads(readSnapshot);
   }
 
   /** Runs `work` in the read queue, so no read overlaps it, and each read queued before it is published before it starts. */
-  function betweenReads<T>(work: () => Promise<T>): Promise<T> {
-    const next = snapshots.then(work);
-    snapshots = next.catch(() => undefined); // the caller handles the error. The queue only needs to move on
-    return next;
-  }
+  const betweenReads = serialQueue().run;
 
   /*
    * A link or unlink, with its route bookkeeping, runs in the read queue: the control plane writes its preview as soon
@@ -407,24 +407,24 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
-    const [pylons, host] = await Promise.all([backend.list(), hostCapacity(storage)]);
-    const artifacts = await backend.artifacts.list(pylons);
-    const present = new Set(pylons.map((p) => p.pylonId));
-    for (const id of gitReads.keys()) if (!present.has(id)) gitReads.delete(id);
-    for (const id of unreadGit) if (!present.has(id)) unreadGit.delete(id);
+    const [listed, host] = await Promise.all([backend.list(), hostCapacity(storage)]);
+    const artifacts = await backend.artifacts.list(listed);
+    const present = new Set(listed.map((p) => p.pylonId));
+    // Not dropped: a spawn in flight compares `diverged` at its start and its end, and a list can miss its pylon.
+    for (const [id, state] of pylons) if (!present.has(id)) notRunning(state);
     return {
       node,
       observedAt: new Date().toISOString(),
       probeBootId: bootId,
       events: journal.recent(),
       capacity: {
-        cpus: host.cpus, committedCpus: sum(pylons, "cpus"),
-        memoryGiB: host.memoryGiB, committedMemoryGiB: sum(pylons, "memoryGiB"),
-        diskFreeGiB: host.disk.freeGiB, committedDiskGiB: sum(pylons, "diskGiB"),
+        cpus: host.cpus, committedCpus: sum(listed, "cpus"),
+        memoryGiB: host.memoryGiB, committedMemoryGiB: sum(listed, "memoryGiB"),
+        diskFreeGiB: host.disk.freeGiB, committedDiskGiB: sum(listed, "diskGiB"),
       },
       artifacts,
       jobs,
-      pylons: await Promise.all(pylons.map(observation)),
+      pylons: await Promise.all(listed.map(observation)),
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
       grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
       spawnsWithoutRelaunch: true,
@@ -439,26 +439,21 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     const running: JobStatus = { ...base, state: "running", startedAt: new Date().toISOString() };
     busy.set(subject, jobId);
     setStatus(running, null);
-    if (job.kind === "pause" || job.kind === "delete") {
-      liveHashes.delete(job.pylonId);
-      published.delete(job.pylonId);
-      reportedListening.delete(job.pylonId);
-      // The counter outlives a pause, so a services read that a withdraw and then a pause overlapped still sees a change.
-      if (job.kind === "delete") {
-        diverged.delete(job.pylonId);
-        unlinked.delete(job.pylonId);
-      }
-    }
+    if (job.kind === "pause") runEnded(pylon(job.pylonId));
+    if (job.kind === "delete") pylons.delete(job.pylonId);
     const signal = AbortSignal.any([AbortSignal.timeout(deadlines[job.kind]), shutdown.signal]);
-    const seen = job.kind === "spawn" ? diverged.get(job.pylonId) : undefined;
+    const seen = job.kind === "spawn" ? pylon(job.pylonId).diverged : undefined;
     const run = runJob(job, deps, signal).then(
       () => {
-        // A withdraw while it ran may have come after its converge, so the planner spawns again.
-        if (job.kind === "spawn" && diverged.get(job.pylonId) === seen) {
-          // A pylon whose sessions this spawn left out does not yet look like `live`, so the next spawn brings them back.
-          if (job.relaunch !== false) liveHashes.set(job.pylonId, job.liveHash);
-          published.set(job.pylonId, job.live.previews);
-          api.republished();
+        if (job.kind === "spawn") {
+          const state = pylon(job.pylonId);
+          // A withdraw while it ran may have come after its converge, so the planner spawns again.
+          if (state.diverged === seen) {
+            // A pylon whose sessions this spawn left out does not yet look like `live`, so the next spawn brings them back.
+            if (job.relaunch !== false) state.liveHash = job.liveHash;
+            state.published = job.live.previews;
+            api.republished();
+          }
         }
         setStatus({ ...base, state: "succeeded", finishedAt: new Date().toISOString() }, Date.now());
       },
@@ -474,12 +469,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return running;
   }
 
-  /** A full snapshot rather than a pylon event, because a pylon event cannot say that a pylon is gone. */
-  function publishSnapshot(): Promise<void> | undefined {
-    if (observers.size === 0 || shutdown.signal.aborted) return;
+  /**
+   * A full snapshot rather than a pylon event, because a pylon event cannot say that a pylon is gone. Calls while one
+   * is read share one more read after it, which runs in the read queue, so it sees each link or unlink queued before it.
+   */
+  const publisher = singleFlight(async () => {
+    if (observers.size === 0) return;
     // Observers that cannot get the new state lose their link, so they reconnect for a fresh snapshot.
-    return snapshot().then((observation) => emit({ type: "snapshot", observation }), (err: Error) => { for (const o of observers) o.drop(err); });
-  }
+    await snapshot().then((observation) => emit({ type: "snapshot", observation }), (err: Error) => { for (const o of observers) o.drop(err); });
+  }, () => shutdown.signal.aborted);
+  const publishSnapshot = (): Promise<void> => publisher.rerun();
 
   function submit(jobId: JobId, body: string) {
     const known = jobs.get(jobId);
@@ -688,7 +687,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.gateway.close()]);
     throw err;
   });
-  const listeningTimer = setInterval(() => void pollListening(), options.listeningPollMs ?? 10_000);
+  const listeningTimer = setInterval(() => void listeningPoll.join(), options.listeningPollMs ?? 10_000);
 
   return {
     port: address.port,
