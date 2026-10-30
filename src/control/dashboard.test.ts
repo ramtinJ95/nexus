@@ -297,7 +297,7 @@ test("a review held for the person says why on its builder's page, and a deploye
   const landed: string[] = [];
   const s = await seeded(t, landingOptions(landed));
   const fix = await s.start("acme", "Fix checkout");
-  s.registry.saveReview(approvedReview(fix.id, personPhase({ code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } }));
+  s.registry.saveReview(approvedReview(fix.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } }));
   const region = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.equal(textOf(region), `Held for you #7 Cache ↗ Head ${head.slice(0, 12)} · approved by gpt-6-astra (harness) in round 2 of 5 · .nexus/check passed · no .nexus/verify, so no live check `
     + "Why it waits for you The pull request's GitHub checks are pending. not waivable Failing or pending GitHub checks hold every landing until they pass. The reviewer's findings P3 F2 : Name the TTL "
@@ -328,7 +328,7 @@ test("a review held for the person says why on its builder's page, and a deploye
 test("a held landing whose live check passed says so with its output, and the review's line says how the live check went", async (t) => {
   const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
-  const review = approvedReview(fix.id, personPhase({ code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } });
+  const review = approvedReview(fix.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } });
   s.registry.saveReview({ ...review, rounds: [review.rounds[0]!, { ...review.rounds[1]!, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: true, output: "verify-nexus: thread started, answered, archived" } }] });
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   const card = textOf(landingOf(page));
@@ -470,7 +470,7 @@ test("a review is not offered for landing when its PR closed, or when the contro
 test("a held review whose PR the watch read at a new head offers no Land for the old one, and its new round says why it started", async (t) => {
   const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
-  const held = approvedReview(fix.id, personPhase({ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }), { land: { requestedBy: laptop } });
+  const held = approvedReview(fix.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }), { land: { requestedBy: laptop } });
   s.registry.saveReview(held);
   const moved = "b3".repeat(20);
   const pr = { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open" as const, checks: "passing" as const, review: "none" as const, conflict: false, head: moved };
@@ -493,7 +493,7 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
   const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
-  s.registry.saveReview(approvedReview(fix.id, personPhase({ code: "github-checks", text: "The pull request's GitHub checks are pending." }, { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } }));
+  s.registry.saveReview(approvedReview(fix.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }, { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } }));
   const page = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
   const region = textOf(page);
   assert.match(region, /The pull request's GitHub checks are pending\. not waivable Failing or pending GitHub checks hold every landing until they pass\. /);
@@ -539,7 +539,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   const now = Date.now();
   const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const held = await s.start("acme", "Cache the list");
-  s.registry.saveReview(approvedReview(held.id, personPhase({ code: "github-checks", text: "The pull request's GitHub checks are pending." }, { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } }));
+  s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }, { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } }));
   s.registry.savePrWatch(held.id, { links: [{ pr: { repo: "acme/nexus", number: 7, title: "Cache", url: "https://github.com/acme/nexus/pull/7", state: "open", checks: "pending", review: "none", conflict: false, summary: "Caches the thread list between polls." }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const asked = await s.start("acme", "Rebuild the image");
   s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
@@ -597,16 +597,16 @@ test("every source of a thread's decision has a card on its page with the action
   const link = (number: number, state: "open" | "merged" | "closed") => ({ links: [{ pr: { repo: "acme/nexus", number, title: "Cache", url: `https://github.com/acme/nexus/pull/${number}`, state, checks: "passing" as const, review: "none" as const, conflict: false }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const silent = await s.start("acme", "Silent reviewer");
   const unread = "The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1.";
-  const first = approvedReview(silent.id, personPhase(unread), { land: { requestedBy: laptop, fromProject: true } });
+  const first = approvedReview(silent.id, personPhase("agent", unread), { land: { requestedBy: laptop, fromProject: true } });
   s.registry.saveReview({ ...first, rounds: [{ head, verdict: null, check: null, answers: null }] });
   s.registry.savePrWatch(silent.id, link(7, "open"));
   const merged = await s.start("acme", "Merged by hand");
-  s.registry.saveReview(approvedReview(merged.id, personPhase({ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }), { reviewer: "th-reviewer2" as ThreadId }));
+  s.registry.saveReview(approvedReview(merged.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }), { reviewer: "th-reviewer2" as ThreadId }));
   s.registry.savePrWatch(merged.id, link(7, "merged"));
   const undeployed = await s.start("acme", "Rolled back");
-  s.registry.saveReview(approvedReview(undeployed.id, personPhase("The deploy of 4444 failed.", "Rolled back to the previous release."), { merged: "4".repeat(40), land: { requestedBy: laptop }, reviewer: "th-reviewer3" as ThreadId }));
+  s.registry.saveReview(approvedReview(undeployed.id, personPhase("deploy", "The deploy of 4444 failed.", "Rolled back to the previous release."), { merged: "4".repeat(40), land: { requestedBy: laptop }, reviewer: "th-reviewer3" as ThreadId }));
   const held = await s.start("acme", "Held for checks");
-  s.registry.saveReview(approvedReview(held.id, personPhase({ code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop }, reviewer: "th-reviewer4" as ThreadId }));
+  s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop }, reviewer: "th-reviewer4" as ThreadId }));
   const nudged = await s.start("acme", "Stopped short");
   s.registry.saveNudge(nudged.id, { state: "person", turn: Date.now() });
   const asked = await s.start("acme", "Rebuild the image");
@@ -661,7 +661,7 @@ test("a held review waits from when it was held, not from when its review last m
   s.registry.saveReview(approvedReview(held.id, { kind: "reviewing" }, { since: Date.now() - 3_600_000 }));
   const asked = await s.start("acme", "Rebuild the image");
   s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() - 1 });
-  const review = approvedReview(held.id, personPhase({ code: "github-checks", text: "The pull request's GitHub checks are pending." }), { since: Date.now() - 3_600_000 });
+  const review = approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { since: Date.now() - 3_600_000 });
   s.registry.saveReview(review);
   s.registry.saveReview({ ...review, phase: { ...review.phase, label: { state: "added" } } as Review["phase"] });
   const { cards } = needsOf((await s.call("GET", "/")).text);
@@ -673,7 +673,7 @@ test("acting on a card through the route its button calls takes the card off the
   const landed: string[] = [];
   const s = await seeded(t, landingOptions(landed));
   const held = await s.start("acme", "Cache the list");
-  s.registry.saveReview(approvedReview(held.id, personPhase({ code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } }));
+  s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } }));
   const asked = await s.start("acme", "Rebuild the image");
   s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
@@ -728,7 +728,7 @@ test("a landing shows its steps as the review moves through them, until it lands
     states: "done skipped done now todo", text: `Landing #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Deploying the merge commit ${merge.slice(0, 12)} until every service reports it healthy.` });
   assert.deepEqual(await steps({ kind: "rolling-back", commit: merge, previous: "3".repeat(40), why: "The deploy of 4444 failed: rj-firebat control failed.", requested: true, deadline: 0 }, { merged: merge }), {
     states: "done skipped done failed todo", text: `Rolling back #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed The deploy of 4444 failed: rj-firebat control failed. Rolling back to ${"3".repeat(12)}.` });
-  assert.deepEqual(await steps(personPhase("The deploy of 4444 failed.", "Rolled back to the previous release, 3333, which every service reports healthy."), { merged: merge }), {
+  assert.deepEqual(await steps(personPhase("deploy", "The deploy of 4444 failed.", "Rolled back to the previous release, 3333, which every service reports healthy."), { merged: merge }), {
     states: "done skipped done failed todo", text: "Merged, not deployed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed The deploy of 4444 failed. Rolled back to the previous release, 3333, which every service reports healthy. The merge commit 444444444444 is on the default branch, but not deployed. Deploy it from a deployer with nexus deploy 4444444444444444444444444444444444444444, or leave the fleet where it is, and cancel the review once nothing more is needed. Cancel review" });
   assert.deepEqual(await steps({ kind: "landed", commit: merge }, { merged: merge }), {
     states: "done skipped done done done", text: `Landed #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Merged as ${merge.slice(0, 12)}, deployed, and every service reports it healthy.` });

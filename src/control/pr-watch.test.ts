@@ -13,7 +13,7 @@ import { gitFacts } from "../git-facts.ts";
 import type { CommandResult, NodeName, PylonCommand, PylonId, TailnetNodeId, LiveHash, PylonObservation } from "../protocol.ts";
 import type { ProjectId } from "../project.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
-import { prWatcher, prWatchPrefix, summaryOf } from "./pr-watch.ts";
+import { commentCap, prWatcher, prWatchPrefix, summaryOf } from "./pr-watch.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";
@@ -780,4 +780,117 @@ test("a pass reads no archived or deleted thread that no queued thread waits for
   await prWatcher({ ...f.options, registry }).poll();
   assert.deepEqual(asked, [f.id]);
   assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+});
+
+test("a thread's linked open pull requests are read together, and their news comes in link order", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const asked: number[] = [];
+  const pending: (() => void)[] = [];
+  const pr = (number: number): PrSnapshot => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, url: `https://github.com/acme/repo/pull/${number}` }, failures: [{ id: `f${number}`, text: `Check failed on #${number}` }] });
+  const watcher = prWatcher({ ...f.options, github: { find: async () => [1, 2], poll(_repo: string, n: number) {
+    asked.push(n);
+    return new Promise<PrSnapshot>((resolve) => pending.push(() => resolve(pr(n))));
+  } } });
+  const pass = watcher.poll();
+  for (let i = 0; i < 20 && asked.length < 2; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(asked, [1, 2], "both polls are in flight before either answers");
+  pending.reverse().forEach((answer) => answer());
+  await pass;
+  const state = f.registry.prWatch(f.id)!;
+  assert.deepEqual(state.links.map((l) => l.pr.number), [1, 2]);
+  assert.match(String(f.messages.at(-1)![1]), /Check failed on #1[\s\S]*Check failed on #2/);
+});
+
+test("the watch stops after its comment cap of comment-only wakes in a row, and says so", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.savePrWatch(f.id, { links: [{ pr: f.snapshot.pr, seen: [], failed: false }], commentWakes: commentCap - 1, pending: null, error: null });
+  f.snapshot = { ...f.snapshot, comments: [{ id: "issue-comment:1", text: "issue-comment by owner: please rename it" }] };
+  await f.watcher.poll();
+  assert.equal(f.registry.prWatch(f.id)!.commentWakes, commentCap);
+  assert.match(String(f.messages.at(-1)![1]), new RegExp(`PR watching stopped after ${commentCap} consecutive comment-only wakes\\.$`));
+  const calls = f.calls.length;
+  f.snapshot = { ...f.snapshot, comments: [...f.snapshot.comments, { id: "issue-comment:2", text: "issue-comment by owner: and test it" }] };
+  await f.watcher.poll();
+  assert.deepEqual(f.calls.slice(calls), [], "a stopped watch reads GitHub no more");
+});
+
+/** A GitHub that answers every path with an ETag of its own, 304 once asked with it, and records each request's If-None-Match. */
+function etagGitHub(answer: (path: string) => unknown = () => [], before: (path: string) => Promise<void> = async () => {}) {
+  const asked: { path: string; etag: string | null }[] = [];
+  const fake: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const path = url.pathname + url.search;
+    const etag = new Headers(init?.headers).get("if-none-match");
+    asked.push({ path, etag });
+    await before(path);
+    const value = answer(url.pathname);
+    const tag = `"${Buffer.from(`${path} ${JSON.stringify(value)}`).toString("base64")}"`;
+    return etag === tag ? new Response(null, { status: 304 }) : Response.json(value, { headers: { etag: tag } });
+  };
+  return { asked, client: githubClient("secret", fake) };
+}
+
+test("a cached GitHub resource that is read again stays cached past 4096 newer ones, and is asked for with its ETag", async () => {
+  const { asked, client } = etagGitHub();
+  await client.find("acme/repo", "kept");
+  for (let i = 0; i < 4095; i++) await client.find("acme/repo", `other-${i}`);
+  await client.find("acme/repo", "kept");
+  await client.find("acme/repo", "newest");
+  await client.find("acme/repo", "kept");
+  assert.notEqual(asked.at(-1)!.etag, null, "the resource read again was not evicted");
+  await client.find("acme/repo", "other-0");
+  assert.equal(asked.at(-1)!.etag, null, "the least recently read one was");
+});
+
+test("a PR's commit resources leave the cache once its head moves or it closes", async () => {
+  let head = "a".repeat(40);
+  let state = "open";
+  const { asked, client } = etagGitHub((path) => path.endsWith("/pulls/1")
+    ? { number: 1, title: "Fix", html_url: "https://github.com/acme/repo/pull/1", state, merged: false, mergeable_state: "clean", head: { sha: head, ref: "feature" }, base: { ref: "main" } }
+    : path.endsWith("/check-runs") ? { check_runs: [] } : []);
+  const commits = () => asked.filter((a) => a.path.includes(`/commits/${"a".repeat(40)}/`));
+  await client.poll("acme/repo", 1);
+  await client.poll("acme/repo", 1);
+  assert.ok(commits().slice(2).every((a) => a.etag !== null), "an unmoved head's checks are asked for with their ETags");
+  head = "b".repeat(40);
+  await client.poll("acme/repo", 1);
+  head = "a".repeat(40);
+  const before = commits().length;
+  await client.poll("acme/repo", 1);
+  assert.deepEqual(commits().slice(before).map((a) => a.etag), [null, null], "the old head's check runs and statuses were dropped");
+  state = "closed";
+  await client.poll("acme/repo", 1);
+  state = "open";
+  const reopened = commits().length;
+  await client.poll("acme/repo", 1);
+  assert.deepEqual(commits().slice(reopened).map((a) => a.etag), [null, null], "a closed PR's were too");
+});
+
+test("a contents read waits out GitHub's rate limit like any other read", async (t) => {
+  let now = Date.parse("2027-01-01T00:00:00Z");
+  t.mock.method(Date, "now", () => now);
+  let calls = 0;
+  const fake: typeof fetch = async () => ++calls === 1 ? new Response(null, { status: 403, headers: { "retry-after": "60" } }) : new Response(null, { status: 404 });
+  const client = githubClient("secret", fake);
+  await assert.rejects(client.find("acme/repo", "main"), /HTTP 403/);
+  await assert.rejects(client.has("acme/repo", "abc", ".nexus/verify"), /waiting for its rate limit/);
+  assert.equal(calls, 1);
+  now += 60_000;
+  assert.equal(await client.has("acme/repo", "abc", ".nexus/verify"), false);
+  assert.equal(calls, 2);
+});
+
+test("a GitHub answer of not modified that comes after its resource was evicted still keeps the cache at 4096", async () => {
+  let held: Promise<void> | null = null;
+  const { asked, client } = etagGitHub(undefined, async (path) => { if (path.includes("kept") && held !== null) await held; });
+  await client.find("acme/repo", "kept");
+  for (let i = 0; i < 4095; i++) await client.find("acme/repo", `other-${i}`);
+  const release = Promise.withResolvers<void>();
+  held = release.promise;
+  const late = client.find("acme/repo", "kept");
+  await client.find("acme/repo", "newest");
+  release.resolve();
+  await late;
+  await client.find("acme/repo", "other-0");
+  assert.equal(asked.at(-1)!.etag, null, "the late answer evicted the least recently used resource");
 });

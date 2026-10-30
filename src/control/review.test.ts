@@ -10,7 +10,7 @@ import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
-import { humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review, type ReviewDeps } from "./review.ts";
+import { humanLabel, landable, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type HoldCause, type Review, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -182,10 +182,13 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   };
 }
 
-/** A phase as the person reads it: a needs-person phase has one hold per reason, in its order, and shows its reasons. */
+/**
+ * A phase as the person reads it: a needs-person phase has one hold per reason, in its order, and shows its reasons,
+ * not the loop's cause.
+ */
 function shown(phase: Review["phase"]) {
   if (phase.kind !== "needs-person") return phase;
-  const { holds, ...rest } = phase;
+  const { holds, cause: _, ...rest } = phase;
   assert.deepEqual(holds.map((h) => h.text), phase.reasons, "one hold per reason, in the same order");
   return rest;
 }
@@ -2206,9 +2209,9 @@ test("a review stored before hold codes reads its holds and its waiver with code
   const f = fixture(t);
   f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
   await approved(f, "nLAPTOP");
-  const { holds: _, ...reasonsOnly } = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
+  const { holds: _, cause: __, ...reasonsOnly } = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
   f.registry.saveReview({ ...f.review(), phase: reasonsOnly as Review["phase"] });
-  assert.deepEqual(f.review().phase, { kind: "needs-person", reasons: reservedHolds, holds: [{ code: "reserved-path:irreversible", text: reservedHolds[0] }] });
+  assert.deepEqual(f.review().phase, { kind: "needs-person", cause: "unrecorded", reasons: reservedHolds, holds: [{ code: "reserved-path:irreversible", text: reservedHolds[0] }] });
 
   const waiver = { head: head1, holds: reservedHolds, by: "nLAPTOP", at: 1 };
   f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, waiver: waiver as Review["waiver"], phase: { kind: "merging", authorized: null } });
@@ -2534,6 +2537,124 @@ test("a review held after an approval for a conflict the builder did not rebase,
   await gave.poll();
   assert.deepEqual(g.review().phase, { kind: "approved" });
   assert.deepEqual(g.review().rounds[1]!.check, { passed: true, output: "ok" }, "the check runs at the new head");
+});
+
+/** Ends three turns of `id` in a row without the block the loop waits for. */
+const silent = async (f: ReturnType<typeof fixture>, id: ThreadId) => {
+  for (let i = 0; i < 3; i++) { f.reply(id, "I looked and it seems fine."); await f.loop().poll(); }
+};
+const holds: { kind: string; hold(f: ReturnType<typeof fixture>): Promise<void>; cause: HoldCause; reasons: string[]; landable: boolean; round: boolean }[] = [
+  { kind: "rounds", cause: "rounds", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], landable: false, round: false, async hold(f) {
+    await f.loop().start(f.builder, { land: null, rounds: 1 });
+    await f.loop().poll();
+    f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+    await f.loop().poll();
+  } },
+  { kind: "gate", cause: "gate", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"], landable: false, round: true, async hold(f) {
+    f.check = { kind: "done", passed: false, output: "1 test failed" };
+    await approved(f, null);
+    f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "rejected", reason: "The test is flaky." }]));
+    await f.loop().poll();
+  } },
+  { kind: "no verdict from the check", cause: "no-verdict", reasons: [`.nexus/check could not run at ${head1}.`, "The check's output:\nno .nexus/check"], landable: false, round: false, async hold(f) {
+    f.check = { kind: "unrunnable", output: "no .nexus/check" };
+    await approved(f, null);
+  } },
+  { kind: "no verdict from the live check", cause: "no-verdict", reasons: [`The live check gave no verdict within 60 minutes at ${head1}.`, "No node could take its verify pylon: every node is offline"], landable: true, round: true, async hold(f) {
+    f.verifies = true;
+    f.refuse = "every node is offline";
+    await approved(f, null);
+    f.tick(61 * 60_000);
+    await f.loop().poll();
+  } },
+  { kind: "agent while reviewing", cause: "agent", reasons: ["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."], landable: false, round: false, async hold(f) {
+    await f.loop().start(f.builder, { land: null });
+    await f.loop().poll();
+    await silent(f, f.review().reviewer);
+  } },
+  { kind: "agent while fixing a gate finding", cause: "agent", reasons: ["The builder ended 3 turns in a row without an answer Nexus could read, in round 1."], landable: false, round: true, async hold(f) {
+    f.check = { kind: "done", passed: false, output: "1 test failed" };
+    await approved(f, null);
+    await silent(f, f.builder);
+  } },
+  { kind: "policy", cause: "policy", reasons: reservedHolds, landable: true, round: true, async hold(f) {
+    f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+    await approved(f, "nLAPTOP");
+  } },
+  { kind: "thread while reviewing", cause: "thread", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: false, round: false, async hold(f) {
+    await f.loop().start(f.builder, { land: null });
+    await f.loop().poll();
+    f.registry.setThreadStatus(f.review().reviewer, "idle");
+    await f.loop().poll();
+    f.registry.setThreadStatus(f.review().reviewer, "active");
+  } },
+  { kind: "thread while verifying", cause: "thread", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: true, round: true, async hold(f) {
+    f.verifies = true;
+    f.refuse = "every node is offline";
+    await approved(f, null);
+    f.registry.setThreadStatus(f.review().reviewer, "idle");
+    await f.loop().poll();
+    f.registry.setThreadStatus(f.review().reviewer, "active");
+  } },
+];
+
+test("each kind of hold says whether nexus land takes the review and whether a head pushed after it gets a round", async (t) => {
+  for (const { kind, hold, cause, reasons, landable: lands, round } of holds) {
+    const f = fixture(t);
+    await hold(f);
+    const r = f.review();
+    assert.equal(r.phase.kind, "needs-person", kind);
+    assert.deepEqual({ cause: (r.phase as { cause: HoldCause }).cause, reasons: (r.phase as { reasons: string[] }).reasons }, { cause, reasons }, kind);
+    assert.equal(landable(r), lands, kind);
+    pushed(f, head2);
+    await f.loop().poll();
+    assert.equal(f.review().rounds.length, r.rounds.length + (round ? 1 : 0), `${kind}: ${round ? "a new round" : "no round"} for the pushed head`);
+    assert.equal(f.review().phase.kind, round ? "reviewing" : "needs-person", kind);
+  }
+});
+
+test("a hold stored before causes reads back as rounds that ran out when it has the label, and unrecorded otherwise", async (t) => {
+  const f = fixture(t);
+  await holds[0]!.hold(f);
+  const { cause: _, ...uncaused } = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
+  f.registry.saveReview({ ...f.review(), phase: uncaused as Review["phase"] });
+  assert.equal((f.review().phase as { cause: HoldCause }).cause, "rounds");
+  const { label: __, ...unlabelled } = uncaused;
+  f.registry.saveReview({ ...f.review(), phase: unlabelled as Review["phase"] });
+  assert.equal((f.review().phase as { cause: HoldCause }).cause, "unrecorded");
+});
+
+test("each gate that stops an approval goes to the builder as its P0 finding, and to the person once the builder pushes nothing for it", async (t) => {
+  const gates: { id: string; land: string | null; fail(f: ReturnType<typeof fixture>): void; finding: string; codes: HoldCode[]; reasons: string[] }[] = [
+    { id: "CHECK", land: null, fail(f) { f.check = { kind: "done", passed: false, output: "boom" }; }, finding: `CHECK (P0) .nexus/check: .nexus/check failed at ${head1}\n    boom`,
+      codes: ["check-failed", "loop"], reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: Not this branch.`, "The check's output:\nboom"] },
+    { id: "LIVE", land: null, fail(f) { f.verifies = true; f.live = { kind: "done", passed: false, output: "boom" }; }, finding: `LIVE (P0) .nexus/verify: The live check failed at ${head1}\n    boom`,
+      codes: ["live-failed", "loop"], reasons: [`The live check failed at ${head1}, and the builder pushed nothing for it: Not this branch.`, "The live check's output:\nboom"] },
+    { id: "CONFLICT", land: "nLAPTOP", fail: conflicting, finding: `CONFLICT (P0) origin/main: The branch conflicts with main, so ${head1} cannot merge`,
+      codes: ["loop"], reasons: ["The branch conflicts with main, and the builder did not rebase it: Not this branch."] },
+  ];
+  for (const { id, land, fail, finding, codes, reasons } of gates) {
+    const f = fixture(t);
+    fail(f);
+    await approved(f, land);
+    assert.equal(f.review().phase.kind, "fixing", id);
+    assert.ok(f.sent.at(-1)!.message.text.includes(finding), id);
+    f.reply(f.builder, answers(f.review(), [{ id, action: "rejected", reason: "Not this branch." }]));
+    await f.loop().poll();
+    const phase = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
+    assert.deepEqual({ cause: phase.cause, codes: phase.holds.map((h) => h.code), reasons: phase.reasons }, { cause: "gate", codes, reasons }, id);
+  }
+});
+
+test("a conflict answered as fixed with no push gets a reminder to push once the push grace ends, not the person", async (t) => {
+  const f = fixture(t);
+  conflicting(f);
+  const loop = await approved(f, "nLAPTOP");
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
+  f.tick(10 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.match(f.sent.at(-1)!.message.text, new RegExp(`the pull request's head is still ${head1}\\. Push the fixes\\.`));
 });
 
 test("a review that merged and is held over its deploy stays as it is whatever the PR watch reads", async (t) => {
