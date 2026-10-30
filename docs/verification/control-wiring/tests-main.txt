@@ -165,6 +165,7 @@
 ✔ a harness, a Claude worker and a bare thread each answer every agent route as their kind does
 ✔ only a deployer reads a node's health, which the node's probe answers, and no route under it changes the node
 ✖ every poll puts the current token to every probe, so a probe that missed one gets the next
+✖ a node that joins after the handoff starts gets the token at the next poll
 ✔ without a ChatGPT login the handoff puts nothing
 ✖ a probe that fails is logged by node and the others still get the token, and no log line carries it
 ✖ a poll while one runs joins it instead of reading the token twice
@@ -333,7 +334,7 @@
 ✔ the harness threads at start are those whose agent is a conversation, less deleted ones whose abort is recorded
 ✔ a node's tallies and room count each of its pylons by what it holds, and a pylon placed elsewhere as an orphan
 ✔ a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()
-ℹ tests 334
+ℹ tests 335
 ℹ pass 319
-ℹ fail 15
+ℹ fail 16
 ✖ failing tests:
