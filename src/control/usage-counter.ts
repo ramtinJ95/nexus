@@ -17,6 +17,8 @@ import { followEvents } from "./follow-events.ts";
 import { runningProbe } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 
+type UsageCounterRegistry = Pick<Registry, "agent" | "eventBatch" | "newestEvent" | "node" | "pylon" | "recordUsage" | "storedThreads" | "thread" | "usageCursor" | "usageCursors">;
+
 export interface UsageCounter {
   /** Reads every thread but the deleted ones now. */
   sweep(): Promise<void>;
@@ -39,7 +41,7 @@ const maxReadsPerPylon = 16;
 const maxWholeReads = 1_000;
 
 export function usageCounter(options: {
-  registry: Registry;
+  registry: UsageCounterRegistry;
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>;
   harness: Pick<HarnessHost, "usage">;
   sweepMs?: number;

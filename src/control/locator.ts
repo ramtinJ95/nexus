@@ -9,9 +9,11 @@ import type { PylonLocator } from "../harness/pylon-env.ts";
 import { listsRunning } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 
+type LocatorRegistry = Pick<Registry, "node" | "pylon" | "threadStatus">;
+
 const pollMs = 250;
 
-export function registryLocator(registry: Registry): PylonLocator {
+export function registryLocator(registry: LocatorRegistry): PylonLocator {
   return {
     async awaitRunning(pylonId: PylonId, deadline: number) {
       for (;;) {

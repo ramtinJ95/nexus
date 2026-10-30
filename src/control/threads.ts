@@ -15,6 +15,8 @@ import { pylonLive } from "./live.ts";
 import type { Registry } from "./registry.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 
+type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "node" | "nodes" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserve" | "reserved" | "saveTemplate" | "templates">;
+
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
 
@@ -25,7 +27,7 @@ const claudePromptOf = (request: StartRequest) =>
   request.claude === undefined || request.raw === true || /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
 
 /** What a start refuses before it places anything, which a queued start is checked against when it is queued too. */
-export function checkStart(registry: Registry, request: StartRequest): Project {
+export function checkStart(registry: ThreadsRegistry, request: StartRequest): Project {
   const claudePrompt = claudePromptOf(request);
   if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
   const project = registry.project(request.project as ProjectId);
@@ -54,7 +56,7 @@ export const bootNetwork = (project: Project, dotfilesRepo: string): BootInputs[
 /** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
 type SetupRead = { project: RemoteProject; inputs: SetupInputs } | { fresh: string };
 
-export function threadStarter(options: { registry: Registry; harness: Pick<HarnessHost, "startThread">; mirror: ProjectMirror; dotfiles: PylonOverlay["dotfiles"]; gitIdentity?: BootInputs["gitIdentity"]; wake(node: NodeName): void }) {
+export function threadStarter(options: { registry: ThreadsRegistry; harness: Pick<HarnessHost, "startThread">; mirror: ProjectMirror; dotfiles: PylonOverlay["dotfiles"]; gitIdentity?: BootInputs["gitIdentity"]; wake(node: NodeName): void }) {
   const { registry, harness, mirror, dotfiles, gitIdentity, wake } = options;
 
   async function readSetup(project: Project, branch: string, commit: string | undefined): Promise<SetupRead> {

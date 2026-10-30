@@ -25,6 +25,8 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 
+type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
+
 export const planFence = "nexus-plan";
 export const acceptOption = "accept";
 export const rejectOption = "reject";
@@ -95,7 +97,7 @@ The person's message follows.`;
 
 export type Planning = ReturnType<typeof planning>;
 
-export function planning(options: { registry: Registry; pipeline: Pick<Pipeline, "add"> | null; replies(t: Thread): Promise<string[]>; log?: (message: string) => void; now?: () => number }) {
+export function planning(options: { registry: PlanningRegistry; pipeline: Pick<Pipeline, "add"> | null; replies(t: Thread): Promise<string[]>; log?: (message: string) => void; now?: () => number }) {
   const { registry, replies, log = () => {} } = options;
   const now = options.now ?? Date.now;
 

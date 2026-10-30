@@ -23,6 +23,8 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { StartRequest } from "./start-request.ts";
 
+type GateRegistry = Pick<Registry, "node" | "pylon" | "recordActivity" | "setThreadStatus" | "thread">;
+
 /** pylon-vm's 3 GiB floor for each of two inner pylons, and 2 GiB for the verify stack's control plane and probe. */
 export const verifyMemoryGiB = 8;
 const tailBytes = 6_000;
@@ -93,7 +95,7 @@ export interface CheckRuns {
 type Run = { kind: "waiting" | "running"; output: Buffer } | { kind: "void" } | Extract<CheckState, { kind: "done" | "unrunnable" }>;
 
 export function checkRuns(options: {
-  registry: Registry;
+  registry: GateRegistry;
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>;
   startThread(request: StartRequest, caller: string): Promise<Thread>;
   wake(t: Thread): void;

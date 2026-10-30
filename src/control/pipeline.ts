@@ -20,6 +20,8 @@ import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 
+type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
+
 export const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
 
 export const phaseKinds = ["planned", "queued", "building", "reviewing", "landing", "landed", "held", "archived", "cancelled"] as const;
@@ -44,12 +46,12 @@ export interface PipelineItem {
 }
 
 export const itemRequestId = (id: ItemId) => `pipeline:${id}`;
-export const itemThread = (registry: Registry, id: ItemId): ThreadId | null => registry.startRequest(itemRequestId(id))?.thread ?? null;
+export const itemThread = (registry: PipelineRegistry, id: ItemId): ThreadId | null => registry.startRequest(itemRequestId(id))?.thread ?? null;
 
 const phase = (kind: ItemPhase["kind"], why: string): ItemPhase => ({ kind, why });
 
 /** What an item with no thread waits for, or null once the pass may queue it. */
-function unqueued(registry: Registry, item: ItemRecord): ItemPhase | null {
+function unqueued(registry: PipelineRegistry, item: ItemRecord): ItemPhase | null {
   if (item.cancelled !== null) return phase("cancelled", `cancelled by ${item.cancelled.by}`);
   const setting = registry.project(item.project)?.pipeline;
   if (setting == null) return phase("planned", `the pipeline does not run for project ${item.project}`);
@@ -62,7 +64,7 @@ function unqueued(registry: Registry, item: ItemRecord): ItemPhase | null {
   return null;
 }
 
-function threadPhase(registry: Registry, id: ThreadId): ItemPhase {
+function threadPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase {
   const t = registry.thread(id);
   if (t === undefined) {
     const queued = registry.queuedThread(id)!;
@@ -100,12 +102,12 @@ function threadPhase(registry: Registry, id: ThreadId): ItemPhase {
   return phase("building", t.working ? "its agent is working, with no pull request yet" : "no pull request yet");
 }
 
-export function itemPhase(registry: Registry, item: ItemRecord): ItemPhase {
+export function itemPhase(registry: PipelineRegistry, item: ItemRecord): ItemPhase {
   const thread = itemThread(registry, item.id);
   return thread === null ? unqueued(registry, item) ?? phase("planned", item.lastError === null ? "is queued on the pipeline's next pass" : `was not queued: ${item.lastError}`) : threadPhase(registry, thread);
 }
 
-export function itemView(registry: Registry, item: ItemRecord): PipelineItem {
+export function itemView(registry: PipelineRegistry, item: ItemRecord): PipelineItem {
   const claude = item.request.claude !== undefined;
   return {
     id: item.id, project: item.project, title: item.title, addedBy: item.addedBy, addedAt: item.addedAt, after: item.after,
@@ -116,7 +118,7 @@ export function itemView(registry: Registry, item: ItemRecord): PipelineItem {
 
 export type Pipeline = ReturnType<typeof pipeline>;
 
-export function pipeline(options: { registry: Registry; queue: Pick<ThreadQueue, "add" | "poll">; log?: (message: string) => void }) {
+export function pipeline(options: { registry: PipelineRegistry; queue: Pick<ThreadQueue, "add" | "poll">; log?: (message: string) => void }) {
   const { registry, queue, log = () => {} } = options;
 
   function find(id: string): ItemRecord {

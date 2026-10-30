@@ -12,6 +12,8 @@ import { HttpError } from "./http-error.ts";
 import type { Registry } from "./registry.ts";
 import type { JoinedNode } from "./node-store.ts";
 
+type JoinRegistry = Pick<Registry, "addJoinToken" | "joinNode" | "joinToken" | "node" | "nodeByTailnetId">;
+
 export const joinTokenTtlMs = 60 * 60_000;
 /** Not strict, so a name or node ID in the body is dropped rather than read. */
 export const joinRequestSchema = z.object({ token: z.string().min(1).max(256), deployKey: z.string().regex(digestPattern, "must be the 64 lower-case hex characters of the deployer token's sha256") });
@@ -19,7 +21,7 @@ export const joinRequestSchema = z.object({ token: z.string().min(1).max(256), d
 const hashOf = (token: string) => createHash("sha256").update(token).digest("hex");
 const mint = "Mint another with sudo deploy/install.sh --join-token on the control plane's machine";
 
-export function mintJoinToken(registry: Registry, now = Date.now()): { token: string; expiresAt: number } {
+export function mintJoinToken(registry: JoinRegistry, now = Date.now()): { token: string; expiresAt: number } {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = now + joinTokenTtlMs;
   registry.addJoinToken(hashOf(token), expiresAt);
@@ -32,7 +34,7 @@ export function mintJoinToken(registry: Registry, now = Date.now()): { token: st
  * control.json names, which keep their keys there, even one that joined before it was added. A joined node may join
  * again with another token, which replaces its deploy key.
  */
-export function joinNode(registry: Registry, admitted: ReadonlySet<TailnetNodeId>, configured: ReadonlySet<TailnetNodeId>, caller: { id: TailnetNodeId; host: string }, request: z.infer<typeof joinRequestSchema>, now = Date.now()): JoinedNode {
+export function joinNode(registry: JoinRegistry, admitted: ReadonlySet<TailnetNodeId>, configured: ReadonlySet<TailnetNodeId>, caller: { id: TailnetNodeId; host: string }, request: z.infer<typeof joinRequestSchema>, now = Date.now()): JoinedNode {
   const hash = hashOf(request.token);
   const token = registry.joinToken(hash);
   if (token === undefined) throw new HttpError(403, `this join token is not one this control plane minted. ${mint}`);

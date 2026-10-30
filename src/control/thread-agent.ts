@@ -26,6 +26,8 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Sent, ThreadDetail } from "./wire.ts";
 
+type ThreadAgentRegistry = Pick<Registry, "agent" | "claudeMessage" | "claudeMessageSenders" | "claudeWorker" | "latestClaudeTurn" | "node" | "pylon" | "recordActivity" | "setClaudeMessage">;
+
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */
 export interface AgentMessage { text: string; requestId: string; mode: "followUp" | "steer" }
 
@@ -68,7 +70,7 @@ const claudeReadMs = 5_000;
  * the API does. `wake` wakes the thread's pylon. Planning composes what a planning thread's messages start with.
  */
 export function threadAgents(options: {
-  registry: Registry; harness: ThreadHarness; claude: ClaudeConversations; inPylon: PylonRun; whileRunning: PylonRun; wake(t: Thread): void;
+  registry: ThreadAgentRegistry; harness: ThreadHarness; claude: ClaudeConversations; inPylon: PylonRun; whileRunning: PylonRun; wake(t: Thread): void;
   planning: Pick<Planning, "compose" | "sent"> | null;
 }): ThreadAgents {
   const { registry, harness, claude, inPylon, whileRunning, wake, planning } = options;

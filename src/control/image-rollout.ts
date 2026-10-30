@@ -21,12 +21,14 @@ import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { ImageOperation, ImageStep, Outcome, RecordedImage } from "./image-store.ts";
 
+type ImageRolloutRegistry = Pick<Registry, "currentImage" | "image" | "imageOperation" | "images" | "node" | "nodes" | "previousImage" | "saveImage" | "saveImageOperation" | "setCurrentImage">;
+
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 export type ImageEntry = RecordedImage & { nodes: NodeName[] };
 export interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
 
 /** The images newest build first. */
-export function imagesView(registry: Registry): ImagesView {
+export function imagesView(registry: ImageRolloutRegistry): ImagesView {
   const nodes = registry.nodes();
   const images = registry.images()
     .map((image): ImageEntry => ({ ...image, nodes: nodes.filter((n) => holds(n, image.id)).map((n) => n.name) }))
@@ -46,7 +48,7 @@ export interface ImageRollout {
 }
 
 export interface ImageRolloutOptions {
-  registry: Registry;
+  registry: ImageRolloutRegistry;
   /** One client per registry node. */
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "submit" | "job" | "manifest">>;
   buildNode: NodeName;

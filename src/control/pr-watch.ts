@@ -9,6 +9,8 @@ import { singleFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "../agent-protocol.ts";
 import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
 
+type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;
+
 /** A description's first paragraph past its headings, images and comments, on one line and at most 400 characters. */
 export function summaryOf(body: string): string {
   const prose = body.replace(/<!--[\s\S]*?-->/g, "").split("\n").filter((line) => !/^ {0,3}#{1,6}(\s|$)/.test(line)).join("\n");
@@ -27,7 +29,7 @@ const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.s
  * `linked` hears of each PR the watch links that is open at its first read, before the link is saved, so a failed
  * call is made again on the next pass.
  */
-export function prWatcher(options: { registry: Registry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox; linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined }) {
+export function prWatcher(options: { registry: PrWatchRegistry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox; linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined }) {
   const { registry, github, inbox } = options;
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);

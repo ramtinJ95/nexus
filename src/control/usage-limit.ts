@@ -8,11 +8,13 @@ import type { Registry } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
 import { usageLimitPrefix } from "../agent-protocol.ts";
 
+type UsageLimitRegistry = Pick<Registry, "appendEvent" | "claudeMessage" | "claudeWorker" | "storedThreads" | "thread">;
+
 const text = `${usageLimitPrefix} The usage limit reset. Continue where you stopped.`;
 /** Claude Code continues a session it still runs about 90 s after the reset, so only a session that did not, such as one whose pylon paused, is typed into. */
 const defaultGraceMs = 180_000;
 
-export function usageLimitResumer(options: { registry: Registry; inbox: Inbox; clock?: () => number; graceMs?: number }) {
+export function usageLimitResumer(options: { registry: UsageLimitRegistry; inbox: Inbox; clock?: () => number; graceMs?: number }) {
   const { registry, inbox, clock = Date.now, graceMs = defaultGraceMs } = options;
   async function tick() {
     for (const { id: thread } of registry.storedThreads({ status: ["active", "idle"] })) {

@@ -43,6 +43,8 @@ import {
 } from "./review-model.ts";
 import type { StartRequest } from "./start-request.ts";
 
+type ReviewRegistry = Pick<Registry, "agent" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "releaseReports" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "storedThreads" | "thread">;
+
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
 /** How long an agent may take to answer, or the builder to push what it says it fixed, before the loop asks the person. */
@@ -56,7 +58,7 @@ const checkMs = 60 * 60_000;
 const deployMs = 30 * 60_000;
 
 export interface ReviewDeps {
-  registry: Registry;
+  registry: ReviewRegistry;
   github: GitHub;
   inbox: Inbox;
   /** What the agent did since the loop's last message to it, read once per step (agent-conversation.ts). */

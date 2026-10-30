@@ -11,6 +11,8 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 
+type AgentConversationRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "setClaudeMessage">;
+
 /** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
 export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };
 export interface Conversation {
@@ -41,7 +43,7 @@ function harnessConversation(view: ConversationView): Conversation {
   };
 }
 
-function claudeConversation(registry: Registry, thread: ThreadId, entries: readonly ClaudeEntry[]): Conversation {
+function claudeConversation(registry: AgentConversationRegistry, thread: ThreadId, entries: readonly ClaudeEntry[]): Conversation {
   // Only a prompt the transcript says the person typed needs the messages Nexus typed, which take a query.
   let sender: PromptSenders | undefined;
   return {
@@ -52,7 +54,7 @@ function claudeConversation(registry: Registry, thread: ThreadId, entries: reado
 }
 
 /** Reads a thread's conversation. A bare thread has none. */
-export function agentConversation(registry: Registry, view: (t: Pick<Thread, "id">) => Promise<ConversationView>): (t: Thread) => Promise<Conversation> {
+export function agentConversation(registry: AgentConversationRegistry, view: (t: Pick<Thread, "id">) => Promise<ConversationView>): (t: Thread) => Promise<Conversation> {
   return async (t) => {
     switch (registry.agent(t).kind) {
       case "claude": return claudeConversation(registry, t.id, registry.claudeEntries(t.id));
@@ -86,7 +88,7 @@ export function heard(t: Pick<Thread, "lastReplyAt" | "working">, entries: reado
 /** What the review loop learns of an agent since `since` in one read: its replies and model failure, and `heard`'s turn facts. */
 export type AgentState = ReturnType<typeof heard> & { replies: string[]; failure: string | null };
 
-export function agentReader(registry: Registry, harness: Pick<HarnessHost, "watch">) {
+export function agentReader(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">) {
   const read = agentConversation(registry, harnessView(harness));
   return {
     /**

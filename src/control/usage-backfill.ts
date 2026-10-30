@@ -14,6 +14,8 @@ import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
 import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 
+type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdUsageBackfill" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseUsageBackfill" | "reserved" | "startUsageBackfill" | "stopUsageBackfill" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitUsageBackfill">;
+
 export interface UsageBackfillJob {
   status(): UsageBackfill;
   /** The dry run: each archived thread a start would read, with why a run before skipped it. */
@@ -28,7 +30,7 @@ export interface UsageBackfillJob {
 const minutes = (ms: number) => `${ms / 60_000} minutes`;
 
 export function usageBackfill(options: {
-  registry: Registry;
+  registry: UsageBackfillRegistry;
   counter: Pick<UsageCounter, "readWhole">;
   /** Asks the node's loop for a pass, so the wake or pause of a pylon goes out at once. */
   wake(node: NodeName): void;

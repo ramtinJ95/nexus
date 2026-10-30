@@ -27,6 +27,8 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Watch } from "./conversation-view.ts";
 
+type ClaudeConversationRegistry = Pick<Registry, "appendClaudeRead" | "claudeEntries" | "claudeTranscript" | "claudeWorker" | "eventBatch" | "newestEvent" | "node" | "pylon" | "questions" | "setWaitingAsks" | "thread">;
+
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
   view(t: Thread): ClaudeConversation;
@@ -76,7 +78,7 @@ async function readWaitingAsks(open: OpenPipe): Promise<WaitingAsk[]> {
 /** One refresh takes this many reads at most. A transcript with more to read goes on in the refresh after it. */
 const maxReadsPerRefresh = 16;
 
-export function claudeConversations(options: { registry: Registry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>; workingReadMs?: number; followMs?: number }): ClaudeConversations {
+export function claudeConversations(options: { registry: ClaudeConversationRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>; workingReadMs?: number; followMs?: number }): ClaudeConversations {
   const { registry, probes, workingReadMs = 2_000, followMs = 1_000 } = options;
   const readers = new Map<ThreadId, Reader>();
   let closed = false;
