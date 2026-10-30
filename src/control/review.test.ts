@@ -10,7 +10,7 @@ import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
-import { humanLabel, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review, type ReviewDeps } from "./review.ts";
+import { humanLabel, landable, phaseNote, reviewerCaller, reviewLoop, reviewPrefix, type Review, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -2534,6 +2534,80 @@ test("a review held after an approval for a conflict the builder did not rebase,
   await gave.poll();
   assert.deepEqual(g.review().phase, { kind: "approved" });
   assert.deepEqual(g.review().rounds[1]!.check, { passed: true, output: "ok" }, "the check runs at the new head");
+});
+
+/** Ends three turns of `id` in a row without the block the loop waits for. */
+const silent = async (f: ReturnType<typeof fixture>, id: ThreadId) => {
+  for (let i = 0; i < 3; i++) { f.reply(id, "I looked and it seems fine."); await f.loop().poll(); }
+};
+const holds: { kind: string; hold(f: ReturnType<typeof fixture>): Promise<void>; reasons: string[]; landable: boolean; round: boolean }[] = [
+  { kind: "rounds", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], landable: false, round: false, async hold(f) {
+    await f.loop().start(f.builder, { land: null, rounds: 1 });
+    await f.loop().poll();
+    f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+    await f.loop().poll();
+  } },
+  { kind: "gate", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"], landable: false, round: true, async hold(f) {
+    f.check = { kind: "done", passed: false, output: "1 test failed" };
+    await approved(f, null);
+    f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "rejected", reason: "The test is flaky." }]));
+    await f.loop().poll();
+  } },
+  { kind: "no verdict from the check", reasons: [`.nexus/check could not run at ${head1}.`, "The check's output:\nno .nexus/check"], landable: false, round: false, async hold(f) {
+    f.check = { kind: "unrunnable", output: "no .nexus/check" };
+    await approved(f, null);
+  } },
+  { kind: "no verdict from the live check", reasons: [`The live check gave no verdict within 60 minutes at ${head1}.`, "No node could take its verify pylon: every node is offline"], landable: true, round: true, async hold(f) {
+    f.verifies = true;
+    f.refuse = "every node is offline";
+    await approved(f, null);
+    f.tick(61 * 60_000);
+    await f.loop().poll();
+  } },
+  { kind: "agent while reviewing", reasons: ["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."], landable: false, round: false, async hold(f) {
+    await f.loop().start(f.builder, { land: null });
+    await f.loop().poll();
+    await silent(f, f.review().reviewer);
+  } },
+  { kind: "agent while fixing a gate finding", reasons: ["The builder ended 3 turns in a row without an answer Nexus could read, in round 1."], landable: false, round: true, async hold(f) {
+    f.check = { kind: "done", passed: false, output: "1 test failed" };
+    await approved(f, null);
+    await silent(f, f.builder);
+  } },
+  { kind: "policy", reasons: reservedHolds, landable: true, round: true, async hold(f) {
+    f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+    await approved(f, "nLAPTOP");
+  } },
+  { kind: "thread while reviewing", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: false, round: false, async hold(f) {
+    await f.loop().start(f.builder, { land: null });
+    await f.loop().poll();
+    f.registry.setThreadStatus(f.review().reviewer, "idle");
+    await f.loop().poll();
+    f.registry.setThreadStatus(f.review().reviewer, "active");
+  } },
+  { kind: "thread while verifying", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: true, round: true, async hold(f) {
+    f.verifies = true;
+    f.refuse = "every node is offline";
+    await approved(f, null);
+    f.registry.setThreadStatus(f.review().reviewer, "idle");
+    await f.loop().poll();
+    f.registry.setThreadStatus(f.review().reviewer, "active");
+  } },
+];
+
+test("each kind of hold says whether nexus land takes the review and whether a head pushed after it gets a round", async (t) => {
+  for (const { kind, hold, reasons, landable: lands, round } of holds) {
+    const f = fixture(t);
+    await hold(f);
+    const r = f.review();
+    assert.equal(r.phase.kind, "needs-person", kind);
+    assert.deepEqual((r.phase as { reasons: string[] }).reasons, reasons, kind);
+    assert.equal(landable(r), lands, kind);
+    pushed(f, head2);
+    await f.loop().poll();
+    assert.equal(f.review().rounds.length, r.rounds.length + (round ? 1 : 0), `${kind}: ${round ? "a new round" : "no round"} for the pushed head`);
+    assert.equal(f.review().phase.kind, round ? "reviewing" : "needs-person", kind);
+  }
 });
 
 test("a review that merged and is held over its deploy stays as it is whatever the PR watch reads", async (t) => {
