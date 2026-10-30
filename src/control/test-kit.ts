@@ -6,11 +6,12 @@ import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import { testObservation } from "../test-kit.ts";
 import { newPylonRecord, type PylonRecord } from "../tick.ts";
-import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
+import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { RemoteProject } from "./project.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { PullRequest } from "./github.ts";
-import { openRegistry, type Registry, type StoredPylon, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type Registry } from "./registry.ts";
+import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Review } from "./review-model.ts";
 
 export const testNode = "rj-firebat" as NodeName;

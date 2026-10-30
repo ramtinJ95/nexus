@@ -22,7 +22,8 @@ import { claudeFrames, viewFrames, type Frames, type Watch } from "./conversatio
 import { HttpError } from "./http-error.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import type { Planning } from "./planning.ts";
-import type { Registry, Thread } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import type { Sent, ThreadDetail } from "./wire.ts";
 
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */

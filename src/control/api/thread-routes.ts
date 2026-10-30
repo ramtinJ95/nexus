@@ -3,8 +3,9 @@
  */
 import { z } from "zod";
 import type { Planning } from "../planning.ts";
-import type { ProjectId } from "../../ids.ts";
-import type { StartKey, Thread, ThreadId } from "../registry.ts";
+import type { ProjectId, ThreadId } from "../../ids.ts";
+import type { StartKey } from "../start-request.ts";
+import type { Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { observedPylon } from "../observed.ts";
 import { queuedView, type QueuedThread, type ThreadQueue } from "../queue.ts";

@@ -15,7 +15,8 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { listsRunning } from "./observed.ts";
-import type { ClaudeWorker, Registry, Thread } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { ClaudeWorker, Thread } from "./thread-store.ts";
 
 /** What the launch reads of the node's observe link, live: loop.ts's `Link` satisfies it. */
 export interface LaunchLink {

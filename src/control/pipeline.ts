@@ -11,11 +11,11 @@
 import { randomBytes } from "node:crypto";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { singleFlight } from "../single-flight.ts";
-import type { ProjectId } from "../ids.ts";
+import type { ProjectId, ThreadId } from "../ids.ts";
 import { HttpError } from "./http-error.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { liveNote, phaseNote } from "./review-model.ts";
-import type { Registry, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
 import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";

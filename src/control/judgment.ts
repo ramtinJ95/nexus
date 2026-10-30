@@ -19,7 +19,7 @@ import { judgmentPrefix, latest, mint, roleOf } from "../agent-protocol.ts";
 import type { ConversationId, HarnessHost } from "../harness/host.ts";
 import type { ThreadSetup } from "./templates.ts";
 import { liveHashOf } from "../spawn.ts";
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import { retryRefusal } from "../reconcile.ts";
@@ -27,8 +27,8 @@ import { singleFlight } from "../single-flight.ts";
 import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";
 import { gib, refusals, weighNodes } from "./placement.ts";
-import type { Weighed } from "./thread-store.ts";
-import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
+import type { StoredPylon, Thread, Weighed } from "./thread-store.ts";
+import type { Registry } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
 /** A judgment as `nexus show` and the thread page show it. */

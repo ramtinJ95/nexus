@@ -7,7 +7,7 @@ import type { TurnGate } from "./drain.ts";
 import { pipeline } from "./pipeline.ts";
 import { planning } from "./planning.ts";
 import { threadQueue } from "./queue.ts";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { threadStarter } from "./threads.ts";
 
 export function threadServices(options: Parameters<typeof threadStarter>[0] & {

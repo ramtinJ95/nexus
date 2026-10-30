@@ -3,14 +3,15 @@
  */
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
-import type { TailnetNodeId } from "../../ids.ts";
+import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { ClaudeConversations } from "../claude-conversation.ts";
 import type { liveStreams } from "../dashboard/live-frames.ts";
 import type { TurnGate } from "../drain.ts";
 import { HttpError } from "../http-error.ts";
-import type { Registry, StartKey, Thread, ThreadId } from "../registry.ts";
+import type { Registry } from "../registry.ts";
+import type { Thread } from "../thread-store.ts";
 import type { ThreadAgents, ThreadHarness } from "../thread-agent.ts";
-import type { StartRequest } from "../start-request.ts";
+import type { StartKey, StartRequest } from "../start-request.ts";
 import type { Access } from "./access.ts";
 import type { PylonAccess } from "./pylon-access.ts";
 import type { EventStreams } from "./sse.ts";

@@ -17,8 +17,9 @@ import { singleFlight } from "../single-flight.ts";
 import { failureMessage } from "../reconcile.ts";
 import { jobOutcome, submitJob } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
-import type { NodeRecord, RecordedImage, Registry } from "./registry.ts";
-import type { ImageOperation, ImageStep, Outcome } from "./image-store.ts";
+import type { Registry } from "./registry.ts";
+import type { NodeRecord } from "./node-store.ts";
+import type { ImageOperation, ImageStep, Outcome, RecordedImage } from "./image-store.ts";
 
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 export type ImageEntry = RecordedImage & { nodes: NodeName[] };

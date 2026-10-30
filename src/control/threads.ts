@@ -5,15 +5,15 @@ import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type
 import { bootSecrets, effectiveAllowedHosts, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, type BootInputs, type RepoInit } from "../spawn.ts";
-import type { ImageId, ProjectId, TemplateId } from "../ids.ts";
+import type { ImageId, ProjectId, TemplateId, ThreadId } from "../ids.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
 import { placeAuto, placeNear } from "./placement.ts";
-import type { Placement } from "./thread-store.ts";
+import type { Placement, Thread } from "./thread-store.ts";
 import { pylonLive } from "./live.ts";
-import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
-import type { StartRequest } from "./start-request.ts";
+import type { Registry } from "./registry.ts";
+import type { StartKey, StartRequest } from "./start-request.ts";
 
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });

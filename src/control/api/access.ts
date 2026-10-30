@@ -2,9 +2,10 @@
  * What every route asks of the caller and the thread it names, over the registry: the thread once it has what
  * the route needs, and whether a person or a deployer calls.
  */
-import type { NodeName, TailnetNodeId } from "../../ids.ts";
+import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { QueuedRecord } from "../queue-store.ts";
-import type { Registry, Thread, ThreadId } from "../registry.ts";
+import type { Registry } from "../registry.ts";
+import type { Thread } from "../thread-store.ts";
 import type { ThreadStatus } from "../../reconcile.ts";
 import { HttpError } from "../http-error.ts";
 import { answerRefusal, type AnswerRefusal, type Question } from "../questions.ts";

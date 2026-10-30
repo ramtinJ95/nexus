@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Inbox } from "./inbox.ts";
 import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./github.ts";
-import type { Registry, StoredThread, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { StoredThread, Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 import type { PrWatchState } from "./pr-watch-store.ts";
 import { singleFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "../agent-protocol.ts";

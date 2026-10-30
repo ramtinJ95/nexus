@@ -13,7 +13,9 @@ import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
 import { pushedBranches } from "./pr-watch-model.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 import type { Nudge } from "./nudge-store.ts";
 
 const text = `${nudgePrefix}

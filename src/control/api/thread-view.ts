@@ -1,7 +1,8 @@
 /**
  * What the API and the dashboard show of a thread: its row, its detail, its pylon's state and its conversation.
  */
-import type { Preview, Registry, Thread } from "../registry.ts";
+import type { Registry } from "../registry.ts";
+import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadAgents } from "../thread-agent.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import { actualState, desiredPhase, retryRefusal } from "../../reconcile.ts";

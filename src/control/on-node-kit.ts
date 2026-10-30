@@ -25,7 +25,8 @@ import { localApiWhois } from "../tailscale.ts";
 import { callText } from "../test-kit.ts";
 import type { ThreadDetail } from "./wire.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
-import { openRegistry, type PortRange } from "./registry.ts";
+import { openRegistry } from "./registry.ts";
+import type { PortRange } from "./thread-store.ts";
 
 /**
  * Reads the probe's config named by argv[2] and refuses to go on unless the probe runs pylon-vm, holds `image` (the

@@ -7,7 +7,9 @@ import type { ConversationView } from "@earendil-works/pi-durable";
 import { errorStop, type ClaudeEntry } from "../claude-transcript.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { promptSenders, type PromptSenders } from "./inbox.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 
 /** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
 export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };

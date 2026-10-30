@@ -19,15 +19,7 @@ import { nodeStore } from "./node-store.ts";
 import { projectStore } from "./project-store.ts";
 import { imageStore } from "./image-store.ts";
 import { openDb } from "./db.ts";
-import type { StartKey } from "./start-request.ts";
-import type { ThreadId } from "../ids.ts";
 import { threadStore, type ThreadParticipant } from "./thread-store.ts";
-
-// Temporary: ThreadId moved to ids.ts, StartKey to start-request.ts, NodeRecord, JoinedNode and RecordedImage to their stores, and the thread core's types to thread-store.ts, and E1 deletes these re-exports.
-export type { StartKey, ThreadId };
-export type { JoinedNode, NodeRecord } from "./node-store.ts";
-export type { RecordedImage } from "./image-store.ts";
-export type { ClaudeSent, ClaudeWorker, Output, Placement, PortRange, Preview, Room, Session, StoredPylon, StoredThread, Thread, ThreadAgent, Weighed } from "./thread-store.ts";
 
 export type Registry = ReturnType<typeof openRegistry>;
 

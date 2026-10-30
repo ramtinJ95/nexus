@@ -19,11 +19,12 @@ import { readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConve
 import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-contract.ts";
 import { followEvents } from "./follow-events.ts";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
-import type { NodeName, PylonId } from "../ids.ts";
+import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import type { Watch } from "./conversation-view.ts";
 
 export interface ClaudeConversations {

@@ -4,7 +4,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
+import { openRegistry, type Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { usageCounter } from "./usage-counter.ts";
 import { tokenCount, usageFilter, utc } from "./usage.ts";
@@ -12,7 +13,7 @@ import type { AgentCall, Tokens } from "../agent-usage.ts";
 import { checkCaller, reviewerCaller, roleOf, verifyCaller } from "../agent-protocol.ts";
 import { processStream } from "../process-stream.ts";
 import type { ConversationId } from "../harness/host.ts";
-import type { ImageId, LiveHash, NodeName, ProjectId, PylonId } from "../ids.ts";
+import type { ImageId, LiveHash, NodeName, ProjectId, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningPylon, tempDir } from "../test-kit.ts";
 

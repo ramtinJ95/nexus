@@ -1,7 +1,6 @@
 /** Renders a node's page: what its probe reads of its host's health and its pylon processes. */
-import type { NodeName } from "../../ids.ts";
+import type { NodeName, ThreadId } from "../../ids.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
-import type { ThreadId } from "../registry.ts";
 import { gib } from "../placement.ts";
 import { utc } from "../usage.ts";
 import { Html, html, menu } from "./view.ts";

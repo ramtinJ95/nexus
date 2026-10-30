@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { OpenedSession, ThreadDetail, ThreadRow, Sent } from "../../control/wire.ts";
 import type { QueuedThread } from "../../control/queue.ts";
-import type { Preview, Thread } from "../../control/registry.ts";
+import type { Preview, Thread } from "../../control/thread-store.ts";
 import type { Changes, Diff, Listing } from "../../checkout-files.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError } from "../transport.ts";

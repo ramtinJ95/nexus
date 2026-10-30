@@ -13,13 +13,14 @@
  * have run something already. It is thrown away, and the check starts again in a fresh one.
  */
 import { checkCaller, verifyCaller } from "../agent-protocol.ts";
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { checkoutDir } from "../session-harness.ts";
 import { runningProbe } from "./observed.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import type { StartRequest } from "./start-request.ts";
 
 /** pylon-vm's 3 GiB floor for each of two inner pylons, and 2 GiB for the verify stack's control plane and probe. */

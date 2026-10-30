@@ -27,7 +27,8 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { pylonLive } from "./live.ts";
 import { claudeLaunch } from "./claude-launch.ts";
-import type { PortRange, Registry, StoredPylon, Thread } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
 /**

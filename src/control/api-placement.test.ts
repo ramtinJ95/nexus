@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import type { ProjectId } from "../ids.ts";
 import type { TemplateRecord } from "./templates.ts";
 import { stoppedPylon } from "../test-kit.ts";

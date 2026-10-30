@@ -3,8 +3,8 @@
  * its questions and its nudge.
  */
 import type { ThreadDetail } from "../wire.ts";
-import type { Thread, ThreadId } from "../registry.ts";
-import type { TailnetNodeId } from "../../ids.ts";
+import type { Thread } from "../thread-store.ts";
+import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, roundNote, roundsSpent, type Review } from "../review-model.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { heldBy } from "../policy.ts";

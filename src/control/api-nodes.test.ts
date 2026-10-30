@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadDetail } from "./wire.ts";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";

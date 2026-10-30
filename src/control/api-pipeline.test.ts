@@ -6,7 +6,7 @@ import type { Question } from "./questions.ts";
 import type { PipelineItem } from "./pipeline.ts";
 import { planningPrefix } from "../agent-protocol.ts";
 import type { QueuedThread } from "./queue.ts";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import type { ImageId, PylonId, TailnetNodeId } from "../ids.ts";
 import { node, laptop, phone, project, image, testApi, withImage, deployment, withQueue } from "./api-test-kit.ts";
 

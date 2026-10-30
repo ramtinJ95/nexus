@@ -9,7 +9,8 @@ import type { TailnetNodeId } from "../ids.ts";
 import { nodeNameSchema } from "../protocol/fields.ts";
 import { digestPattern } from "../deploy/model.ts";
 import { HttpError } from "./http-error.ts";
-import type { JoinedNode, Registry } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { JoinedNode } from "./node-store.ts";
 
 export const joinTokenTtlMs = 60 * 60_000;
 /** Not strict, so a name or node ID in the body is dropped rather than read. */

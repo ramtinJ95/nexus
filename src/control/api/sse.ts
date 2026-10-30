@@ -3,7 +3,9 @@
  */
 import type { ServerResponse } from "node:http";
 import type { Frames, Watch } from "../conversation-view.ts";
-import type { Registry, Thread, ThreadId } from "../registry.ts";
+import type { Registry } from "../registry.ts";
+import type { Thread } from "../thread-store.ts";
+import type { ThreadId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 
 type EventBatch = ReturnType<Registry["eventBatch"]>;

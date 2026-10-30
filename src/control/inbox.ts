@@ -7,12 +7,13 @@
 import { createHash } from "node:crypto";
 import { senderPrefixes, type Sender } from "../agent-protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./observed.ts";
-import type { ClaudeSent, Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { ClaudeSent, Thread } from "./thread-store.ts";
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
 export interface AutomatedMessage { id: string; text: string; sender: Sender }

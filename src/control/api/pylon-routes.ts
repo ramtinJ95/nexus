@@ -3,7 +3,7 @@
  */
 import { z } from "zod";
 import type { OpenedSession } from "../wire.ts";
-import type { PortRange, Preview, Thread } from "../registry.ts";
+import type { PortRange, Preview, Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { focusScript } from "../../sessions.ts";
 import { checkoutDir, sessionHarnessSchema } from "../../session-harness.ts";

@@ -21,7 +21,9 @@ import { HttpError } from "./http-error.ts";
 import type { Pipeline } from "./pipeline.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 import type { Proposal, Question } from "./questions.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 
 export const planFence = "nexus-plan";
 export const acceptOption = "accept";

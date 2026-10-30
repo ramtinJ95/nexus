@@ -33,7 +33,9 @@ import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, watchStopped } from "./pr-watch-model.ts";
-import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadId } from "../ids.ts";
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, checkOutput, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
   landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, roundsSpent, settledKinds, verdictSchema,

@@ -3,7 +3,7 @@ import { reportSchema } from "./releases.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { turnGate } from "./drain.ts";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { releaseOutcome, reportStates, type ReleaseReport } from "../deploy/model.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";

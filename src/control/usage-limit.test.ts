@@ -1,12 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { ThreadId } from "./registry.ts";
 import { testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageLimitPrefix } from "../agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
+import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { runningPylon, testCapacity, testObservation, watch } from "../test-kit.ts";
 

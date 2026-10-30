@@ -7,7 +7,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import type { Judgment } from "./judgment-store.ts";
-import type { Thread } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { liveHashOf } from "../spawn.ts";
 import { processStream } from "../process-stream.ts";
 import { runningPylon, testCapacity, testObservation } from "../test-kit.ts";

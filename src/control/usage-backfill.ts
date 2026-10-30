@@ -4,12 +4,13 @@
  * the pylon pause again before it wakes the next. Each step reads the run from the registry and does what is left of
  * it, so a control plane that restarts or deploys mid-run goes on where it stopped.
  */
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { observedPylon } from "./observed.ts";
 import { gib, roomLeft, uncounted } from "./placement.ts";
-import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
 import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 

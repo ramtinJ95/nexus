@@ -11,12 +11,13 @@
 import { startedByNexus } from "../agent-protocol.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs } from "../spawn.ts";
-import type { ProjectId } from "../ids.ts";
+import type { ProjectId, ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
-import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { Thread } from "./thread-store.ts";
 import { checkStart, newThreadId, resourcesOf } from "./threads.ts";
-import type { StartRequest } from "./start-request.ts";
+import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 
 /** What one predecessor means for the queued thread. */

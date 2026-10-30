@@ -3,7 +3,9 @@ import type { NodeName, PylonId } from "../ids.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
-import type { NodeRecord, Placement, Registry, Room, StoredPylon, Weighed } from "./registry.ts";
+import type { Registry } from "./registry.ts";
+import type { NodeRecord } from "./node-store.ts";
+import type { Placement, Room, StoredPylon, Weighed } from "./thread-store.ts";
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 

@@ -1,7 +1,7 @@
 /** Renders a conversation's runs and blocks, the state bar, the composer and a Claude worker's questions. */
 import type { LiveState } from "@earendil-works/pi-durable";
 import type { ThreadDetail } from "../wire.ts";
-import type { Thread, ThreadAgent } from "../registry.ts";
+import type { Thread, ThreadAgent } from "../thread-store.ts";
 import type { ClaudeConversation } from "../../claude-transcript.ts";
 import type { AgentView } from "../conversation-view.ts";
 import { clock } from "./elapsed.ts";
