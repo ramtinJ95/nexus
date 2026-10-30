@@ -40,9 +40,14 @@ import type { NodeCapacity, NodeHealth } from "../protocol.ts";
 import { sessionHarnessSchema } from "../sessions.ts";
 import type { WebSocket } from "ws";
 import { attachTerminal, processTty } from "./attach.ts";
-import { call, CliError, exitCodes, follow, isMissingRoute, upgrade, type Endpoint, type HostPort } from "./transport.ts";
+import { call, CliError, exitCodes, follow, upgrade, type Endpoint, type HostPort } from "./transport.ts";
+import { version } from "../version.ts";
 
-const version = "0.52.0";
+/**
+ * The oldest control plane this CLI reads, raised when the CLI starts relying on something newer. 0.53.0 is the first
+ * that reports its version, so one that reports none is older.
+ */
+const minControlVersion = "0.53.0";
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
@@ -227,13 +232,10 @@ function backfillPlanText(plan: readonly BackfillPlanRow[]): string {
     ...lines.flatMap((line, i) => plan[i]!.reason === null ? [line] : [line, `  skipped before: ${plan[i]!.reason}`])].join("\n");
 }
 
-/** A control plane older than 0.33.0 reports no backfill. */
-type ReportedUsage = Omit<UsageReport, "backfill"> & Partial<Pick<UsageReport, "backfill">>;
-
-function usageText(r: ReportedUsage): string {
+function usageText(r: UsageReport): string {
   const rows = (keyHead: string, of: readonly (UsageTotals & { key: string })[]) =>
     table([[keyHead, ...tokenColumns.map((col) => col.label), "Calls"], ...of.map((row) => [row.key, ...tokenColumns.map((col) => tokenCount(row[col.field])), String(row.calls)])]);
-  const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.${r.backfill === undefined ? "" : `\n${backfillText(r.backfill)}`}`;
+  const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.\n${backfillText(r.backfill)}`;
   if (r.total.calls === 0) return `${head}\nNo model calls were counted in this period.`;
   return [head, rows("", [{ key: "Total", ...r.total }]), ...breakdowns.flatMap((b) => {
     const { title, key } = breakdownLook[b];
@@ -241,8 +243,6 @@ function usageText(r: ReportedUsage): string {
   })].join("\n\n");
 }
 
-/** Why the preview cannot answer, such as its service failed, or null. A control plane older than `Preview.failed` sends none, which is no failure. */
-const failureOf = (p: Preview): string | null => p.failed ?? null;
 const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}...`;
 const contentText = (content: string | readonly (TextContent | ImageContent)[]) => typeof content === "string" ? content
   : content.map((part) => part.type === "text" ? part.text : `[${part.mimeType} image]`).join("");
@@ -324,8 +324,7 @@ function claudeText(c: ClaudeConversation): string {
     ...lines,
     ...queuedOf(c.entries).map((q) => `(queued) > ${q.text ?? ""}`),
     ...c.working ? ["(Claude is working)"] : [],
-    // A control plane older than `usageLimit` sends none.
-    ...c.usageLimit == null ? [] : [`(Claude ${usageLimitText(c.usageLimit, Date.now())}. Send it "continue" after the reset to resume)`],
+    ...c.usageLimit === null ? [] : [`(Claude ${usageLimitText(c.usageLimit, Date.now())}. Send it "continue" after the reset to resume)`],
   ];
   if (parts.length > 0) return parts.join("\n\n");
   return c.readAt === null ? "Claude's transcript has not been read yet. It is read while the pylon runs." : "Claude has not written a transcript yet.";
@@ -341,8 +340,7 @@ function capacityText(c: Partial<NodeCapacity>, overcommitted: boolean): string 
 
 /**
  * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry,
- * 1 orphaned (pylon-x)`. Empty
- * for a node with no pylons, or never observed, or from a control plane older than 0.25.0, which sends no `pylons`.
+ * 1 orphaned (pylon-x)`. Empty for a node with no pylons, or never observed.
  */
 function pylonsText(p: NodePylons | null): string {
   if (p === null) return "";
@@ -350,8 +348,7 @@ function pylonsText(p: NodePylons | null): string {
     ...p.up.pylons === 0 ? [] : [`${p.up.pylons} up holding ${p.up.cpus} CPUs and ${gib(p.up.memoryGiB)} GiB`],
     ...p.paused.pylons === 0 ? [] : [`${p.paused.pylons} paused needing ${gib(p.paused.memoryGiB)} GiB to wake`],
     ...p.archived.pylons === 0 ? [] : [`${p.archived.pylons} archived`],
-    // A control plane older than `crashed` counts such pylons as up.
-    ...(p.crashed?.pylons ?? 0) === 0 ? [] : [`${p.crashed.pylons} crashed needing ${gib(p.crashed.memoryGiB)} GiB to retry`],
+    ...p.crashed.pylons === 0 ? [] : [`${p.crashed.pylons} crashed needing ${gib(p.crashed.memoryGiB)} GiB to retry`],
     ...p.orphaned.length === 0 ? [] : [`${p.orphaned.length} orphaned (${p.orphaned.join(", ")})`],
   ].join(", ");
 }
@@ -386,8 +383,7 @@ function reviewText(r: Review): string {
     ...note === null ? [] : [note],
     ...live?.kind === "ran" && !live.passed ? live.output.split("\n").slice(-20).map((line) => `  ${line}`) : [],
     ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],
-    // A control plane older than waivers sends none.
-    ...r.waiver == null ? [] : [`waived by ${r.waiver.by} at ${r.waiver.head}, ${new Date(r.waiver.at).toISOString()}:`, ...r.waiver.holds.map((hold) => `  ${hold}`)],
+    ...r.waiver === null ? [] : [`waived by ${r.waiver.by} at ${r.waiver.head}, ${new Date(r.waiver.at).toISOString()}:`, ...r.waiver.holds.map((hold) => `  ${hold}`)],
   ].join("\n");
 }
 
@@ -416,47 +412,38 @@ function judgmentText(j: ThreadDetail["judgments"][number]): string {
 
 const autoReviews = { off: null, review: { land: false }, land: { land: true } } as const;
 const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart: true } } as const;
-/** A control plane older than `Project.pipeline` sends none, and has no pipeline. */
 const pipelineText = (p: Project) => p.pipeline == null ? "pipeline off" : p.pipeline.autoStart ? "pipeline starts items" : "pipeline waits for approval";
-/** A control plane older than `Project.autoReview` sends none, and reviews nothing on its own. */
 const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" : p.autoReview.land ? `auto review and land, for ${p.autoReview.enabledBy}` : `auto review, set by ${p.autoReview.enabledBy}`;
-
-/** A control plane older than `Thread.working` sends none. */
-const working = (t: Thread) => t.working ?? (t.agentTurnRunning || t.sessionTurnRunning === true);
 
 function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions, judgments, planning }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
     `project: ${t.project}`,
-    // A control plane older than 0.40.0 sends no planning.
-    ...planning === true ? ["planning: its proposed items become questions you accept or reject"] : [],
+    ...planning ? ["planning: its proposed items become questions you accept or reject"] : [],
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
-    `status: ${t.status}${working(t) ? ", agent working" : ""}`,
+    `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
     ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],
-    // A control plane older than the size in thread detail sends none.
-    ...p.resources === undefined ? [] : [`size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`],
+    `size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`,
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
     ...t.setup === undefined ? [] : [`setup: ${setupText(t.setup)}`],
     ...(p.grantsOutdated ? ["grants: older than project; start a new thread to apply current grants (archive/unarchive keeps these grants)"] : []),
     ...p.failed === null ? [] : [`failed: ${p.failed.replaceAll("\n", "\n  ")}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
-    // A session in no pane is closed by its ID. A control plane older than `Session.state` sends none, and every session it lists runs.
+    // A session in no pane is closed by its ID.
     ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "paused" ? `paused (resumes on ${t.status === "archived" ? "unarchive" : "wake"})`
       : s.state === "failed" ? `failed: ${s.message}` : s.status}`),
-    ...previews.map((v) => `preview: ${v.service} at ${v.url}${failureOf(v) !== null ? `, not ready: ${failureOf(v)}` : v.ready ? "" : ", not ready"}`),
+    ...previews.map((v) => `preview: ${v.service} at ${v.url}${v.failed !== null ? `, not ready: ${v.failed}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
     ...(prWatch?.enabled ? [prWatch.stopped ? "PR watch: stopped (10 comment-only wakes)" : "PR watch: on", ...(prWatch.error ? [prWatch.error] : [])] : ["PR watch: off (no control-plane GitHub token configured)"]),
-    ...(pullRequests ?? []).map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
+    ...pullRequests.map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
     ...review == null ? [] : [reviewText(review)],
-    // A control plane older than 0.35.0 sends no questions.
-    ...(questions ?? []).map(questionText),
-    // A control plane older than 0.39.0 sends no judgments.
-    ...(judgments ?? []).map(judgmentText),
+    ...questions.map(questionText),
+    ...judgments.map(judgmentText),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),
   ].join("\n");
 }
@@ -465,7 +452,7 @@ function portsText(ports: ThreadDetail["ports"], id: string): string {
   if (ports === null) return "The pylon's listening ports could not be read.";
   if (ports.length === 0) return "No listening ports.";
   return [
-    table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${failureOf(l.preview) !== null ? ` (not ready: ${failureOf(l.preview)})` : l.preview.ready ? "" : " (not served yet)"}`])),
+    table(ports.map((l) => [String(l.port), l.service ?? "-", l.preview === null ? "-" : `${l.preview.url}${l.preview.failed !== null ? ` (not ready: ${l.preview.failed})` : l.preview.ready ? "" : " (not served yet)"}`])),
     ...ports.some((l) => l.preview === null) ? [`\`nexus preview ${id} <port>\` publishes a port.`] : [],
   ].join("\n");
 }
@@ -544,7 +531,7 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
   return pollUntil({
     deadlineMs: waitMs, everyMs: waitPollMs,
     timedOut: () => {
-      const why = preview && failureOf(preview) !== null ? `, because ${failureOf(preview)}` : "";
+      const why = preview && preview.failed !== null ? `, because ${preview.failed}` : "";
       return new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s${why}. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
     },
   }, async () => {
@@ -557,9 +544,8 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
 /**
  * Sends a request that needs the pylon running, such as an unlink or a session open. Each try is human activity, so
  * the first wakes a paused pylon, and a 409 that waiting fixes is tried again once a second until the pylon runs,
- * unless the thread is archived or deleted. Any other 409, such as Claude waiting at a prompt, fails at once. A
- * control plane older than error codes sends none, so a 409 without one is tried again too. `undone` says what the
- * failure after the wait leaves undone.
+ * unless the thread is archived or deleted. Any other 409, such as Claude waiting at a prompt, fails at once.
+ * `undone` says what the failure after the wait leaves undone.
  */
 async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undone: string): Promise<T> {
   let refused: CliError;
@@ -570,7 +556,7 @@ async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undo
     try {
       return await send();
     } catch (err) {
-      if (!(err instanceof CliError) || err.kind !== "conflict" || (err.code !== null && !waitedOut.has(err.code))) throw err;
+      if (!(err instanceof CliError) || err.kind !== "conflict" || err.code === null || !waitedOut.has(err.code)) throw err;
       const { status } = (await api("GET", thread(id)) as ThreadDetail).thread;
       if (status === "archived" || status === "deleted") throw err;
       refused = err;
@@ -627,17 +613,7 @@ function itemText(i: PipelineItem): string {
 /** "A", "A and B", or "A, B and C". */
 const listed = (names: readonly string[]) => names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
-/** A control plane older than queued threads has no such route, so it has none queued. */
-async function queuedThreads(api: Api, query: string): Promise<QueuedThread[]> {
-  try {
-    return await api("GET", `/v1/queued${query}`) as QueuedThread[];
-  } catch (err) {
-    if (isMissingRoute(err)) return [];
-    throw err;
-  }
-}
-
-const threadRow = (t: ThreadRow) => [t.id, t.status, t.usageLimit !== undefined ? usageLimitText(t.usageLimit, Date.now()) : working(t) ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
+const threadRow = (t: ThreadRow) => [t.id, t.status, t.usageLimit !== undefined ? usageLimitText(t.usageLimit, Date.now()) : t.working ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
 
 /** The first line of a message, as the title of the thread it starts. */
 
@@ -799,7 +775,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   /** The thread as last polled, and its conversation as last streamed. */
   let detail: ThreadDetail | null = null;
   let streamed: View | null = null;
-  /** A Claude worker's transcript as streamed, or "none" when it does not stream, such as from an older control plane. */
+  /** A Claude worker's transcript as streamed, or "none" when it does not stream. */
   let transcript: Transcript | "none" | null = null;
   /** What of the transcript is printed, so each entry prints once across reconnects. */
   const claudePrinted = claudeFrames();
@@ -904,7 +880,6 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   /**
    * A dropped stream is opened again after 100 ms, doubling up to the poll interval, and from 100 ms again once a
    * frame arrives. A thread without a conversation, or a deleted one, refuses the stream, and never streams again.
-   * A control plane without the route for Claude transcripts is older than it, and streams nothing.
    */
   async function stream() {
     const claude = (await firstDetail.promise).claudeWorker !== undefined;
@@ -923,12 +898,6 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
         if (err instanceof CliError && err.kind === "conflict") {
           // A deleted thread's transcript is gone, and its poll still prints its state.
           if (claude) transcript = "none";
-          return;
-        }
-        if (claude && isMissingRoute(err)) {
-          transcript = "none";
-          emit({ type: "error", thread: id, kind: "failed", message: `The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${id}` }, `-- The control plane does not stream Claude transcripts. Upgrade it, or run nexus conversation ${id}`);
-          print();
           return;
         }
         failed("stream", err);
@@ -1025,10 +994,9 @@ function candidatesOf(host: string): URL[] {
   return controlPorts.map((url) => controlUrl(url.replace("{host}", host)));
 }
 
-function connectText(url: string, file: string, caller: Whoami | null): string {
+function connectText(url: string, file: string, caller: Whoami): string {
   const head = `Connected to ${url}, saved in ${file}.`;
   const overridden = process.env.NEXUS_URL ? [`NEXUS_URL is set, so it overrides ${file} until you unset it.`] : [];
-  if (caller === null) return [head, "This control plane allows this device, and is too old to say whether it may start threads or deploy. Upgrade it, as deploy/README.md describes, and run nexus connect again.", ...overridden].join("\n");
   const may = (yes: boolean, what: string) => `  ${yes ? "may" : "may not"} ${what}`;
   const admit = (why: string) => `To let it ${why}, run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit ${caller.node}`;
   return [
@@ -1054,23 +1022,25 @@ const commands: Readonly<Record<string, Command>> = {
       const tried: string[] = [];
       for (const url of candidatesOf(host!)) {
         const endpoint = { url, socks };
+        let health: unknown;
         try {
-          await call(endpoint, "GET", "/v1/health");
+          health = await call(endpoint, "GET", "/v1/health");
         } catch (err) {
           if (!(err instanceof CliError)) throw err;
-          // A control plane refuses health to a caller it does not allow, which whoami then names.
+          // A control plane refuses health to a caller it does not allow, which whoami then names. The first command it
+          // admits checks its version.
           if (err.status !== 403) {
             tried.push(`${url.origin}: ${(err as Error).message}`);
             continue;
           }
         }
-        let caller: Whoami | null;
+        if (health !== undefined) checkVersion(url, health);
+        let caller: Whoami;
         try {
           caller = await call(endpoint, "GET", "/v1/whoami") as Whoami;
         } catch (err) {
-          if (!(err instanceof CliError) || (err.status !== 404 && err.status !== 403)) throw err;
-          if (err.status === 403) throw new CliError("refused", `the control plane at ${url.origin} answers, but ${err.message}. Connect with the name the control plane lists in listen.hostnames, such as its full MagicDNS name`, 403);
-          caller = null;
+          if (!(err instanceof CliError) || err.status !== 403) throw err;
+          throw new CliError("refused", `the control plane at ${url.origin} answers, but ${err.message}. Connect with the name the control plane lists in listen.hostnames, such as its full MagicDNS name`, 403);
         }
         const saved = { ...config, url: url.origin, ...str(v, "socks") === undefined ? {} : { socks: str(v, "socks") } };
         await mkdir(dirname(file), { recursive: true });
@@ -1189,7 +1159,7 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, _, v) {
       const project = str(v, "project");
       const query = project === undefined ? "" : `?project=${encodeURIComponent(project)}`;
-      const queuing = queuedThreads(api, query).then((all) => all.filter((q) => v.all === true || q.status === "queued"));
+      const queuing = (api("GET", `/v1/queued${query}`) as Promise<QueuedThread[]>).then((all) => all.filter((q) => v.all === true || q.status === "queued"));
       if (v.queued === true) {
         const queued = await queuing;
         return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
@@ -1207,8 +1177,8 @@ const commands: Readonly<Record<string, Command>> = {
       try {
         d = await api("GET", thread(id!)) as ThreadDetail;
       } catch (err) {
-        // A queued thread has no row, which the thread route answers with a 409, and an older control plane with a 404.
-        if (!(err instanceof CliError) || (err.status !== 404 && err.status !== 409)) throw err;
+        // A queued thread has no row, which the thread route answers with a 409.
+        if (!(err instanceof CliError) || err.status !== 409) throw err;
         const q = await api("GET", `/v1/queued/${encodeURIComponent(id!)}`).catch(() => { throw err; }) as QueuedThread;
         return { json: q, text: queuedText(q) };
       }
@@ -1229,7 +1199,7 @@ const commands: Readonly<Record<string, Command>> = {
       const port = portArg(given!);
       const linked = await api("POST", `${thread(id!)}/previews`, { port }) as Preview;
       const preview = v.wait === true ? await served(api, id!, port) : linked;
-      return { json: preview, text: failureOf(preview) !== null ? `${preview.url} (not ready: ${failureOf(preview)})` : preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
+      return { json: preview, text: preview.failed !== null ? `${preview.url} (not ready: ${preview.failed})` : preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
     },
   },
   unpreview: {
@@ -1479,7 +1449,7 @@ const commands: Readonly<Record<string, Command>> = {
     async run(api, _, v) {
       const query = new URLSearchParams({ since: str(v, "since") ?? "7d" });
       for (const key of ["project", "by"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
-      const report = await api("GET", `/v1/usage?${query}`) as ReportedUsage;
+      const report = await api("GET", `/v1/usage?${query}`) as UsageReport;
       return { json: report, text: usageText(report) };
     },
   },
@@ -1548,6 +1518,27 @@ async function settings(v: Values): Promise<Endpoint> {
   return { url: controlUrl(url), socks: socksOf(v, config) };
 }
 
+const versionParts = (v: unknown) => typeof v === "string" ? /^(\d+)\.(\d+)\.(\d+)$/.exec(v)?.slice(1).map(Number) ?? null : null;
+
+/** Whether a version is `min` or later, by major, minor and patch. */
+function atLeast(parts: readonly number[], min: readonly number[]): boolean {
+  const i = parts.findIndex((n, j) => n !== min[j]);
+  return i === -1 || parts[i]! > min[i]!;
+}
+
+/** Refuses a control plane older than this CLI reads, by the version its health reply reports. */
+function checkVersion(url: URL, health: unknown): void {
+  const reported = (health as { version?: unknown } | null)?.version;
+  const parts = versionParts(reported);
+  if (parts !== null && atLeast(parts, versionParts(minControlVersion)!)) return;
+  throw new CliError("failed", `the control plane at ${url.origin} runs Nexus ${typeof reported === "string" ? reported : `older than ${minControlVersion}`}, and this CLI needs ${minControlVersion} or later. Upgrade it, as deploy/README.md describes`);
+}
+
+async function checked(endpoint: Endpoint): Promise<Endpoint> {
+  checkVersion(endpoint.url, await call(endpoint, "GET", "/v1/health"));
+  return endpoint;
+}
+
 function socksOf(v: Values, config: Config): HostPort | null {
   const socks = str(v, "socks") ?? env("NEXUS_SOCKS") ?? config.socks;
   return socks === undefined || socks === "none" ? null : hostPort(socks);
@@ -1607,7 +1598,7 @@ async function run(argv: readonly string[]): Promise<void> {
   }
   // Only once a command calls the API, since connect sets the URL rather than reading it.
   let target: Promise<Endpoint> | undefined;
-  const endpoint = () => target ??= settings(values);
+  const endpoint = () => target ??= settings(values).then(checked);
   const result = await command.run(async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs), positionals, values,
     async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path) });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
