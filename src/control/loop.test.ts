@@ -525,7 +525,7 @@ test("a retry and a wake boot the size the thread started with, though its proje
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
   await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
 
-  registry.updateProject({ ...registry.project(thread.project)!, resources: { cpus: 8, memoryGiB: 16, diskGiB: 80 } });
+  registry.editProject(thread.project, (p) => ({ ...p, resources: { cpus: 8, memoryGiB: 16, diskGiB: 80 } }));
   assert.equal(registry.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("the retry's spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
@@ -1523,7 +1523,7 @@ test("every new boot takes the configured git identity, but a checkpoint keeps i
   assert.ok(fresh.kind === "spawn");
   assert.deepEqual(fresh.boot.gitIdentity, gitIdentity);
   const override = { name: "Work Person", email: "work@example.com" };
-  registry.updateProject({ ...registry.project(thread.project)!, gitIdentity: override, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }], logins: ["claude"] });
+  registry.editProject(thread.project, (p) => ({ ...p, gitIdentity: override, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }], logins: ["claude"] }));
   assert.deepEqual(registry.pylon(thread.pylonId)!.boot.gitIdentity, gitIdentity, "a running pylon keeps its boot identity");
   registry.setThreadStatus(thread.id, "archived");
   await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
