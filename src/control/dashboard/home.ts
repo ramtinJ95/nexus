@@ -1,11 +1,12 @@
 /** Renders the home page: the inbox of what waits on the person, and every open thread. */
 import { desiredPhase } from "../../reconcile.ts";
 import { needsPerson } from "../attention.ts";
+import type { ThreadDetail } from "../wire.ts";
 import type { Registry, Thread } from "../registry.ts";
 import { cannotLand, type Review } from "../review-model.ts";
 import { heldBy } from "../policy.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
-import type { DashboardOptions, Context, Need } from "./context.ts";
+import type { Context, Need } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, newProjectButton, type Shell } from "./shell.ts";
@@ -66,7 +67,7 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
  * other attention that needs the person one for the thread. A new reply does not wait on the person, so it has none,
  * but it outranks a dialog in the terminal, which the session's own state says waits.
  */
-export function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail: DashboardOptions["detail"]): Need[] {
+export function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail: (thread: Thread) => ThreadDetail): Need[] {
   return c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
     const { attention } = c.row(t);
     const review = c.registry.review(t.id);

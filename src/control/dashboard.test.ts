@@ -1937,7 +1937,7 @@ test("dashboard pages answer only allowed callers under the API's own names", as
   assert.equal((await s.call("GET", "/", undefined, { host: "evil.example" })).status, 403);
   assert.equal((await s.call("GET", "/")).status, 200);
   // Pages are read-only. Only the JSON API changes state.
-  assert.equal((await s.call("POST", "/threads/new", {})).status, 404);
+  assert.equal((await s.call("POST", "/threads/new", {})).status, 405);
 });
 
 test("a job in flight shows on the thread page as its transition", async (t) => {

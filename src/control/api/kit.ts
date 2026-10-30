@@ -16,9 +16,10 @@ import type { PylonAccess } from "./pylon-access.ts";
 import type { EventStreams } from "./sse.ts";
 import type { ThreadViews } from "./thread-view.ts";
 
-/** A file is served as its bytes, everything else as JSON. */
+/** A file is served as its bytes, a page as its text under its own headers, everything else as JSON. */
 export type Reply =
-  | { status: number; body?: unknown; file?: never; stream?: never }
+  | { status: number; body?: unknown; headers?: never; file?: never; stream?: never }
+  | { status: number; headers: Record<string, string>; body: string; file?: never; stream?: never }
   | { status: number; file: Buffer; type: string; cache?: string; stream?: never }
   | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
 export type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;

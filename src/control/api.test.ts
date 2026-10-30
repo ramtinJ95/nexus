@@ -4211,7 +4211,7 @@ test("only a deployer reads a node's health, which the node's probe answers, and
   assert.equal((await off.call("GET", `/v1/nodes/${node}/health`)).status, 403, "with no deployers configured, nobody reads it");
 });
 
-test("the route table holds the routes it always has, and each path matches one route of its method, so their order is free", () => {
+test("the route table holds the routes it always has, and each path matches one route of its method, so their order is free except for /threads/new before the thread page", () => {
   const table = featureRoutes({} as ApiKit, {} as ApiOptions, async () => { throw new Error("unused"); });
   const described = table.map((entry) => {
     if (entry[0] === "GET") return `GET ${entry[1].source}`;
@@ -4224,7 +4224,15 @@ test("the route table holds the routes it always has, and each path matches one 
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ person: unpublish a preview",
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)$ person: close a session in a thread's pylon",
     "DELETE ^\\/v1\\/usage\\/backfill$ open: deployers only, which steerUsageBackfill checks",
+    "GET ^\\/$",
+    "GET ^\\/assets\\/([\\w.-]+)$",
+    "GET ^\\/nodes\\/([^/]+)$",
+    "GET ^\\/pipeline$",
+    "GET ^\\/projects\\/new$",
+    "GET ^\\/threads\\/([^/]+)$",
     "GET ^\\/threads\\/([^/]+)\\/stream$",
+    "GET ^\\/threads\\/new$",
+    "GET ^\\/usage$",
     "GET ^\\/v1\\/deployer\\/release$",
     "GET ^\\/v1\\/events$",
     "GET ^\\/v1\\/images$",
@@ -4282,8 +4290,9 @@ test("the route table holds the routes it always has, and each path matches one 
   ]);
   const routes = [["GET", /^\/v1\/health$/] as const, ...table];
   for (const [method, regex] of routes) {
-    const path = regex.source.slice(1, -1).replaceAll("\\/", "/").replaceAll("(seen|unseen)", "seen").replaceAll("([^/]+)", "x");
+    const path = regex.source.slice(1, -1).replaceAll("\\/", "/").replaceAll("(seen|unseen)", "seen").replaceAll("([^/]+)", "x").replaceAll("([\\w.-]+)", "x");
     const matching = routes.filter((other) => other[0] === method && other[1].test(path));
-    assert.equal(matching.length, 1, `${method} ${path} matches ${matching.length} routes of its method`);
+    assert.equal(matching.length, path === "/threads/new" ? 2 : 1, `${method} ${path} matches ${matching.length} routes of its method`);
+    assert.equal(matching[0]![1], regex);
   }
 });
