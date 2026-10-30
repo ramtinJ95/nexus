@@ -1,27 +1,24 @@
-import { after, test, type TestContext } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { addThread as addTestThread, observeNode, seedRegistry } from "./test-kit.ts";
+import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { desiredPhase, envelope } from "../reconcile.ts";
 import type { JobId, NodeName, PylonId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { ImageId } from "../images.ts";
-import { runningPylon, stoppedPylon, testCapacity } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity } from "../test-kit.ts";
 
 const image: ImageId = "img-000000000000";
 const n1 = "rj-firebat" as NodeName;
 const n2 = "infra-testbench" as NodeName;
-const dir = await mkdtemp(join(tmpdir(), "nexus-backfill-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-backfill-");
 
-function opened(path = join(dir, `${randomUUID()}.db`)): Registry {
-  return seedRegistry(openRegistry(path), { nodes: [n1, n2] });
+function opened(t: TestContext, path = join(dir, `${randomUUID()}.db`)): Registry {
+  return seedRegistry(testRegistry(t, path), { nodes: [n1, n2] });
 }
 
 let created = 0;
@@ -83,8 +80,7 @@ const nothing = { calls: 0, tokens: 0 };
 
 test("a start lists each thread once and leaves a running run as it is, and a later start pends again only the skipped threads it lists", (t) => {
   const path = join(dir, `${randomUUID()}.db`);
-  let registry = opened(path);
-  t.after(() => registry.close());
+  let registry = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
   const [a, b, c] = ["a", "b", "c"].map((title) => addThread(registry, n1, title));
   assert.deepEqual(registry.usageBackfill(), { state: "never" });
 
@@ -103,7 +99,7 @@ test("a start lists each thread once and leaves a running run as it is, and a la
   });
 
   registry.close();
-  registry = opened(path);
+  registry = opened(t, path);
   assert.equal(registry.usageBackfill().state, "done", "the run outlives a restart");
   assert.deepEqual(registry.startUsageBackfill([b!.id, c!.id], 500), {
     state: "running", startedAt: 500, finishedAt: null, current: null, waiting: null, read: 1, of: 3, recovered: { calls: 5, tokens: 500 }, skipped: [],
@@ -121,8 +117,7 @@ test("a start lists each thread once and leaves a running run as it is, and a la
 });
 
 test("a run wakes one archived thread's pylon at a time, across nodes, reads it once it runs, and wakes the next once it paused", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const a = addThread(registry, n1, "first");
   const b = addThread(registry, n2, "second");
   addThread(registry, n1, "active", "idle");
@@ -153,8 +148,7 @@ test("a run wakes one archived thread's pylon at a time, across nodes, reads it 
 });
 
 test("a run waits while the pylon's node is offline, runs an older probe, is busy with a job, or would be left too little memory, and says why", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const a = addThread(registry, n1, "archived");
   const other = addThread(registry, n1, "other", "idle");
   const { job } = backfill(t, registry);
@@ -180,8 +174,7 @@ test("a run waits while the pylon's node is offline, runs an older probe, is bus
 });
 
 test("a wake that fails, or does not boot in time, is skipped with why, its attempt cleared so its pylon pauses rather than fails", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const a = addThread(registry, n1, "failed");
   const b = addThread(registry, n1, "slow");
   observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
@@ -208,8 +201,7 @@ test("a wake that fails, or does not boot in time, is skipped with why, its atte
 });
 
 test("a failed wake for reading is skipped with why, as the tick keeps it apart and as a record from before kept it in last", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const apart = addThread(registry, n1, "apart");
   const before = addThread(registry, n1, "before");
   observe(registry, n1, [[apart.pylonId, "stopped"], [before.pylonId, "stopped"]]);
@@ -230,8 +222,7 @@ test("a failed wake for reading is skipped with why, as the tick keeps it apart 
 });
 
 test("a failed wake for reading from an earlier run is cleared before the next run wakes the pylon", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const a = addThread(registry, n1, "earlier");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
   registry.savePylon({ ...registry.pylon(a.pylonId)!, attempts: { count: 0, last: null, readFailure: { at: Date.now(), code: "backend", message: "an earlier run's wake" } } });
@@ -241,8 +232,7 @@ test("a failed wake for reading from an earlier run is cleared before the next r
 });
 
 test("a thread whose pylon's image no online node holds is skipped, and woken once another node holds it", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const a = addThread(registry, n1, "no image");
   observe(registry, n1, [[a.pylonId, "stopped"]], { artifacts: [] });
   const { job } = backfill(t, registry);
@@ -257,8 +247,7 @@ test("a thread whose pylon's image no online node holds is skipped, and woken on
 });
 
 test("a read that fails skips the thread with its error, and one a stop cut short leaves it for the next run", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const a = addThread(registry, n1, "broken transcript");
   const b = addThread(registry, n1, "stopped mid-read");
   observe(registry, n1, [[a.pylonId, "running"], [b.pylonId, "running"]]);
@@ -283,8 +272,7 @@ test("a read that fails skips the thread with its error, and one a stop cut shor
 });
 
 test("a thread unarchived or deleted while its pylon is read is skipped and let go at once, and the run goes on", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const a = addThread(registry, n1, "unarchived");
   const b = addThread(registry, n1, "deleted");
   const c = addThread(registry, n1, "last");
@@ -303,7 +291,7 @@ test("a thread unarchived or deleted while its pylon is read is skipped and let 
 
 test("a control plane restarted mid-run goes on with the pylon it held, and a second run reads none of the threads the first read", async (t) => {
   const path = join(dir, `${randomUUID()}.db`);
-  const first = opened(path);
+  const first = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
   const a = addThread(first, n1, "first");
   const b = addThread(first, n1, "second");
   observe(first, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
@@ -313,8 +301,7 @@ test("a control plane restarted mid-run goes on with the pylon it held, and a se
   await before.close();
   first.close();
 
-  const registry = opened(path);
-  t.after(() => registry.close());
+  const registry = opened(t, path);
   const { job, counter } = backfill(t, registry);
   assert.deepEqual(current(registry)?.thread, a.id);
   observe(registry, n1, [[a.pylonId, "running"], [b.pylonId, "stopped"]]);
@@ -333,8 +320,7 @@ test("a control plane restarted mid-run goes on with the pylon it held, and a se
 });
 
 test("the dry run lists each archived thread a start would read, with its node and why a run skipped it, and no done, active or deleted one", async (t) => {
-  const registry = opened();
-  t.after(() => registry.close());
+  const registry = opened(t);
   const skipped = addThread(registry, n2, "skipped before");
   const done = addThread(registry, n1, "read before");
   const fresh = addThread(registry, n1, "never read");

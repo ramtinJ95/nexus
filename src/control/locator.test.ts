@@ -1,26 +1,22 @@
-import { after, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registryLocator } from "./locator.ts";
-import { openRegistry, type ThreadId } from "./registry.ts";
-import { addThread, observeNode, seedRegistry } from "./test-kit.ts";
+import type { ThreadId } from "./registry.ts";
+import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import { probePort } from "../protocol/routes.ts";
-import { runningPylon, testCapacity } from "../test-kit.ts";
+import { runningPylon, tempDir, testCapacity } from "../test-kit.ts";
 
 const node = "infra-testbench" as NodeName;
 const threadId = "th-1" as ThreadId;
 const pylonId = "pylon-th-1" as PylonId;
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-locator-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-locator-");
 
 function seeded(t: import("node:test").TestContext) {
-  const registry = seedRegistry(openRegistry(join(dir, `${randomUUID()}.db`)), { nodes: [node] });
-  t.after(() => registry.close());
+  const registry = seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`)), { nodes: [node] });
   addThread(registry, { node, thread: { id: threadId, conversationId: "1", createdAt: 0, agentTurnRunning: true, working: true, lastHumanActivityAt: 0 }, liveHash: "h" });
   return registry;
 }

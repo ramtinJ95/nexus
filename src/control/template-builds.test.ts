@@ -1,8 +1,6 @@
-import { after, test, type TestContext } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tickTemplateBuild } from "./template-builds.ts";
 import { openRegistry, type Registry } from "./registry.ts";
@@ -13,7 +11,7 @@ import type { JobId, NodeName } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { testObservation } from "../test-kit.ts";
+import { tempDir, testObservation } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";
@@ -25,8 +23,7 @@ const building: BuildingTemplate = {
   inputs: { key, repo: { url: "git@example.com:acme.git", branch: "main", commit }, preSetup: null, allowedHosts: [], resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } },
 };
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-template-builds-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-template-builds-");
 
 /** A probe whose jobs run until the test ends them. `refuse` makes it turn down the next submit. */
 function fakeProbe() {

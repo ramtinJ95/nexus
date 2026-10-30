@@ -1,13 +1,11 @@
-import { after, test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { addThread as addTestThread, observeNode, seedRegistry } from "./test-kit.ts";
+import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { usageCounter } from "./usage-counter.ts";
 import { tokenCount, usageFilter, utc } from "./usage.ts";
 import type { AgentCall, Tokens } from "../agent-usage.ts";
@@ -18,7 +16,7 @@ import type { LiveHash, NodeName, PylonId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { ProjectId } from "../project.ts";
 import type { ImageId } from "../images.ts";
-import { runningPylon } from "../test-kit.ts";
+import { runningPylon, tempDir } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";
@@ -28,11 +26,10 @@ const claudeFixture: Tokens & { calls: number } = { calls: 9, input: 20, output:
 /** The two calls of src/fixtures/pi-session.jsonl, a real pi 1.4.0 session on gpt-6-astra. */
 const piFixture: Tokens & { calls: number } = { calls: 2, input: 1723 + 204, output: 5 + 5, cacheWrite: 0, cacheRead: 1536 };
 
-const dir = await mkdtemp(join(tmpdir(), "nexus-usage-"));
-after(() => rm(dir, { recursive: true }));
+const dir = await tempDir("nexus-usage-");
 
-function openOnline(path = join(dir, `${randomUUID()}.db`)): Registry {
-  return seedRegistry(openRegistry(path), { nodes: [node] });
+function openOnline(t: TestContext, path = join(dir, `${randomUUID()}.db`)): Registry {
+  return seedRegistry(testRegistry(t, path), { nodes: [node] });
 }
 
 function addThread(registry: Registry, options: { startedBy?: string; conversationId?: string | null; phase?: "running" | "paused" } = {}): Thread {
@@ -90,8 +87,7 @@ const totals = (registry: Registry, thread?: ThreadId) => {
 };
 
 test("a pylon's Claude transcripts and pi sessions count each call once, however often they are read", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = addThread(registry);
   const { logs, transcript, session } = pylonHome();
   const probe = localProbe();
@@ -120,8 +116,7 @@ test("a pylon's Claude transcripts and pi sessions count each call once, however
 });
 
 test("a whole read counts every call from the start of each transcript, past where live counting's cursors stand, once", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = addThread(registry);
   const { logs, transcript, session } = pylonHome();
   const end = (path: string) => {
@@ -150,8 +145,7 @@ test("a whole read counts every call from the start of each transcript, past whe
 });
 
 test("a whole read cut short keeps what its finished reads recovered on the thread's backfill row, and so does finishing the thread", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = addThread(registry, { phase: "paused" });
   const { logs, transcript } = pylonHome();
   // Over a megabyte of calls, which takes more than one read.
@@ -193,7 +187,7 @@ test("a whole read cut short keeps what its finished reads recovered on the thre
 
 test("the counts survive a restart, which reads on from where the last read stopped", async (t) => {
   const path = join(dir, `${randomUUID()}.db`);
-  const registry = openOnline(path);
+  const registry = seedRegistry(openRegistry(path), { nodes: [node] });
   const thread = addThread(registry);
   const { logs } = pylonHome();
   const first = usageCounter({ registry, probes: new Map([[node, localProbe()]]), harness: noHarness, logs, sweepMs: 3_600_000 });
@@ -201,8 +195,7 @@ test("the counts survive a restart, which reads on from where the last read stop
   await first.close();
   registry.close();
 
-  const reopened = openOnline(path);
-  t.after(() => reopened.close());
+  const reopened = openOnline(t, path);
   assert.equal(reopened.usageCursors(thread.pylonId).size, 2);
   const second = usageCounter({ registry: reopened, probes: new Map([[node, localProbe()]]), harness: noHarness, logs, sweepMs: 3_600_000 });
   t.after(() => second.close());
@@ -211,8 +204,7 @@ test("the counts survive a restart, which reads on from where the last read stop
 });
 
 test("a replaced transcript is read from its start, and its calls already counted stay counted once", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   addThread(registry);
   const { logs, transcript } = pylonHome();
   const counter = usageCounter({ registry, probes: new Map([[node, localProbe()]]), harness: noHarness, logs, sweepMs: 3_600_000 });
@@ -225,8 +217,7 @@ test("a replaced transcript is read from its start, and its calls already counte
 });
 
 test("deleting a thread keeps its counts, and a paused or deleted thread's pylon is not read", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = addThread(registry);
   const { logs } = pylonHome();
   const probe = localProbe();
@@ -244,8 +235,7 @@ test("deleting a thread keeps its counts, and a paused or deleted thread's pylon
 });
 
 test("the Nexus agent's calls are read from the harness after the last entry read, a deleted thread's too", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = addThread(registry, { conversationId: "7", phase: "paused" });
   const entries: AgentCall[] = [1, 2, 3].map((n) => ({ id: `harness:7/${n}`, agent: "pi", model: "gpt-6-astra", at: 1_000 * n, input: 100 * n, output: n, cacheWrite: 0, cacheRead: 10 * n }));
   const asked: (number | null)[] = [];
@@ -270,8 +260,7 @@ test("the Nexus agent's calls are read from the harness after the last entry rea
 });
 
 test("a sweep reads an archived thread's Nexus agent from the harness, and a deleted thread's not at all", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const deleted = addThread(registry, { conversationId: "7", phase: "paused" });
   const archived = addThread(registry, { conversationId: "8", phase: "paused" });
   const asked: ConversationId[] = [];
@@ -288,8 +277,7 @@ test("a sweep reads an archived thread's Nexus agent from the harness, and a del
 });
 
 test("a deleted thread's harness read in flight through a sweep still runs one at a time", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = addThread(registry, { conversationId: "7", phase: "paused" });
   let calls = 0;
   let running = 0;
@@ -327,8 +315,7 @@ test("a deleted thread's harness read in flight through a sweep still runs one a
 });
 
 test("a forked pi session, a replaced transcript of the same size, and another thread's copy of a session count each call once", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   addThread(registry);
   const { logs, transcript, session } = pylonHome();
   const counter = usageCounter({ registry, probes: new Map([[node, localProbe()]]), harness: noHarness, logs, sweepMs: 3_600_000 });
@@ -361,8 +348,7 @@ test("a forked pi session, a replaced transcript of the same size, and another t
 });
 
 test("a pylon's read is refused whole when a call claims another agent's ID or a count past 10⁹", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const thread = addThread(registry);
   registry.recordUsage(thread.id, [{ id: "harness:7/1", agent: "pi", model: "gpt-6-astra", at: 0, input: 1, output: 1, cacheWrite: 0, cacheRead: 0 }]);
   const call = (id: string, input: number) => JSON.stringify({ id, agent: "pi", model: "gpt-6-astra", at: 1, input, output: 0, cacheWrite: 0, cacheRead: 0 });
@@ -385,8 +371,7 @@ test("a pylon's read is refused whole when a call claims another agent's ID or a
 });
 
 test("an event cursor that retention passed reads every thread and follows on from the newest", async (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   addThread(registry);
   const { logs } = pylonHome();
   let expired = false;
@@ -419,16 +404,14 @@ test("each thread's role comes from who started it", () => {
 });
 
 test("a verify pylon's calls count under the verify role", (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const verify = addThread(registry, { startedBy: verifyCaller });
   registry.recordUsage(verify.id, [{ id: "v", agent: "claude", model: "claude-opus-5-5", at: Date.now(), input: 10, output: 1, cacheWrite: 0, cacheRead: 0 }]);
   assert.deepEqual(registry.usageReport({ since: null, by: ["role"] }).by.role!.map((r) => [r.key, r.calls]), [["verify", 1]]);
 });
 
 test("the report groups calls by model, project, kind, role and UTC day, within the period and project asked for", (t) => {
-  const registry = openOnline();
-  t.after(() => registry.close());
+  const registry = openOnline(t);
   const builder = addThread(registry);
   const reviewer = addThread(registry, { startedBy: reviewerCaller });
   const call = (id: string, at: number, model: string, input: number): AgentCall => ({ id, agent: "pi", model, at, input, output: 1, cacheWrite: 2, cacheRead: 3 });
