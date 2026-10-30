@@ -19,6 +19,11 @@ export interface PrSnapshot {
   detail: PrDetail;
   failures: { id: string; text: string }[];
   comments: { id: string; text: string }[];
+  /**
+   * GitHub failed to read the head commit's check runs or statuses this pass, so `pr.checks` is `failed` or `pending`,
+   * never `passing` or `none`, and `failures` lacks what was not read.
+   */
+  checksUnread?: true;
 }
 /** `previous` is the path a renamed file had, so a rename cannot carry a file past a check on its path. */
 export interface ChangedFile { path: string; previous: string | null; patch: string }

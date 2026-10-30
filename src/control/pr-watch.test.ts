@@ -329,6 +329,64 @@ test("legacy statuses use the latest context and missing detail URLs still link 
   assert.equal((await client.poll("acme/repo", 1)).pr.checks, "passing");
 });
 
+/** A GitHub whose statuses answer 500 while `state.failing` holds, with one check run and the owner's comments `state.comments`. */
+function statusesDown(url: string) {
+  const state = { failing: true, conclusion: "success", comments: [] as string[] };
+  const fake: typeof fetch = async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/pulls")) return Response.json([{ number: 1, head: { repo: { full_name: "acme/repo" } } }]);
+    if (path.endsWith("/pulls/1")) return Response.json({ number: 1, title: "Fix", html_url: url, state: "open", merged: false, mergeable_state: "clean", head: { sha: "abc", ref: "feature" }, base: { ref: "main" } });
+    if (path.endsWith("/statuses")) return state.failing ? new Response("oops", { status: 500 }) : Response.json([]);
+    if (path.endsWith("/check-runs")) return Response.json({ check_runs: [{ id: 3, name: "build", status: "completed", conclusion: state.conclusion, details_url: "https://example.com/build", completed_at: state.conclusion }] });
+    if (path.endsWith("/issues/1/comments")) return Response.json(state.comments.map((body, i) => ({ id: i, body, html_url: "https://example.com/comment", user: { login: "owner" }, author_association: "OWNER" })));
+    return Response.json([]);
+  };
+  return { fake, state };
+}
+
+test("statuses GitHub could not read leave a PR's checks pending, or failed with the failures that were read", async () => {
+  const { fake, state } = statusesDown("https://github.com/acme/repo/pull/1");
+  const client = githubClient("secret", fake);
+  const passed = await client.poll("acme/repo", 1);
+  assert.equal(passed.checksUnread, true);
+  assert.equal(passed.pr.checks, "pending");
+  assert.deepEqual(passed.failures, []);
+  state.conclusion = "failure";
+  const failed = await client.poll("acme/repo", 1);
+  assert.equal(failed.checksUnread, true);
+  assert.equal(failed.pr.checks, "failed");
+  assert.match(failed.failures[0]!.text, /Check failed: build/);
+  state.failing = false;
+  assert.equal((await client.poll("acme/repo", 1)).checksUnread, undefined);
+});
+
+test("the watch still reads a PR whose statuses GitHub could not read, and keeps the checks it last read", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const { fake, state } = statusesDown(f.snapshot.pr.url);
+  const watch = prWatcher({ ...f.options, github: githubClient("secret", fake) });
+  const link = () => f.registry.prWatch(f.id)!.links[0]!;
+  await watch.poll();
+  assert.equal(f.registry.prWatch(f.id)?.error, null);
+  assert.deepEqual([link().pr.title, link().pr.head, link().pr.conflict], ["Fix", "abc", false]);
+  state.conclusion = "failure";
+  state.comments.push("looks close");
+  await watch.poll();
+  assert.equal(f.messages.length, 1);
+  assert.match(f.messages[0]![1], /Check failed: build/);
+  assert.match(f.messages[0]![1], /issue-comment by owner: https:\/\/example.com\/comment\nlooks close/);
+  const checks = link().pr.checks;
+  state.conclusion = "success";
+  await watch.poll();
+  assert.equal(f.messages.length, 1, "no news of passing checks while the statuses are unread");
+  assert.equal(link().pr.checks, checks);
+  assert.equal(f.registry.prWatch(f.id)?.error, null);
+  state.failing = false;
+  await watch.poll();
+  assert.equal(link().pr.checks, "passing");
+  assert.equal(f.messages.length, 2);
+  assert.match(f.messages[1]![1], /All checks are passing/);
+});
+
 test("only trusted reviews and comments wake, and untrusted feedback cannot exhaust the cap", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   let generation = 0;
