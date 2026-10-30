@@ -1491,7 +1491,7 @@ test("a boot asking for the ChatGPT token right after a probe restart boots once
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   const fake = fakeNode({ autoFinish: true, heldSecrets: [chatgptTokenGrant.name] });
   let token: string | undefined;
-  const handoff = chatgptTokenHandoff({ probes: [fake.probe], token: async () => token, log: assert.fail });
+  const handoff = chatgptTokenHandoff({ probes: () => [fake.probe], token: async () => token, log: assert.fail });
   run(t, registry, fake.probe, { ingest: (event, ...rest) => {
     if (event.type === "snapshot") handoff.observed(event.observation);
     return ingest(event, ...rest);
