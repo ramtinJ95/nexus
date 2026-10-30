@@ -1,0 +1,141 @@
+# main: ccc2f2e Give the Mac CLI one copy of its worker flags, one poll loop, one consumer check and one reused connection (#333)
+## A declared diff of a tree that holds an edit, a rename with an edit, a binary edit, an untracked file and a force-added ignored file
+addOutput diff: 4 git commands
+  git rev-parse --quiet --verify HEAD^{commit}
+  git read-tree a4330e42b8519ef25daef82efbcd466485e6332b
+  git add -A
+  git diff --cached --binary --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ a4330e42b8519ef25daef82efbcd466485e6332b
+record: {"id":"<id>","kind":"diff","base":"a4330e42b8519ef25daef82efbcd466485e6332b","sha256":"8fed2bfc20ffb3652598bbf58b44913d6ab6225c34857c488a400f8fd689fb94","title":"capture"}
+record base is HEAD: true
+diff file:
+  | diff --git a/app.txt b/app.txt
+  | index 814f4a4..f04eb26 100644
+  | --- a/app.txt
+  | +++ b/app.txt
+  | @@ -1,2 +1,3 @@
+  |  one
+  | -two
+  | +2
+  | +three
+  | diff --git a/notes.md b/notes.md
+  | new file mode 100644
+  | index 0000000..5a72eb2
+  | --- /dev/null
+  | +++ b/notes.md
+  | @@ -0,0 +1 @@
+  | +untracked
+  | diff --git a/pixel.bin b/pixel.bin
+  | index 8352675d67aed6625ece79af41c27fdb4ee2e867..6bf3847422ec8b0725ea4b4aaef19f2b747745ff 100644
+  | GIT binary patch
+  | literal 4
+  | LcmZQzW?=;Y02%-d
+  | 
+  | literal 3
+  | KcmZQzWC8#H2LJ>B
+  | 
+  | diff --git a/src/new.ts b/src/new.ts
+  | new file mode 100644
+  | index 0000000..3bd5857
+  | --- /dev/null
+  | +++ b/src/new.ts
+  | @@ -0,0 +1,20 @@
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const a = 1;
+  | +export const b = 2;
+  | diff --git a/src/old.ts b/src/old.ts
+  | deleted file mode 100644
+  | index 30fddfa..0000000
+  | --- a/src/old.ts
+  | +++ /dev/null
+  | @@ -1,20 +0,0 @@
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | -export const a = 1;
+  | 
+git apply to its base: resolves ""
+  app.txt: in the checkout, same bytes after apply
+  src/new.ts: in the checkout, same bytes after apply
+  src/old.ts: absent in the checkout, absent after apply
+  pixel.bin: in the checkout, same bytes after apply
+  notes.md: in the checkout, same bytes after apply
+  kept.log: in the checkout, absent after apply
+  dist/bundle.js: in the checkout, absent after apply
+
+## The Changes view of the same tree
+changes head: 6 git commands
+  git rev-parse --verify --quiet HEAD
+  git rev-parse --verify --quiet a4330e42b8519ef25daef82efbcd466485e6332b^{commit}
+  git rev-parse --git-path index
+  git add --all
+  git diff --cached --no-color --no-ext-diff --no-textconv --find-renames --no-relative -z --name-status a4330e42b8519ef25daef82efbcd466485e6332b
+  git diff --cached --no-color --no-ext-diff --no-textconv --find-renames --no-relative -z --numstat a4330e42b8519ef25daef82efbcd466485e6332b
+base kind: head, base is HEAD: true
+  {"path":"app.txt","oldPath":null,"status":"modified","additions":2,"deletions":1}
+  {"path":"kept.log","oldPath":null,"status":"added","additions":1,"deletions":0}
+  {"path":"notes.md","oldPath":null,"status":"added","additions":1,"deletions":0}
+  {"path":"pixel.bin","oldPath":null,"status":"modified","additions":null,"deletions":null}
+  {"path":"src/new.ts","oldPath":"src/old.ts","status":"renamed","additions":1,"deletions":1}
+agent's index unchanged: true
+changes start: resolves ["modified app.txt","added kept.log","added notes.md","modified pixel.bin","renamed src/new.ts"]
+
+## Refusals that name their base kind
+blob start missing: rejects CheckoutRefused "notes.md does not exist at the start base"
+blob head directory: rejects CheckoutRefused "src is not a file at the head base"
+changes turn with no snapshot: rejects CheckoutRefused "the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead"
+diff start with no refs/nexus/base: rejects CheckoutRefused "the checkout has no refs/nexus/base, what its pylon booted at, because the pylon booted before Nexus recorded it. Ask for the changes since HEAD instead"
+
+## Declared diff refusals
+a clean tree: rejects OutputRefused "the working tree has no changes against HEAD"
+no commits and no files: rejects OutputRefused "the repository has no commits and no files"
+not a git repository: rejects Error "snapshotting the working tree failed with exit 128: fatal: not a git repository (or any of the parent directories): .git\nfatal: not a git repository (or any of the parent directories): .git\n"
+no checkout: rejects Error "snapshotting the working tree failed with exit 127: "
+
+## Malformed guest replies
+git facts, not JSON: rejects SyntaxError "Unexpected token 'b', \"bad JSON\" is not valid JSON"
+git facts, wrong shape: rejects ZodError "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"head\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"branch\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"dirty\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received undefined\"\n  },\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"branches\"\n    ],\n    \"message\": \"Invalid input: expected array, received undefined\"\n  }\n]"
+agent usage, end record of the wrong shape: rejects ZodError "[\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"offsets\"\n    ],\n    \"message\": \"Invalid input: expected record, received undefined\"\n  },\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"more\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received undefined\"\n  }\n]"
+agent usage, a call that is not JSON: rejects SyntaxError "Unexpected token 'x', \"x\" is not valid JSON"
+
+## Leave-out flags
+--leave-out claude-plugin:x: resolves {"kind":"claude-plugin","name":"x","why":"left out on the command line"}
+--leave-out pi-package:npm:@me/x: resolves {"kind":"pi-package","name":"npm:@me/x","why":"left out on the command line"}
+--leave-out skill:x: resolves {"kind":"skill","name":"x","why":"left out on the command line"}
+--leave-out pi-extension:x: resolves {"kind":"pi-extension","name":"x","why":"left out on the command line"}
+--leave-out shepherdr-profile:x: resolves {"kind":"shepherdr-profile","name":"x","why":"left out on the command line"}
+--leave-out plugin:x: rejects Error "--leave-out takes <kind>:<name> with kind one of claude-plugin, pi-package, skill, pi-extension, shepherdr-profile, such as skill:ramtin-mode"
+--leave-out toString:x: rejects Error "--leave-out takes <kind>:<name> with kind one of claude-plugin, pi-package, skill, pi-extension, shepherdr-profile, such as skill:ramtin-mode"
+settled leave-outs: claude-plugin:nexus@claude-mods, pi-package:npm:@ramtinj95/pi-nexus, skill:anki-cards, skill:voxcraft-remote, skill:macmini-handoff, pi-extension:atuin.ts, pi-extension:herdr-agent-state.ts
