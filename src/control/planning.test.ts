@@ -19,8 +19,8 @@ const dir = await tempDir("nexus-planning-");
 const block = (token: string, items: unknown[]) => `\`\`\`nexus-plan\n${JSON.stringify({ token, items })}\n\`\`\``;
 const a = { key: "a", title: "A", brief: "Build A." };
 const b = { key: "b", title: "B", brief: "Build B.", after: ["a"] };
-/** Each pass asks at a later millisecond, so a later block's cards list after an earlier one's rather than by block hash. */
-let asked = Date.now();
+/** Every pass asks in the same millisecond, so a later block's cards must list after an earlier one's by the order they were asked, not by block hash. */
+const asked = Date.now();
 
 test("a plan block is read only with its thread's token, as an ordered list of items each waiting on earlier ones or on pipeline items", () => {
   const [plan] = planBlocks([`Here is the plan.\n${block("tok", [a, { ...b, after: ["a", "it-0123456789ab"] }])}`], "tok");
@@ -59,7 +59,7 @@ async function fixture(t: import("node:test").TestContext, path = ":memory:", fa
   const start = services.api.startThread;
   const queue = services.api.queue!;
   const items = services.api.pipeline!;
-  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies, now: () => ++asked });
+  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies, now: () => asked });
   t.after(async () => { await plans.close(); await services.close(); });
   return {
     registry, fake, plans, items, queue,
@@ -137,6 +137,22 @@ test("an item waits on a pipeline item named by its ID even when a later proposa
   const [qa] = f.registry.questions(thread.id);
   assert.match(qa!.text, /It waits on pipeline item it-0123456789ab\./);
   assert.throws(() => f.registry.answerQuestion(qa!.id, { option: "accept", by: laptop, at: 1 }, f.plans.answered), (err: { status?: number; message: string }) => err.status === 404 && /no item it-0123456789ab/.test(err.message));
+});
+
+test("cards asked in one millisecond list block by block in the order the blocks were written, and each block's by index", async (t) => {
+  const f = await fixture(t);
+  const thread = await f.planner();
+  const token = f.registry.planning(thread.id)!.token;
+  const plans = [1, 3, 8].map((n) => [{ ...a, title: `Plan ${n} A` }, { ...b, title: `Plan ${n} B` }]);
+  const hashes = plans.map((items) => planBlocks([block(token, items)], token)[0]![0]!.block);
+  assert.deepEqual(hashes, [...hashes].sort().reverse(), "each later block's hash sorts before the earlier ones'");
+
+  f.reply(thread, block(token, plans[0]!));
+  f.reply(thread, block(token, plans[1]!));
+  await f.plans.poll();
+  f.reply(thread, block(token, plans[2]!));
+  await f.plans.poll();
+  assert.deepEqual(f.registry.questions(thread.id).map((q) => q.text.match(/Plan \d [AB]/)![0]), ["Plan 1 A", "Plan 1 B", "Plan 3 A", "Plan 3 B", "Plan 8 A", "Plan 8 B"]);
 });
 
 test("an accepted proposal adds the item named from its question once, and one after a rejected proposal cannot be accepted", async (t) => {

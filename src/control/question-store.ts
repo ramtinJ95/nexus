@@ -83,7 +83,7 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
         updateAttention(thread);
       });
     },
-    questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), id").all(thread).map((r) => json<Question>(r.record)),
+    questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(thread).map((r) => json<Question>(r.record)),
     /**
      * Records the answer to an open question. An answered one keeps its first answer, which this returns. `then` runs
      * in the same transaction once the answer is recorded, and a throw from it records nothing.

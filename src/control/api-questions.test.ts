@@ -16,7 +16,7 @@ test("a person answers a question, a deployer question needs a deployer, and no 
   const answer = (id: string, option: string) => s.call("POST", `/v1/questions/${id}/answer`, { option });
   const detail = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail;
   assert.equal((await detail()).attention, "decision");
-  assert.deepEqual((await detail()).questions.map((q) => q.id), ["qn-deployer", "qn-person"], "by when they were asked, then by ID");
+  assert.deepEqual((await detail()).questions.map((q) => q.id), ["qn-person", "qn-deployer"], "by when they were asked, then in the order they were asked");
 
   s.callAs("nFIREBAT" as TailnetNodeId);
   for (const id of ["qn-person", "qn-deployer"]) {
@@ -39,7 +39,7 @@ test("a person answers a question, a deployer question needs a deployer, and no 
   assert.equal((await answer("qn-deployer", "Rebuild")).status, 200);
   const after = await detail();
   assert.notEqual(after.attention, "decision");
-  assert.deepEqual(after.questions.map((q) => [q.id, q.answer?.option, q.answer?.by]), [["qn-deployer", "Rebuild", laptop], ["qn-person", "Not now", phone]]);
+  assert.deepEqual(after.questions.map((q) => [q.id, q.answer?.option, q.answer?.by]), [["qn-person", "Not now", phone], ["qn-deployer", "Rebuild", laptop]]);
 });
 
 test("without deployment options the control node is unknown, so no one answers a question or starts or messages a thread", async (t) => {
