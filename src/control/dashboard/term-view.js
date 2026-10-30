@@ -13,21 +13,27 @@ document.adoptedStyleSheets = [...document.adoptedStyleSheets, base];
 
 /**
  * The page's content security policy blocks <style> elements, and xterm.js writes its theme and cell sizes into
- * them, so each one's rules go into a constructed sheet, which the policy allows. Returns what stops it.
+ * them, so each one's rules go into a constructed sheet, which the policy allows. xterm.js appends them to its screen
+ * element, beside the rows it rewrites on every frame, so only the screen's own children and each style's text are
+ * watched. Returns what stops it.
  */
-function adoptStyles(host) {
+function adoptStyles(screen) {
   const sheets = new Map();
+  const copied = new Map();
   const copy = () => {
-    for (const style of host.querySelectorAll("style")) {
+    for (const style of screen.querySelectorAll(":scope > style")) {
       if (!sheets.has(style)) {
         sheets.set(style, new CSSStyleSheet());
         document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheets.get(style)];
+        watch.observe(style, { subtree: true, childList: true, characterData: true });
       }
+      if (copied.get(style) === style.textContent) continue;
       sheets.get(style).replaceSync(style.textContent);
+      copied.set(style, style.textContent);
     }
   };
   const watch = new MutationObserver(copy);
-  watch.observe(host, { subtree: true, childList: true, characterData: true });
+  watch.observe(screen, { childList: true });
   copy();
   return () => {
     watch.disconnect();
@@ -56,7 +62,6 @@ const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
  * current connection to land, as landing says.
  */
 export function openTerminal(host, thread, status, pane) {
-  const unstyle = adoptStyles(host);
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, scrollback: 5000,
     fontFamily: getComputedStyle(host).fontFamily,
@@ -79,6 +84,7 @@ export function openTerminal(host, thread, status, pane) {
     return false;
   });
   term.open(host);
+  const unstyle = adoptStyles(host.querySelector(".xterm-screen"));
   fit.fit();
   const lands = landing(term);
   let first = pane;

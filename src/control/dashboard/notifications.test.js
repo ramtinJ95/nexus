@@ -138,7 +138,7 @@ const marking = slice("let marking = false;", "\nsetInterval(markSeen, 1000);");
  * One dashboard tab's attention code from client.js, run in its own context. Tabs given the same `browser` share its
  * BroadcastChannel and its one Web Lock, which the first tab to ask holds.
  */
-function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms) }) {
+function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
   const timers = [];
   const intervals = [];
   const favicon = { href: "/assets/favicon.svg?v=0123456789ab" };
@@ -146,28 +146,32 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = 
     title: "Threads · Nexus",
     getElementById: (id) => id === "convo" ? conversation : null,
     querySelector: (selector) => selector === 'link[rel="icon"]' ? favicon : null,
+    visibilityState: visible ? "visible" : "hidden",
+    listeners: [],
+    addEventListener: (_, listener) => doc.listeners.push(listener),
   };
   class Channel {
     constructor() { browser.channels.push(this); this.listeners = []; }
     addEventListener(_, listener) { this.listeners.push(listener); }
-    postMessage(data) { for (const other of browser.channels) if (other !== this) for (const l of other.listeners) l({ data }); }
+    postMessage(data) { browser.posts += 1; for (const other of browser.channels) if (other !== this) for (const l of other.listeners) l({ data }); }
   }
   class Events {
-    constructor(url) { browser.streams.push(this); this.url = url; }
-    close() {}
+    constructor(url) { browser.streams.push(this); this.url = url; this.closed = false; }
+    close() { this.closed = true; }
   }
   const context = {
     window: { BroadcastChannel: Channel }, BroadcastChannel: Channel, EventSource: Events, URLSearchParams,
-    navigator: { locks: { request: (_, hold) => { if (!browser.locked) { browser.locked = true; hold(); } return new Promise(() => {}); } } },
+    navigator: locks ? { locks: { request: (_, hold) => { if (!browser.locked) { browser.locked = true; hold(); } return new Promise(() => {}); } } } : {},
     document: doc, fetch, Date: { now },
     AbortSignal: { timeout }, setTimeout: (f, ms) => timers.push({ f, at: now() + ms }), clearTimeout: () => timers.splice(0),
     setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), owedSeen,
     currentThread: () => "t1", focused: () => focused, activeTab: null,
   };
   const code = runInNewContext(`${api}\n${rows}\n${marking}\n({ readRows, markSeen })`, context);
-  return { ...code, doc, favicon, timers, intervals };
+  const show = (state) => { doc.visibilityState = state; for (const l of doc.listeners) l(); };
+  return { ...code, doc, favicon, timers, intervals, show };
 }
-const browser = () => ({ channels: [], streams: [], locked: false });
+const browser = () => ({ channels: [], streams: [], locked: false, posts: 0 });
 const json = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -291,6 +295,32 @@ test("the tab that follows the events reads again a second after a read failed",
   await settle();
   assert.equal(read, 1);
   assert.deepEqual(leader.timers, [], "and stops retrying once it reads");
+});
+
+test("over plain HTTP, with no Web Locks, a visible tab follows the events itself and a hidden one holds no stream", async () => {
+  const shared = browser();
+  const reads = { visible: 0, hidden: 0 };
+  const page = (name) => tab(shared, { locks: false, visible: name === "visible", fetch: async () => { reads[name] += 1; return json([]); } });
+  const visible = page("visible");
+  const hidden = page("hidden");
+  await settle();
+  assert.equal(shared.streams.length, 1, "only the visible tab follows the events");
+  const query = new URL(shared.streams[0].url, "http://nexus").searchParams;
+  assert.deepEqual(query.getAll("kind"), ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"]);
+  for (const each of [visible, hidden]) assert.deepEqual(each.intervals.map((i) => i.ms), [10_000], "every tab reads the list every 10 s, not every second");
+  assert.deepEqual(reads, { visible: 1, hidden: 1 }, "each tab reads the list once as it loads");
+
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.equal(reads.visible, 2, "an event reads the list");
+  visible.show("hidden");
+  assert.ok(shared.streams[0].closed, "a tab that is hidden closes its stream");
+  visible.show("visible");
+  assert.equal(shared.streams.length, 2, "and opens another on return");
+  assert.equal(shared.streams[1].closed, false);
+  hidden.show("visible");
+  assert.equal(shared.streams.length, 3);
+  assert.equal(shared.posts, 0, "no tab hands rows to another");
 });
 
 test("a page marks each reply it shows seen once, so one marked unseen elsewhere stays unseen", async () => {

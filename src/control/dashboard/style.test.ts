@@ -82,3 +82,32 @@ test("the terminal view keeps the dock's state bar and questions, and hides only
   assert.deepEqual(hidden.filter((s) => s.endsWith(".dock")), []);
   assert.ok(hidden.some((s) => s.endsWith("#composer")), hidden.join(", "));
 });
+
+/** Each style rule's selector list and declarations, with the at-rules it sits in, which are "" at the top level. */
+function styleRules(): { at: string; selector: string; body: string }[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const found: { at: string; selector: string; body: string }[] = [];
+  const open: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === "{") {
+      open.push(text.slice(start, i).trim().replace(/\s+/g, " "));
+      start = i + 1;
+    } else if (text[i] === "}") {
+      const head = open.pop()!;
+      if (!head.startsWith("@")) found.push({ at: open.join(" "), selector: head.split(",").map((s) => s.trim()).join(", "), body: text.slice(start, i) });
+      start = i + 1;
+    } else if (text[i] === ";" && open.length === 0) start = i + 1;
+  }
+  return found;
+}
+
+test("no selector list has two rules at one level, where the later would silently override the earlier", () => {
+  const seen = new Set<string>();
+  const twice = styleRules().map(({ at, selector }) => `${at} ${selector}`.trim()).filter((key) => seen.has(key) || !seen.add(key));
+  assert.deepEqual(twice, []);
+});
+
+test("only [hidden] uses !important, as it must beat every display rule", () => {
+  assert.deepEqual(styleRules().filter(({ body }) => body.includes("!important")).map(({ selector }) => selector), ["[hidden]"]);
+});
