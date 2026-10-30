@@ -43,7 +43,7 @@ import { imageIdOf, type ImageId, type ImageRecipe } from "../images.ts";
 import { githubTokenGrant } from "../secret-grants.ts";
 import { liveHashOf } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
-import type { ProjectMirror, TemplateRecord } from "../images.ts";
+import type { ProjectMirror, TemplateRecord } from "./templates.ts";
 import { ingest } from "../reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";

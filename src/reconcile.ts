@@ -145,7 +145,7 @@ const planRules: readonly Rule[] = [
     if (!i.retrying || refused !== null) return brokenFailure(i.observed, refused);
     return submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint });
   },
-  // 7b. Templates are built before planPylon runs. See chooseTemplate in images.ts.
+  // 7b. Templates are built before planPylon runs. See chooseTemplate in control/templates.ts.
   // A running VM ignores its boot inputs, so it needs no artifacts, even after its template is collected.
   (i) => {
     if (i.observed !== "absent" && i.observed.phase === "running") return null;

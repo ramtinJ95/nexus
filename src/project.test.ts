@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bootSecrets, effectiveAllowedHosts, renderOverlay, type Project, type PylonOverlay } from "./project.ts";
@@ -200,4 +200,15 @@ test("installFileCommand makes the parent as a user owner, as root for root, and
     ["runuser", "-u", "user", "--", "mkdir", "-p", "/home/user/it's a dir"],
     ["install", "-o", "user", "-g", "group-of-user", "-m", "755", "/staging/it's 1", path],
   ]);
+});
+
+test("code that runs on nodes never imports project.ts, the control plane's Project record and overlay", () => {
+  const src = new URL("./", import.meta.url);
+  const nodeFiles = [
+    ...["probe", "protocol", "pylon-vm"].flatMap((dir) => readdirSync(new URL(dir, src), { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.[jt]s$/.test(file) && !/\.(test|check)\.[jt]s$/.test(file)).map((file) => `${dir}/${file}`)),
+    "backend.ts", "docker-backend.ts", "docker-services.ts", "pylon-vm-backend.ts", "images.ts",
+  ];
+  const importers = nodeFiles.filter((file) => /\bfrom\s*["'][^"']*\/project\.ts["']|\bimport\s*\(\s*["'][^"']*\/project\.ts["']/.test(readFileSync(new URL(file, src), "utf8")));
+  assert.deepEqual(importers, []);
 });

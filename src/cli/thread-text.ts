@@ -11,7 +11,7 @@ import { reservedNames } from "../control/holds.ts";
 import { usageLimitText } from "../claude-transcript.ts";
 import { liveNote, phaseNote, roundNote, roundsSpent } from "../control/review-model.ts";
 import type { Changes, Listing } from "../checkout-files.ts";
-import type { ThreadSetup } from "../images.ts";
+import type { ThreadSetup } from "../control/templates.ts";
 import { ago, table, clip, gib } from "./kit.ts";
 
 const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;

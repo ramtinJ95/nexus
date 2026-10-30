@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { fullCommit } from "../deploy/model.ts";
 import type { HarnessHost } from "../harness/host.ts";
-import { chooseTemplate, setupHashOf, type ImageId, type ProjectMirror, type SetupInputs, type TemplateId, type ThreadSetup } from "../images.ts";
+import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
+import type { ImageId, TemplateId } from "../images.ts";
 import { bootSecrets, effectiveAllowedHosts, hasRemote, withHttpsHosts, type Project, type PylonOverlay, type RemoteProject } from "../project.ts";
 import { liveHashOf, type BootInputs, type RepoInit } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
