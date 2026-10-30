@@ -74,14 +74,18 @@ test("the controller logs each server error after it listens, and keeps serving"
 	assert.equal(existsSync(join(dir, "controller.pid")), false);
 });
 
-test("a body over 8 MiB is refused with a reply, and one that is no action is answered without waiting behind the lifecycle queue", async (t) => {
+test("a body over 8 MiB is refused with a reply, and the controller keeps serving", async (t) => {
 	const { post, inspect } = await controller(t);
 	const refused = await post(JSON.stringify({ action: "inspect", name, padding: "x".repeat(8 << 20) }));
 	assert.deepEqual(refused, { ok: false, error: "request body over 8388608 bytes" });
+	assert.equal(await inspect(), "running");
+});
+
+test("a body that is no action is answered without waiting behind the lifecycle queue", async (t) => {
+	const { post } = await controller(t);
 	void post(JSON.stringify({ action: "services", name, op: "status" })).catch(() => {});
 	const answered = await Promise.race([post(JSON.stringify({ action: "frob", name })), delay(5000, "still waiting")]);
 	assert.notEqual(answered, "still waiting", "the reply to a body that is no action waited for the queue");
 	assert.equal((answered as { ok: boolean }).ok, false);
 	assert.match((answered as { error: string }).error, /^action\.action: /);
-	assert.equal(await inspect(), "running");
 });

@@ -84,9 +84,9 @@ test("once its controller stops, an instance is read from its directory and the 
 
 test("an action reaches its controller in one request, with no inspect before it", async (t) => {
 	const c = await controller(t);
+	t.after(() => c.server.close());
 	assert.deepEqual(await run(c.root, { action: "services", name: c.name, op: "status" }), []);
 	assert.deepEqual(c.arrived, ["services"]);
-	c.server.close();
 });
 
 test("with no controller listening, an inspect reads the instance offline, a stop settles it, and any other action is refused", async (t) => {
