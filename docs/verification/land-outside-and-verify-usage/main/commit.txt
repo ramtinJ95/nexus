@@ -1,1 +1,0 @@
-main: c5168d6 feat(dashboard): open, close and jump between a pylon's sessions from the thread page (#211)

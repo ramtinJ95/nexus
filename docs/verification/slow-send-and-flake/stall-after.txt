@@ -1,2 +1,0 @@
-# this branch: 40 runs of the stall-limit tests in src/control/api.test.ts beside burn.sh 6 (6 busy loops on 4 CPUs)
-pass=40 fail=0

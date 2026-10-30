@@ -1,5 +1,0 @@
-# origin/main: 3 runs of the queued Claude worker test in src/control/loop.test.ts with tools/slow-disk.mjs at WRITE_MS=300
- Error: timed out waiting until worker started 
- Error: timed out waiting until worker started 
- Error: timed out waiting until worker started 
-pass=0 fail=3

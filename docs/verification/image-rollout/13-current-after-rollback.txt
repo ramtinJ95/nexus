@@ -1,4 +1,0 @@
-$ nexus image current
-img-0000000000aa  current   built 2026-10-20T00:00:00.000Z on infra-testbench  release unknown       on infra-testbench, rj-firebat, rj-nuc
-img-051b22b601e4  previous  built 2026-10-26T10:08:22.074Z on infra-testbench  release c93c0f2475b7  on infra-testbench, rj-firebat
-exit 0

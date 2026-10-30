@@ -1,3 +1,0 @@
-$ nexus unarchive th-0b983b741dea
-Unarchived th-0b983b741dea.
-[exit 0]

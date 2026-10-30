@@ -1,5 +1,0 @@
-2026-10-28T09:49:15.656Z pylon-th-afbd81684c6a on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at bae3c1b0c2fa
-2026-10-28T09:49:15.687Z pylon-th-8b875be5a3a5 on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at c9c16c08f675
-2026-10-28T09:49:15.724Z pylon-th-52080257be01 on verify-node, {"cpus":2,"memoryGiB":4,"diskGiB":10}, runs nexus-check at 89ef381f6ed3
-2026-10-28T09:49:17.668Z pylon-th-92a93c421176 on rj-firebat, {"cpus":2,"memoryGiB":8,"diskGiB":10,"nestedVirtualization":true}, runs nexus-verify at bae3c1b0c2fa
-2026-10-28T09:49:17.707Z pylon-th-58ff31bfba2e on rj-firebat, {"cpus":2,"memoryGiB":8,"diskGiB":10,"nestedVirtualization":true}, runs nexus-verify at 89ef381f6ed3

@@ -1,3 +1,0 @@
-control: nexus control plane: API on 127.0.0.1:7470, following node-a
-control: nexus control plane: API on 127.0.0.1:7470, following node-a
-control: latest-turn snapshot failed: node-a: GET /v1/pylons/pylon-th-4418fb719a79/stream?request=%7B%22argv%22%3A%5B%22python3%22%2C%22-%22%2C%22%2Fhome%2Fuser%2Fworkspace%2Frepo%22%2C%22snapshot%22%2C%22input%3A17%22%5D%7D: HTTP 502: the stand-in guest runs only the pi-env daemon, not python3 - /home/user/workspace/repo snapshot input:17

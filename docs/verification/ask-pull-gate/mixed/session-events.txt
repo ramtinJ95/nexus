@@ -1,5 +1,0 @@
-session.turn-started {"at":1793324156581,"session":"c1b3e643-aca8-44a3-bb4b-2ba7c303e5d6"}
-session.heartbeat {"at":1793324326418,"session":"c1b3e643-aca8-44a3-bb4b-2ba7c303e5d6"}
-session.waiting {"at":1793324333931,"session":"c1b3e643-aca8-44a3-bb4b-2ba7c303e5d6"}
-session.heartbeat {"at":1793324350083,"session":"c1b3e643-aca8-44a3-bb4b-2ba7c303e5d6"}
-session.turn-ended {"at":1793324351205,"session":"c1b3e643-aca8-44a3-bb4b-2ba7c303e5d6"}

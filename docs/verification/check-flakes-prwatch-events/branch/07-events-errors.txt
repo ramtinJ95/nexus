@@ -1,6 +1,0 @@
-$ nexus events --kind pull-request.error --kind pull-request.error-cleared
-2 2026-10-29T15:43:38.099Z th-caa7dc21f076 pull-request.error {"error":"PR watch could not read GitHub or deliver its message; it will retry."}
-3 2026-10-29T15:43:46.105Z th-caa7dc21f076 pull-request.error-cleared {}
-4 2026-10-29T15:43:48.100Z th-caa7dc21f076 pull-request.error {"error":"PR watch could not read the pull requests a queued thread waits for; it will retry."}
-5 2026-10-29T15:43:56.100Z th-caa7dc21f076 pull-request.error-cleared {}
-[exit 0]

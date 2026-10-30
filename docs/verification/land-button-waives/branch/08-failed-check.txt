@@ -1,4 +1,0 @@
-The driver asks to waive every hold on the review whose .nexus/check failed.
-POST /v1/threads/th-d0dc4754948d/land {"head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","waive":["Findings P0 to P2 are open: CHECK.","The builder neither fixed nor rejected with a reason finding CHECK of round 1.",".nexus/check failed at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.","Always needs the person: changes to secrets, as it changes deploy/control.json."]}
-=> 409 {"error":"review rv-48000000 of th-d0dc4754948d is needs-person: Findings P0 to P2 are open: CHECK. The builder neither fixed nor rejected with a reason finding CHECK of round 1. .nexus/check failed at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. Always needs the person: changes to secrets, as it changes deploy/control.json., not approved with its checks passing"}
-The review is still needs-person.

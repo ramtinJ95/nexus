@@ -1,8 +1,0 @@
-$ run.sh <main's deploy/release.sh> (bf84ee5)
-installed release 4f545fa6b2eae81fbe5702aeec8136dab40cf49b
-release: $SCRATCH/opt-main/releases/4f545fa6b2eae81fbe5702aeec8136dab40cf49b, owner root, user user
-release images/pylon:
-  images/pylon/agent-setup/manifest.ts
-  images/pylon/nexus-turn.ts
-checkout recipe: img-051b22b601e4, 13 files
-release recipe:  nexus: ENOENT: no such file or directory, open '$SCRATCH/opt-main/releases/4f545fa6b2eae81fbe5702aeec8136dab40cf49b/images/pylon/pins.json'

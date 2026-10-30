@@ -1,9 +1,0 @@
-#301 (watch: closed) Land button: no
-  (no landing card)
-
-#302 (watch: merged) Land button: no
-  (no landing card)
-
-#303 (watch: open) Land button: yes
-  Approved, not landed #303 Still open ↗ Head 303a00000000 · approved by gpt-6-astra (harness) in round 1 of 5 · .nexus/check passed · no .nexus/verify, so no live check Why it waits for you Nothing holds it. The review stopped at approval because it was started without --land. The reviewer's findings None. .nexus/check passed at 303a00000000 npm test: ok Land #303
-

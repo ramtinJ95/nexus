@@ -1,1 +1,0 @@
-branch: 34af3f6 fix(dashboard): wait for the terminal's current connection to land before focusing a session

@@ -1,2 +1,0 @@
-# this branch: 5 runs of the used-up port range and queued Claude worker tests in src/control/loop.test.ts with tools/slow-disk.mjs at WRITE_MS=100, beside the same runs of the other side
-pass=5 fail=0

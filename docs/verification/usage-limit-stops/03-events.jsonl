@@ -1,9 +1,0 @@
-{"id":"1","time":1792996773152,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"session.turn-started","payload":{"at":1792996771113,"session":"85b7afd5-cbe4-4cfd-b240-c929520f586f"}}
-{"id":"2","time":1792996773153,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"attention.changed","payload":{"attention":"working"}}
-{"id":"3","time":1792996773246,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"attention.changed","payload":{"attention":"limited"}}
-{"id":"4","time":1792996773495,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"session.turn-ended","payload":{"at":1792996771491,"session":"85b7afd5-cbe4-4cfd-b240-c929520f586f"}}
-{"id":"5","time":1792996924895,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"usage-limit.continued","payload":{"session":"85b7afd5-cbe4-4cfd-b240-c929520f586f","stoppedAt":1792996771398,"resetsAt":1792996918000,"requestId":"usage-limit:85b7afd5-cbe4-4cfd-b240-c929520f586f:1792996771398"}}
-{"id":"6","time":1792996927103,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"session.turn-started","payload":{"at":1792996925075,"session":"85b7afd5-cbe4-4cfd-b240-c929520f586f"}}
-{"id":"7","time":1792996927103,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"attention.changed","payload":{"attention":"working"}}
-{"id":"8","time":1792996927447,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"session.turn-ended","payload":{"at":1792996925443,"session":"85b7afd5-cbe4-4cfd-b240-c929520f586f"}}
-{"id":"9","time":1792996927447,"thread":"th-c8a6bfd1fcb3","project":"words","kind":"attention.changed","payload":{"attention":"reply"}}

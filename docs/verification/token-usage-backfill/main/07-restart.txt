@@ -1,4 +1,0 @@
-before the restart: "GET /v1/usage/backfill answered 404"
-total: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}
-after the restart: "GET /v1/usage/backfill answered 404"
-total: {"calls":9,"input":20,"output":1523,"cacheWrite":37665,"cacheRead":293246,"total":332454}

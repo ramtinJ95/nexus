@@ -1,3 +1,0 @@
-$ nexus land th-9c7e00535390
-nexus: caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons
-exit 3

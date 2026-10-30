@@ -1,3 +1,0 @@
-$ nexus archive th-0f894b23de17
-Archived th-0f894b23de17.
-[exit 0]

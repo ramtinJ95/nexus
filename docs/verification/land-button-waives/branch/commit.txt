@@ -1,1 +1,0 @@
-branch: 7b7f785 docs: pressing Land on the dashboard is the person waiving a reserved hold

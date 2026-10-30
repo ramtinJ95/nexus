@@ -1,2 +1,0 @@
-Started th-4c49a0ecf021 on acme: auto placement
-exit 0

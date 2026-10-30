@@ -1,3 +1,0 @@
-$ nexus retry-pylon th-a297c0341eda
-[stderr] nexus: pylon pylon-th-a297c0341eda has not failed
-[exit 5]

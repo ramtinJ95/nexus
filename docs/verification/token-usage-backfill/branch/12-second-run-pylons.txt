@@ -1,4 +1,0 @@
-2026-10-28T01:16:22.854Z pylon-th-e2d1b22d3832: spawn without relaunch failed: pylon-vm: the VM did not boot: gondolin exited 1 before the guest answered
-2026-10-28T01:16:27.826Z pylon-th-2efe9f7b9b2b: spawn booted from ckpt-th-2efe9f7b9b2b-2 without relaunching its sessions, which wait for the next spawn
-2026-10-28T01:16:29.824Z pylon-th-2efe9f7b9b2b: pipe python3 -c ... fails, as fail-read asks
-2026-10-28T01:16:29.833Z pylon-th-2efe9f7b9b2b: pause wrote ckpt-th-2efe9f7b9b2b-3 and kept the sessions its last pause recorded, as they never came back

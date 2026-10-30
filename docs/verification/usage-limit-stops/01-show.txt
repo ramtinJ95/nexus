@@ -1,9 +1,0 @@
-th-c8a6bfd1fcb3  Stops on its limit
-project: words
-Claude worker: started, model claude-opus-5-5
-attention: limited
-usage limit: stopped on its usage limit until 06:41 UTC. `nexus send th-c8a6bfd1fcb3 continue` resumes it once the limit resets
-status: active
-pylon: pylon-th-c8a6bfd1fcb3 on verify-node, running, observed 0s ago
-placement: verify-node, the project's default node
-PR watch: off (no control-plane GitHub token configured)

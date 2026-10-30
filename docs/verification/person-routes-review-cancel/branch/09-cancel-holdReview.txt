@@ -1,3 +1,0 @@
-$ nexus review --cancel th-c8b6e6069390
-Cancelled review rv-d7857d58 of PR #1, started on its own: cancelled, round 1 of 5, reviewer th-a07f2eb0c560 on gpt-6-astra, cancelled by nLAPTOP
-[exit 0]

@@ -1,5 +1,0 @@
-$ nexus review th-933083b5ad47 --rounds 6
---- stderr
-nexus: ✖ Too big: expected number to be <=5
-  → at rounds
---- exit 64

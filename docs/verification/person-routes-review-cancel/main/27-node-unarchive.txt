@@ -1,3 +1,0 @@
-$ nexus unarchive th-a297c0341eda
-[stderr] nexus: thread th-a297c0341eda is active, not archived
-[exit 5]

@@ -1,5 +1,0 @@
-$ nexus threads
-th-090e5f31f75e  active  -  pylon running  nexus  3s ago  Pin the pylon's Node to 26
-th-482afd619ef8  active  -  pylon running  nexus  3s ago  Rotate the merge token
-th-5850688c4c82  active  -  pylon running  nexus  3s ago  Plan the pipeline items
-exit 0

@@ -1,9 +1,0 @@
-th-569f641a703a  E: setup changed
-project: acme
-attention: failed
-status: active
-pylon: pylon-th-569f641a703a on local-node, failed, observed 0s ago
-placement: local-node, the project's default node
-setup: fresh boot runs .nexus/setup, because no template of this setup is on local-node yet; tpl-ad1dacf48b98 builds for the next thread
-failed: last job failed with invalid, which is not retryable: file:///tmp/tmp.n6EEUig5y6/origin.git is neither an SSH nor an HTTPS git URL
-PR watch: off (no control-plane GitHub token configured)

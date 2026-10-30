@@ -1,3 +1,0 @@
-$ nexus archive th-6c08354eb7bf
-Archived th-6c08354eb7bf.
-exit 0

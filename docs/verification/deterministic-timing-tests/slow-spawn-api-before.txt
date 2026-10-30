@@ -1,7 +1,0 @@
-# origin/main: 5 runs of the page stream test in src/control/api.test.ts with tools/slow-spawn.mjs at SPAWN_MS=6000, beside the same runs of the other side
- AssertionError [ERR_ASSERTION]: no event on /threads/th-0ca58827bb54/stream  actual: false,  expected: true, 
- AssertionError [ERR_ASSERTION]: no event on /threads/th-8b699f48930a/stream  actual: false,  expected: true, 
- AssertionError [ERR_ASSERTION]: no event on /threads/th-7e6edf1477b8/stream  actual: false,  expected: true, 
- AssertionError [ERR_ASSERTION]: no event on /threads/th-3c8a54856b54/stream  actual: false,  expected: true, 
- AssertionError [ERR_ASSERTION]: no event on /threads/th-0c485ac421ce/stream  actual: false,  expected: true, 
-pass=0 fail=5

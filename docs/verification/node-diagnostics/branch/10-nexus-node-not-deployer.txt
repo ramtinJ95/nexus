@@ -1,3 +1,0 @@
-$ nexus node infra-testbench
-nexus: caller may not read a node's health: only deployers may, never infrastructure nodes or pylons
-exit 3

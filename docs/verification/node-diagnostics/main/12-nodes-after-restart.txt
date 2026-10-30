@@ -1,4 +1,0 @@
-$ nexus nodes
-infra-testbench  offline  observed 47s ago  3/4 CPUs, 4/5.8 GiB memory committed, 30 GiB disk committed, 17.2 GiB disk free
-  pylons: 2 up holding 3 CPUs and 4 GiB, 1 crashed needing 2 GiB to retry
-exit 0

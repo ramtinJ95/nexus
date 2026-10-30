@@ -1,1 +1,0 @@
-main: e15c1cb feat(dashboard): themes, with light, dark and macarchy's Tokyo Night, Catppuccin Mocha and Kanagawa Wave (#202)

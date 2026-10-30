@@ -1,5 +1,0 @@
-$ nexus release
-Desired: 03bb00247832adf7d088ba863c976243cbf6eacd by verify seed at 2026-10-26T11:04:04.891Z
-verify-node control: 03bb00247832adf7d088ba863c976243cbf6eacd healthy
-verify-node probe: 03bb00247832adf7d088ba863c976243cbf6eacd healthy
---- exit 0

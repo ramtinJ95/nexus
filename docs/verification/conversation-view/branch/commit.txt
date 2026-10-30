@@ -1,1 +1,0 @@
-branch: 61f98ad fix(dashboard): draw a tool row's mark as an icon, which needs no font's glyph

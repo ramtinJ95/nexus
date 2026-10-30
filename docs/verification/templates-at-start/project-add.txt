@@ -1,1 +1,0 @@
-Added project acme (file:///tmp/tmp.n6EEUig5y6/origin.git) on local-node

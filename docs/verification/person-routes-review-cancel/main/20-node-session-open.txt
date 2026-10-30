@@ -1,3 +1,0 @@
-$ nexus session open th-a297c0341eda --harness shell
-[stderr] nexus: the verify stack's pylons run no open-session
-[exit 1]

@@ -9,7 +9,7 @@ A user sends a thread's agent a message. The agent runs tools inside the thread'
 - `msg-disk` leaves the tool call's file on the pylon's disk.
 - `msg-dedupe` takes a resend with the same `--request-id` as the same message.
 - `msg-ui` sends from the dashboard's composer and shows the turn on the thread page, with its tool call as one line, `Bash echo from-ui >> proof.txt`.
-- `msg-busy` shows the composer in its steer mode while a run is busy, and joins a busy run with `--steer`. Steering and queueing from the composer are driven by [the thread page's capture](../../../../docs/verification/thread-page-interaction/README.md), not here.
+- `msg-busy` shows the composer in its steer mode while a run is busy, and joins a busy run with `--steer`. Steering and queueing from the composer are driven by [the thread page's capture](https://github.com/ramtinJ95/nexus/blob/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/thread-page-interaction/README.md), not here.
 
 ## How to get to it (user POV)
 

@@ -1,3 +1,0 @@
-$ nexus usage backfill
-Backfill: running, 4 of 6 threads read, recovered 6044 calls and 7.6M tokens.
-exit 0

@@ -1,3 +1,0 @@
-$ nexus session close th-a297c0341eda w1:p1
-[stderr] nexus: the verify stack's pylons run no close-session
-[exit 1]

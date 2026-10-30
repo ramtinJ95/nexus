@@ -1,3 +1,0 @@
-$ nexus delete th-49cc7812dc2f
-Deleted th-49cc7812dc2f.
-[exit 0]

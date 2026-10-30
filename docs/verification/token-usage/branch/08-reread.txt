@@ -1,4 +1,0 @@
-The stack appended the Claude worker's transcript to itself and reported its turn's end.
-total after the read: {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
-expected:  {"calls":14,"input":5649,"output":1701,"cacheWrite":40335,"cacheRead":315782,"total":363467}
-MATCH

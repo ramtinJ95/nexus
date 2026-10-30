@@ -1,1 +1,0 @@
-branch: 88da8eb fix(dashboard): keep the reader's place while a diff tab hides the conversation

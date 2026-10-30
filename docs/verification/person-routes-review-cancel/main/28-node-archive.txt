@@ -1,3 +1,0 @@
-$ nexus archive th-a297c0341eda
-Archived th-a297c0341eda.
-[exit 0]

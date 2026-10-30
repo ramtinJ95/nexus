@@ -1,3 +1,0 @@
-$ nexus delete th-54f01021bbe3
-Deleted th-54f01021bbe3.
-[exit 0]

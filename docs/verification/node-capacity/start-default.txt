@@ -1,2 +1,0 @@
-Started th-4829254a1949 on acme: default placement
-exit 0

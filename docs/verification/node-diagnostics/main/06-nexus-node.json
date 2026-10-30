@@ -1,3 +1,0 @@
-$ nexus node infra-testbench --json
-{"error":"unknown command node","kind":"invalid","status":null}
-exit 64

@@ -1,3 +1,0 @@
-$ nexus project edit nexus --auto-review land
-Updated project nexus, auto review and land, for nLAPTOP, pipeline off. Existing threads keep their boot settings and grants; start a new thread to apply them.
-[exit 0]

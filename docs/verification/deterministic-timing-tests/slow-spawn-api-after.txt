@@ -1,2 +1,0 @@
-# this branch: 5 runs of the page stream test in src/control/api.test.ts with tools/slow-spawn.mjs at SPAWN_MS=6000, beside the same runs of the other side
-pass=5 fail=0

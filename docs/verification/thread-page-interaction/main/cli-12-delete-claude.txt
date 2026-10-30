@@ -1,3 +1,0 @@
-$ nexus delete th-6e88df42d00d
-Deleted th-6e88df42d00d.
-[exit 0]

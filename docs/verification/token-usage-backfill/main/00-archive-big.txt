@@ -1,3 +1,0 @@
-$ nexus archive th-cb250e6d0ea3
-Archived th-cb250e6d0ea3.
-exit 0

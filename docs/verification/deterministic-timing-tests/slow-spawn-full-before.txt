@@ -1,7 +1,0 @@
-# origin/main: the full suite with tools/slow-spawn.mjs at SPAWN_MS=600, beside the same run of this branch (tools/compare.sh 1 0-3 0)
-ℹ pass 1136
-ℹ fail 4
-✖ a background command runs while its process group lives, through exec or closed output, and MCP servers in Claude's group do not count
-✖ a background command that left its group runs while a process writes to its output file
-✖ a deadline that passes during the ref update lets it finish, so no ref lock is left to fail later snapshots
-✖ a snapshot whose turn a later attempt claimed is refused even to a read expecting it, as when that attempt's turn start was lost

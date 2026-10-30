@@ -1,3 +1,0 @@
-$ nexus events --kind pull-request.error --kind pull-request.error-cleared
-[stderr] nexus: unknown event kind
-[exit 64]

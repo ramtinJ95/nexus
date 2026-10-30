@@ -1,3 +1,0 @@
-$ nexus delete th-a297c0341eda
-Deleted th-a297c0341eda.
-[exit 0]

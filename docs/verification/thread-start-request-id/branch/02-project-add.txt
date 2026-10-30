@@ -1,3 +1,0 @@
-$ NEXUS_URL=http://127.0.0.1:7470 nexus project add scratch --scratch --node node-a --cpus 1 --memory 1 --disk 1
-Added scratch project scratch on node-a
-[exit 0]

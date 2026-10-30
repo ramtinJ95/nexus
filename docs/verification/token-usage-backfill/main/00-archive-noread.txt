@@ -1,3 +1,0 @@
-$ nexus archive th-ce9d6e1ed315
-Archived th-ce9d6e1ed315.
-exit 0

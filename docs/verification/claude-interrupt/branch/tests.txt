@@ -1,3 +1,0 @@
-ℹ fail 0
-ℹ pass 481
-ℹ tests 481

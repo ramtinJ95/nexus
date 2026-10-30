@@ -1,1 +1,0 @@
-no #thread-usage on the thread page

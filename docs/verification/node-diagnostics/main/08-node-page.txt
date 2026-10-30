@@ -1,2 +1,0 @@
-HTTP 404
-{"error":"no route /nodes/infra-testbench"}

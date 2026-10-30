@@ -1,6 +1,0 @@
-harness: first frame 18.5 ms, then median 4.59 ms, p90 5.79 ms per frame
-claude: first frame 7.3 ms, then median 4.60 ms, p90 5.35 ms per frame
-harness: first frame 20.0 ms, then median 4.79 ms, p90 6.37 ms per frame
-claude: first frame 6.9 ms, then median 4.59 ms, p90 5.52 ms per frame
-harness: first frame 17.9 ms, then median 4.66 ms, p90 5.66 ms per frame
-claude: first frame 6.3 ms, then median 4.61 ms, p90 5.48 ms per frame

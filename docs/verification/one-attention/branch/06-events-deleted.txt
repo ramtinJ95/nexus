@@ -1,3 +1,0 @@
-$ nexus events --thread th-4f68310b1091 --kind attention.changed
-8 2026-10-27T13:09:50.213Z th-4f68310b1091 attention.changed {"attention":"parked"}
-14 2026-10-27T13:09:58.696Z th-4f68310b1091 attention.changed {"attention":null}

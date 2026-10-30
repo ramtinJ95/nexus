@@ -1,8 +1,0 @@
-nexus API on http://127.0.0.1:7470 following infra-testbench, rj-firebat, rj-nuc; release c93c0f2475b744ce0a4469aaecfa0ce4c6343aba
-infra-testbench: build-image img-051b22b601e4 from a recipe of 13 files, Dockerfile included: true
-worker: image build of img-051b22b601e4 is done
-worker: image rollout of img-051b22b601e4 failed: rj-nuc could not fetch img-051b22b601e4: backend: no space left on device writing img-051b22b601e4.partial.archive
-rj-nuc's probe stopped
-worker: image rollout of img-051b22b601e4 is done
-worker: image rollout of img-0000000000aa is done
-worker: image rollout of img-051b22b601e4 is done

@@ -1,4 +1,0 @@
-$ sudo python3 -I docs/verification/no-baked-hook-events/scan-disk.py /dev/vda 2c7eb86f
-44818432 {"kind":"session.turn-started","at":1793089661334,"session":"2c7eb86f-bf2e-4416-b70f-28600c27c4fa","id":"0001793089661334-433-000000-8b97cd5c"}
-44822528 {"kind":"session.ended","at":1793089662158,"session":"2c7eb86f-bf2e-4416-b70f-28600c27c4fa","id":"0001793089662158-483-000000-a3af0512"}
-# 1793089661334 = 2026-10-27T08:27:41.334Z, 1793089662158 = 2026-10-27T08:27:42.158Z. This pylon booted at 09:22:28.

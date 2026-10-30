@@ -87,6 +87,12 @@ Proof standards:
 - Mocks stand only at the boundaries listed above: whois, the model and `tailscale serve`. A behavior that depends on what those fakes replace, such as real model output, ts-home's SOCKS proxy, tailnet identity, a real MagicDNS preview URL or Gondolin's network policy, is not proven by this stack. Say so in your report rather than claiming it.
 - Report each entry point you drove. An entry point you skipped is unverified, even if a sibling entry point passed.
 
+Evidence is never committed. The pull request carries it:
+
+- The description says what was driven and what it showed: the key commands with their output, the entry points covered, and what could not be checked live.
+- Longer logs and screenshots go in a comment on the pull request.
+- The reviewer reads only the description, up to 8,000 characters, so anything the review depends on goes there.
+
 ## Cleanup
 
 ```sh
