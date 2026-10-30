@@ -38,7 +38,7 @@ nexus start --project hello --message "Say hello"
 nexus conversation <the thread ID it printed>
 ```
 
-[Install on a new machine](deploy/README.md#install-on-a-new-machine) has the detail, adding more machines among it. [The CLI's contract](docs/cli.md) lists every command. [docs/verification/fresh-install](docs/verification/fresh-install) runs this install on two fresh Debian machines with Tailscale faked. A run in a real tailnet is still a step done by hand.
+[Install on a new machine](deploy/README.md#install-on-a-new-machine) has the detail, adding more machines among it. [The CLI's contract](docs/cli.md) lists every command. [docs/verification/fresh-install](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/fresh-install) runs this install on two fresh Debian machines with Tailscale faked. A run in a real tailnet is still a step done by hand.
 
 ## Documentation
 
