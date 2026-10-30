@@ -4,7 +4,7 @@
  * worker's AskUserQuestion call is one while its pylon's hook reports that its dialog waits (the registry's asks).
  */
 import { z } from "zod";
-import type { AskAnswer } from "../../images/pylon/nexus-ask.ts";
+import type { AskAnswer } from "../../images/pylon/nexus-contract.ts";
 import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { ThreadId } from "./registry.ts";

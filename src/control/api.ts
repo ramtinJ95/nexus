@@ -58,7 +58,7 @@ import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDo
 import { promptSenders } from "./inbox.ts";
 import { HttpError, type ApiErrorCode } from "./http-error.ts";
 import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "./questions.ts";
-import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
+import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-contract.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { bootNetwork, startKey, type StartRequest } from "./threads.ts";

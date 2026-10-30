@@ -6,9 +6,6 @@ import { join } from "node:path";
 /** The image's copy of src/checkout-files.py, which the control plane reads the snapshot back with. */
 export const checkoutHelper = "/usr/local/lib/nexus/checkout-files.py";
 
-/** The control plane expects this ID for the latest session.turn-started it recorded, so the hook stamps both with `at`. */
-export const claudeTurn = (session: string, at: number): string => `claude:${session}:${at}`;
-
 /**
  * Snapshots the checkout into refs/nexus/turn before Claude acts on the prompt. Claude kills a hook after two seconds,
  * and a capture finishing after that could include Claude's first edits, so the helper's process group, git and any

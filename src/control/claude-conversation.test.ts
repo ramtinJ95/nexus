@@ -10,7 +10,7 @@ import { openRegistry, type Registry, type Thread } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
-import { claudeHook } from "../../images/pylon/nexus-ask.ts";
+import { claudeHook } from "../../images/pylon/nexus-contract.ts";
 import type { LiveHash, NodeName } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeClient } from "../protocol/client.ts";

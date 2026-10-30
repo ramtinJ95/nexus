@@ -16,30 +16,8 @@
 import { createHash } from "node:crypto";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { answerDelivered, answerExits, maxAsksBytes, type AskAnswer } from "./nexus-contract.ts";
 import { startTime } from "./nexus-heartbeat.ts";
-
-/** Where the image installs the hook, which the control plane runs through the probe. */
-export const claudeHook = "/usr/local/bin/nexus-claude-hook";
-
-/**
- * What the control plane hands `nexus-claude-hook answer`: the session and question texts that name the ask, the
- * call's ID, and Claude's `answers` and `annotations`. An answer maps each question's text to the picked labels and
- * the person's own answer, joined with ", ".
- */
-export interface AskAnswer {
-  session: string;
-  questions: readonly string[];
-  toolUseId: string;
-  answers: Readonly<Record<string, string>>;
-  annotations: Readonly<Record<string, { notes?: string }>>;
-}
-
-/**
- * `nexus-claude-hook answer`'s exit codes. A delivery also prints answerDelivered, since the hook of an image from
- * before asks exits 0 for a kind it does not know.
- */
-export const answerExits = { delivered: 0, nobodyWaits: 20, answeredOtherwise: 21, malformed: 64 } as const;
-export const answerDelivered = "delivered";
 
 /** An ask whose hook waits, as `nexus-claude-hook asks` prints it: the call and its input as Claude gave it. */
 export interface ReportedAsk { session: string; toolUseId: string; at: number; input: Record<string, unknown> }
@@ -54,7 +32,6 @@ interface Waiting { pid: number; start: number | null; at: number; session: stri
 
 /** `asks` leaves out a waiting file over maxWaitingBytes, and prints at most maxAsksBytes. */
 const maxWaitingBytes = 256 << 10;
-export const maxAsksBytes = 1 << 20;
 
 /** How much of a hook's input is read: any hook's up to maxReportInput, and AskUserQuestion's up to maxAskInput, since its previews make it long. */
 const maxReportInput = 64 << 10;

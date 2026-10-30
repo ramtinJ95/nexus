@@ -6,7 +6,8 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { answerExits, askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks, type AskAnswer } from "../images/pylon/nexus-ask.ts";
+import { askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "../images/pylon/nexus-ask.ts";
+import { answerExits, type AskAnswer } from "../images/pylon/nexus-contract.ts";
 
 const hook = new URL("../images/pylon/nexus-claude-hook", import.meta.url).pathname;
 

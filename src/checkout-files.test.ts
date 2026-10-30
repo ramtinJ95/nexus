@@ -13,7 +13,8 @@ import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipe
 import type { OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
 import { localPipes } from "./fake-guest.ts";
-import { claudeTurn, snapshotTurn } from "../images/pylon/nexus-turn.ts";
+import { claudeTurn } from "../images/pylon/nexus-contract.ts";
+import { snapshotTurn } from "../images/pylon/nexus-turn.ts";
 import type { ByteStream, StreamEnd } from "./protocol/streams.ts";
 
 const run = promisify(execFile);

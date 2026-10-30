@@ -4,10 +4,11 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
-import { alive, answerDelivered, answerExits, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
+import { alive, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
+import { answerDelivered, answerExits, claudeTurn } from "./nexus-contract.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
-import { claudeTurn, snapshotTurn } from "./nexus-turn.ts";
+import { snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
 
 const at = Date.now();
