@@ -1,3 +1,7 @@
+/**
+ * The wire contract between the deploy worker and the control plane. The bootstrap deployer copies src/deploy/*.ts and
+ * runs without node_modules, so this module imports only builtins.
+ */
 import { createHash } from "node:crypto";
 
 export const fullCommit = /^[0-9a-f]{40}$/;
@@ -21,12 +25,18 @@ export interface ReleaseReport {
   reason: string | null;
   observedAt: number;
 }
+/** What the worker posts to /v1/deployer/report. */
+export type ReportBody = Omit<ReleaseReport, "node" | "observedAt">;
 /** What the control plane answers, which has already turned a stale report into a pending one. */
 export interface ReleaseView {
   desired: DesiredRelease | null;
   nodes: ReleaseReport[];
 }
 export interface Drain { commit: string; expiresAt: number; locked?: boolean }
+/** What the control node posts to /v1/deployer/drain. */
+export interface DrainBody { commit: string; release?: boolean; hold?: boolean }
+/** `expiresAt` is null once a release has cleared the drain. */
+export interface DrainReply { idle: boolean; expiresAt: number | null }
 
 export function releaseOutcome(view: ReleaseView, commit: string): "pending" | "healthy" | "failed" | "superseded" {
   if (view.desired?.commit !== commit) return "superseded";

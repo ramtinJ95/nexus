@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { TailnetNodeId } from "../protocol.ts";
 import type { Registry } from "./registry.ts";
-import { fullCommit, reportStates, tokenDigest, type ReleaseView, type Role } from "../deploy/model.ts";
+import { fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../deploy/model.ts";
 import { command, repository } from "../deploy/install.ts";
 
 export interface DeploymentOptions {
@@ -16,7 +16,7 @@ export const reportSchema = z.strictObject({
   role: z.enum(["control", "probe"] satisfies Role[]), commit: commitSchema.nullable(), target: commitSchema.nullable(),
   state: z.enum(reportStates),
   reason: z.string().max(20_000).nullable(),
-});
+}) satisfies z.ZodType<ReportBody>;
 
 /**
  * Whether the caller is a person's device: neither the control node nor a node, whose pylons call as their node. Without
