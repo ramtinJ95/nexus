@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The in-pylon nexus CLI. Each command is one POST of a PylonApiRequest (src/project.ts) to $NEXUS_API/v1/request,
+// The in-pylon nexus CLI. Each command is one POST of a PylonApiRequest (src/probe/pylon-api.ts) to $NEXUS_API/v1/request,
 // which the host bridge answers from the probe on this node, so the call never leaves the machine and carries no
 // token. --json prints the probe's reply as it is. Plain JavaScript with no dependencies, run by the image's Node.
 import { resolve } from "node:path";
