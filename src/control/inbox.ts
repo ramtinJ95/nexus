@@ -6,6 +6,7 @@
  */
 import type { HarnessHost, Sender } from "../harness/host.ts";
 import type { CommandResult, NodeName, ProbeClient, ProbeError, PylonCommand } from "../protocol.ts";
+import { runningProbe } from "./observed.ts";
 import type { ClaudeSent, Registry, Thread, ThreadId } from "./registry.ts";
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
@@ -94,11 +95,8 @@ export function agentInbox(options: { registry: Registry; harness: Pick<HarnessH
     wake(t);
     if (agent.kind === "harness") return "delivered";
     const { worker } = agent;
-    const pylon = registry.pylon(t.pylonId)!;
-    const node = registry.node(pylon.node);
-    const running = node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === t.pylonId && p.phase === "running") === true;
-    const probe = probes.get(pylon.node);
-    if (worker.session === null || !running || probe === undefined) return "later";
+    const probe = runningProbe(registry, probes, t);
+    if (worker.session === null || probe === null) return "later";
     let typed: ClaudeTyped;
     try {
       typed = await typeIntoClaude(registry, t.id, worker.session, worker.model, message.id, typeable(message.text), (command) => probe.command(t.pylonId, command));

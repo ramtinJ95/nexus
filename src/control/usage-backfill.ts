@@ -6,6 +6,7 @@
  */
 import type { NodeName, PylonObservation } from "../protocol.ts";
 import { singleFlight } from "../single-flight.ts";
+import { observedPylon } from "./observed.ts";
 import { gib, roomLeft, uncounted } from "./placement.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import type { UsageCounter } from "./usage-counter.ts";
@@ -46,11 +47,7 @@ export function usageBackfill(options: {
     }
   }, () => shutdown.signal.aborted);
 
-  function seen(p: StoredPylon): PylonObservation | "absent" | null {
-    const node = registry.node(p.node);
-    if (node?.state !== "online" || node.observation === null) return null;
-    return node.observation.pylons.find((o) => o.pylonId === p.pylonId) ?? "absent";
-  }
+  const seen = (p: StoredPylon): PylonObservation | "absent" | null => registry.node(p.node)?.state === "online" ? observedPylon(registry, p) : null;
 
   function unreadable(t: Thread): string | null {
     if (t.status === "deleted") return "it was deleted, and its pylon with it";

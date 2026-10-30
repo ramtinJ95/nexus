@@ -11,6 +11,7 @@ import type { ConversationId } from "../harness/host.ts";
 import type { NodeName, ProbeClient, PylonId } from "../protocol.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { EventKind } from "../events.ts";
+import { runningProbe } from "./observed.ts";
 import type { Registry, ThreadId } from "./registry.ts";
 
 export interface UsageCounter {
@@ -79,11 +80,9 @@ export function usageCounter(options: {
 
   async function readOn(id: ThreadId, cursors: (pylon: PylonId) => ReadonlyMap<string, FileCursor>, backfill = false) {
     const t = registry.thread(id);
-    const pylon = t === undefined ? undefined : registry.pylon(t.pylonId);
-    const node = pylon === undefined ? undefined : registry.node(pylon.node);
-    const running = node?.state === "online" && node.observation?.pylons.some((p) => p.pylonId === pylon!.pylonId && p.phase === "running") === true;
-    const probe = running ? probes.get(pylon!.node) : undefined;
-    if (t === undefined || t.status === "deleted" || probe === undefined) return null;
+    if (t === undefined || t.status === "deleted") return null;
+    const probe = runningProbe(registry, probes, t);
+    if (probe === null) return null;
     const read = await readAgentUsage((argv) => probe.stream(t.pylonId, argv), cursors(t.pylonId), logs);
     const added = registry.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })), backfill);
     return { ...added, offsets: read.offsets, more: read.more };

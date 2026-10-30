@@ -25,6 +25,7 @@ import { isImageId, type NodeName, type NodeObservation, type ProbeClient, type 
 import type { ArtifactId } from "../images.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { pylonLive } from "./live.ts";
+import { listsRunning } from "./observed.ts";
 import type { PortRange, Registry, StoredPylon, Thread } from "./registry.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
@@ -179,7 +180,7 @@ export function startLoop(options: LoopOptions): Loop {
       };
       try {
         const worker = registry.claudeWorker(thread.id);
-        const running = nodeObservation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running") === true;
+        const running = listsRunning(nodeObservation, pylonId);
         // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
         // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
         if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
