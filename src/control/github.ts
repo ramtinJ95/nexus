@@ -52,9 +52,14 @@ interface Comment { author_association: string; id: number; body: string | null;
 interface Check { id: number; name: string; status: string; conclusion: string | null; details_url: string | null; html_url?: string; completed_at: string | null }
 interface Status { id: number; context: string; state: string; target_url: string | null }
 
-/** Each resource has its own ETag: a PR's ETag says nothing about its checks or comments. */
+/**
+ * Each resource has its own ETag: a PR's ETag says nothing about its checks or comments. The cache keeps the resources
+ * read most recently, and drops a PR's commit resources once its head moves, since nothing reads them again.
+ */
 export function githubClient(token: string, request: typeof fetch = fetch): GitHub {
   const cache = new Map<string, { etag: string | null; value: unknown; next: string | null }>();
+  /** Each PR's head at its last read, by repository and number. */
+  const heads = new Map<string, string>();
   let retryAt = 0;
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" };
   function limited(response: Response) {
@@ -70,14 +75,19 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     }
     return false;
   }
+  /** No request goes out while a rate limit lasts, and none follows a redirect away from GitHub. */
+  async function call(path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
+    if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
+    return await request(`https://api.github.com${path}`, { ...init, headers: { ...headers, ...init.headers }, signal: AbortSignal.timeout(30_000), redirect: "error" });
+  }
   async function get<T>(path: string): Promise<{ value: T; next: string | null }> {
-    if (Date.now() < retryAt) throw new Error("GitHub PR watch is waiting for its rate limit");
     const old = cache.get(path);
-    const response = await request(`https://api.github.com${path}`, {
-      headers: { ...headers, ...(old?.etag ? { "If-None-Match": old.etag } : {}) },
-      signal: AbortSignal.timeout(30_000), redirect: "error",
-    });
-    if (response.status === 304 && old) return { value: old.value as T, next: old.next };
+    const response = await call(path, { headers: old?.etag ? { "If-None-Match": old.etag } : {} });
+    if (response.status === 304 && old) {
+      cache.delete(path);
+      cache.set(path, old);
+      return { value: old.value as T, next: old.next };
+    }
     if (!response.ok) {
       limited(response);
       throw new Error(`GitHub PR watch: HTTP ${response.status}`);
@@ -85,16 +95,14 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     const value = await response.json() as T;
     const nextUrl = response.headers.get("link")?.match(/<([^>]+)>; rel="next"/)?.[1];
     const next = nextUrl?.startsWith("https://api.github.com/") ? nextUrl.slice("https://api.github.com".length) : null;
-    if (!cache.has(path) && cache.size >= 4096) cache.delete(cache.keys().next().value!);
+    cache.delete(path);
+    if (cache.size >= 4096) cache.delete(cache.keys().next().value!);
     cache.set(path, { etag: response.headers.get("etag"), value, next });
     return { value, next };
   }
   /** A write's answer. A rate limit throws, so the caller's step is retried, never reported as a refusal. */
   async function write(method: "PUT" | "POST", path: string, body: unknown, what: string) {
-    if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
-    const response = await request(`https://api.github.com${path}`, {
-      method, headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000), redirect: "error",
-    });
+    const response = await call(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const reply = await response.json().catch(() => ({})) as { sha?: string; message?: string };
     if (!response.ok && limited(response)) throw new Error(`GitHub ${what}: HTTP ${response.status}`);
     return { response, reply, message: `GitHub answered ${response.status}${typeof reply.message === "string" ? `: ${reply.message.slice(0, 500)}` : ""}` };
@@ -119,6 +127,9 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     async poll(repo, number) {
       const base = `/repos/${repo}`;
       const { value: p } = await get<Pr>(`${base}/pulls/${number}`);
+      const before = heads.get(`${repo}#${number}`);
+      if (before !== undefined && before !== p.head.sha) for (const key of cache.keys()) if (key.startsWith(`${base}/commits/${before}/`)) cache.delete(key);
+      heads.set(`${repo}#${number}`, p.head.sha);
       const detail: PrDetail = { head: p.head.sha, branch: p.head.ref, base: p.base.ref, body: p.body ?? "", mergeCommit: p.merged ? p.merge_commit_sha : null };
       const pr: PullRequest = { repo, number, title: p.title, url: p.html_url, state: p.merged ? "merged" : p.state === "closed" ? "closed" : "open", checks: "none", review: "none", conflict: p.mergeable_state === "unknown" ? null : p.mergeable_state === "dirty" };
       if (pr.state !== "open") return { pr, detail, failures: [], comments: [] };
@@ -161,8 +172,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       throw new Error(`GitHub label: HTTP ${added.response.status}`);
     },
     async has(repo, commit, path) {
-      if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
-      const response = await request(`https://api.github.com/repos/${repo}/contents/${path}?ref=${commit}`, { headers, signal: AbortSignal.timeout(30_000), redirect: "error" });
+      const response = await call(`/repos/${repo}/contents/${path}?ref=${commit}`);
       await response.body?.cancel();
       if (response.status === 404) return false;
       if (response.ok) return true;
