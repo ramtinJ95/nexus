@@ -20,6 +20,7 @@ import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { maxStreams, startApi, type ThreadDetail, type ThreadRow } from "./api.ts";
+import { version } from "../version.ts";
 import type { Question } from "./questions.ts";
 import type { Judgment } from "./judgment.ts";
 import { threadStarter } from "./threads.ts";
@@ -2445,6 +2446,11 @@ test("direct TLS uses TCP whois, ignores forged headers, and renews without dist
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal((await api.call("GET", "/v1/threads")).status, 200);
+});
+
+test("health reports the version of the API contract, which the CLI reads", async (t) => {
+  const api = await setup(t);
+  assert.equal((await api.call("GET", "/v1/health")).body.version, version);
 });
 
 test("HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry", async (t) => {

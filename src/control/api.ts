@@ -1,6 +1,7 @@
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
 import { DeployDraining, isDraining, turnGate, type TurnGate } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
+import { version } from "../version.ts";
 import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
@@ -1246,7 +1247,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const httpsState: { status: "disabled" | "waiting" | "ready" | "degraded"; error: string | null; nextAttemptAt: number | null } = {
     status: options.https ? "waiting" : "disabled", error: null, nextAttemptAt: null,
   };
-  const health = () => ({ commit: runningCommit, https: { ...httpsState } });
+  const health = () => ({ commit: runningCommit, version, https: { ...httpsState } });
 
   const callerOf = <T>(req: IncomingMessage, who: (address: string, port: number) => Promise<T | null>) => {
     const { remoteAddress, remotePort } = req.socket;
