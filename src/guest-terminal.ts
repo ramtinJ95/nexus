@@ -7,7 +7,7 @@
  * URL, whose length is limited. The argv carries only a bootstrap that reads exactly that many bytes and runs them.
  */
 import { readFileSync } from "node:fs";
-import type { ByteStream, StreamEnd } from "./protocol.ts";
+import { frame, type ByteStream, type StreamEnd } from "./protocol.ts";
 
 const relay = readFileSync(new URL("./guest-terminal.py", import.meta.url));
 /** os.read, never sys.stdin.buffer, which would read ahead into the frames. */
@@ -71,11 +71,4 @@ export async function openTerminal(open: (argv: readonly string[]) => Promise<By
     abort: () => stream.abort(),
     done: stream.done,
   };
-}
-
-function frame(type: number, payload: Uint8Array): Buffer {
-  const header = Buffer.alloc(5);
-  header.writeUInt8(type, 0);
-  header.writeUInt32BE(payload.length, 1);
-  return Buffer.concat([header, payload]);
 }

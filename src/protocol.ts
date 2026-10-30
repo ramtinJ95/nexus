@@ -756,7 +756,7 @@ function clientByteStream(socket: Duplex, head: Buffer): ByteStream {
   };
 }
 
-function frame(type: number, payload: Uint8Array): Buffer {
+export function frame(type: number, payload: Uint8Array): Buffer {
   const header = Buffer.alloc(5);
   header.writeUInt8(type, 0);
   header.writeUInt32BE(payload.length, 1);

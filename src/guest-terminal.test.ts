@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash, randomBytes } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { openTerminal, terminalSize, type Terminal } from "./guest-terminal.ts";
 import { processStream } from "./process-stream.ts";
@@ -72,6 +73,27 @@ test("keys and output pass byte for byte through a terminal in raw mode", async 
   await out.read;
   assert.deepEqual(out.bytes.subarray(0, 7), Buffer.from("ready\x00\xff", "latin1"));
   assert.equal(out.text.slice(7).replace(/\s+/g, " ").trim(), "00 ff 03 1b 0d 0a");
+  assert.deepEqual(await terminal.done, { kind: "exited", code: 0 });
+});
+
+test("a paste of a few hundred KiB into a program that reads it late reaches it byte for byte", async () => {
+  const paste = randomBytes(300 << 10);
+  const reader = `import hashlib, os, sys, time, tty
+tty.setraw(0)
+os.write(1, b"ready")
+time.sleep(0.5)
+h, n = hashlib.sha256(), 0
+while n < ${paste.length}:
+    chunk = os.read(0, 65536)
+    h.update(chunk)
+    n += len(chunk)
+os.write(1, h.hexdigest().encode())`;
+  const terminal = await openTerminal(local(), size, "xterm", ["python3", "-c", reader]);
+  const out = screen(terminal);
+  await out.until(/ready/);
+  for (let at = 0; at < paste.length; at += 64 << 10) await terminal.write(paste.subarray(at, at + (64 << 10)));
+  await out.read;
+  assert.equal(out.text, `ready${createHash("sha256").update(paste).digest("hex")}`);
   assert.deepEqual(await terminal.done, { kind: "exited", code: 0 });
 });
 
