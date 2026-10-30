@@ -8,12 +8,10 @@
  * leaves the thread alone for good.
  */
 import { nudgePrefix, startedByNexus } from "../agent-protocol.ts";
-import type { HarnessHost } from "../harness/host.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
-import { agentConversation, harnessView, personWrote } from "./agent-conversation.ts";
 import { pushedBranches, type prWatcher } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
 
@@ -43,8 +41,13 @@ export type Nudge =
 
 const maxNudges = 2;
 
-export function builderNudger(options: { registry: Registry; github: Pick<GitHub, "find">; inbox: Inbox; harness: Pick<HarnessHost, "watch">; watch: Pick<ReturnType<typeof prWatcher>, "passes">; log?: (message: string) => void }) {
-  const { registry, github, inbox, harness, watch, log = (message: string) => console.error(message) } = options;
+export function builderNudger(options: {
+  registry: Registry; github: Pick<GitHub, "find">; inbox: Inbox;
+  /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
+  personWroteTo(t: Thread): Promise<boolean>;
+  watch: Pick<ReturnType<typeof prWatcher>, "passes">; log?: (message: string) => void;
+}) {
+  const { registry, github, inbox, personWroteTo, watch, log = (message: string) => console.error(message) } = options;
   /** The PR watch pass each thread's latest ended turn waits for. A restart only makes a turn wait for another. */
   const awaited = new Map<ThreadId, { turn: number; pass: number }>();
 
@@ -55,10 +58,6 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
     const project = registry.project(t.project);
     return project?.autoReview == null ? null : githubRepo(project.repoUrl);
   }
-
-  const conversation = agentConversation(registry, harnessView(harness));
-  /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
-  const personWroteTo = async (t: Thread) => personWrote(await conversation(t));
 
   /**
    * Whether the registry's outputs hold every branch the thread pushed before `turn` ended. The probe takes a snapshot's

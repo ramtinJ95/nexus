@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import type { PylonId } from "../protocol.ts";
 import { scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
 import { callText } from "../test-kit.ts";
-import type { ThreadDetail, ThreadRow } from "./api.ts";
+import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import { defaultPreviewPorts, startControlPlane } from "./main.ts";
 import { apiClient, fetchUntil, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
 import { openRegistry } from "./registry.ts";

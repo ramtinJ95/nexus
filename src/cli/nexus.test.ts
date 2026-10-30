@@ -29,7 +29,7 @@ import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
 import type { ReviewLoop } from "../control/review.ts";
-import { agentReplies } from "../control/agent-conversation.ts";
+import { agentReader } from "../control/agent-conversation.ts";
 import type { Judgment } from "../control/judgment.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
@@ -140,7 +140,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
   const backfill = usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} });
   const queue = setupOptions.queue === true ? threadQueue({ registry, startThread, gate: turnGate(() => false), send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") }) : null;
   const items = queue === null ? null : pipeline({ registry, queue });
-  const plans = planning({ registry, pipeline: items, replies: agentReplies(registry, fake.harness) });
+  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies });
   const options = (port: number) => ({
     queue,
     pipeline: items,

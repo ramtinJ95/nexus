@@ -8,60 +8,19 @@
  * transcript and its `/claude/events` stream. Only the transcript carries a kind, which `agentView` reads.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ConversationView, EntryRecord, JsonObject, Submission } from "@earendil-works/pi-durable";
+import type { ConversationView, Submission } from "@earendil-works/pi-durable";
 import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { CommandResult, ProbeClient, ProbeError, PylonId } from "../protocol.ts";
+import type { HarnessHost } from "../harness/host.ts";
 import { claudeTextProblem } from "../sessions.ts";
-import { claudeFrames, type ClaudeConversations } from "./claude-conversation.ts";
+import { harnessView } from "./agent-conversation.ts";
+import type { ClaudeConversations } from "./claude-conversation.ts";
+import { claudeFrames, viewFrames, type Frames, type Watch } from "./conversation-view.ts";
 import { HttpError } from "./http-error.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import type { Planning } from "./planning.ts";
-import type { ThreadDetail, ThreadHarness } from "./api.ts";
 import type { ClaudeSent, Registry, Thread } from "./registry.ts";
-
-/** A thread's conversation, tagged with the kind of agent it is from. */
-export type AgentView = { kind: "harness"; view: ConversationView } | { kind: "claude"; view: ClaudeConversation };
-
-/** Tags a view as served, so the dashboard and the CLI tell the two apart without asking the thread again. */
-export function agentView(view: ConversationView | ClaudeConversation): AgentView {
-  return "kind" in view ? { kind: "claude", view } : { kind: "harness", view };
-}
-
-/** What a stream follows: a harness conversation's watch, or a Claude worker's. */
-export interface Watch<V> {
-  readonly value: V;
-  start(listener: (view: V) => void | Promise<void>): void;
-  stop(): Promise<unknown>;
-  readonly closed: Promise<unknown>;
-}
-
-/**
- * One event of `GET /v1/threads/:id/events`. The first carries the whole view. Each later one carries what changed
- * since the one before, each part whole: the active context when any entry changed, and each document that changed,
- * or null for one that is gone.
- */
-export interface ViewFrame {
-  entries?: readonly EntryRecord[];
-  docs?: Record<string, JsonObject | null>;
-}
-
-/** Maps each view to what one client has not seen yet, or null when nothing it shows changed. */
-export type Frames<V = ConversationView> = (view: V) => unknown;
-
-/** The frames of one client of a thread's event stream. pi-durable's views share every part a commit left alone. */
-export function viewFrames(): Frames {
-  let sent: ConversationView | null = null;
-  return (view) => {
-    const kinds = new Set([...Object.keys(view.docs), ...Object.keys(sent?.docs ?? {})]);
-    const docs = Object.fromEntries([...kinds].flatMap((kind) => view.docs[kind] === sent?.docs[kind] ? [] : [[kind, view.docs[kind] ?? null]]));
-    const frame: ViewFrame = {
-      ...view.entries === sent?.entries ? {} : { entries: view.entries },
-      ...Object.keys(docs).length === 0 ? {} : { docs },
-    };
-    sent = view;
-    return Object.keys(frame).length === 0 ? null : frame;
-  };
-}
+import type { ThreadDetail } from "./wire.ts";
 
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */
 export interface AgentMessage { text: string; requestId: string; mode: "followUp" | "steer" }
@@ -94,6 +53,8 @@ export interface Agent<V> {
 /** The drain reads every harness thread's view from its stored row, so a harness view needs only the thread's ID. */
 interface HarnessAgent extends Agent<ConversationView> { view(t: Pick<Thread, "id">): Promise<ConversationView> }
 
+export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity" | "latestTurn">;
+
 export interface ThreadAgents { harness: HarnessAgent; claude: Agent<ClaudeConversation>; none: Agent<null> }
 
 export const noConversation = (t: Pick<Thread, "id">) => `thread ${t.id} has no conversation`;
@@ -113,19 +74,12 @@ export function threadAgents(options: {
   const refuse = (t: Thread): never => { throw new HttpError(409, noConversation(t)); };
   const worker = (t: Thread) => registry.claudeWorker(t.id)!;
 
-  const harnessView = async (t: Pick<Thread, "id">) => {
-    const watch = await harness.watch(t.id);
-    try {
-      return watch.value;
-    } finally {
-      await watch.stop();
-    }
-  };
+  const view = harnessView(harness);
 
   return {
     harness: {
-      view: harnessView,
-      read: harnessView,
+      view,
+      read: view,
       watch: (t) => harness.watch(t.id),
       frames: viewFrames,
       /** A message is human activity, so the pylon wakes while the model answers. */

@@ -13,7 +13,7 @@ import { holdRule, reservedNames, type HoldCode } from "./holds.ts";
 import { landingHolds } from "./policy.ts";
 import { humanLabel, landable, phaseNote, type HoldCause, type Review } from "./review-model.ts";
 import { reviewLoop, type ReviewDeps } from "./review.ts";
-import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
+import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
@@ -2266,7 +2266,7 @@ test("a harness, a Claude worker and a bare thread each give the replies and tak
   f.registry.appendClaudeRead(claude.id, { session: "s1", from: transcriptStart, entries: [{ kind: "prompt", at: 1, text: "fix it", from: "person" }, { kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 3 });
   const bare = f.registry.thread(f.add("th-check-bare", false, checkCaller, true))!;
 
-  const replies = agentReplies(f.registry, fake.harness);
+  const replies = agentReader(f.registry, fake.harness).replies;
   assert.deepEqual(await replies(harness), ["Fixed it."]);
   assert.deepEqual(await replies(claude), ["Done."], "a Claude worker's replies are its transcript's, and never reach the harness");
   await assert.rejects(replies(bare), "a bare thread has no replies to read");
@@ -2315,7 +2315,7 @@ test("a conversation's harness watch is stopped when its projection throws", asy
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
   fake.transcript(harness.id).messages.push({ role: "assistant", content: "not a list of parts", timestamp: 1 } as never);
   fake.commit(harness.id);
-  await assert.rejects(agentReplies(f.registry, fake.harness)(harness));
+  await assert.rejects(agentReader(f.registry, fake.harness).replies(harness));
   assert.equal(fake.watching(harness.id), 0);
 });
 
@@ -2323,7 +2323,7 @@ test("a conversation's harness watch is stopped when its projection throws", asy
 function realReads(t: import("node:test").TestContext) {
   const fake = fakeHarness();
   const counted = { entries: 0 };
-  const f = fixture(t, { agentState: (registry) => agentState({ ...registry, claudeEntries: (...args) => { counted.entries++; return registry.claudeEntries(...args); } }, fake.harness) });
+  const f = fixture(t, { agentState: (registry) => agentReader({ ...registry, claudeEntries: (...args) => { counted.entries++; return registry.claudeEntries(...args); } }, fake.harness).state });
   /** A harness thread's turn that ended with `text`. */
   const say = (id: ThreadId, text: string) => {
     fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 1 } as never);

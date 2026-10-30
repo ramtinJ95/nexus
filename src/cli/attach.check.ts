@@ -27,7 +27,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { ThreadDetail } from "../control/api.ts";
+import type { ThreadDetail } from "../control/wire.ts";
 import type { Thread } from "../control/registry.ts";
 import { openTerminal, terminalSize, type Terminal, type TerminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
