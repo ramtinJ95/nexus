@@ -560,6 +560,18 @@ test("asking a question twice keeps one, its thread needs a decision until it is
   assert.equal(reopened.question("qn-2"), null);
 });
 
+test("questions asked in one millisecond list in the order they were asked, before and after an answer", (t) => {
+  const registry = seeded(t, tempDb());
+  const ask = { thread: threadId, options: ["Yes", "No"], reserved: null, answerer: "person" as const, askedAt: 5 };
+  registry.askQuestion({ ...ask, id: "qn-b", text: "First?" });
+  registry.askQuestion({ ...ask, id: "qn-a", text: "Second?" });
+  assert.deepEqual(registry.questions(threadId).map((q) => q.id), ["qn-b", "qn-a"]);
+  for (const id of ["qn-b", "qn-a"]) {
+    registry.answerQuestion(id, { option: "Yes", by: "nLAPTOP" as TailnetNodeId, at: 6 });
+    assert.deepEqual(registry.questions(threadId).map((q) => q.id), ["qn-b", "qn-a"], `answering ${id} keeps the order`);
+  }
+});
+
 test("desired release, reports and drain survive reopening the registry", () => {
   const path = join(dir, `${randomUUID()}.db`);
   const first = openRegistry(path);
