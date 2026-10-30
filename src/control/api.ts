@@ -1,5 +1,5 @@
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
-import { DeployDraining, isDraining, turnGate } from "./drain.ts";
+import { DeployDraining, isDraining, turnGate, type TurnGate } from "./drain.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "./releases.ts";
 /**
@@ -79,7 +79,8 @@ export interface ApiOptions {
   /** Marks planning threads, writes what their messages start with, and adds the items the person accepts from them. */
   planning?: Planning | null;
   deployment?: DeploymentOptions;
-  turnsStarting?: () => boolean;
+  /** The drain gate every turn start passes. Omitted: the API builds one over the registry's drain. */
+  gate?: TurnGate;
   registry: Registry;
   host: string;
   /** 0 picks a free port. */
@@ -971,9 +972,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const noContent: Reply = { status: 204 };
 
   const draining = () => isDraining(registry.drain());
-  const turnRequests = turnGate(draining);
+  const gate = options.gate ?? turnGate(draining);
   async function turnsRunning(): Promise<boolean> {
-    if (turnRequests.busy() || options.turnsStarting?.()) return true;
+    if (gate.busy()) return true;
     for (const t of registry.harnessThreads()) {
       if (t.status === "deleted") continue;
       const { docs } = await agents.harness.view(t);
@@ -981,7 +982,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const inbox = docs["pi.inbox"];
       if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
     }
-    return turnRequests.busy() || (options.turnsStarting?.() ?? false);
+    return gate.busy();
   }
 
   const routes: readonly RouteEntry[] = [
@@ -1325,7 +1326,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
     if (match.policy !== undefined && "person" in match.policy) personOnly(caller, match.policy.person);
     const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
-    const reply = match.policy?.startsTurn ? await turnRequests.run(async () => route()) : await route();
+    const reply = match.policy?.startsTurn ? await gate.run(async () => route()) : await route();
     if (reply.stream !== undefined) return reply.stream(res);
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
     else if (reply.body === undefined) res.writeHead(reply.status).end();

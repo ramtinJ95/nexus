@@ -247,7 +247,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     queue,
     pipeline: items,
     planning: plans,
-    turnsStarting: gate.busy,
+    gate,
     deployment,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
