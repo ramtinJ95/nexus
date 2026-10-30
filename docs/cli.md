@@ -59,7 +59,7 @@ Before 0.9.0, `attach` ran ssh to the pylon's node, chosen by `"ssh"` in the con
 
 ### The attach route
 
-`GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&pane=P]` is a WebSocket, RFC 6455, with no subprotocol and no extensions. It is the contract a browser terminal on the dashboard can use too. `src/attach-wire.ts` is the one definition both ends of the CLI's attach use.
+`GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&pane=P]` is a WebSocket, RFC 6455, with no subprotocol and no extensions. `src/attach-route.ts` is the one definition of it that the control plane, the CLI and the dashboard's terminal use, and `src/attach-wire.ts` parses it for the ends that run in Node.
 
 - `cols` and `rows` are the terminal's size, whole numbers from 1 to 9999, and both are required, because Herdr refuses a terminal of zero size. `term` is the terminal type, which matches `^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`, and is `xterm-256color` when it is left out. The CLI sends `$TERM` when it matches, and `xterm-256color` otherwise.
 - `pane` is the Herdr pane the terminal lands in, such as `w2:p1`, in place of the Claude worker's, and matches `^w[0-9]{1,9}:p[0-9]{1,9}$`. The route passes it to the pylon as an argument, never as shell text. A pane that is not open focuses nothing, and the terminal lands where Herdr was. Herdr's focus is the server's, so every terminal attached to the pylon moves there. The CLI sends no `pane`.

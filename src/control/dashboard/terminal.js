@@ -1,12 +1,14 @@
 // A thread page's browser terminal: the attach route's WebSocket, as docs/cli.md describes it, joined to a terminal
 // such as xterm.js. It lands where `nexus attach` does, and Herdr keeps its sessions when the terminal ends.
+import { attachPath, defaultTerm, encodeMessage } from "../../attach-route.ts";
 
 /**
  * The attach route for a terminal of `size` on the page's own host, which the route checks against the Origin. It
  * lands in `pane` when that is given, and otherwise where `nexus attach` does.
  */
 export function attachUrl(location, thread, { cols, rows }, pane = null) {
-  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/threads/${encodeURIComponent(thread)}/attach?cols=${cols}&rows=${rows}&term=xterm-256color${pane === null ? "" : `&pane=${encodeURIComponent(pane)}`}`;
+  const path = attachPath(thread, { size: { cols, rows }, term: defaultTerm, ...(pane === null ? {} : { pane }) });
+  return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 }
 
 /**
@@ -45,7 +47,7 @@ export function joinTerminal(term, socket, status) {
   const send = (data) => { if (!over && socket.readyState === 1) socket.send(data); };
   socket.binaryType = "arraybuffer";
   // The terminal may be resized while the socket connects, and a resize before `attached` replaces the size it opens with.
-  socket.addEventListener("open", () => send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })));
+  socket.addEventListener("open", () => send(encodeMessage({ type: "resize", size: { cols: term.cols, rows: term.rows } })));
   socket.addEventListener("message", ({ data }) => {
     heard = true;
     if (typeof data !== "string") return term.write(new Uint8Array(data));
@@ -64,7 +66,7 @@ export function joinTerminal(term, socket, status) {
   socket.addEventListener("close", () => end(heard ? dropped : refused));
   const typed = term.onData((data) => send(encoder.encode(data)));
   const binary = term.onBinary((data) => send(Uint8Array.from(data, (c) => c.charCodeAt(0))));
-  const resized = term.onResize(({ cols, rows }) => send(JSON.stringify({ type: "resize", cols, rows })));
+  const resized = term.onResize(({ cols, rows }) => send(encodeMessage({ type: "resize", size: { cols, rows } })));
   return () => {
     for (const listener of [typed, binary, resized]) listener.dispose();
     end(detached);
