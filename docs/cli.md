@@ -132,7 +132,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `seen <thread> [--unread \| --last-reply-at MS]` | `POST /v1/threads/<thread>/seen` with `{}`, or `{"lastReplyAt": MS}` with `--last-reply-at`, or `/unseen` with `--unread` | `null` |
 | `wake <thread>` | `POST /v1/threads/<thread>/activity` with `{"kind":"human"}` | `null` |
 | `archive <thread>` | `POST /v1/threads/<thread>/archive` | `Thread`, or `QueuedThread` with status `archived` for a thread that has not started, which cancels it |
-| `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread`, or `QueuedThread` with status `queued` for a cancelled one, which queues it again |
+| `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread`, or `QueuedThread` with status `queued` for a cancelled one, which queues it again. A thread archived 24 hours or more has no disk left, so its pylon boots fresh from the thread's recorded image and commit |
 | `delete <thread>` | `DELETE /v1/threads/<thread>` | `Thread`, with status `deleted`, or `QueuedThread` with status `deleted` |
 | `projects` | `GET /v1/projects` | `Project[]`. A scratch project's `repoUrl` is null |
 | `project add <id> (<repo-url> \| --scratch) [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]...` | `POST /v1/projects` | `Project`, the project that was added |
@@ -199,6 +199,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `usageLimit` | optional `{ stoppedAt: number, resetsAt: number \| null }` | The Claude worker's session stopped on its usage limit at `stoppedAt`, and nothing has run since. `resetsAt` is when the limit resets, null when Claude Code did not say. [Usage-limit stops](#usage-limit-stops-0210) describes it |
 | `setup` | optional `ThreadSetup` | Whether the pylon boots from a template or fresh, and why, as [Templates at thread start](#templates-at-thread-start-0230) describes. Left out for a thread started before 0.23.0 |
 | `readingUsage` | optional `true` | The usage backfill reads this archived thread's pylon now, so its `desired` is `reading`, as [Usage backfill](#usage-backfill-0330) describes |
+| `archivedAt` | optional number | When the thread was archived, in milliseconds, while it is. 24 hours later its `desired` is `deleted` and its pylon goes, while the thread stays |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
 
 `ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `questions` (every question the thread asked, answered or not, as [Questions](#questions-0350) describes), `judgments` (every judgment of its failed pylon, as [Failure judgments](#failure-judgments-0390) describes), `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`).
