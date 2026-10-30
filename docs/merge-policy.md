@@ -51,10 +51,10 @@ Text in the pull request can mislead the reviewer but cannot change which files 
 |---|---|
 | Secrets | any path naming a secret or a credential, and everything under `deploy/` |
 | The egress allowlist | `src/project.ts`, `src/control/threads.ts`, `src/control/live.ts`, every path starting `src/pylon-vm`, and any path naming a network, egress or an allowlist |
-| Login or auth | `src/control/api.ts`, `src/control/main.ts`, `src/control/login.ts`, `src/control/releases.ts`, `src/control/attach.ts`, `src/control/policy.ts`, `src/control/holds.ts`, `src/protocol/routes.ts`, everything under `src/probe/` and `src/deploy/`, and any path naming auth, login or whois |
+| Login or auth | `src/control/api.ts`, `src/control/main.ts`, `src/control/login.ts`, `src/control/releases.ts`, `src/control/attach.ts`, `src/control/policy.ts`, `src/control/holds.ts`, `src/protocol/routes.ts`, everything under `src/control/api/`, everything under `src/probe/` and `src/deploy/`, and any path naming auth, login or whois |
 | The tailnets | any path naming tailscale or a tailnet |
 | Pylon image rebuilds | everything under `images/`, and `src/agent-setup.ts` |
-| Anything irreversible | a registry migration in `src/control/registry.ts`, and a change to the `@earendil-works/pi-durable` version in `package.json` |
+| Anything irreversible | a registry migration in `src/control/schema.ts`, a table or index created, altered or dropped in `src/control/registry.ts`, and a change to the `@earendil-works/pi-durable` version in `package.json` |
 
 A registry migration counts as irreversible even when it only adds a table: a control plane refuses a registry newer than its code, so a rollback past a migration could not start the control plane. A pi-durable upgrade may migrate the harness's storage in the same way. A change to `.nexus/check` also holds the landing, since it is the check this policy relies on, and so does a change to `.nexus/verify`, the live check it relies on.
 
