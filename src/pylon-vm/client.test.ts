@@ -16,8 +16,8 @@ type Inspection = { connected: boolean; status: { state: string } };
  * A controller of one instance that queues every action but inspect, as daemon.ts does, and ends a stop as it
  * does: it answers, closes its server and removes its socket. A queued action that runs after the stop is refused.
  * Its stop waits for `finishStop`, so a test can queue a request behind it. It counts the requests that arrive
- * after its stop, and `closed` settles once its last connection ends, which is when a real controller removes
- * its controller.pid.
+ * after its stop, and every action that arrives, and `closed` settles once its last connection ends, which is when a
+ * real controller removes its controller.pid.
  */
 async function controller(t: TestContext) {
 	const root = await mkdtemp(join(tmpdir(), "nxc-"));
@@ -29,6 +29,7 @@ async function controller(t: TestContext) {
 	const socket = join(dir, "control.sock");
 	let state = "running";
 	let afterStop = 0;
+	const arrived: string[] = [];
 	let finishStop!: () => void;
 	const stopFinished = new Promise<void>((accept) => (finishStop = accept));
 	const waiting = new Map<string, () => void>();
@@ -39,6 +40,7 @@ async function controller(t: TestContext) {
 		req.on("data", (chunk: string) => (body += chunk));
 		req.on("end", () => {
 			const { action } = JSON.parse(body) as { action: string };
+			arrived.push(action);
 			if (state === "stopped") afterStop++;
 			waiting.get(action)?.();
 			const reply = (value: unknown) => res.end(JSON.stringify(value));
@@ -58,7 +60,7 @@ async function controller(t: TestContext) {
 	const closed = once(server, "close").then(() => "closed");
 	await new Promise<void>((accept) => server.listen(socket, accept));
 	const arrival = (action: string) => new Promise<void>((accept) => waiting.set(action, accept));
-	return { root, name, closed, arrival, finishStop, afterStop: () => afterStop };
+	return { root, dir, name, server, closed, arrival, finishStop, afterStop: () => afterStop, arrived };
 }
 
 test("once its controller stops, an instance is read from its directory and the stopped controller is left to exit", async (t) => {
@@ -78,4 +80,23 @@ test("once its controller stops, an instance is read from its directory and the 
 	assert.equal(inspected.status.state, "stopped");
 	assert.equal(c.afterStop(), 0, "requests reached the controller after its stop");
 	assert.equal(await Promise.race([c.closed, delay(1000, "open", { ref: false })]), "closed", "the stopped controller still has a client connection, so it keeps its controller.pid");
+});
+
+test("an action reaches its controller in one request, with no inspect before it", async (t) => {
+	const c = await controller(t);
+	assert.deepEqual(await run(c.root, { action: "services", name: c.name, op: "status" }), []);
+	assert.deepEqual(c.arrived, ["services"]);
+	c.server.close();
+});
+
+test("with no controller listening, an inspect reads the instance offline, a stop settles it, and any other action is refused", async (t) => {
+	const c = await controller(t);
+	await saveJson(join(c.dir, "status.json"), { name: c.name, state: "interrupted" });
+	c.server.close();
+	await c.closed;
+	const inspected = (await run(c.root, { action: "inspect", name: c.name })) as Inspection;
+	assert.deepEqual([inspected.connected, inspected.status.state], [false, "interrupted"]);
+	await assert.rejects(run(c.root, { action: "services", name: c.name, op: "status" }), /^Error: pylon-t1 is not running\. Use start first$/);
+	assert.equal(((await run(c.root, { action: "stop", name: c.name })) as Inspection).status.state, "stopped");
+	assert.deepEqual(c.arrived, []);
 });

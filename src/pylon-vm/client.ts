@@ -18,7 +18,6 @@ import {
 	type Action,
 	actionSchema,
 	type BootSpec,
-	inspectionSchema,
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
@@ -76,25 +75,38 @@ function request(
 		req.end(JSON.stringify(action));
 	});
 }
-async function reachable(
+/** What no controller answered, since none listens on the socket: the request reached nothing, so falling back is safe. */
+const absent = Symbol("no controller");
+async function send(
 	dir: string,
-	name: string,
+	action: Action,
 	signal?: AbortSignal,
-): Promise<boolean> {
+): Promise<unknown> {
 	try {
-		await request(
-			dir,
-			{ action: "inspect", name },
-			signal
-				? AbortSignal.any([signal, AbortSignal.timeout(1000)])
-				: AbortSignal.timeout(1000),
-		);
-		return true;
+		return await request(dir, action, signal);
 	} catch (error) {
 		if (existsError(error, "ENOENT") || existsError(error, "ECONNREFUSED"))
-			return false;
+			return absent;
 		throw error;
 	}
+}
+/** An inspect that asks only whether a controller is up, so it waits at most 1 s. */
+const liveness = (dir: string, name: string, signal?: AbortSignal) =>
+	send(
+		dir,
+		{ action: "inspect", name },
+		signal ? AbortSignal.any([signal, AbortSignal.timeout(1000)]) : AbortSignal.timeout(1000),
+	);
+/** Each state root this process found private. A failed check is dropped, so the next call checks again. */
+const privateRoots = new Map<string, Promise<void>>();
+function privateRoot(root: string): Promise<void> {
+	let checked = privateRoots.get(root);
+	if (checked === undefined) {
+		checked = privateDirectory(root);
+		privateRoots.set(root, checked);
+		checked.catch(() => privateRoots.delete(root));
+	}
+	return checked;
 }
 const controllerAlive = (dir: string) => published(join(dir, "controller.pid"));
 /** A client that holds the launch lock is still to start the controller, or waits for it to come up. */
@@ -107,7 +119,10 @@ async function published(file: string): Promise<boolean> {
 /** Short, because the instance directory's path would push Gondolin's socket paths past their limit. */
 const scratchDirectory = (root: string, dir: string) =>
 	join(root, "tmp", createHash("sha256").update(dir).digest("hex").slice(0, 12));
-/** An instance whose controller already runs keeps the spec it booted with. */
+/**
+ * An instance whose controller already runs keeps the spec it booted with. Returns the controller's inspection once it
+ * runs, with any startupError its setup or services left.
+ */
 async function launch(
 	root: string,
 	dir: string,
@@ -116,8 +131,8 @@ async function launch(
 	signal?: AbortSignal,
 ): Promise<unknown> {
 	signal?.throwIfAborted();
-	if (await reachable(dir, name, signal))
-		return request(dir, { action: "inspect", name }, signal);
+	const running = await liveness(dir, name, signal);
+	if (running !== absent) return running;
 	if (await controllerAlive(dir))
 		throw new Error(
 			"Sandbox controller is still starting or unavailable. Read controller logs before retrying",
@@ -228,15 +243,8 @@ async function launch(
 						"Sandbox start failed. Read controller logs before retrying start",
 					)
 				);
-			if (await reachable(dir, name, signal)) {
-				const result = await request(dir, { action: "inspect", name }, signal);
-				const inspect = inspectionSchema.parse(result);
-				if (inspect.status.startupError)
-					throw new Error(
-						`${name} is running, but ${inspect.status.startupError}`,
-					);
-				return result;
-			}
+			const inspection = await liveness(dir, name, signal);
+			if (inspection !== absent) return inspection;
 		}
 		throw new Error(
 			"Sandbox start has not completed. Use inspect or logs before retrying",
@@ -305,7 +313,7 @@ export async function run(
 	signal?: AbortSignal,
 ): Promise<unknown> {
 	const action = actionSchema.parse(input);
-	await privateDirectory(root);
+	await privateRoot(root);
 	if (action.action === "create" || action.action === "prepare")
 		return create(root, action, signal);
 	if (action.action === "list") {
@@ -357,8 +365,7 @@ export async function run(
 		const doomed = join(root, kind, `.${action.name}.deleting`);
 		if (existsSync(dir)) {
 			await readRecord(dir);
-			if (await reachable(dir, action.name)) await request(dir, action, signal);
-			else if (await controllerAlive(dir))
+			if ((await send(dir, action, signal)) === absent && (await controllerAlive(dir)))
 				throw new Error(
 					"Sandbox controller is still starting or unavailable. Read its logs and wait before destroying it",
 				);
@@ -382,12 +389,11 @@ export async function run(
 	}
 	if (action.action === "start")
 		return launch(root, dir, action.name, action.boot, signal);
-	if (!(await reachable(dir, action.name))) {
-		if (action.action === "stop") return settle(dir);
-		if (action.action === "inspect") return offline(dir);
-		throw new Error(`${action.name} is not running. Use start first`);
-	}
-	return request(dir, action, signal);
+	const reply = await send(dir, action, signal);
+	if (reply !== absent) return reply;
+	if (action.action === "stop") return settle(dir);
+	if (action.action === "inspect") return offline(dir);
+	throw new Error(`${action.name} is not running. Use start first`);
 }
 /**
  * Stop without a controller. An instance whose controller died settles as stopped on its last completed

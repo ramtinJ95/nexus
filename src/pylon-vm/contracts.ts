@@ -248,10 +248,6 @@ export const statusSchema = z.strictObject({
 		.optional(),
 	recovery: z.string().optional(),
 });
-export const inspectionSchema = z.object({
-	name: nameSchema,
-	status: statusSchema,
-});
 export const replySchema = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown() }),
 	z.object({ ok: z.literal(false), error: z.string() }),

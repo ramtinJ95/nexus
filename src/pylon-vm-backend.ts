@@ -416,17 +416,6 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     }
   }
 
-  /** Runs a create or start. A setup failure leaves the VM running with a startupError, which the caller reports. */
-  async function boot(pylonId: PylonId, start: () => Promise<unknown>, signal: AbortSignal): Promise<void> {
-    try {
-      await start();
-    } catch (err) {
-      if (signal.aborted) throw err;
-      const after = await inspect(pylonId);
-      if (after?.status.state !== "running" || after.status.startupError === undefined) throw err;
-    }
-  }
-
   function vmState(instance: Instance): Pick<BackendPylon, "vm" | "detail" | "cause"> {
     const { status } = instance;
     switch (status.state) {
@@ -538,7 +527,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       for (;;) {
         const instance = await settled(pylonId, signal);
         if (instance === null) {
-          await boot(pylonId, () => create(bootInputs, live, signal), signal);
+          await create(bootInputs, live, signal);
           continue;
         }
         switch (instance.status.state) {
@@ -564,7 +553,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             await settleSidecar(pylonId, instance.status.state === "stopped");
             const sidecar = await readSidecar(pylonId);
             await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint, relaunch: true, ...relaunch ? {} : sessionsOf(sidecar.sessions) });
-            await boot(pylonId, () => sandbox({ action: "start", name, boot: spec }, signal), signal);
+            await sandbox({ action: "start", name, boot: spec }, signal);
             continue;
           }
           default:
