@@ -12,6 +12,7 @@
 #   blob <base> <path> <max>  the file's bytes in <base>'s tree, at most <max> of them
 #   changes <base>          the files that differ from <base>, as JSON
 #   diff <base> [path...]   the unified diff from <base>, as JSON
+#   diff-to <file> <base>   the whole binary diff from <base> into <file>, and its base and digest, as JSON
 # <base> is `start`, what the pylon booted at (refs/nexus/base), or `head`, or `turn` (the latest reply's start). Internal `turn:<id>` reads also verify the run ID. A base that names no commit is the
 # empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. Changes and
 # diffs compare the working tree, untracked files included and ignored ones left out, through a scratch index, so
@@ -21,6 +22,7 @@
 # Any other exit is a failure, whose traceback goes to stderr, which the probe logs.
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import shutil
@@ -66,6 +68,8 @@ def main(argv):
         answer(changes(root, parse_base(args[0])))
     elif op == "diff":
         answer(diff(root, parse_base(args[0]), args[1:]))
+    elif op == "diff-to":
+        answer(diff_to(root, args[0], parse_base(args[1])))
     else:
         raise ValueError("unknown op %r" % op)
 
@@ -331,6 +335,23 @@ def diff(root, base, paths):
         # Whole lines only.
         text = text[: text.rfind(b"\n", 0, MAX_DIFF_BYTES) + 1]
     return {"base": {"kind": base[0], "commit": commit}, "diff": text.decode(errors="replace"), "truncated": truncated}
+
+
+def diff_to(root, path, base):
+    tree, commit = base_of(root, base)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with tempfile.TemporaryDirectory() as scratch:
+        env = scratch_env(root, scratch)
+        # Straight into the file, so a large diff never passes through memory.
+        with open(path, "wb") as out:
+            done = subprocess.run(git_command(root, DIFF_FLAGS + ["--binary", "--src-prefix=a/", "--dst-prefix=b/", tree]), stdout=out, stderr=subprocess.PIPE, env=env, timeout=GIT_TIMEOUT_S)
+    if done.returncode != 0:
+        raise RuntimeError("git diff exited %d: %s" % (done.returncode, done.stderr.decode(errors="replace")))
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return {"base": tree, "commit": commit, "sha256": digest.hexdigest(), "bytes": os.path.getsize(path)}
 
 
 try:

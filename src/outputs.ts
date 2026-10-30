@@ -7,8 +7,10 @@
  * The directory is the guest's, so every record read back is parsed as untrusted input.
  */
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { Guest } from "./backend.ts";
+import { parseJson } from "./parse.ts";
 import type { DeclaredOutput } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
 
@@ -25,13 +27,18 @@ const callTimeoutMs = 10_000;
  * is one command. The probe is the only writer, so it refuses an output that would take the listing past this.
  */
 const listingBudgetBytes = 60_000;
-/** A diff of a large tree can take a while to write. */
+/** A diff of a large tree can take a while to write. Above the helper's 45 s for one git command, so a slow git is its refusal. */
 const diffTimeoutMs = 60_000;
+/** Sent with each diff rather than run from the image, whose copy on an older pylon has no diff-to. */
+const helper = readFileSync(new URL("./checkout-files.py", import.meta.url), "utf8");
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+const objectId = z.string().regex(/^[0-9a-f]{40,64}$/);
+const diffReply = z.strictObject({ base: objectId, commit: objectId.nullable(), sha256, bytes: z.number().int().nonnegative() });
+const diffRefusal = z.strictObject({ refused: z.string(), message: z.string() });
 const outputId = z.string().regex(/^out-[0-9a-z]+-[0-9a-f]{8}$/);
 const recordSchema = z.discriminatedUnion("kind", [
   z.strictObject({ id: outputId, kind: z.literal("file"), path: z.string().startsWith("/"), title: z.string().nullable(), sha256 }),
-  z.strictObject({ id: outputId, kind: z.literal("diff"), base: z.string().regex(/^[0-9a-f]{40,64}$/), sha256, title: z.string().nullable() }),
+  z.strictObject({ id: outputId, kind: z.literal("diff"), base: objectId, sha256, title: z.string().nullable() }),
 ]);
 
 function parseRecord(text: string): DeclaredOutput | null {
@@ -55,9 +62,8 @@ async function sh(guest: Guest, script: string, args: readonly string[], cwd: st
 
 /**
  * A file output records the file's path and its digest now. The file is not copied, so a later change shows as
- * a digest mismatch. A diff output snapshots the checkout against HEAD, or against the empty tree before the first
- * commit, untracked files included, through a scratch index so the agent's own index is left alone. A clean tree
- * is refused.
+ * a digest mismatch. A diff output snapshots the working tree's changes against HEAD, or against the empty tree before
+ * the first commit, as checkout-files.py's Changes view reads them. A clean tree is refused.
  */
 export async function addOutput(guest: Guest, declaration: OutputDeclaration): Promise<DeclaredOutput> {
   const listed = (await listOutputs(guest)).reduce((bytes, o) => bytes + listingBytes(o), 0);
@@ -71,25 +77,16 @@ export async function addOutput(guest: Guest, declaration: OutputDeclaration): P
     if (digest.exitCode !== 0) throw new Error(`hashing ${path} failed with exit ${digest.exitCode}: ${digest.output}`);
     output = { id, kind: "file", path, title, sha256: digest.output.slice(0, 64) };
   } else {
-    const diff = await sh(guest, [
-      "set -e",
-      `mkdir -p ${outputsDir}`,
-      `export GIT_INDEX_FILE="${outputsDir}/$1.index"`,
-      'trap \'rm -f "$GIT_INDEX_FILE"\' EXIT',
-      // Before the first commit, as in a scratch project, HEAD names nothing, so the base is the empty tree.
-      `if base=$(git rev-parse --quiet --verify 'HEAD^{commit}'); then empty="the working tree has no changes against HEAD"`,
-      `else base=$(git hash-object -t tree -w /dev/null); empty="the repository has no commits and no files"; fi`,
-      'git read-tree "$base" && git add -A',
-      // The agent's git config must not change what the diff is, such as by coloring it or by mnemonic prefixes.
-      `git diff --cached --binary --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ "$base" > "${outputsDir}/$1.diff"`,
-      `if ! test -s "${outputsDir}/$1.diff"; then rm "${outputsDir}/$1.diff"; echo "$empty"; exit 3; fi`,
-      'echo "$base"',
-      `sha256sum < "${outputsDir}/$1.diff"`,
-    ].join("\n"), [id], checkoutDir, diffTimeoutMs);
-    if (diff.exitCode === 3) throw new OutputRefused(diff.output.trim());
+    const file = `${outputsDir}/${id}.diff`;
+    const diff = await guest.exec(["python3", "-c", helper, checkoutDir, "diff-to", file, "head"], { cwd: "/", timeoutMs: diffTimeoutMs });
+    if (diff.exitCode === 3) throw new OutputRefused(parseJson(diffRefusal, diff.output, "the working tree diff's refusal").message);
     if (diff.exitCode !== 0) throw new Error(`snapshotting the working tree failed with exit ${diff.exitCode}: ${diff.output}`);
-    const [base, digest] = diff.output.trim().split("\n");
-    output = { id, kind: "diff", base: base!, sha256: digest!.slice(0, 64), title };
+    const reply = parseJson(diffReply, diff.output, "the working tree's diff");
+    if (reply.bytes === 0) {
+      await sh(guest, 'rm -f "$1"', [file], "/");
+      throw new OutputRefused(reply.commit === null ? "the repository has no commits and no files" : "the working tree has no changes against HEAD");
+    }
+    output = { id, kind: "diff", base: reply.base, sha256: reply.sha256, title };
   }
   const record = recordSchema.parse(output);
   if (listed + listingBytes(record) > listingBudgetBytes) {
