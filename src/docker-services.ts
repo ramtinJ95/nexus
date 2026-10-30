@@ -10,15 +10,11 @@
  * The last URLs, start failures and published ports are in the probe's memory, so a probe restart forgets
  * them until the next spawn, which the planner sends after one.
  */
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { PreviewOrigin } from "./backend.ts";
-import { exit } from "./exec.ts";
+import { docker, dockerExec } from "./docker-cli.ts";
 import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ServiceFact } from "./protocol.ts";
 import { checkoutDir } from "./sessions.ts";
-
-const execFileAsync = promisify(execFile);
 
 /** Published on loopback by every `docker run` of the double. */
 export const publishedPorts = { first: 8000, last: 8007 } as const;
@@ -41,14 +37,11 @@ interface Known {
 }
 
 /** Runs a script in the container. A nonzero exit is a result, not an error. */
-async function inContainer(container: string, script: string, args: readonly string[] = []): Promise<{ code: number | null; output: string }> {
-  const { code, stdout, stderr } = await exit("docker", ["exec", container, "sh", "-c", script, "sh", ...args], { maxBuffer: 16 << 20 });
-  return { code, output: stdout + stderr };
-}
+const sh = (container: string, text: string, args: readonly string[] = []) => dockerExec(container, ["sh", "-c", text, "sh", ...args]);
 
-async function checked(container: string, script: string, args: readonly string[] = []): Promise<string> {
-  const { code, output } = await inContainer(container, script, args);
-  if (code !== 0) throw new Error(`in ${container}, ${script.split("\n")[0]} exited ${code}: ${output.trim()}`);
+async function checked(container: string, text: string, args: readonly string[] = []): Promise<string> {
+  const { exitCode, output } = await sh(container, text, args);
+  if (exitCode !== 0) throw new Error(`in ${container}, ${text.split("\n")[0]} exited ${exitCode}: ${output.trim()}`);
   return output;
 }
 
@@ -62,9 +55,9 @@ export function dockerServices() {
   }
 
   async function declarations(container: string): Promise<Known["declared"]> {
-    const { code, output } = await inContainer(container, 'test -e "$1" || exit 3; exec cat -- "$1"', [servicesFile]);
-    if (code === 3) return {};
-    if (code !== 0) throw new Error(`reading ${servicesFile} in ${container} exited ${code}: ${output}`);
+    const { exitCode, output } = await sh(container, 'test -e "$1" || exit 3; exec cat -- "$1"', [servicesFile]);
+    if (exitCode === 3) return {};
+    if (exitCode !== 0) throw new Error(`reading ${servicesFile} in ${container} exited ${exitCode}: ${output}`);
     const declared: Known["declared"] = {};
     for (const [name, decl] of Object.entries(parseServicesFile(output).services)) {
       const { port } = decl;
@@ -79,15 +72,15 @@ export function dockerServices() {
   /** One port per line, so a checkpoint keeps them. */
   const linkedFile = `${root}/linked`;
   async function linked(container: string): Promise<Set<number>> {
-    const { output } = await inContainer(container, `cat ${linkedFile} 2>/dev/null || true`);
+    const { output } = await sh(container, `cat ${linkedFile} 2>/dev/null || true`);
     return new Set(output.split("\n").filter((line) => line !== "").map(Number));
   }
 
   const listening = async (container: string, port: number) =>
-    (await inContainer(container, `exec bash -c 'exec 3<>"/dev/tcp/127.0.0.1/$0"' "$1"`, [String(port)])).code === 0;
+    (await sh(container, `exec bash -c 'exec 3<>"/dev/tcp/127.0.0.1/$0"' "$1"`, [String(port)])).exitCode === 0;
 
   const running = async (container: string, name: string) =>
-    (await inContainer(container, `p=$(cat ${root}/"$1".pid 2>/dev/null) && kill -0 "$p" 2>/dev/null`, [name])).code === 0;
+    (await sh(container, `p=$(cat ${root}/"$1".pid 2>/dev/null) && kill -0 "$p" 2>/dev/null`, [name])).exitCode === 0;
 
   async function healthy(container: string, k: Known, name: string): Promise<boolean> {
     const decl = k.declared[name]!;
@@ -113,7 +106,7 @@ export function dockerServices() {
   }
 
   const stoppedOnPurpose = async (container: string, name: string) =>
-    (await inContainer(container, `test -e ${root}/"$1".stopped`, [name])).code === 0;
+    (await sh(container, `test -e ${root}/"$1".stopped`, [name])).exitCode === 0;
 
   /** A failure is recorded, not thrown, as in the pylon VM's supervisor. */
   async function start(container: string, k: Known, name: string): Promise<void> {
@@ -133,7 +126,7 @@ export function dockerServices() {
           'while :; do sh -lc "$4"; echo "Service exited $?, restarting in 1s"; sleep 1; done',
         ].join("\n");
         const cwd = decl.cwd === undefined ? checkoutDir : `${checkoutDir}/${decl.cwd}`;
-        await execFileAsync("docker", ["exec", "--detach", ...Object.entries(env).flatMap(([n, v]) => ["--env", `${n}=${v}`]), container, "setsid", "sh", "-c", loop, "sh", cwd, name, key, decl.command]);
+        await docker(["exec", "--detach", ...Object.entries(env).flatMap(([n, v]) => ["--env", `${n}=${v}`]), container, "setsid", "sh", "-c", loop, "sh", cwd, name, key, decl.command]);
       }
       const deadline = Date.now() + (decl.timeoutMs ?? 30_000);
       while (current() && !await healthy(container, k, name)) {
@@ -182,7 +175,7 @@ export function dockerServices() {
      */
     async apply(container: string, urls: Record<ServiceName, string>, booted: boolean): Promise<void> {
       const hostPorts = new Map<number, number>();
-      for (const line of (await execFileAsync("docker", ["port", container])).stdout.split("\n")) {
+      for (const line of (await docker(["port", container])).split("\n")) {
         const m = /^(\d+)\/tcp -> 127\.0\.0\.1:(\d+)$/.exec(line.trim());
         if (m) hostPorts.set(Number(m[1]), Number(m[2]));
       }
@@ -200,7 +193,7 @@ export function dockerServices() {
           if (!await stoppedOnPurpose(container, name)) await start(container, k, name);
           continue;
         }
-        const startedWith = (await inContainer(container, `cat ${root}/"$1".key`, [name])).output;
+        const startedWith = (await sh(container, `cat ${root}/"$1".key`, [name])).output;
         let wanted: string | null;
         try {
           wanted = environment(k, name).key;

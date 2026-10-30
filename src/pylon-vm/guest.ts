@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { posix } from "node:path";
 import { Writable } from "node:stream";
 import type { VM } from "@earendil-works/gondolin";
 import { commandOutcomeSchema, type GuestFile, type Service } from "./contracts.ts";
-import { shellQuote as q } from "../project.ts";
+import { installFileCommand, shellQuote as q } from "../project.ts";
 
 /**
  * Gondolin refuses a command once 64 are outstanding, and counts one until the guest answers it, also after the host
@@ -157,7 +156,6 @@ export async function readGuestFile(vm: VM, path: string, signal?: AbortSignal):
 }
 export const serviceRoot = "/var/lib/pi-sandbox/services";
 export const stagingRoot = "/var/lib/pi-sandbox/staging";
-/** Missing parent directories are made as the file's owner, so a user's file never lands in a directory only root can write. */
 export async function writeFiles(
 	vm: VM,
 	files: readonly GuestFile[],
@@ -168,15 +166,9 @@ export async function writeFiles(
 	await checked(vm, `mkdir -p ${q(staging)}; chmod 700 ${q(staging)}`);
 	for (const [i, file] of files.entries())
 		await vm.fs.writeFile(`${staging}/${i}`, file.content, { signal });
-	const install = files.map((file, i) => {
-		const owner = q(file.owner);
-		const dir = q(posix.dirname(file.path));
-		const mkdir =
-			file.owner === "root"
-				? `mkdir -p ${dir}`
-				: `runuser -u ${owner} -- mkdir -p ${dir}`;
-		return `${mkdir} && install -o ${owner} -g "$(id -gn ${owner})" -m ${file.mode.toString(8)} ${q(`${staging}/${i}`)} ${q(file.path)}`;
-	});
+	const install = files.map((file, i) =>
+		installFileCommand(file.path, file.owner, file.mode, `${staging}/${i}`),
+	);
 	await checked(vm, [...install, `rm -rf ${q(staging)}`].join(" &&\n"));
 }
 export async function serviceRunning(vm: VM, name: string): Promise<boolean> {
