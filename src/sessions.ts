@@ -50,8 +50,8 @@ interface Harness {
 interface Agent {
   /** Herdr's agent kind, which Herdr names after the agent's executable. */
   kind: string;
-  /** The launch arguments that resume a harness session ID. */
-  resume(guest: Guest, id: string): Promise<readonly string[]>;
+  /** The launch arguments that resume a harness session ID, and whether the session already took a prompt, which a prompted launch must not repeat. */
+  resume(guest: Guest, id: string): Promise<{ args: readonly string[]; hasHistory: boolean }>;
   /** The launch arguments of a fresh start. */
   fresh(): readonly string[];
   /** Arguments every launch passes, after those and any model. */
@@ -62,7 +62,7 @@ interface Agent {
   sessionFlags?: readonly string[];
   /** Launch arguments that make the agent run `command` as it takes its first prompt. A harness without them takes no prompt. */
   promptReceipt?(command: string): readonly string[];
-  /** Runs before each start. */
+  /** Runs before a start. It is idempotent, so one run serves every start after it. */
   seed?(guest: Guest): Promise<void>;
   /**
    * A session runs in one pane only. A relaunch brings it back in one and holds it from sends and launches meanwhile,
@@ -95,8 +95,9 @@ const sessionHarnesses = {
     label: "pi",
     activity: "herdr",
     // pi 1.4.0 opens a missing --session path as a new session that it first writes there on its first
-    // message, so unlike a Claude Code ID the path needs no check. pi reports its session file at once.
-    agent: { kind: "pi", resume: async (_guest, sessionFile) => ["--session", sessionFile], fresh: () => [], flags: [], onePane: false },
+    // message, so unlike a Claude Code ID the path needs no check, and its history is not looked for. pi reports its
+    // session file at once.
+    agent: { kind: "pi", resume: async (_guest, sessionFile) => ({ args: ["--session", sessionFile], hasHistory: true }), fresh: () => [], flags: [], onePane: false },
   },
   shell: { label: "Shell", activity: "herdr", agent: null },
 } satisfies Record<string, Harness>;
@@ -116,10 +117,10 @@ export function harnessNamed(name: string): Harness | undefined {
  * a session that was opened but never prompted would not come back. `--session-id` starts it fresh under
  * the same ID instead. The guest looks for the transcript under any project, whatever slug Claude gave the cwd.
  */
-async function claudeResume(guest: Guest, id: string): Promise<readonly string[]> {
+async function claudeResume(guest: Guest, id: string): Promise<{ args: readonly string[]; hasHistory: boolean }> {
   const { exitCode, output } = await guest.exec(["sh", "-c", 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] && exit 0; done; exit 1', id, `${home}/.claude/projects`], { cwd: home, timeoutMs: callTimeoutMs });
-  if (exitCode === 0) return ["--resume", id];
-  if (exitCode === 1) return ["--session-id", id];
+  if (exitCode === 0) return { args: ["--resume", id], hasHistory: true };
+  if (exitCode === 1) return { args: ["--session-id", id], hasHistory: false };
   throw new Error(`looking for Claude Code transcript ${id} failed with exit ${exitCode}: ${output}`);
 }
 
@@ -199,7 +200,7 @@ export class HerdrError extends Error {
  * under it: it reads how far the earlier one got (claudeLaunch) and carries on from there. It types the command at
  * most once, reuses the earlier one's pane if nothing was typed, and never starts Claude in a second pane.
  */
-export async function openSession(guest: Guest, session: { harness: SessionHarness; title: string; cwd: string; resume?: string; prompt?: string; model?: string }): Promise<string> {
+export async function openSession(guest: Guest, session: { harness: SessionHarness; title: string; cwd: string; resume?: string; prompt?: string; model?: string; seeded?: boolean }): Promise<string> {
   await ensureServer(guest);
   const prompted = session.prompt !== undefined && harnesses[session.harness].agent?.promptReceipt !== undefined;
   const resume = prompted ? session.resume ?? randomUUID() : session.resume;
@@ -220,9 +221,9 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
     if (launch !== null) await guest.writeFiles([{ path: `${launch.dir}/opened`, mode: 0o644, owner: "user", content: `${opened.workspace} ${opened.pane}\n` }]);
   }
   try {
-    await startHarness(guest, opened.pane, session.harness, resume, session.prompt, session.model, launch?.dir);
+    await startHarness(guest, opened.pane, session.harness, { resume, model: session.model, seeded: session.seeded, prompted: launch === null ? undefined : { prompt: session.prompt!, launchDir: launch.dir } });
   } catch (err) {
-    if (err instanceof ClaudeLaunchStalled) throw err;
+    if (err instanceof LaunchStalled) throw err;
     try {
       await herdr(guest, ["workspace", "close", opened.workspace]);
     } catch (cleanup) {
@@ -256,15 +257,26 @@ async function claudeLaunch(guest: Guest, session: string): Promise<ClaudeLaunch
   return { dir, progress: stages.includes("typed") ? "typed" : "opened", workspace, pane };
 }
 
+/** How a start runs. `seeded` says the caller ran the agent's seed already, as a relaunch does once for all its starts. */
+interface Start {
+  resume?: string | undefined;
+  model?: string | undefined;
+  /** Types the launch with `prompt` as the agent's first prompt, and waits for its receipt in `launchDir` instead of its readiness. */
+  prompted?: { prompt: string; launchDir: `/${string}` } | undefined;
+  seeded?: boolean | undefined;
+}
+
 /** Starts at the shell prompt; prompted launches use submission evidence instead of readiness. */
-async function startHarness(guest: Guest, pane: string, harness: SessionHarness, resume: string | undefined, prompt?: string, model?: string, launchDir?: string): Promise<void> {
-  const { agent } = harnesses[harness];
+async function startHarness(guest: Guest, pane: string, harness: SessionHarness, start: Start = {}): Promise<void> {
+  const { label, agent } = harnesses[harness];
   if (agent === null) return;
-  await agent.seed?.(guest);
-  const args = resume === undefined ? agent.fresh() : await agent.resume(guest, resume);
-  const launch = [...args, ...(model === undefined || agent.modelFlag === undefined ? [] : [agent.modelFlag, model]), ...agent.flags];
-  if (prompt !== undefined && launchDir !== undefined && agent.promptReceipt !== undefined) {
-    if (args[0] === "--resume") throw new Error(`Claude session ${resume} already has a transcript, so its first prompt went in before this launch, which typed nothing. Attach to check before starting another session`);
+  if (!start.seeded) await agent.seed?.(guest);
+  const { args, hasHistory } = start.resume === undefined ? { args: agent.fresh(), hasHistory: false } : await agent.resume(guest, start.resume);
+  const launch = [...args, ...(start.model === undefined || agent.modelFlag === undefined ? [] : [agent.modelFlag, start.model]), ...agent.flags];
+  if (start.prompted !== undefined) {
+    const { prompt, launchDir } = start.prompted;
+    if (agent.promptReceipt === undefined) throw new Error(`a ${label} session takes no prompt`);
+    if (hasHistory) throw new Error(`${label} session ${start.resume} already has a transcript, so its first prompt went in before this launch, which typed nothing. Attach to check before starting another session`);
     launch.push(...agent.promptReceipt(`mkdir -p ${launchDir} && touch ${launchDir}/submitted`), prompt);
     await awaitShellPrompt(guest, pane);
     // Herdr 0.9.5's agent start refuses an argument holding a newline or another control character, as a multi-line
@@ -292,7 +304,7 @@ async function startHarness(guest: Guest, pane: string, harness: SessionHarness,
       if (agent.onePane) {
         const running = await runsAgent(guest, pane, agent.kind).catch(() => null);
         if (running === true) return;
-        if (running === null) throw new ClaudeLaunchStalled(`Claude launch stalled: ${(err as Error).message}; attach before starting another session`, pane);
+        if (running === null) throw new LaunchStalled(`${label} launch stalled: ${(err as Error).message}; attach before starting another session`, pane);
       }
       // A rollback closes the pane, so its screen, such as the harness's own error, goes into the failure.
       throw new Error(`${(err as Error).message}. The pane showed:\n${await screen(guest, pane)}`, { cause: err });
@@ -308,7 +320,7 @@ async function awaitSubmission(guest: Guest, pane: string, launchDir: string, ki
   const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done', "claude-submitted", `${launchDir}/submitted`], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
   if (submitted.exitCode === 0) return;
   if (await runsAgent(guest, pane, kind).catch(() => false) && (await livePanes(guest).catch(() => [])).some((p) => p.herdrPane === pane && p.status === "working")) return;
-  throw new ClaudeLaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
+  throw new LaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${typed}; attach before starting another session. The pane showed:\n${await screen(guest, pane)}`, pane);
 }
 
 /**
@@ -334,7 +346,8 @@ function shellWord(arg: string): string {
   return `$'${arg.replace(/[\\'!\x00-\x1f\x7f]/g, (c) => c === "\\" ? "\\\\" : `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`)}'`;
 }
 
-export class ClaudeLaunchStalled extends Error {
+/** A launch whose pane stays open because it may have started the agent, so it is not rolled back. */
+export class LaunchStalled extends Error {
   readonly herdrPane: string;
   constructor(message: string, herdrPane: string) {
     super(message);
@@ -430,7 +443,7 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
   const herdrPane = found?.pane.herdrPane ?? await openSession(guest, { harness: "claude-code", title: "Claude Code", cwd: checkoutDir, resume: message.session, ...(message.model === undefined ? {} : { model: message.model }) });
   // A pane whose Claude exited still reports the session, and a restored one is recorded with it. Starting it there, as a
   // relaunch does, keeps the session in one pane.
-  if (found?.runs === false) await startHarness(guest, herdrPane, "claude-code", message.session, undefined, message.model);
+  if (found?.runs === false) await startHarness(guest, herdrPane, "claude-code", { resume: message.session, model: message.model });
   let pane = await livePane(guest, herdrPane);
   for (const deadline = Date.now() + readyWithinMs; pane.status === "unknown" && Date.now() < deadline;) {
     await delay(claudeReadyPollMs);
@@ -635,19 +648,25 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
   // Herdr's agent fact outlives a failed start, so an agent counts as present only if its pane runs it.
   const present = new Set<SessionRecord>();
   const unreadable = new Map<SessionRecord, Error>();
-  for (const [r, pane] of claimed) {
+  await Promise.all([...claimed].map(async ([r, pane]) => {
     const { agent } = harnesses[r.harness];
     try {
       if (agent === null ? pane.harness === "shell" : await runsAgent(guest, pane.herdrPane, agent.kind)) present.add(r);
     } catch (err) {
       unreadable.set(r, err as Error);
     }
-  }
+  }));
   const recordsOf = (r: SessionRecord) => harnesses[r.harness].agent?.onePane && r.harnessSessionId !== null
     ? records.filter((other) => other.harness === r.harness && other.harnessSessionId === r.harnessSessionId) : [r];
   // Any of a session's panes might still run it, so none of them is started or closed.
   const doubt = (r: SessionRecord) => recordsOf(r).flatMap((other) => unreadable.has(other) ? [{ pane: claimed.get(other)!.herdrPane, err: unreadable.get(other)! }] : [])[0];
   const kept = (r: SessionRecord) => r === (recordsOf(r).find((other) => present.has(other)) ?? recordsOf(r)[0]);
+  // One seed before the starts serves them all. A seed that fails fails only the sessions of its agent.
+  const seeds = new Map<Agent["seed"], Error | null>();
+  for (const r of records) {
+    const seed = harnesses[r.harness].agent?.seed;
+    if (seed !== undefined && !present.has(r) && !seeds.has(seed)) seeds.set(seed, await seed(guest).then(() => null, (err: Error) => err));
+  }
 
   const outcomes: RelaunchOutcome[] = [];
   for (const r of records) {
@@ -661,15 +680,15 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
         outcomes.push({ record: r, result: "dropped", herdrPane: pane?.herdrPane ?? null });
       } else if (present.has(r)) {
         outcomes.push({ record: r, result: "present", herdrPane: pane!.herdrPane });
-      } else if (pane) {
-        await startHarness(guest, pane.herdrPane, r.harness, resume, undefined, r.model);
-        outcomes.push({ record: r, result: "relaunched", herdrPane: pane.herdrPane });
       } else {
-        const herdrPane = await openSession(guest, { harness: r.harness, title: r.title, cwd: r.cwd, ...(r.model === undefined ? {} : { model: r.model }), ...(resume === undefined ? {} : { resume }) });
+        const unseeded = seeds.get(harnesses[r.harness].agent?.seed);
+        if (unseeded) throw unseeded;
+        if (pane) await startHarness(guest, pane.herdrPane, r.harness, { resume, model: r.model, seeded: true });
+        const herdrPane = pane?.herdrPane ?? await openSession(guest, { harness: r.harness, title: r.title, cwd: r.cwd, seeded: true, ...(r.model === undefined ? {} : { model: r.model }), ...(resume === undefined ? {} : { resume }) });
         outcomes.push({ record: r, result: "relaunched", herdrPane });
       }
     } catch (err) {
-      outcomes.push({ record: r, result: "failed", herdrPane: err instanceof ClaudeLaunchStalled ? err.herdrPane : pane?.herdrPane ?? null, message: (err as Error).message });
+      outcomes.push({ record: r, result: "failed", herdrPane: err instanceof LaunchStalled ? err.herdrPane : pane?.herdrPane ?? null, message: (err as Error).message });
     }
   }
   await recordOutcomes(guest, file, outcomes);

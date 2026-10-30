@@ -268,6 +268,45 @@ function withSessionsFile(records: readonly SessionRecord[] | null, herdr: (argv
   });
 }
 
+test("a relaunch seeds Claude state once for every Claude session it starts, in a restored pane or a new one", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" }, // Herdr restored its shell
+    { herdrPane: "w2:p1", harness: "claude-code", title: "plan", cwd: "/home/user/workspace/repo", harnessSessionId: "d778fc1b" },
+  ];
+  const live = herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", null, "unknown")]);
+  const guest = withSessionsFile(records, (argv) => {
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "api snapshot") return herdrOk(live);
+    if (sub === "pane process-info") return processInfo({})(argv);
+    if (sub === "workspace create") return created("w3", "w3:p1");
+    if (sub === "agent start") return agentStarted;
+    throw new Error(`unscripted ${sub}`);
+  });
+  const outcomes = await relaunchSessions(guest);
+  assert.deepEqual(outcomes.map((o) => [o.record.title, o.result, o.herdrPane]), [["review", "relaunched", "w1:p1"], ["plan", "relaunched", "w3:p1"]]);
+  assert.equal(guest.execs.filter((a) => a[2] === seedClaudeState).length, 1);
+  assert.equal(guest.herdrCalls().filter((c) => c === "agent start").length, 2);
+});
+
+test("a relaunch whose Claude seed fails fails only its Claude sessions", async () => {
+  const records: SessionRecord[] = [
+    { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" },
+    { herdrPane: "w2:p1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+  ];
+  const guest = fakeGuest((argv, isHerdr) => {
+    if (argv[2] === seedClaudeState) return { exitCode: 1, output: "invalid JSON" };
+    if (!isHerdr) return sessionsFileReply(records);
+    const sub = argv.slice(0, 2).join(" ");
+    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
+    if (sub === "api snapshot") return herdrOk(herdrSnapshot([], []));
+    if (sub === "workspace create") return created("w3", "w3:p1");
+    throw new Error(`unscripted ${sub}`);
+  });
+  const outcomes = await relaunchSessions(guest);
+  assert.deepEqual(outcomes.map((o) => [o.record.title, o.result, o.result === "failed" ? o.message : null]), [["review", "failed", "seeding Claude state failed: invalid JSON"], ["sh", "relaunched", null]]);
+});
+
 test("relaunch opens only the recorded sessions that are not already live, into their prompt", async () => {
   const records: SessionRecord[] = [
     { herdrPane: "w1:p1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "bd2c2d6b" }, // Herdr restored it under a new pane
