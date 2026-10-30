@@ -4,7 +4,7 @@
  * every snapshot from a node puts its list again, and a join puts every node's. A probe from before this answers 404
  * and keeps probe.json's.
  */
-import type { NodeName, ProbeClient } from "../protocol.ts";
+import { ProbeHttpError, type NodeName, type ProbeClient } from "../protocol.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { Registry } from "./registry.ts";
 
@@ -20,8 +20,7 @@ export function peerHandoff(options: { registry: Registry; probes: ReadonlyMap<N
       await probes.get(node)!.putPeers(peers);
       unaware.delete(node);
     } catch (err) {
-      const message = (err as Error).message;
-      if (!/HTTP 404/.test(message)) return log(`telling ${node} its peers failed: ${message}`);
+      if (!(err instanceof ProbeHttpError && err.status === 404)) return log(`telling ${node} its peers failed: ${(err as Error).message}`);
       if (!unaware.has(node)) log(`${node}: its probe cannot learn its peers yet, so it keeps the peers in its probe.json until it is upgraded`);
       unaware.add(node);
     }
