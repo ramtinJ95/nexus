@@ -1426,7 +1426,7 @@ const transcriptShots = (thread: ThreadId, images: readonly TranscriptImage[] = 
 const fileShots = (thread: ThreadId, paths: readonly string[]): Shot[] => paths.map((path) => ({ src: imageRoute(thread, { source: "file", path }), label: path, caption: path }));
 /** A part's hash, once per part, since a page renders the same committed parts again and again. */
 const partHashes = new WeakMap<ImageContent, string>();
-const partHash = (part: ImageContent) => partHashes.get(part) ?? partHashes.set(part, createHash("sha256").update(part.data).digest("hex")).get(part)!;
+export const partHash = (part: ImageContent) => partHashes.get(part) ?? partHashes.set(part, createHash("sha256").update(part.data).digest("hex")).get(part)!;
 /** The image parts of a harness message, each named by its entry's ID, the message's place in the entry, its own place and its hash. */
 function harnessShots(thread: ThreadId, entry: number, message: number, content: UserMessage["content"]): Shot[] {
   if (typeof content === "string") return [];

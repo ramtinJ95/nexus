@@ -23,7 +23,6 @@ import { canDeploy, commitSchema, isPerson, isReporter, releaseView, reportSchem
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
 import type { Attention } from "./attention.ts";
-import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
@@ -34,7 +33,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, gitIdentitySchema, gitUrl, linkedName, reservedPorts, secretHostPattern, secretNamePattern, withHttpsHosts, type BootInputs, type Project, type ProjectId } from "../project.ts";
+import { chatgptTokenGrant, gitIdentitySchema, gitUrl, linkedName, reservedPorts, secretHostPattern, secretNamePattern, type BootInputs, type Project, type ProjectId } from "../project.ts";
 import { isImageId, type CommandResult, type NodeHealth, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
@@ -42,7 +41,7 @@ import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
 import type { ClaudeSent, JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
-import { dashboard, liveFrames } from "./dashboard.ts";
+import { dashboard, liveFrames, partHash } from "./dashboard.ts";
 import { attachScript, checkoutDir, claudeTextProblem, focusScript, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
 import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
 import { threadAgents, type AgentView, type Watch } from "./thread-agent.ts";
@@ -60,7 +59,7 @@ import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRef
 import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import { imagesView, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
-import { startKey, type StartRequest } from "./threads.ts";
+import { bootNetwork, startKey, type StartRequest } from "./threads.ts";
 import { itemView, type ItemId, type Pipeline } from "./pipeline.ts";
 import type { Planning } from "./planning.ts";
 import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
@@ -450,10 +449,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
     return {
-      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey({
-        allowedHosts: withHttpsHosts(effectiveAllowedHosts(registry.project(t.project)!), [pylon.boot.dotfiles.repo]),
-        secrets: bootSecrets(registry.project(t.project)!),
-      }),
+      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(registry.project(t.project)!, pylon.boot.dotfiles.repo)),
       id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
       actualState: actualState(observed, inFlight, node.state === "online", gaveUp), retryRefused: retryRefusal(observed),
     };
@@ -861,7 +857,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const view = await agents.harness.view(conversing(t));
       const content = view.entries.find((e) => e.id === entry)?.model?.[message]?.content;
       const found = Array.isArray(content) ? content[part] : undefined;
-      if (found?.type !== "image" || createHash("sha256").update(found.data).digest("hex") !== sha256) return null;
+      if (found?.type !== "image" || partHash(found) !== sha256) return null;
       return Buffer.from(found.data, "base64");
     },
     file: (t, { path, base }) => inCheckout(t, (c) => base === undefined ? c.read(path) : c.blob(base, path), whileRunning),
