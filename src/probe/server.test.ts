@@ -74,6 +74,7 @@ function fakeBackend(guest: Guest | null = null) {
       pylons.delete(id);
     },
     async list() { return [...pylons.values()]; },
+    async state(id) { return pylons.get(id)?.vm ?? "absent"; },
     async buildTemplate(id) { calls.push(`build-template ${id}`); },
     async buildImage(id, _recipe, on) { calls.push(`build-image ${id} on ${on}`); },
     guest: () => { if (guest === null) throw new Error("this test has no guest"); return guest; },
@@ -607,6 +608,24 @@ test("a command for a pylon that is not running is refused as not-running", asyn
   assert.deepEqual(guest.execs, []);
 });
 
+test("a command and a stream ask the backend for their own pylon's state and list no pylons", async (t) => {
+  const fake = fakeBackend();
+  const asked: string[] = [];
+  const guest = { ...fakeGuest(() => ({ exitCode: 0, output: "ran" })), stream: async (argv: readonly string[], log: (text: string) => void) => processStream(argv[0]!, argv.slice(1), log) };
+  const backend: VmBackend = {
+    ...fake.backend,
+    guest: () => guest,
+    list: async () => { asked.push("list"); return fake.backend.list(); },
+    state: async (id) => { asked.push(`state ${id}`); return fake.backend.state(id); },
+  };
+  const { client } = await setup(t, { backend });
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  assert.deepEqual(await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { kind: "exec", exitCode: 0, output: "ran", truncated: false });
+  assert.deepEqual(await (await client.stream(pylonId, ["true"])).done, { kind: "exited", code: 0 });
+  await assert.rejects(client.command("pylon-gone" as PylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
+  assert.deepEqual(asked, [`state ${pylonId}`, `state ${pylonId}`, "state pylon-gone"]);
+});
+
 test("a command or job body over a mebibyte is refused and reaches no guest", async (t) => {
   const guest = fakeGuest(() => { throw new Error("no exec expected"); });
   const { client, base } = await setup(t, {}, guest);
@@ -902,8 +921,8 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   assert.equal((await events.next()).value?.type, "snapshot");
   /**
    * Whether answering the command queued a snapshot read for the observers. A link runs in the read queue, so the reads
-   * between two sentinel links are the first one's own publish and pylon read, the command's pylon read, any read it
-   * queued, and the second link's pylon read.
+   * between two sentinel links are the first one's own publish and any read the command queued. A command checks its
+   * pylon with the backend's state, which lists nothing.
    */
   const sentinel = () => client.command(pylonId, { kind: "link-port", port: sentinelPort });
   async function publishes(command: PylonCommand): Promise<boolean> {
@@ -911,7 +930,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     const before = sentinelReads.at(-1)!;
     await client.command(pylonId, command);
     await sentinel();
-    return sentinelReads.at(-1)! - before - 3 > 0;
+    return sentinelReads.at(-1)! - before - 1 > 0;
   }
   const published: Record<string, boolean> = {};
   for (const name of ["exec", "open-session", "close-session", "drop-failed-session", "send-claude-outcome", "service", "link-port", "unlink-port"]) published[name] = await publishes(commands[name]!);

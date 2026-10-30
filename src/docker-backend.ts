@@ -99,7 +99,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     return inspect<ContainerInfo>("container", ids === "" ? [] : ids.split("\n"), signal);
   }
 
-  async function container(pylonId: PylonId, signal: AbortSignal): Promise<ContainerInfo | null> {
+  async function container(pylonId: PylonId, signal?: AbortSignal): Promise<ContainerInfo | null> {
     const found = await containers(pylonId, signal);
     if (found.length > 1) throw new Error(`${found.length} containers carry ${label.pylon}=${pylonId}`);
     return found[0] ?? null;
@@ -367,6 +367,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         });
       }
       return [...pylons.values()];
+    },
+
+    async state(pylonId) {
+      const found = await container(pylonId);
+      if (found !== null) return containerState(found).vm;
+      // A completed pause removes the container and leaves its checkpoint, as list() reports.
+      return (await checkpointImages(pylonId)).length > 0 ? "stopped" : "absent";
     },
 
     async buildTemplate(template, inputs, signal) {

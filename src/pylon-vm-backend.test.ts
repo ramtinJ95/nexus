@@ -302,6 +302,29 @@ test("a pylon whose controller failed carries its controller log's last 60 lines
   assert.equal((await backend.list()).find((p) => p.pylonId === "pylon-failed")!.logTail, "", "a controller that left no log");
 });
 
+test("a pylon's state is its own controller's answer, stopped from what its last stop left, and absent with no instance", async () => {
+  const { backend, instances } = await backendWith();
+  const up = await fakeController(await leftInstance(instances, "pylon-up", "running"), "pylon-up");
+  await leftInstance(instances, "pylon-down", "stopped");
+  assert.equal(await backend.state("pylon-up" as PylonId), "running");
+  assert.equal(await backend.state("pylon-down" as PylonId), "stopped");
+  assert.equal(await backend.state("pylon-none" as PylonId), "absent");
+  up.state.current = "stopping";
+  assert.equal(await backend.state("pylon-up" as PylonId), "stopping");
+});
+
+test("a pylon whose controller takes the request and never answers gets the state a list reports, within seconds", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-wedged", "running");
+  const server = createServer(() => {});
+  await new Promise<void>((resolve) => server.listen(join(dir, "control.sock"), resolve));
+  after(() => { server.closeAllConnections(); return new Promise<void>((resolve) => server.close(() => resolve())); });
+  const started = Date.now();
+  const state = await backend.state("pylon-wedged" as PylonId);
+  assert.ok(Date.now() - started < 10_000, `${Date.now() - started} ms`);
+  assert.equal(state, (await backend.list()).find((p) => p.pylonId === "pylon-wedged")?.vm);
+});
+
 test("a pylon's process is its controller while it lives, and node health reads disk free where the instances are", async () => {
   const { backend, instances, stateRoot } = await backendWith();
   await writeFile(join(await leftInstance(instances, "pylon-up", "running"), "controller.pid"), JSON.stringify(await identityOf(process.pid)));

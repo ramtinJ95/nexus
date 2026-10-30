@@ -560,8 +560,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       } catch (err) {
         return send(res, 400, (err as Error).message);
       }
-      const pylon = (await backend.list()).find((p) => p.pylonId === pylonId);
-      if (pylon?.vm !== "running") return send(res, 409, `${pylonId} is ${pylon?.vm ?? "absent"}, not running`);
+      const vm = await backend.state(pylonId);
+      if (vm !== "running") return send(res, 409, `${pylonId} is ${vm}, not running`);
       const asked = command;
       // Each kind's policy takes its own kind of command and result, which command.kind picks.
       const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
@@ -652,7 +652,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
     if (parsed === null) return refuse(socket, 404, `no upgrade route ${url.pathname} for ${req.headers.upgrade}`);
     const { pylonId, argv } = parsed;
-    if ((await backend.list()).find((p) => p.pylonId === pylonId)?.vm !== "running") return refuse(socket, 409, `${pylonId} is not running`);
+    if (await backend.state(pylonId) !== "running") return refuse(socket, 409, `${pylonId} is not running`);
     if (socket.destroyed || shutdown.signal.aborted) return;
     const guest = await backend.guest(pylonId).stream(argv, (text) => log(`${pylonId} stream ${argv[0]}: ${text.trimEnd()}`));
     socket.write(streamUpgradeResponse);
