@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { artifactArchive, artifactDirectory, fileCodec, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "./protocol/jobs.ts";
-import type { ImageId, ImageManifest, TemplateId, TemplateManifest } from "./images.ts";
+import type { ImageManifest, TemplateManifest } from "./images.ts";
+import type { ImageId, TemplateId } from "./ids.ts";
 import { tempDir } from "./test-kit.ts";
 
 const gnuTar = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout?.includes("GNU tar") === true;

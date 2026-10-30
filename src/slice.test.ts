@@ -34,7 +34,7 @@ import { nodeSecrets, type NodeSecrets } from "./probe/config.ts";
 import { startProbe, type Probe } from "./probe/server.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
 import { pylonInfoFile } from "./probe/pylon-api.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
+import type { CheckpointId, ImageId, LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
 import type { DeclaredOutput, ServiceFact } from "./protocol/observations.ts";
 import { connectProbe, type ProbeClient } from "./protocol/client.ts";
 import { envelope, type PlanStep } from "./reconcile.ts";
@@ -45,7 +45,6 @@ import { renderOverlay } from "./control/overlay.ts";
 import type { BootInputs, CloneRepo, OverlayFile, PreviewAssignment } from "./spawn.ts";
 import type { ProjectId } from "./ids.ts";
 import { checkoutDir, sessionFacts, sessionsFile, type SessionHarness } from "./sessions.ts";
-import type { CheckpointId, ImageId } from "./images.ts";
 import { freePort } from "./test-kit.ts";
 
 const execFileAsync = promisify(execFile);

@@ -3,8 +3,8 @@
  * image and the latest image build or rollout, in the `current`, `previous-image` and `image-operation` settings.
  */
 import { json, jsonOrNull, type Db, type Row } from "./db.ts";
-import type { JobId, NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
-import type { ImageId, ImageManifest, TemplateId } from "../images.ts";
+import type { ImageId, JobId, NodeName, ProjectId, TailnetNodeId, TemplateId } from "../ids.ts";
+import type { ImageManifest } from "../images.ts";
 import type { BuildingTemplate, TemplateRecord } from "./templates.ts";
 
 /**

@@ -5,9 +5,8 @@ import assert from "node:assert/strict";
 import { turnGate } from "./drain.ts";
 import type { Thread } from "./registry.ts";
 import { usageBackfill } from "./usage-backfill.ts";
-import type { ImageId } from "../images.ts";
 import { releaseOutcome, reportStates, type ReleaseReport } from "../deploy/model.ts";
-import type { TailnetNodeId } from "../ids.ts";
+import type { ImageId, TailnetNodeId } from "../ids.ts";
 import { node, laptop, project, image, testApi, withThread, deployCommit, deployment, reporterHeaders } from "./api-test-kit.ts";
 
 test("deploy defaults off, main resolves, and release records the authenticated caller", async (t) => {

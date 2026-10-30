@@ -13,12 +13,12 @@
  * The backend speaks its own types. Wire types from src/protocol/ stop at probe/run.ts's runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { NodeName, PylonId } from "./ids.ts";
+import type { CheckpointId, ImageId, NodeName, PortableArtifactId, PylonId, TemplateId } from "./ids.ts";
 import type { BrokenCause, PausedSession, ServiceFact } from "./protocol/observations.ts";
 import type { ByteStream } from "./protocol/streams.ts";
 import type { BootInputs, LiveSpec, OverlayFile } from "./spawn.ts";
 import type { ServiceDecl, ServiceName } from "./services-file.ts";
-import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
+import type { ArtifactManifest, ImageRecipe, TemplateBuildInputs } from "./images.ts";
 import type { HostBridge } from "./host-bridge.ts";
 
 export interface VmBackend {

@@ -10,10 +10,9 @@ import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.t
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
 import { claudeHook } from "../../images/pylon/nexus-contract.ts";
-import type { LiveHash, NodeName } from "../ids.ts";
+import type { ImageId, LiveHash, NodeName } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import type { ImageId } from "../images.ts";
 import { runningPylon, tempDir, until } from "../test-kit.ts";
 
 const node = "rj-firebat" as NodeName;

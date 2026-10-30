@@ -14,14 +14,13 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { retryable } from "./protocol/jobs.ts";
 import { heldSecrets } from "./protocol/observations.ts";
-import type { JobId, LiveHash, NodeName, PylonId } from "./ids.ts";
+import type { ArtifactId, CheckpointId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId } from "./ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus } from "./protocol/jobs.ts";
 import type {
   HerdrStatus, NodeObservation, PausedSession, ProbeEvent, PylonObservation, RunningFacts, SessionFact,
 } from "./protocol/observations.ts";
 import type { BootInputs, LiveSpec, PylonSource } from "./spawn.ts";
 import { harnessNamed, type SessionHarness } from "./sessions.ts";
-import type { ArtifactId, CheckpointId, PortableArtifactId } from "./images.ts";
 
 export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
 /** `reading` runs an archived thread's pylon for the usage backfill without bringing its sessions back. */

@@ -8,8 +8,8 @@
  * A pass derives each step from its node's observation and the probe's status of the step's job, never from what an
  * earlier pass meant to do, so a control plane that restarts mid-operation carries on from the stored operation.
  */
-import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
-import type { NodeName, TailnetNodeId } from "../ids.ts";
+import { imageIdOf, type ImageManifest, type ImageRecipe } from "../images.ts";
+import type { ImageId, NodeName, TailnetNodeId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";

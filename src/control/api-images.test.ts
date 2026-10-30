@@ -3,10 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { startImageRollout } from "./image-rollout.ts";
-import { imageIdOf, type ImageId, type ImageRecipe } from "../images.ts";
+import { imageIdOf, type ImageRecipe } from "../images.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { testCapacity, testObservation } from "../test-kit.ts";
-import type { TailnetNodeId } from "../ids.ts";
+import type { ImageId, TailnetNodeId } from "../ids.ts";
 import { node, laptop, project, image, testApi, deployment } from "./api-test-kit.ts";
 
 test("a thread cannot start before an image is current", async (t) => {

@@ -8,7 +8,7 @@ import { nodePylons } from "./placement.ts";
 import { openRegistry, type PortRange, type Registry, type Thread } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
-import type { JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type {
   BrokenCause, ListeningFact, NodeObservation, PreviewRouteFact, ProbeEvent, PylonObservation, RunningFacts, ServiceFact, SessionFact,
@@ -19,7 +19,6 @@ import { upgradeObservation } from "../protocol/observations.ts";
 import { chatgptTokenGrant } from "../secret-grants.ts";
 import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
-import type { CheckpointId, ImageId } from "../images.ts";
 import type { ReportedEvent } from "../events.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, until, watch } from "../test-kit.ts";
 

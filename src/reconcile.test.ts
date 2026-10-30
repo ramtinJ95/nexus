@@ -4,7 +4,7 @@ import {
   actualState, backoffMs, desiredPhase, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
-import type { JobId, LiveHash, NodeName, PylonId } from "./ids.ts";
+import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "./ids.ts";
 import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "./protocol/jobs.ts";
 import {
   encodeProbeEvent, parseProbeEvent, upgradeObservation, type OlderObservation, type PausedSession, type ProbeEvent,
@@ -12,7 +12,6 @@ import {
 } from "./protocol/observations.ts";
 import { chatgptTokenGrant } from "./secret-grants.ts";
 import type { BootInputs, PylonSource } from "./spawn.ts";
-import type { ArtifactId, CheckpointId, ImageId, TemplateId } from "./images.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "./test-kit.ts";
 
 const now = 1_800_000_000_000;
