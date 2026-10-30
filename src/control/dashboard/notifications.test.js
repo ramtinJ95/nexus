@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { runInNewContext } from "node:vm";
 import { coordinator, notificationChannel, needSelectors, noticeUrl, owedSeen, seenBody } from "./notifications.js";
+import { apiOver } from "./request.js";
+import { startRows } from "./rows.js";
 
 const row = (attention, working = false, id = "t1") => ({ id, attention, working });
 test("initial states are silent; failures and parked notify immediately", () => {
@@ -128,14 +128,8 @@ test("a page owes a seen mark once for each reply it shows, so one marked unseen
   assert.equal(owedSeen(null, null), null);
 });
 
-const client = await readFile(new URL("./client.js", import.meta.url), "utf8");
-const slice = (from, to) => client.slice(client.indexOf(from), client.indexOf(to));
-const api = slice("async function api(", "\nfunction showError(");
-const rows = slice("// The events that change a row's attention", "\nlet marking = false;");
-const marking = slice("let marking = false;", "\nsetInterval(markSeen, 1000);");
-
 /**
- * One dashboard tab's attention code from client.js, run in its own context. Tabs given the same `browser` share its
+ * One dashboard tab's attention code from rows.js, run on fakes of the browser. Tabs given the same `browser` share its
  * BroadcastChannel and its one Web Lock, which the first tab to ask holds.
  */
 function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
@@ -165,9 +159,9 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = 
     document: doc, fetch, Date: { now },
     AbortSignal: { timeout }, setTimeout: (f, ms) => timers.push({ f, at: now() + ms }), clearTimeout: () => timers.splice(0),
     setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), owedSeen,
-    currentThread: () => "t1", focused: () => focused, activeTab: null,
+    currentThread: () => "t1", focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
   };
-  const code = runInNewContext(`${api}\n${rows}\n${marking}\n({ readRows, markSeen })`, context);
+  const code = startRows(context, context);
   const show = (state) => { doc.visibilityState = state; for (const l of doc.listeners) l(); };
   return { ...code, doc, favicon, timers, intervals, show };
 }

@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { runInNewContext } from "node:vm";
 import { diffOf, imageSides, maxDiffRows } from "./diff.js";
+import { bases, checkoutText } from "./checkout-text.js";
 import { imageTypes } from "../../image-types.ts";
 
 const edit = `diff --git a/src/a.ts b/src/a.ts
@@ -216,16 +215,13 @@ test("a changed image shows its before at the base and its after in the working 
   assert.equal(imageSides(undefined, "start"), null);
 });
 
-const client = await readFile(new URL("./client.js", import.meta.url), "utf8");
-const slice = (from, to) => client.slice(client.indexOf(from), client.indexOf(to));
 /**
- * The changes pane's and the diff's texts from client.js: `bases`, and `unreadable` for a pylon in `facts`, run with
+ * The changes pane's and the diff's texts from checkout-text.js: `bases`, and `unreadable` for a pylon in `facts`, run with
  * `el` making plain objects and `wanted` saying whether the reader asked to wake the pylon.
  */
 function checkoutTexts(wanted = false) {
   const el = (tag, props, ...children) => ({ tag, ...props, children, addEventListener(kind, listener) { this[kind] = listener; } });
-  const code = `${slice("const bases = {", "\nconst checkout = {")}\n${slice("function unreadable(", "\nfunction changesUnreadable(")}\n({ bases, unreadable })`;
-  return runInNewContext(code, { el, checkout: { wanted } });
+  return { bases, ...checkoutText({ el, checkout: { wanted } }) };
 }
 const said = (nodes) => Array.from(nodes, (n) => n.tag === "button" ? `[${n.textContent}]` : n.textContent);
 

@@ -5,7 +5,6 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
-import { runInNewContext } from "node:vm";
 import { startApi, type ApiOptions } from "./api.ts";
 import { threadStarter } from "./threads.ts";
 import { itemThread, pipeline, type PipelineItem } from "./pipeline.ts";
@@ -2501,64 +2500,12 @@ test("the start dialog's hint says where the pylon boots, from what image, and w
   assert.equal(said(startHint({ node: "auto", image: "img-1", branch: "dev", scratch: false })), "Boots a pylon on the node with the most room left from image <code>img-1</code> and checks out <code>dev</code>.");
 });
 
-test("a swap keeps what the reader filled in on each form it replaces, and the start dialog says a project no longer offered is gone", async () => {
-  const client = await readFile(new URL("./dashboard/client.js", import.meta.url), "utf8");
-  const code = client.slice(client.indexOf("const projectRadios = "), client.indexOf("\nasync function openStart("));
-  const field = (name: string, type: string, value: string, checked = false, extra: object = {}) => ({ name, type, value, checked, ...extra });
-  const form = (id: string, fields: ReturnType<typeof field>[], question?: string) => {
-    const submit = { disabled: false };
-    return { id, dataset: question === undefined ? {} : { question }, elements: fields, submit, querySelector: (selector: string) => selector === "button[type=submit]" ? submit : null };
-  };
-  const options = (...values: string[]) => ({ options: values.map((value) => ({ value })) });
-  const start = (projects: string[], nodes: string[]) => form("start", [
-    field("worker", "radio", "claude", true), field("worker", "radio", "harness"), field("title", "text", ""), field("claude", "textarea", ""),
-    field("node", "select-one", "", false, options("", "auto", ...nodes)), ...projects.map((p, i) => field("project", "radio", p, i === 0)),
-  ]);
-  const ask = () => form("", [field("picked-0", "radio", "A"), field("picked-0", "radio", "B"), field("own-0", "text", "")], "q1");
-  const prompt = () => form("prompt", [field("text", "textarea", "")]);
-
-  const before = [start(["acme", "beta"], ["tower"]), ask(), prompt()];
-  const [oldStart, oldAsk, oldPrompt] = before;
-  oldStart!.elements[0]!.checked = false;
-  oldStart!.elements[1]!.checked = true;
-  oldStart!.elements[2]!.value = "Ship it";
-  oldStart!.elements[4]!.value = "tower";
-  oldStart!.elements[5]!.checked = false;
-  oldStart!.elements[6]!.checked = true;
-  oldAsk!.elements[0]!.checked = true;
-  oldAsk!.elements[2]!.value = "my own";
-  oldPrompt!.elements[0]!.value = "a draft the composer keeps itself";
-
-  let forms = before;
-  const errors: (string | null)[] = [];
-  const synced: unknown[] = [];
-  const document = {
-    querySelectorAll: (selector: string) => selector === "form" ? forms : forms[0]!.elements.filter((f) => f.name === "project"),
-    getElementById: (id: string) => forms.find((f) => f.id === id) ?? null,
-  };
-  const { formDrafts, restoreDrafts, restoreStart } = runInNewContext(`${code}\n({ formDrafts, restoreDrafts, restoreStart })`, {
-    document, starting: true, syncWorker: (f: unknown) => synced.push(f), updateStartHint: () => {},
-    showError: (_: string, err: Error | null) => errors.push(err === null ? null : err.message),
-  });
-  const drafts = formDrafts([{ querySelectorAll: () => before }]);
-  forms = [start(["acme"], []), ask(), prompt()];
-  restoreDrafts(drafts);
-  restoreStart(drafts);
-  const [newStart, newAsk, newPrompt] = forms;
-  const values = (f: ReturnType<typeof form>) => f.elements.map((e) => e.type === "radio" ? `${e.name}=${e.value}:${e.checked}` : `${e.name}=${e.value}`);
-  assert.deepEqual(values(newStart!), ["worker=claude:false", "worker=harness:true", "title=Ship it", "claude=", "node=", "project=acme:false"],
-    "the typed title and picked worker are kept, the node whose option is gone is not, and no project is picked in place of the one gone");
-  assert.deepEqual(errors, ["Project beta is not offered here yet. Reload the page to see it."]);
-  assert.deepEqual(synced, [newStart], "the worker's fields follow the worker picked, once");
-  assert.equal(newStart!.submit.disabled, true, "a start in flight stays unsendable");
-  assert.deepEqual(values(newAsk!), ["picked-0=A:true", "picked-0=B:false", "own-0=my own"]);
-  assert.deepEqual(values(newPrompt!), ["text="], "the composer restores its own draft");
-});
-
 test("a page's icon template holds only the icons client.js clones", async (t) => {
   const s = await seeded(t);
   const template = /<template id="icons">(.*?)<\/template>/.exec((await s.call("GET", "/")).text)![1]!;
   assert.deepEqual([...template.matchAll(/class="i i-([a-z]+)"/g)].map((m) => m[1]), ["chevron", "folder"]);
-  const client = await readFile(new URL("./dashboard/client.js", import.meta.url), "utf8");
+  const dir = new URL("./dashboard/", import.meta.url);
+  const scripts = (await readdir(dir)).filter((name) => name.endsWith(".js") && !name.endsWith(".test.js"));
+  const client = (await Promise.all(scripts.map((name) => readFile(new URL(name, dir), "utf8")))).join("\n");
   assert.deepEqual([...new Set([...client.matchAll(/iconOf\("([a-z]+)"\)/g)].map((m) => m[1]))].sort(), ["chevron", "folder"]);
 });
