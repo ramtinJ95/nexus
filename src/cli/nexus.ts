@@ -513,19 +513,45 @@ const waitedOut = new Set(["not-running", "not-ready", "moved"]);
 const pylonCommandMs = 120_000;
 const waitPollMs = 1_000;
 
+/**
+ * Runs `step` every `everyMs` until it answers something other than undefined, and fails with `timedOut` once the
+ * deadline passes. A wait rides through an unreachable control plane, since every deploy restarts it and a step that
+ * reads finishes on the next try. A step that sends what it waits on passes `tolerateUnreachable: false`, because an
+ * unreachable answer may hide a request that ran.
+ */
+async function pollUntil<T>(o: { deadlineMs: number; everyMs: number; tolerateUnreachable?: boolean; timedOut: () => CliError }, step: () => Promise<T | undefined>): Promise<T> {
+  const deadline = Date.now() + o.deadlineMs;
+  for (;;) {
+    let lost: CliError | null = null;
+    try {
+      const done = await step();
+      if (done !== undefined) return done;
+    } catch (err) {
+      if (o.tolerateUnreachable === false || !(err instanceof CliError) || err.kind !== "unreachable") throw err;
+      lost = err;
+    }
+    if (Date.now() >= deadline) {
+      const timedOut = o.timedOut();
+      throw lost === null ? timedOut : new CliError(timedOut.kind, `${timedOut.message}\nThe last poll failed: ${lost.message}`);
+    }
+    await sleep(o.everyMs);
+  }
+}
+
 /** Polls the thread until its node reports the port listening and its preview published and warmed. */
 async function served(api: Api, id: string, port: number): Promise<Preview> {
-  const deadline = Date.now() + waitMs;
-  for (;;) {
-    const d = await api("GET", thread(id)) as ThreadDetail;
-    const preview = d.ports?.find((l) => l.port === port)?.preview;
-    if (preview?.ready === true) return preview;
-    if (Date.now() >= deadline) {
+  let preview: Preview | null | undefined;
+  return pollUntil({
+    deadlineMs: waitMs, everyMs: waitPollMs,
+    timedOut: () => {
       const why = preview && failureOf(preview) !== null ? `, because ${failureOf(preview)}` : "";
-      throw new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s${why}. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
-    }
-    await sleep(waitPollMs);
-  }
+      return new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s${why}. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
+    },
+  }, async () => {
+    const d = await api("GET", thread(id)) as ThreadDetail;
+    preview = d.ports?.find((l) => l.port === port)?.preview;
+    return preview?.ready === true ? preview : undefined;
+  });
 }
 
 /**
@@ -536,18 +562,21 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
  * failure after the wait leaves undone.
  */
 async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undone: string): Promise<T> {
-  const deadline = Date.now() + waitMs;
-  for (;;) {
+  let refused: CliError;
+  return pollUntil({
+    deadlineMs: waitMs, everyMs: waitPollMs, tolerateUnreachable: false,
+    timedOut: () => new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so ${undone}. ${refused.message}`),
+  }, async () => {
     try {
       return await send();
     } catch (err) {
       if (!(err instanceof CliError) || err.kind !== "conflict" || (err.code !== null && !waitedOut.has(err.code))) throw err;
       const { status } = (await api("GET", thread(id)) as ThreadDetail).thread;
       if (status === "archived" || status === "deleted") throw err;
-      if (Date.now() >= deadline) throw new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so ${undone}. ${err.message}`);
+      refused = err;
+      return undefined;
     }
-    await sleep(waitPollMs);
-  }
+  });
 }
 
 /** What a queued thread's row and `show` call its status: an archived one is cancelled. */
@@ -728,6 +757,25 @@ function stateText(s: WatchState): string {
 }
 
 /**
+ * Calls `onEnd` once the consumer of a stream is gone: on SIGINT, SIGTERM or SIGHUP, when it closes the pipe, or when
+ * the process that started this one exits. A consumer killed outright never closes the pipe, and a quiet stream
+ * writes nothing that would find it closed, so the parent is checked every second. Answers what removes the handlers.
+ */
+function untilConsumerGone(onEnd: () => void): () => void {
+  const parent = process.ppid;
+  const orphan = setInterval(() => { if (process.ppid !== parent) onEnd(); }, 1000);
+  const outputError = (err: NodeJS.ErrnoException) => { if (err.code === "EPIPE") onEnd(); else throw err; };
+  process.stdout.on("error", outputError);
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  for (const signal of signals) process.once(signal, onEnd);
+  return () => {
+    clearInterval(orphan);
+    process.stdout.removeListener("error", outputError);
+    for (const signal of signals) process.removeListener(signal, onEnd);
+  };
+}
+
+/**
  * Follows the thread's conversation as the API streams it, and polls the thread. The conversation is pi-durable's
  * active context, not the full history: a new head marker, a compaction or a delete can reorder or drop entries.
  * So the first print shows the context whole, a later one that only appends prints each new entry, and any other
@@ -739,14 +787,6 @@ function stateText(s: WatchState): string {
  * is gone.
  */
 async function watch(api: Api, follow: Follow, id: string, intervalMs: number, json: boolean): Promise<void> {
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(signal, () => process.exit(0));
-  // A consumer that closes the pipe is done reading.
-  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code !== "EPIPE") throw err;
-    process.exit(0);
-  });
-  // A consumer killed outright never closes the pipe, and an idle thread prints nothing that would find it closed.
-  const parent = process.ppid;
   const emit = (event: WatchEvent, text: string) => {
     if (json) process.stdout.write(`${JSON.stringify(event)}\n`);
     else if (text !== "") process.stdout.write(`${text}\n`);
@@ -909,16 +949,17 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
         failed("poll", err);
       }
       await sleep(intervalMs, undefined, { signal: stop.signal }).catch(() => {});
-      if (process.ppid !== parent) return;
     }
   }
   // Only the poll ends the watch. The stream stops early for a thread without a conversation, which leaves the
   // watch running, or with a failure such as a refusal, which ends it.
+  const dispose = untilConsumerGone(() => process.exit(0));
   const streaming = stream();
   try {
     await Promise.race([poll(), streaming.then(() => new Promise<never>(() => {}))]);
   } finally {
     stop.abort();
+    dispose();
   }
 }
 
@@ -947,26 +988,26 @@ function imagesText(view: ImagesView): string {
  * change of a running step goes to stderr, so a build of minutes shows where it is and stdout stays one value for --json.
  */
 async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
-  const deadline = Date.now() + 45 * 60_000;
   let operation = started;
   let view: ImagesView | null = null;
-  for (;;) {
-    if (operation.state === "done") {
-      view ??= await api("GET", "/v1/images") as ImagesView;
-      return { json: view, text: imagesText(view) };
-    }
+  const settled = async (): Promise<Result | undefined> => {
     if (operation.state === "failed") throw new CliError("failed", operationText(operation));
-    if (Date.now() >= deadline) throw new CliError("failed", `image wait timed out\n${operationText(operation)}`);
-    await sleep(2_000);
-    try { view = await api("GET", "/v1/images") as ImagesView; }
-    catch (error) { if (!(error instanceof CliError) || error.kind !== "unreachable") throw error; continue; }
+    if (operation.state !== "done") return undefined;
+    view ??= await api("GET", "/v1/images") as ImagesView;
+    return { json: view, text: imagesText(view) };
+  };
+  return await settled() ?? pollUntil({
+    deadlineMs: 45 * 60_000, everyMs: 2_000, timedOut: () => new CliError("failed", `image wait timed out\n${operationText(operation)}`),
+  }, async () => {
+    view = await api("GET", "/v1/images") as ImagesView;
     const now = view.operation;
     if (now === null || now.kind !== started.kind || now.image !== started.image || now.requestedAt !== started.requestedAt) {
       throw new CliError("conflict", `another image operation replaced the ${started.kind} of ${started.image}${now === null ? "" : `\n${operationText(now)}`}`);
     }
     if (now.state === "running" && operationText(now) !== operationText(operation)) process.stderr.write(`${operationText(now)}\n`);
     operation = now;
-  }
+    return settled();
+  });
 }
 
 /** Starts an image operation, and with --wait follows it until it ends. */
@@ -1060,13 +1101,7 @@ const commands: Readonly<Record<string, Command>> = {
       }
       query.set("follow", "true");
       const stop = new AbortController();
-      const end = () => { stop.abort(); process.exit(0); };
-      const parent = process.ppid;
-      const orphan = setInterval(() => { if (process.ppid !== parent) end(); }, 1000);
-      const outputError = (err: NodeJS.ErrnoException) => { if (err.code === "EPIPE") end(); else throw err; };
-      process.stdout.on("error", outputError);
-      const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-      for (const signal of signals) process.once(signal, end);
+      const dispose = untilConsumerGone(() => { stop.abort(); process.exit(0); });
       try {
         while (!stop.signal.aborted) {
           try { await follow(`/v1/events?${query}`, (data) => print(data as NexusEvent, stop.signal), stop.signal, (id) => query.set("since", id)); }
@@ -1077,9 +1112,7 @@ const commands: Readonly<Record<string, Command>> = {
           await sleep(1000, undefined, { signal: stop.signal }).catch(() => undefined);
         }
       } finally {
-        clearInterval(orphan);
-        process.stdout.removeListener("error", outputError);
-        for (const signal of signals) process.removeListener(signal, end);
+        dispose();
       }
     },
   },
@@ -1118,16 +1151,17 @@ const commands: Readonly<Record<string, Command>> = {
       if (commit !== "main" && !fullCommit.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
       let view = await api("PUT", "/v1/release", { commit }) as ReleaseView;
       const target = view.desired!.commit;
-      const deadline = Date.now() + 30 * 60_000;
-      while (values.wait === true) {
+      const settled = (): ReleaseView | undefined => {
         const outcome = releaseOutcome(view, target);
-        if (outcome === "healthy") break;
         if (outcome === "failed") throw new CliError("failed", releaseText(view));
         if (outcome === "superseded") throw new CliError("conflict", `deployment superseded\n${releaseText(view)}`);
-        if (Date.now() >= deadline) throw new CliError("failed", `deployment wait timed out\n${releaseText(view)}`);
-        await sleep(1_000);
-        try { view = await api("GET", "/v1/release") as ReleaseView; }
-        catch (error) { if (!(error instanceof CliError) || error.kind !== "unreachable") throw error; }
+        return outcome === "healthy" ? view : undefined;
+      };
+      if (values.wait === true) {
+        view = settled() ?? await pollUntil({ deadlineMs: 30 * 60_000, everyMs: 1_000, timedOut: () => new CliError("failed", `deployment wait timed out\n${releaseText(view)}`) }, async () => {
+          view = await api("GET", "/v1/release") as ReleaseView;
+          return settled();
+        });
       }
       return { json: view, text: releaseText(view) };
     },

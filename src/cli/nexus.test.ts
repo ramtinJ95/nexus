@@ -2273,3 +2273,69 @@ test("start and item add check their worker flags alike, and item add refuses an
   assert.equal(s.requests(), asked, "nothing was sent");
   assert.deepEqual(await s.json(["items"]), []);
 });
+
+test("preview --wait rides through a restart of the control plane and prints the preview once it is served", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "ports"]);
+  observeRunning(s, thread, [], [3000]);
+  const { url } = await s.json(["preview", thread.id, "3000"]);
+  const asked = s.requests();
+  const waiting = s.nexus(["preview", thread.id, "3000", "--wait"]);
+  await until("the wait polls a preview that is not served yet", () => s.requests() >= asked + 2);
+  const restart = await s.stop();
+  const tried = s.proxy.connects.length;
+  await until("a poll met the stopped control plane", () => s.proxy.connects.length > tried);
+  await restart();
+  observeRunning(s, thread, [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], [3000]);
+  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
+  const served = await waiting;
+  assert.deepEqual([served.code, served.stdout], [0, `${url}\n`], served.stderr);
+});
+
+test("send to a Claude worker whose message meets an unreachable control plane fails at once with exit code 2, and is not sent again", { timeout: 30_000 }, async (t) => {
+  const s = await setup(t);
+  const sends: string[] = [];
+  const dropping = createHttpServer((req, res) => {
+    if (req.method === "GET") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ thread: { status: "active" }, claudeWorker: {} }));
+    sends.push(req.url!);
+    req.socket.destroy();
+  });
+  const port = await listening(t, dropping);
+  const started = Date.now();
+  const sent = await s.nexus(["send", "th-0123456789ab", "deploy", "--json"], { NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "none" });
+  assert.equal(sent.code, 2, sent.stderr);
+  assert.equal(JSON.parse(sent.stderr).kind, "unreachable");
+  assert.equal(sends.length, 1, "the message may have run, so it is not sent again");
+  assert.ok(Date.now() - started < 10_000, "it fails at once rather than waiting for the pylon");
+});
+
+/** Runs `args` with its output in a file under a shell, kills the shell once the output has `ready`, and answers how long the orphan outlived it. */
+async function orphanLife(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], ready: string): Promise<number> {
+  const out = join(await mkdtemp(join(tmpdir(), "nexus-orphan-")), "out");
+  const sh = spawn("sh", ["-c", `"$0" "$@" > "${out}" 2>&1 & echo $!; wait`, process.execPath, cli, ...args], { env: s.env() });
+  t.after(() => { sh.kill("SIGKILL"); });
+  const [pidLine] = await once(sh.stdout, "data") as [Buffer];
+  const pid = Number(pidLine.toString().trim());
+  t.after(() => { try { process.kill(pid); } catch {} });
+  await until(`${args[0]} printed ${ready}`, async () => (await readFile(out, "utf8").catch(() => "")).includes(ready));
+  sh.kill("SIGKILL");
+  await once(sh, "exit");
+  const killed = Date.now();
+  await until(`the orphaned ${args[0]} exited`, async () => {
+    try {
+      process.kill(pid, 0);
+      // A container's PID 1 may leave an exited orphan as a zombie.
+      return /\) Z /.test(await readFile(`/proc/${pid}/stat`, "utf8").catch(() => ""));
+    } catch { return true; }
+  });
+  return Date.now() - killed;
+}
+
+test("a watch or events --follow whose parent is killed exits within about a second, however long the watch's interval", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "idle"]);
+  // The bounds are well under the minute's interval, and loose for a loaded suite.
+  assert.ok(await orphanLife(t, s, ["watch", thread.id, "--json", "--interval", "60000"], '"type":"state"') < 10_000, "the watch did not wait out its interval");
+  s.registry.appendEvent("release.changed", null, { state: "pending" });
+  assert.ok(await orphanLife(t, s, ["events", "--follow"], "release.changed") < 10_000, "events --follow exited");
+});
