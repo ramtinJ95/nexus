@@ -908,7 +908,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     };
     const prompt = reviewerRequest(draft, snapshot.detail, draft.expect);
     const reviewer = await deps.startThread({
-      project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), node: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
+      project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
       ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
     }, reviewerCaller);
     const review: Review = { ...draft, reviewer: reviewer.id, asked: prompt, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
