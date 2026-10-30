@@ -1,11 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
-import { newPylonRecord } from "../tick.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { AutoReview } from "../project.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SecretGrant } from "../secret-grants.ts";
@@ -19,7 +17,8 @@ import { agentConversation, agentReader, harnessView, heard } from "./agent-conv
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import { watch } from "../test-kit.ts";
+import { tempDir, watch } from "../test-kit.ts";
+import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "../agent-protocol.ts";
 import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./threads.ts";
@@ -45,13 +44,13 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   /** A Claude worker thread, a harness thread, or with `bare` one with neither agent. */
   function add(id: string, claude: boolean, startedBy = "test", bare = false): ThreadId {
     if (registry.thread(id as ThreadId) !== undefined) return id as ThreadId;
-    const thread: Thread = { id: id as ThreadId, title: id, project: project.id, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: claude || bare ? null : "1", startedBy, createdAt: 1, seenAt: null, lastReplyAt: null, lastHumanActivityAt: 1, lastAgentActivityAt: 0, agentTurnRunning: false, working: false };
-    const { desired: _, ...pylon } = newPylonRecord({ thread: id, pylonId: thread.pylonId, node, desired: "running", boot: { pylonId: thread.pylonId, image: "img-000000000000", resources: project.resources, network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, firstBoot: { kind: "fresh", preSetup: null }, live: { previews: [], overlay: [] }, liveHash: "hash" as LiveHash });
+    const thread = testThread({ id: id as ThreadId, title: id, project: project.id, conversationId: claude || bare ? null : "1", startedBy, createdAt: 1, lastHumanActivityAt: 1 });
+    const pylon = testPylon(thread, { node, boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, liveHash: "hash" });
     registry.createThread(thread, pylon, claude ? "fix it" : undefined, claude ? "claude-opus-5-5" : undefined);
     return thread.id;
   }
   const builder = add("th-builder", options.claudeBuilder ?? true);
-  const pr = { repo, number: 7, title: "Add the cache", url: `https://github.com/${repo}/pull/7`, state: "open" as const, checks: "none" as const, review: "none", conflict: false };
+  const pr = testPr({ repo, number: 7, title: "Add the cache" });
   registry.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
 
   let clock = 1_000_000;
@@ -642,7 +641,7 @@ async function approved(f: ReturnType<typeof fixture>, land: string | null) {
 }
 
 test("a landing under the policy merges the approved head, deploys it and waits for every service to be healthy", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-review-")); t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-review-", t);
   const path = join(dir, "registry.db");
   const f = fixture(t, { path });
   released(f, previous);
@@ -900,11 +899,11 @@ test("the policy names every condition that fails and every reserved case, and h
 
 test("paths under docs/ hold for no reserved case by their names, while deploy/ and shipped code still do", () => {
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
-  const review: Review = {
-    id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 199, url: "", title: "", branch: "f" }, models: { builder: "a", reviewer: "b" }, reviewerKind: "harness",
-    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "merging", authorized: null }, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0, rounds: [round],
-  };
-  const pr: PrSnapshot = { pr: { repo: "ramtinJ95/nexus", number: 199, title: "", url: "", state: "open", checks: "none", review: "none", conflict: false }, detail: { head: head1, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
+  const review = testReview({
+    builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 199, url: "", title: "", branch: "f" }, models: { builder: "a", reviewer: "b" },
+    maxRounds: 3, phase: { kind: "merging", authorized: null }, rounds: [round],
+  });
+  const pr: PrSnapshot = { pr: testPr({ repo: "ramtinJ95/nexus", number: 199, title: "", url: "" }), detail: { head: head1, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
   const holds = (...paths: string[]) => landingHolds({ review, pr, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) }).map((h) => h.text);
   const pr199 = ["README.md", "docs/explorations/install.md", "docs/roadmap.md", ...["README.md", "loopback.py", "run.ts", "standin/apt-get", "standin/github-host-keys", "standin/journalctl", "standin/qemu",
     "standin/ssh-keyscan", "standin/systemctl", "standin/tailscale", "tailnet.ts", "transcript.txt", "tsconfig.json"].map((p) => `docs/verification/fresh-install/${p}`)];
@@ -923,12 +922,12 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
 
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
-  const review: Review = {
-    id: "rv-1", builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" }, reviewerKind: "harness",
-    maxRounds: 3, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, phase: { kind: "checking", startedAt: 0, thread: null }, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
+  const review = testReview({
+    builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "acme/shop", number: 7, url: "", title: "", branch: "f" }, models: { builder: "m", reviewer: "m" },
+    maxRounds: 3, phase: { kind: "checking", startedAt: 0, thread: null },
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
-  };
-  const pr: PrSnapshot = { pr: { repo: "acme/shop", number: 7, title: "", url: "", state: "open", checks: "pending", review: "none", conflict: true }, detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
+  });
+  const pr: PrSnapshot = { pr: testPr({ repo: "acme/shop", number: 7, title: "", url: "", checks: "pending", conflict: true }), detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
   assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }).map((h) => h.text), [
     "The reviewer ran the builder's own model, m.",
     "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
@@ -1315,7 +1314,7 @@ test("a Claude reviewer's approval does not land, and goes to the person", async
 });
 
 test("every merge attempt checks the policy again, so checks that fail after approval, or across a restart, hold it", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-review-")); t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-review-", t);
   const path = join(dir, "registry.db");
   const f = fixture(t, { path, repo: "acme/shop" });
   f.mergeAnswer = () => { throw new Error("GitHub is down"); };
@@ -1898,7 +1897,7 @@ test("nothing starts on its own without the project's setting, for a thread the 
   await off.loop().auto(off.registry.thread(off.builder)!, off.pr);
   assert.equal(off.registry.review(off.builder), null, "a project without the setting");
 
-  const f = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db"), autoReview: { land: false, enabledBy: "nPHONE" } });
+  const f = fixture(t, { path: join(await tempDir("nexus-review-", t), "registry.db"), autoReview: { land: false, enabledBy: "nPHONE" } });
   const loop = f.loop();
   for (const [id, by] of [["th-reviewing", reviewerCaller], ["th-checking", checkCaller]] as const) {
     await loop.auto(f.registry.thread(f.add(id, true, by))!, f.pr);
@@ -1963,7 +1962,7 @@ test("a builder that cannot rebase, or a conflict after the last round, goes to 
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The branch conflicts with main, and the builder did not rebase it: main rewrote the cache this PR adds, so one side has to go."] });
 
-  const last = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db") });
+  const last = fixture(t, { path: join(await tempDir("nexus-review-", t), "registry.db") });
   const capped = last.loop();
   await capped.start(last.builder, { land: "nLAPTOP", rounds: 1 });
   await capped.poll();
@@ -2025,7 +2024,7 @@ test("each landing asks again whether its lander may deploy, and whether the pro
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["nLAPTOP, who asked for this landing, is not among the control plane's deployers, so only the person can land it."] });
 
-  const auto = fixture(t, { path: join(await mkdtemp(join(tmpdir(), "nexus-review-")), "registry.db"), autoReview: { land: true, enabledBy: "nLAPTOP" } });
+  const auto = fixture(t, { path: join(await tempDir("nexus-review-", t), "registry.db"), autoReview: { land: true, enabledBy: "nLAPTOP" } });
   const own = auto.loop();
   await own.auto(auto.registry.thread(auto.builder)!, auto.pr);
   await own.poll();

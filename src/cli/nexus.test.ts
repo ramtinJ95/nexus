@@ -28,6 +28,7 @@ import { turnGate } from "../control/drain.ts";
 import { fakeHarness } from "../control/fake-harness.ts";
 import { openRegistry, type Thread, type ThreadId } from "../control/registry.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
+import { testPr, testReview } from "../control/test-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import { agentReader } from "../control/agent-conversation.ts";
 import type { Judgment } from "../control/judgment.ts";
@@ -48,7 +49,7 @@ import type { NodeHealth } from "../protocol/client.ts";
 import { checkoutDir } from "../sessions.ts";
 import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { testCertificate } from "../test-certificate.ts";
-import { freePort, runningPylon, stoppedPylon, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
+import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";
 import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
@@ -527,8 +528,7 @@ test("show reports a published preview whose service is starting as not ready, a
 test("files, changes and diff read the pylon's checkout, and wait for a paused pylon to run", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "checkout"]);
-  const repo = await mkdtemp(join(tmpdir(), "nexus-cli-checkout-"));
-  t.after(() => rm(repo, { recursive: true }));
+  const repo = await tempDir("nexus-cli-checkout-", t);
   const git = (...args: string[]) => promisify(execFile)("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
   // Enough lines stay the same that the renamed file is still similar enough for git to call it a rename.
   const kept = "keep\n".repeat(4);
@@ -590,8 +590,7 @@ test("files, changes and diff read the pylon's checkout, and wait for a paused p
 test("changes and diff of a scratch thread are against the empty tree, before its first commit and after", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "scratch"]);
-  const scratch = await mkdtemp(join(tmpdir(), "nexus-cli-scratch-"));
-  t.after(() => rm(scratch, { recursive: true }));
+  const scratch = await tempDir("nexus-cli-scratch-", t);
   const repo = join(scratch, "repo");
   await promisify(execFile)("sh", ["-c", repoInitCommand({ kind: "empty", branch: "main" }, repo)]);
   const git = (...args: string[]) => promisify(execFile)("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
@@ -836,7 +835,7 @@ test("watch prints the backlog, then each new entry and state change, and ends w
 test("a watch whose consumer is killed outright exits, though an idle thread never writes to the dead pipe", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "idle"]);
-  const out = join(await mkdtemp(join(tmpdir(), "nexus-orphan-")), "watch.jsonl");
+  const out = join(await tempDir("nexus-orphan-", t), "watch.jsonl");
   // The shell starts the watch with its output in a file, so killing the shell leaves no pipe for the watch to find closed.
   const sh = spawn("sh", ["-c", `"$0" "$1" watch "$2" --json --interval 50 > "$3" 2>&1 & echo $!; wait`, process.execPath, cli, thread.id, out], { env: s.env() });
   t.after(() => { sh.kill("SIGKILL"); });
@@ -965,8 +964,7 @@ test("watch opens a dropped stream again, reports the outage once, and prints th
 async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof setup>>, launched = true) {
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
   if (launched) s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
-  const projects = await mkdtemp(join(tmpdir(), "nexus-claude-projects-"));
-  t.after(() => rm(projects, { recursive: true }));
+  const projects = await tempDir("nexus-claude-projects-", t);
   await mkdir(join(projects, "-home-user-workspace-repo"));
   s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
   observeRunning(s, thread, [], []);
@@ -1168,8 +1166,7 @@ test("connect finds the API on the dashboard's HTTPS port, saves it, and the nex
 });
 
 test("connect checks an IP address URL's certificate against that address", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-cli-ip-"));
-  t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-cli-ip-", t);
   const server = createHttpsServer(await testCertificate(dir, "127.0.0.1"), withHealth((_req, res) => {
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ node: laptop, allowed: true, person: true, deployer: true }));
   }));
@@ -1256,8 +1253,7 @@ async function versioned(t: TestContext, health: unknown) {
 
 /** The CLI with a home of its own and no proxy. */
 async function bare(t: TestContext, args: readonly string[], env: Record<string, string> = {}) {
-  const home = await mkdtemp(join(tmpdir(), "nexus-cli-home-"));
-  t.after(() => rm(home, { recursive: true }));
+  const home = await tempDir("nexus-cli-home-", t);
   const res = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => execFile(process.execPath, [cli, ...args], { env: { PATH: process.env.PATH!, HOME: home, NEXUS_SOCKS: "none", ...env } },
     (err, stdout, stderr) => resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout, stderr })));
   return { ...res, config: join(home, ".config", "nexus", "cli.json") };
@@ -1462,7 +1458,7 @@ test("nodes prints what an older probe does not count as unknown, never as 0, wi
 test("show prints PR metadata and one disabled-watch notice without waking the pylon", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "PR"]);
-  const pr = { repo: "acme/repo", number: 12, title: "Fix build", url: "https://github.com/acme/repo/pull/12", state: "open", checks: "failed", review: "changes_requested", conflict: false } as const;
+  const pr = testPr({ number: 12, title: "Fix build", checks: "failed", review: "changes_requested" });
   s.registry.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const before = s.registry.thread(thread.id)!.lastHumanActivityAt;
   const shown = await s.nexus(["show", thread.id]);
@@ -1578,12 +1574,11 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.equal((await s.nexus(["land", thread.id])).code, 5);
   assert.equal((await s.nexus(["review", thread.id, "--rounds", "two"])).code, 64);
   assert.equal((await s.nexus(["review", thread.id, "--rounds", "6"])).code, 64, "a review runs at most 5 rounds");
-  const review: Review = {
-    id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "claude",
-    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
-    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }],
+  const review = testReview({
+    builder: thread.id, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "claude",
+    models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" },
     phase: { ...personPhase("rounds", "The reviewer still requests changes after 5 rounds, the most this review allows.", "Nexus could not add the label \"needs human review\" to pull request #7 (GitHub answered 403: Forbidden)."), label: { state: "failed", why: "GitHub answered 403: Forbidden" } },
-  };
+  });
   s.registry.saveReview(review);
   const shown = await s.nexus(["show", thread.id]);
   assert.match(shown.stdout, /^attention: decision$/m);
@@ -1630,11 +1625,7 @@ test("review --cancel ends the thread's running review through its route, and pr
   const reviews = { cancel(builder: ThreadId, by: string) { asked.push([builder, by]); return { ...review!, phase: { kind: "cancelled", who: "person", by } }; } } as never as ReviewLoop;
   const s = await setup(t, { reviews });
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
-  review = {
-    id: "rv-1", builder: thread.id, reviewer: "th-reviewer" as ThreadId, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" }, reviewerKind: "harness",
-    models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1, outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0,
-    rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" },
-  };
+  review = testReview({ builder: thread.id, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" } });
   assert.equal((await s.nexus(["review", "--cancel", thread.id])).stdout, `Cancelled review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on gpt-6-astra, cancelled by ${laptop}\n`);
   assert.deepEqual((await s.json(["review", thread.id, "--cancel"])).phase, { kind: "cancelled", who: "person", by: laptop });
   assert.deepEqual(asked, [[thread.id, laptop], [thread.id, laptop]]);
@@ -2288,7 +2279,7 @@ test("send to a Claude worker whose message meets an unreachable control plane f
 
 /** Runs `args` with its output in a file under a shell, kills the shell once the output has `ready`, and answers how long the orphan outlived it. */
 async function orphanLife(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], ready: string): Promise<number> {
-  const out = join(await mkdtemp(join(tmpdir(), "nexus-orphan-")), "out");
+  const out = join(await tempDir("nexus-orphan-", t), "out");
   const sh = spawn("sh", ["-c", `"$0" "$@" > "${out}" 2>&1 & echo $!; wait`, process.execPath, cli, ...args], { env: s.env() });
   t.after(() => { sh.kill("SIGKILL"); });
   const [pidLine] = await once(sh.stdout, "data") as [Buffer];
@@ -2376,8 +2367,7 @@ test("a GET whose kept connection the server closed, idle or as the GET went out
 
 test("the CLI exits as soon as its command is done, though the server keeps the connection open", { timeout: 60_000 }, async (t) => {
   const s = await setup(t);
-  const dir = await mkdtemp(join(tmpdir(), "nexus-keep-"));
-  t.after(() => rm(dir, { recursive: true }));
+  const dir = await tempDir("nexus-keep-", t);
   const certificate = await testCertificate(dir, apiName);
   let answered = 0;
   const server = createHttpsServer(certificate, withHealth((_req, res) => {
