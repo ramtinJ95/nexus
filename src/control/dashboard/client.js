@@ -7,6 +7,7 @@ import { coordinator, notificationChannel, needSelectors, noticeText, noticeUrl,
 import { agoText } from "./ago.js";
 import { atEnd, endFollower } from "./scroll.js";
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
+import { startHint } from "./start-hint.ts";
 
 const main = document.querySelector("main");
 const pollMs = Number(main?.dataset.pollMs);
@@ -106,20 +107,19 @@ function swap(regions) {
   const focused = changed.some(([el]) => el.contains(document.activeElement)) ? focusKey(document.activeElement) : null;
   const draft = document.getElementById("prompt-text");
   const saved = draft === null ? null : { value: draft.value, start: draft.selectionStart, end: draft.selectionEnd };
-  const start = startState();
-  const asks = askDrafts();
+  const drafts = formDrafts(changed.map(([el]) => el));
   const restoreScroll = anchor();
   for (const [el, html, key] of changed) {
     el.innerHTML = html;
     served.set(el.id, key);
   }
-  restoreAskDrafts(asks);
+  restoreDrafts(drafts);
   const prompt = document.getElementById("prompt-text");
   if (saved !== null && prompt !== null && prompt !== draft) {
     prompt.value = saved.value;
     prompt.setSelectionRange(saved.start, saved.end);
   }
-  restoreStart(start);
+  restoreStart(drafts);
   for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
   for (const send of document.querySelectorAll("#prompt button[type=submit]")) send.disabled = outgoing?.inFlight === true;
   if (focused !== null) document.querySelector(focused)?.focus({ preventScroll: true });
@@ -134,7 +134,7 @@ function swap(regions) {
 // older text back. Its frames come in order: the region whole, then the parts that grew since.
 let stream = null;
 let frames = 0;
-// Which Claude view the stream last rendered, which a poll of a streaming page names instead of rendering it.
+// Which view the stream last rendered, which a poll of a streaming page names instead of rendering it.
 let shows = null;
 const streaming = () => stream?.readyState === EventSource.OPEN;
 function follow(url) {
@@ -353,23 +353,6 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-/** What the person has filled in on each open AskUserQuestion form, by its question, so a swap of its region keeps it. */
-function askDrafts() {
-  return new Map([...document.querySelectorAll("form.ask")].map((form) => [form.dataset.question, [...form.elements].filter((f) => f.name !== "").map((f) => ({ name: f.name, value: f.value, checked: f.checked }))]));
-}
-function restoreAskDrafts(drafts) {
-  for (const form of document.querySelectorAll("form.ask")) {
-    const draft = drafts.get(form.dataset.question) ?? [];
-    for (const field of [...form.elements].filter((f) => f.name !== "")) {
-      const choosable = field.type === "radio" || field.type === "checkbox";
-      const was = draft.find((d) => d.name === field.name && (!choosable || d.value === field.value));
-      if (was === undefined) continue;
-      if (choosable) field.checked = was.checked;
-      else field.value = was.value;
-    }
-  }
-}
-
 /**
  * An AskUserQuestion form's choices, one per question as the answer route takes them: the options picked and the
  * person's own answer, which on a single-select question counts only while its radio is picked, and the notes.
@@ -449,10 +432,8 @@ function updateStartHint() {
   form.elements.memoryGiB.placeholder = project.dataset.memoryGib;
   form.elements.diskGiB.placeholder = project.dataset.diskGib;
   const hint = document.getElementById("start-hint");
-  const tag = (name, text) => Object.assign(document.createElement(name), { textContent: text });
-  const image = hint.dataset.image;
-  const repo = project.dataset.scratch === undefined ? " and checks out " : " and starts an empty repository on ";
-  hint.replaceChildren("Boots a pylon on ", node === "auto" ? "the node with the most room left" : tag("b", node), ...(image === "" ? [] : [" from image ", tag("code", image)]), repo, tag("code", branch), ".");
+  const parts = startHint({ node, image: hint.dataset.image || null, branch, scratch: project.dataset.scratch !== undefined });
+  hint.replaceChildren(...parts.map(({ text, look }) => look === undefined ? text : Object.assign(document.createElement(look), { textContent: text })));
 }
 
 /**
@@ -490,6 +471,45 @@ function selectProject(project) {
   updateStartHint();
 }
 
+const formKey = (form) => form.dataset.question ?? form.id;
+
+/**
+ * What the reader has filled in on each form in the regions a swap replaces, by its ID or an ask form's question, so
+ * the swap keeps it. The composer keeps its own draft, with its selection.
+ */
+function formDrafts(regions) {
+  const forms = regions.flatMap((el) => [...el.querySelectorAll("form")]).filter((form) => formKey(form) && form.id !== "prompt");
+  return new Map(forms.map((form) => [formKey(form), { form, fields: [...form.elements].filter((f) => f.name !== "").map((f) => ({ name: f.name, value: f.value, checked: f.checked })) }]));
+}
+/** A radio or checkbox is the one of its name and value. A select keeps a value only while it still offers it. */
+function restoreDrafts(drafts) {
+  for (const form of document.querySelectorAll("form")) {
+    const draft = drafts.get(formKey(form));
+    if (draft === undefined || draft.form === form) continue;
+    for (const field of [...form.elements].filter((f) => f.name !== "")) {
+      const choosable = field.type === "radio" || field.type === "checkbox";
+      const was = draft.fields.find((d) => d.name === field.name && (!choosable || d.value === field.value));
+      if (was === undefined) continue;
+      if (choosable) field.checked = was.checked;
+      else if (!field.type.startsWith("select") || [...field.options].some((o) => o.value === was.value)) field.value = was.value;
+    }
+  }
+}
+/**
+ * A start form the swap replaced shows the worker picked, and the project picked or that it is no longer offered,
+ * and stays unsendable while a start is in flight.
+ */
+function restoreStart(drafts) {
+  const form = document.getElementById("start");
+  const saved = drafts.get("start");
+  if (form === null || saved?.form === form) return;
+  syncWorker(form);
+  const project = saved?.fields.find((f) => f.name === "project" && f.checked)?.value;
+  if (project !== undefined) selectProject(project);
+  else updateStartHint();
+  form.querySelector("button[type=submit]").disabled = starting;
+}
+
 async function openStart(project, title) {
   if (dialog === null) return;
   setOpen(null);
@@ -515,30 +535,6 @@ dialog?.addEventListener("close", () => {
 document.addEventListener("input", (event) => {
   if (event.target instanceof Element && event.target.closest("#start") !== null) updateStartHint();
 });
-
-/** What the reader entered in the start dialog, which a refresh of its projects and nodes must keep. */
-function startState() {
-  const form = document.getElementById("start");
-  if (form === null) return null;
-  const project = form.querySelector("input[name=project]:checked")?.value ?? null;
-  return { form, project, worker: form.elements.worker.value, title: form.elements.title.value, claude: form.elements.claude.value, model: form.elements.model.value, planning: form.elements.planning.checked, node: form.elements.node.value, branch: form.elements.branch.value,
-    cpus: form.elements.cpus.value, memoryGiB: form.elements.memoryGiB.value, diskGiB: form.elements.diskGiB.value };
-}
-function restoreStart(saved) {
-  const form = document.getElementById("start");
-  if (saved === null || form === null || form === saved.form) return;
-  for (const radio of form.querySelectorAll("input[name=worker]")) radio.checked = radio.value === saved.worker;
-  syncWorker(form);
-  form.elements.title.value = saved.title;
-  form.elements.claude.value = saved.claude;
-  form.elements.model.value = saved.model;
-  form.elements.planning.checked = saved.planning;
-  form.elements.branch.value = saved.branch;
-  for (const field of ["cpus", "memoryGiB", "diskGiB"]) form.elements[field].value = saved[field];
-  if ([...form.elements.node.options].some((o) => o.value === saved.node)) form.elements.node.value = saved.node;
-  if (saved.project !== null) selectProject(saved.project);
-  form.querySelector("button[type=submit]").disabled = starting;
-}
 
 // ⌘↵ submits as well as the button, so a second press while the first is in flight must not start a second thread.
 let starting = false;

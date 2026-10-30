@@ -5,6 +5,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { request } from "node:http";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { startApi, type ApiOptions } from "./api.ts";
 import { threadStarter } from "./threads.ts";
 import { itemThread, pipeline, type PipelineItem } from "./pipeline.ts";
@@ -24,6 +25,7 @@ import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai"
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { testImage } from "../test-kit.ts";
 import { imagePaths, liveFrames } from "./dashboard.ts";
+import { startHint, type HintPart } from "./dashboard/start-hint.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
@@ -1160,20 +1162,25 @@ test("a thread page's stream sends its conversation, then only the text that gre
   assert.match(page, new RegExp(`<div class="convo" id="convo" data-rendered-reply-at="" data-live data-stream="/threads/${fix.id}/stream">`));
 
   const stream = s.events(`/threads/${fix.id}/stream`);
+  const grew = async () => {
+    const { grow, shows } = await stream.next();
+    assert.equal(typeof shows, "string", "each frame names the view it shows");
+    return { grow };
+  };
   const first = await stream.next();
   assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
   assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Bash npm run build 1 line › npm run build compiling", "Hal"]);
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), { grow: [[0, "2 lines"], [1, "compiling\nlinking\n"], [2, '<p>Half an &lt;answer&gt;<span class="caret" aria-hidden="true"></span></p>']] },
+  assert.deepEqual(await grew(), { grow: [[0, "2 lines"], [1, "compiling\nlinking\n"], [2, '<p>Half an &lt;answer&gt;<span class="caret" aria-hidden="true"></span></p>']] },
     "the line count, the output and the answer grow in place, escaped as the page escapes them");
   transcript.docs["pi.live"] = live("Half an <answer> and more", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), { grow: [[2, '<p>Half an &lt;answer&gt; and more<span class="caret" aria-hidden="true"></span></p>']] }, "only the parts that grew");
+  assert.deepEqual(await grew(), { grow: [[2, '<p>Half an &lt;answer&gt; and more<span class="caret" aria-hidden="true"></span></p>']] }, "only the parts that grew");
   transcript.docs["pi.live"] = live("Half an <answer> and more\n\n- **one**\n```sh\nnpm te <!--/grow-->", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), {
+  assert.deepEqual(await grew(), {
     grow: [[2, '<p>Half an &lt;answer&gt; and more</p><ul><li><p><strong>one</strong></p></li></ul><pre class="code">npm te &lt;!--/grow--&gt;<span class="caret" aria-hidden="true"></span></pre>']],
   }, "markdown blocks grow in place, an open fence is code so far, the caret trails the last character, and text cannot close the part");
 
@@ -1596,7 +1603,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
   const dialog = page.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( data-scratch)?( checked)?><span class="seg-name">[^<]*<\/span><span class="seg-repo">([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[4]]),
     [["acme", false, "git@example.com:acme.git"], ["beta", false, "git@example.com:beta.git"], ["sketch", true, "scratch"]]);
-  assert.match(textOf(dialog), new RegExp(`Boots a pylon on rj-firebat from image ${image.id} and starts an empty repository on main \\.`));
+  assert.match(dialog, /name="project" required value="sketch" data-node="rj-firebat" data-branch="main"[^>]* data-scratch[ >]/, "client.js says the thread starts an empty repository from these");
   assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote New thread/);
 });
 
@@ -1626,18 +1633,20 @@ test("every page carries the start dialog, which offers every project and node a
   assert.match(dialog, /^[^>]* data-autoopen>/, "/threads/new opens the dialog");
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["acme", false], ["beta", true]]);
   assert.deepEqual([...dialog.matchAll(/<option value="([^"]*)">([^<]*)</g)].map((m) => [m[1], m[2]]), [["", "rj-firebat (project default)"], ["auto", "auto, where it fits best"], [node, `${node}, offline`]]);
-  assert.match(textOf(dialog), /No image is current yet.* Boots a pylon on rj-firebat and checks out main \./);
+  assert.match(textOf(dialog), /No image is current yet/);
+  assert.match(dialog, /<p class="hint" id="start-hint" data-image=""><\/p>/, "client.js writes the hint, here naming no image");
 
   await s.call("POST", "/v1/projects", { ...project("spread"), defaultNode: "auto" });
   const spread = (await s.call("GET", "/threads/new?project=spread")).text.split('<dialog id="start-dialog"')[1]!.split("</dialog>")[0]!;
   assert.match(spread, /<option value="">auto \(project default\)<\/option>/);
-  assert.match(textOf(spread), /Boots a pylon on the node with the most room left and checks out main \./, "a project whose default node is auto names no node");
+  assert.match(spread, /name="project" required value="spread" data-node="auto" data-branch="main"/, "client.js names no node for a project whose default node is auto");
 
   await s.call("POST", "/v1/images", image);
   s.registry.setCurrentImage(image.id as ImageId);
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
-  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), new RegExp(`^Start a thread ✕ Worker Claude Code .* Title \\(optional\\) Project acme .* Boots a pylon on rj-firebat from image ${image.id} and checks out main \\.`));
+  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), /^Start a thread ✕ Worker Claude Code .* Title \(optional\) Project acme /);
+  assert.match(home, new RegExp(`<p class="hint" id="start-hint" data-image="${image.id}"></p>`), "client.js writes the hint with the current image");
 });
 
 test("the start dialog offers the thread's size, with the chosen project's as placeholders, and each project radio carries its own", async (t) => {
@@ -2327,4 +2336,166 @@ test("image paths in prose are the checkout's, each once, at most six", () => {
   assert.deepEqual(imagePaths("Not https://example.com/x.png, /tmp/c.png, ../d.png, ~/e.png, src/../../f.gif or a.png.bak"), []);
   assert.deepEqual(imagePaths("1.png 2.gif 3.jpeg 4.jpg 5.webp 6.png 7.png"), ["1.png", "2.gif", "3.jpeg", "4.jpg", "5.webp", "6.png"]);
   assert.deepEqual(imagePaths(`${"x".repeat(1 << 20)} ${"a.".repeat(1 << 19)}`), [], "a long word takes one pass, as a reply's base64 would");
+});
+
+test("a page reads the threads, the queue and the release reports as often whatever the count of projects and nodes", async (t) => {
+  const reads = async (projects: number, nodes: number) => {
+    const s = await setup(t);
+    assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+    s.registry.setCurrentImage(image.id as ImageId);
+    for (let n = 1; n < nodes; n++) s.registry.upsertNode({ name: `node-${n}` as NodeName, tailnetHost: `node-${n}.tail.ts.net`, tailnetNodeId: `nNODE${n}` as TailnetNodeId });
+    let thread: Thread | undefined;
+    for (let p = 0; p < projects; p++) {
+      assert.equal((await s.call("POST", "/v1/projects", project(`p${p}`))).status, 201);
+      thread = await s.start(`p${p}`, `Thread ${p}`);
+      assert.equal((await s.call("POST", "/v1/threads", { project: `p${p}`, title: `Queued ${p}`, after: [thread.id] })).status, 201);
+    }
+    const counted = (["threads", "queuedThreads", "releaseReports"] as const).map((name) => [name, t.mock.method(s.registry, name)] as const);
+    const counts: Record<string, Record<string, number>> = {};
+    for (const path of ["/", `/threads/${thread!.id}`, "/pipeline"]) {
+      for (const [, mock] of counted) mock.mock.resetCalls();
+      assert.equal((await s.call("GET", path)).status, 200);
+      counts[path.replace(thread!.id, "<id>")] = Object.fromEntries(counted.map(([name, mock]) => [name, mock.mock.callCount()]));
+    }
+    return counts;
+  };
+  const one = await reads(1, 1);
+  assert.deepEqual(await reads(5, 4), one);
+  assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
+});
+
+test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {
+  const s = await seeded(t);
+  const tower = "tower" as NodeName;
+  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  const commit = "a".repeat(40);
+  const report = (role: "control" | "probe", observedAt: number) => s.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt });
+  report("control", Date.now());
+  report("probe", Date.now() - 90_000);
+  const lines = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!.split(/<span><svg class="i i-server"/).slice(1)
+    .map((n) => [textOf(/<a [^>]*>([^<]*)<\/a>/.exec(n)![1]!), ...[...n.matchAll(/<small title="([^"]*)">([^<]*)<\/small>/g)].map((m) => `${m[2]} (${m[1]})`)]);
+  assert.deepEqual(lines, [
+    [node, "control: aaaaaaaaaaaa · healthy ()", "probe: aaaaaaaaaaaa · pending (deployer report is stale)"],
+    [tower, "probe: unknown · pending (no deployer report)"],
+  ]);
+});
+
+/** The page's conversation region: its named view, and what it renders. */
+function convoRegion(html: string) {
+  const tag = /<div class="convo" id="convo" data-rendered-reply-at="\d*"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
+  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
+}
+
+test("a poll of a streaming harness thread's page names the view its stream shows rather than render it", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push({ role: "user", content: "Build it", timestamp: Date.now() }, assistant([bash("c1", "npm run build")], "toolUse"));
+  transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [1] }, tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\n" }] };
+  const stream = s.events(`/threads/${fix.id}/stream`);
+  t.after(() => stream.close());
+  const first = await stream.next();
+  const polled = convoRegion((await s.call("GET", `/threads/${fix.id}?streaming=1`)).text);
+  assert.deepEqual(polled, { named: first.shows, inside: "" }, "the poll names the view the stream's frame shows and renders none");
+  const unstreamed = convoRegion((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.equal(unstreamed.named, undefined);
+  assert.match(unstreamed.inside, /npm run build/, "a poll from a page that does not stream renders the conversation");
+
+  transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [1] }, tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\nlinking\n" }] };
+  s.fake.commit(fix.id);
+  const grew = await stream.next();
+  assert.ok(grew.grow !== undefined && grew.shows !== first.shows, "output that grew is another view");
+  assert.equal(convoRegion((await s.call("GET", `/threads/${fix.id}?streaming=1`)).text).named, grew.shows);
+});
+
+test("a finished text renders as it did uncached, and a streaming answer keeps its caret whatever was rendered of the same text", async (t) => {
+  const s = await seeded(t);
+  const thread = await s.start("acme", "Fix checkout");
+  const text = `Done: **${randomUUID()}** and \`code\`.\n\n- one\n- two`;
+  const reply = (entries: ClaudeEntry[]): ClaudeConversation => ({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
+  const rendered = (liveFrames(thread)(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo;
+  assert.equal((liveFrames(thread)(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo, rendered, "a render from the cache is the render it keeps");
+  assert.match(rendered, /<strong>[^<]+<\/strong> and <code>code<\/code>\.<\/p><ul><li><p>one<\/p><\/li><li><p>two<\/p><\/li><\/ul>/);
+
+  const caret = '<span class="caret" aria-hidden="true"></span>';
+  const harness = (committed: string | null, streaming: string | null) => ({
+    conversation: { id: 1 },
+    entries: committed === null ? [] : [{ id: 1, conversationId: 1, kind: "pi.assistant", model: [assistant([{ type: "text", text: committed }])] }],
+    docs: streaming === null ? {} : { "pi.live": { run: { taskId: 1, inputs: [1] }, tools: [], generation: { attempt: 1, message: assistant([{ type: "text", text: streaming }], "pending") } } },
+  }) as never;
+  const streamed = `Streaming ${randomUUID()}`;
+  const carets = (view: never) => (liveFrames(thread)(view) as { convo: string }).convo.split(caret).length - 1;
+  assert.equal(carets(harness(null, streamed)), 1);
+  assert.equal(carets(harness(streamed, null)), 0, "the finished text is not the streaming render");
+  assert.equal(carets(harness(streamed, streamed)), 1, "nor the streaming render the finished one");
+});
+
+test("the start dialog's hint says where the pylon boots, from what image, and what it checks out", () => {
+  const said = (parts: HintPart[]) => parts.map(({ text, look }) => look === undefined ? text : `<${look}>${text}</${look}>`).join("");
+  assert.equal(said(startHint({ node: "rj-firebat", image: "img-1", branch: "main", scratch: false })), "Boots a pylon on <b>rj-firebat</b> from image <code>img-1</code> and checks out <code>main</code>.");
+  assert.equal(said(startHint({ node: "rj-firebat", image: "img-1", branch: "main", scratch: true })), "Boots a pylon on <b>rj-firebat</b> from image <code>img-1</code> and starts an empty repository on <code>main</code>.");
+  assert.equal(said(startHint({ node: "rj-firebat", image: null, branch: "main", scratch: false })), "Boots a pylon on <b>rj-firebat</b> and checks out <code>main</code>.", "no image is current");
+  assert.equal(said(startHint({ node: "auto", image: "img-1", branch: "dev", scratch: false })), "Boots a pylon on the node with the most room left from image <code>img-1</code> and checks out <code>dev</code>.");
+});
+
+test("a swap keeps what the reader filled in on each form it replaces, and the start dialog says a project no longer offered is gone", async () => {
+  const client = await readFile(new URL("./dashboard/client.js", import.meta.url), "utf8");
+  const code = client.slice(client.indexOf("const projectRadios = "), client.indexOf("\nasync function openStart("));
+  const field = (name: string, type: string, value: string, checked = false, extra: object = {}) => ({ name, type, value, checked, ...extra });
+  const form = (id: string, fields: ReturnType<typeof field>[], question?: string) => {
+    const submit = { disabled: false };
+    return { id, dataset: question === undefined ? {} : { question }, elements: fields, submit, querySelector: (selector: string) => selector === "button[type=submit]" ? submit : null };
+  };
+  const options = (...values: string[]) => ({ options: values.map((value) => ({ value })) });
+  const start = (projects: string[], nodes: string[]) => form("start", [
+    field("worker", "radio", "claude", true), field("worker", "radio", "harness"), field("title", "text", ""), field("claude", "textarea", ""),
+    field("node", "select-one", "", false, options("", "auto", ...nodes)), ...projects.map((p, i) => field("project", "radio", p, i === 0)),
+  ]);
+  const ask = () => form("", [field("picked-0", "radio", "A"), field("picked-0", "radio", "B"), field("own-0", "text", "")], "q1");
+  const prompt = () => form("prompt", [field("text", "textarea", "")]);
+
+  const before = [start(["acme", "beta"], ["tower"]), ask(), prompt()];
+  const [oldStart, oldAsk, oldPrompt] = before;
+  oldStart!.elements[0]!.checked = false;
+  oldStart!.elements[1]!.checked = true;
+  oldStart!.elements[2]!.value = "Ship it";
+  oldStart!.elements[4]!.value = "tower";
+  oldStart!.elements[5]!.checked = false;
+  oldStart!.elements[6]!.checked = true;
+  oldAsk!.elements[0]!.checked = true;
+  oldAsk!.elements[2]!.value = "my own";
+  oldPrompt!.elements[0]!.value = "a draft the composer keeps itself";
+
+  let forms = before;
+  const errors: (string | null)[] = [];
+  const synced: unknown[] = [];
+  const document = {
+    querySelectorAll: (selector: string) => selector === "form" ? forms : forms[0]!.elements.filter((f) => f.name === "project"),
+    getElementById: (id: string) => forms.find((f) => f.id === id) ?? null,
+  };
+  const { formDrafts, restoreDrafts, restoreStart } = runInNewContext(`${code}\n({ formDrafts, restoreDrafts, restoreStart })`, {
+    document, starting: true, syncWorker: (f: unknown) => synced.push(f), updateStartHint: () => {},
+    showError: (_: string, err: Error | null) => errors.push(err === null ? null : err.message),
+  });
+  const drafts = formDrafts([{ querySelectorAll: () => before }]);
+  forms = [start(["acme"], []), ask(), prompt()];
+  restoreDrafts(drafts);
+  restoreStart(drafts);
+  const [newStart, newAsk, newPrompt] = forms;
+  const values = (f: ReturnType<typeof form>) => f.elements.map((e) => e.type === "radio" ? `${e.name}=${e.value}:${e.checked}` : `${e.name}=${e.value}`);
+  assert.deepEqual(values(newStart!), ["worker=claude:false", "worker=harness:true", "title=Ship it", "claude=", "node=", "project=acme:false"],
+    "the typed title and picked worker are kept, the node whose option is gone is not, and no project is picked in place of the one gone");
+  assert.deepEqual(errors, ["Project beta is not offered here yet. Reload the page to see it."]);
+  assert.deepEqual(synced, [newStart], "the worker's fields follow the worker picked, once");
+  assert.equal(newStart!.submit.disabled, true, "a start in flight stays unsendable");
+  assert.deepEqual(values(newAsk!), ["picked-0=A:true", "picked-0=B:false", "own-0=my own"]);
+  assert.deepEqual(values(newPrompt!), ["text="], "the composer restores its own draft");
+});
+
+test("a page's icon template holds only the icons client.js clones", async (t) => {
+  const s = await seeded(t);
+  const template = /<template id="icons">(.*?)<\/template>/.exec((await s.call("GET", "/")).text)![1]!;
+  assert.deepEqual([...template.matchAll(/class="i i-([a-z]+)"/g)].map((m) => m[1]), ["chevron", "folder"]);
+  const client = await readFile(new URL("./dashboard/client.js", import.meta.url), "utf8");
+  assert.deepEqual([...new Set([...client.matchAll(/iconOf\("([a-z]+)"\)/g)].map((m) => m[1]))].sort(), ["chevron", "folder"]);
 });

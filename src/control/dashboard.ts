@@ -37,6 +37,7 @@ import { askedIn, askQuestionId, type AnswerRefusal, type AskedQuestion, type Qu
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 import { itemView, type ItemPhase, type PipelineItem } from "./pipeline.ts";
 import { queuedView, type QueuedThread, type Wait } from "./queue.ts";
+import { releaseView } from "./releases.ts";
 import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, type Period, type UsageBackfill, type UsageTotals } from "./usage.ts";
 
 export interface DashboardOptions {
@@ -55,7 +56,6 @@ export interface DashboardOptions {
   deploys(review: Review): boolean;
   /** The API's read of a node's health, which refuses a caller that is not a deployer. */
   nodeHealth(caller: TailnetNodeId, node: NodeName): Promise<NodeHealth>;
-  now?: () => number;
 }
 
 export interface Page { status: number; headers: Record<string, string>; body: string }
@@ -65,10 +65,15 @@ export const pollMs = 5_000;
 
 export type LandRefusal = "no review loop" | "not a deployer";
 
-/** What every part of a page reads. */
+/** What every part of a page reads. `now` is read once, so every text of a render agrees on the time. */
 interface Context {
   registry: Registry; row: DashboardOptions["row"]; deploys: DashboardOptions["deploys"]; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null;
   answerRefusal(question: Question): AnswerRefusal | null;
+  /** Every thread, oldest first, and a project's, read once per render however many parts show them. */
+  threads(): readonly Thread[];
+  threadsIn(project: string): readonly Thread[];
+  /** A project's threads that wait in the queue, in the order they were queued. */
+  queuedIn(project: string): readonly QueuedThread[];
   /** What waits on the person, which the sidebar counts and the home page lists. */
   needs(): readonly Need[];
 }
@@ -130,8 +135,18 @@ export function dashboard(options: DashboardOptions): (path: string, query: URLS
       const rows = new Map<ThreadId, ThreadRow>();
       const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, options.row(t)).get(t.id)!;
       let needs: readonly Need[] | undefined;
-      const c: Context = { registry, row, deploys, now: (options.now ?? Date.now)(), caller, landRefusal: options.landRefusal(caller),
-        answerRefusal: (question) => options.answerRefusal(caller, question), needs: () => needs ??= needsOf(c, detail) };
+      let threads: readonly Thread[] | undefined;
+      // registry.threads() is in the order registry.threads(project) is, so each project's keeps its order.
+      let byProject: Map<string, Thread[]> | undefined;
+      let queued: Map<string, QueuedThread[]> | undefined;
+      const c: Context = {
+        registry, row, deploys, now: Date.now(), caller, landRefusal: options.landRefusal(caller),
+        answerRefusal: (question) => options.answerRefusal(caller, question),
+        threads: () => threads ??= registry.threads(),
+        threadsIn: (project) => (byProject ??= Map.groupBy(c.threads(), (t) => t.project)).get(project) ?? [],
+        queuedIn: (project) => (queued ??= Map.groupBy(registry.queuedThreads().filter((q) => q.status === "queued").map((q) => queuedView(registry, q)), (q) => q.project)).get(project) ?? [],
+        needs: () => needs ??= needsOf(c, detail),
+      };
       return c;
     };
     for (const [pattern, page] of pages) {
@@ -207,7 +222,7 @@ const dot = (tone: Tone, label?: string) => label === undefined
   : html`<span class="dot dot-${tone}" role="img" aria-label="${label}" title="${label}"></span>`;
 const state = (label: string, tone: Tone) => html`<span class="state">${dot(tone)}${label}</span>`;
 
-/** Line icons on a 16-unit grid, drawn in the text's colour. client.js clones them from the page's `#icons`. */
+/** Line icons on a 16-unit grid, drawn in the text's colour. */
 const iconPaths = {
   folder: "M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z",
   branch: "M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5",
@@ -230,15 +245,20 @@ const iconPaths = {
 } as const;
 type IconName = keyof typeof iconPaths;
 const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
+/** The icons client.js clones from the page's `#icons`, for the folders of the changed files' tree. */
+const clonedIcons = ["chevron", "folder"] as const satisfies readonly IconName[];
 /** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
 const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
+/** What stopped a thread on its usage limit, and when it resets. */
+const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLimitText(t.usageLimit ?? { resetsAt: null }, now);
+
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
-function threadState(t: ThreadRow): [label: string, tone: Tone] {
+function threadState(t: ThreadRow, now: number): [label: string, tone: Tone] {
   const { attention, pylon } = t;
-  if (attention === "limited") return [usageLimitText(t.usageLimit ?? { resetsAt: null }, Date.now()), attentions.limited.tone];
+  if (attention === "limited") return [limitText(t, now), attentions.limited.tone];
   if (attention === "waiting") return [t.sessionWaitingMessage ?? attentions.waiting.label, attentions.waiting.tone];
   if (attention !== null) return [attentions[attention].label, attentions[attention].tone];
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
@@ -322,7 +342,7 @@ ${page.inspector}
 </div>
 <p id="refresh-state" class="refresh-state" role="status"></p>
 <div class="scrim" data-close aria-hidden="true"></div>
-<template id="icons">${(Object.keys(iconPaths) as IconName[]).map(icon)}</template>
+<template id="icons">${clonedIcons.map(icon)}</template>
 ${startDialog(c, page.start)}
 ${projectDialog(c, page.addProject === true)}
 <noscript><p class="noscript">Adding projects, starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
@@ -333,20 +353,18 @@ ${projectDialog(c, page.addProject === true)}
 
 /** A project's threads, newest first: the open ones, and the archived or deleted ones folded below them. */
 function threadsOf(c: Context, project: string) {
-  const threads = c.registry.threads(project as Thread["project"]).toReversed();
+  const threads = c.threadsIn(project).toReversed();
   const closed = (t: Thread) => t.status === "archived" || t.status === "deleted";
   return { open: threads.filter((t) => !closed(t)), closed: threads.filter(closed) };
 }
-/** A project's threads that wait in the queue, in the order they were queued. */
-const queuedThreadsOf = (c: Context, project: string) =>
-  c.registry.queuedThreads().filter((q) => q.project === project && q.status === "queued").map((q) => queuedView(c.registry, q));
 /** A blocked thread waits for the person, as a review that ended for them does. */
 function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
   if (q.status !== "queued") return [q.status === "archived" ? "cancelled" : "deleted", "muted"];
   return q.blocked ? ["blocked", "bad"] : ["queued", "idle"];
 }
 const waitTone: Record<Wait["state"], Tone> = { waiting: "idle", landed: "ok", blocked: "bad" };
-const predecessor = (c: Context, id: ThreadId) => c.registry.thread(id)?.title ?? c.registry.queuedThread(id)?.title ?? id;
+/** A thread's title, started or queued. */
+const threadTitle = (c: Context, id: ThreadId) => c.registry.thread(id)?.title ?? c.registry.queuedThread(id)?.title ?? id;
 const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt);
 function closedLabel(threads: readonly Thread[]): string {
   const deleted = threads.filter((t) => t.status === "deleted").length;
@@ -356,10 +374,11 @@ function closedLabel(threads: readonly Thread[]): string {
 
 function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
   const projects = c.registry.projects();
+  const releases = Map.groupBy(releaseLines(c), (r) => r.node);
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
     const r = c.row(t);
-    const [label, tone] = threadState(r);
+    const [label, tone] = threadState(r, c.now);
     return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   // A queued thread has no time of its own to show until it starts, so its row says what it is instead.
@@ -374,7 +393,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
-  const queued = queuedThreadsOf(c, p.id);
+  const queued = c.queuedIn(p.id);
   // A project folds like a folder. client.js remembers which ones the reader folded.
   return html`<details class="group" id="group-${p.id}" open>
 <summary class="group-h">${icon("chevron")}${icon("folder")}<span class="group-name"><span>${p.id}</span><span class="group-branch">${p.defaultBranch}</span></span></summary>
@@ -384,10 +403,20 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${c.registry.releaseReports().filter((r) => r.node === n.name).map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${c.now - r.observedAt >= 90_000 ? "stale" : r.state}</small>`)}`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}`)}</div>
 <div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
+}
+
+/**
+ * Each node's release as `GET /v1/release` reports it. The dashboard is not told which node is the control node, but
+ * the API takes a control report only from the control node, so the node that holds one is it, and the view gives a
+ * control line to that node alone, as it does to the control node.
+ */
+function releaseLines(c: Context) {
+  const control = c.registry.releaseReports().find((r) => r.role === "control")?.node;
+  return releaseView(c.registry, c.registry.nodes().find((n) => n.name === control)?.tailnetNodeId, c.now).nodes;
 }
 
 /** A node's committed and total memory, and what its paused pylons need to wake. */
@@ -438,7 +467,7 @@ ${projects.map((p) => html`<label class="seg-opt"><input type="radio" name="proj
 <div><label for="start-node">Node</label><select id="start-node" name="node">
 <option value="">${chosen.defaultNode} (project default)</option>
 <option value="auto">auto, where it fits best</option>
-${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offline" && ", offline"}</option>`)}
+${nodeOptions(nodes)}
 </select></div>
 <div><label for="start-branch">Branch</label><input id="start-branch" name="branch" autocomplete="off" placeholder="${chosen.defaultBranch}"></div>
 </div>
@@ -447,13 +476,15 @@ ${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offlin
 <div><label for="start-memory">Memory (GiB)</label><input id="start-memory" name="memoryGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.memoryGiB}"></div>
 <div><label for="start-disk">Disk (GiB)</label><input id="start-disk" name="diskGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="${chosen.resources.diskGiB}"></div>
 </div>
-<p class="hint" id="start-hint" data-image="${image ?? ""}">Boots a pylon on ${chosen.defaultNode === "auto" ? "the node with the most room left" : html`<b>${chosen.defaultNode}</b>`}${image !== null && html` from image <code>${image}</code>`} and ${chosen.repoUrl === null ? "starts an empty repository on" : "checks out"} <code>${chosen.defaultBranch}</code>.</p>
+<p class="hint" id="start-hint" data-image="${image ?? ""}"></p>
 <p id="start-error" class="error" role="alert" hidden></p>
 <footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread<kbd>⌘↵</kbd></button></footer>
 </form>`}
 </div>
 </dialog>`;
 }
+
+const nodeOptions = (nodes: readonly NodeRecord[]) => nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offline" && ", offline"}</option>`);
 
 const newProjectButton = html`<a class="btn btn-primary" href="/projects/new" data-new-project>New project</a>`;
 
@@ -483,7 +514,7 @@ ${nodes.length === 0 ? html`<p class="empty modal-empty">No nodes yet, so a proj
 <div class="two">
 <div><label for="project-node">Node</label><select id="project-node" name="defaultNode">
 <option value="auto" selected>auto, where it fits best</option>
-${nodes.map((n) => html`<option value="${n.name}">${n.name}${n.state === "offline" && ", offline"}</option>`)}
+${nodeOptions(nodes)}
 </select></div>
 <div><label for="project-branch">Branch</label><input id="project-branch" name="defaultBranch" required autocomplete="off" autocapitalize="off" spellcheck="false" value="main"></div>
 </div>
@@ -504,7 +535,7 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
 <tbody>${threads.map((t) => {
   const r = c.row(t);
   const desired = desiredPhase(t, c.now);
-  const [label, tone] = threadState(r);
+  const [label, tone] = threadState(r, c.now);
   return html`<tr${dims(r) && html` class="dim"`}>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>
 <td class="wide">${state(desired, desiredTone[desired])}</td>
@@ -523,7 +554,7 @@ function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
 <div class="page" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { open, closed } = threadsOf(c, p.id);
-  const queued = queuedThreadsOf(c, p.id);
+  const queued = c.queuedIn(p.id);
   return html`<section aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
 ${open.length === 0 ? html`<p class="empty">No open threads.</p>` : table(open)}
@@ -533,7 +564,7 @@ ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-qu
   const [label, tone] = queuedLook(q);
   return html`<tr>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${q.id}">${q.title}</a><span class="tag">${label}</span></span></td>
-<td>${q.waits.map((w) => html`<span class="ov-wait">${predecessor(c, w.thread)}: ${w.why}</span>`)}</td>
+<td>${q.waits.map((w) => html`<span class="ov-wait">${threadTitle(c, w.thread)}: ${w.why}</span>`)}</td>
 <td class="wide">${q.node}</td>
 </tr>`;
 })}</tbody>
@@ -563,8 +594,8 @@ type Need =
  * other attention that needs the person one for the thread. A new reply does not wait on the person, so it has none,
  * but it outranks a dialog in the terminal, which the session's own state says waits.
  */
-function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions["detail"]): Need[] {
-  return c.registry.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
+function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail: DashboardOptions["detail"]): Need[] {
+  return c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
     const { attention } = c.row(t);
     const review = c.registry.review(t.id);
     const holds = review !== null && review.phase.kind === "approved" && heldBy(review).length > 0;
@@ -572,7 +603,7 @@ function needsOf(c: Pick<Context, "registry" | "row">, detail: DashboardOptions[
     const d = detail(t);
     const nudged = c.registry.nudge(t.id);
     const needs: Need[] = [
-      ...d.review?.phase.kind === "needs-person" || (holds && cannotLand(d.review!, d.thread, reviewedPr(d, d.review!)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
+      ...d.review?.phase.kind === "needs-person" || (holds && cannotLand(d.review!, d.thread, prOf(d)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
       ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
       ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
     ];
@@ -617,8 +648,9 @@ function needCard(c: Context, n: Need): [what: string, body: Html] {
   switch (n.kind) {
     case "review": {
       const card = landing(c, d, (name) => `${name}-${t.id}`);
-      if (cannotLand(d.review!, t, reviewedPr(d, d.review!)) !== null) return ["Review needs you", html`${card}`];
-      const summary = reviewedPr(d, d.review!)?.summary;
+      const pr = prOf(d);
+      if (cannotLand(d.review!, t, pr) !== null) return ["Review needs you", html`${card}`];
+      const summary = pr?.summary;
       const quote = d.review!.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
       return [d.review!.phase.kind === "needs-person" ? "Held review" : "Approved review", html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}
 <div class="need-unchecked"><h3>Not checked live</h3>${quote === null ? html`<p class="land-note">The reviewer quoted nothing.</p>` : prose(quote)}</div>
@@ -633,7 +665,7 @@ ${card}`];
     }
     case "thread": switch (n.attention) {
       case "waiting": return ["Dialog in its terminal", fix(`${t.sessionWaitingMessage ?? "A dialog waits for input"}, in the pylon's terminal.`, html`<a class="btn btn-xs" href="/threads/${t.id}#terminal">${icon("terminal")}Open terminal</a>`)];
-      case "limited": return ["Usage limit", fix(`It ${usageLimitText(t.usageLimit ?? { resetsAt: null }, c.now)}. Nexus has it continue once the limit resets, or archive it to stop it.`, button("archive", "Archive"))];
+      case "limited": return ["Usage limit", fix(`It ${limitText(t, c.now)}. Nexus has it continue once the limit resets, or archive it to stop it.`, button("archive", "Archive"))];
       case "parked": return ["Stuck", fix(`${d.agent?.parkedTasks ?? 0} ${d.agent?.parkedTasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run.`, button("retry", "Retry"))];
       case "failed": {
         const why = d.pylon.failed?.split("\n")[0] ?? d.claudeWorker?.message ?? "It failed.";
@@ -736,7 +768,7 @@ ${own.length === 0 ? html`<p class="empty">No items. <code>nexus item add --proj
 <td><span class="ov-title">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></span><code class="dim">${i.id}</code></td>
 <td>${state(i.phase.kind, phaseTone[i.phase.kind])}<span class="ov-why">${i.phase.why}</span></td>
 <td class="wide">${i.after.length === 0 ? html`<span class="dim">nothing</span>` : i.after.map((id) => html`<span class="ov-wait">${title(id)}</span>`)}</td>
-<td class="wide">${i.thread === null ? html`<span class="dim">none yet</span>` : html`<a class="link" href="/threads/${i.thread}">${c.registry.thread(i.thread)?.title ?? c.registry.queuedThread(i.thread)?.title ?? i.thread}</a>`}</td>
+<td class="wide">${i.thread === null ? html`<span class="dim">none yet</span>` : html`<a class="link" href="/threads/${i.thread}">${threadTitle(c, i.thread)}</a>`}</td>
 <td>${actions(i, p)}</td>
 </tr>`)}</tbody>
 </table>`}
@@ -813,26 +845,19 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
   const agent = c.registry.agent(t).kind;
   const read = view === null || view instanceof Error ? null : view;
   const items = read === null ? [] : itemsOf(read, d.questions ?? [], t.id);
-  const run = runOf(d, read, items);
+  const run = runOf(d, read, items, c.now);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
-  const shows = streaming && read?.kind === "claude" ? shownKey(read.view, model) : null;
-  const [label, tone] = threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon });
+  const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = t.status === "active" || t.status === "idle";
-  const actions = [
-    open && html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${t.id}">Archive</button>`,
-    t.status === "archived" && html`<button type="button" class="btn btn-ghost" id="unarchive" data-action="unarchive" data-thread="${t.id}">Unarchive</button>`,
+  const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), [
+    t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
-  ].filter((a) => a !== false);
+  ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
   return layout(c, {
     title: t.title,
     active: t.id,
     ...(open ? { activity: t.id } : {}),
-    main: html`<header class="bar" id="bar" data-live>
-${menu}
-<div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1>${d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`}</div>
-<span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
-${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
-</header>
+    main: html`${bar}
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
@@ -865,6 +890,22 @@ function termView(t: Thread): Html {
 <div class="tv-host" id="term-host"></div>
 </section>`;
 }
+
+/** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */
+function threadBar(t: { project: string; title: string }, [label, tone]: readonly [string, Tone], actions: readonly Part[], tag: Part = null): Html {
+  const shown = actions.filter((a) => a !== false);
+  return html`<header class="bar" id="bar" data-live>
+${menu}
+<div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1>${tag}</div>
+<span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
+${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
+</header>`;
+}
+
+/** A thread's Archive button while it is open or queued, and its Unarchive button once it is archived. */
+const archiveButton = (id: ThreadId, archived: boolean) => archived
+  ? html`<button type="button" class="btn btn-ghost" id="unarchive" data-action="unarchive" data-thread="${id}">Unarchive</button>`
+  : html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${id}">Archive</button>`;
 
 /** The steps of a landing, in order. */
 const landingSteps = [["checking", "Check"], ["verifying", "Live check"], ["merging", "Merge"], ["deploying", "Deploy"], ["landed", "Landed"]] as const;
@@ -969,8 +1010,7 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
 
 /** The review's PR as the PR watch last read it. */
-const reviewedPr = (d: ThreadDetail, r: Review) => d.pullRequests?.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
-
+const prOf = (d: ThreadDetail) => d.pullRequests?.find((p) => p.repo === d.review?.pr.repo && p.number === d.review.pr.number);
 
 /**
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
@@ -1011,8 +1051,8 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
 <div class="land-act need-act">${cancelReview(d.thread.id, r, "btn-ghost")}</div>`}
 </section>`;
   }
-  const pr = reviewedPr(d, r);
-  if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, r.phase.reasons, id) : null;
+  const pr = prOf(d);
+  if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, id) : null;
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
   const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
@@ -1055,8 +1095,7 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
  * One that merged or closed outside the review has nothing left to review. Cancelling it ends it for the person, who
  * then owns the pull request, and archives its reviewer.
  */
-function heldReview(c: Context, d: ThreadDetail, r: Review, reasons: readonly string[], id: (name: string) => string): Html {
-  const pr = reviewedPr(d, r);
+function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof prOf>, id: (name: string) => string): Html {
   const outside = pr === undefined || pr.state === "open" ? null : pr.state;
   const land = c.registry.project(d.thread.project)?.autoReview?.land === true;
   const refusal = land || c.landRefusal === "no review loop" ? c.landRefusal : null;
@@ -1065,7 +1104,7 @@ function heldReview(c: Context, d: ThreadDetail, r: Review, reasons: readonly st
   return html`<section class="landing held-review" aria-labelledby="${id("landing-h")}">
 <div class="land-top"><h2 id="${id("landing-h")}">${outside === "merged" ? "Merged outside its review" : outside === "closed" ? "Closed outside its review" : "Review needs you"}</h2><a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a></div>
 <p class="land-meta">Ended in round ${roundsSpent(r)} of ${r.maxRounds} · reviewer <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})</p>
-<ul class="error">${reasons.map((reason) => html`<li>${reason}</li>`)}</ul>
+${r.phase.kind === "needs-person" && html`<ul class="error">${r.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
 ${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} merged on GitHub outside this review, so nothing is left to review or land.${c.deploys(r) && " Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run."} Cancel the review once nothing more is needed.</p>`
   : outside === "closed" ? html`<p class="land-note">Pull request #${r.pr.number} closed on GitHub, so nothing is left to review or land. Cancel the review once nothing more is needed.</p>`
   : !again && html`<p class="land-note">The thread is ${d.thread.status}, so it cannot be reviewed again.</p>`}
@@ -1098,25 +1137,17 @@ function nudgeCard(c: Context, t: Thread, id = (name: string) => name): Html | n
  * has no conversation or pylon, so it has no inspector and counts no visit.
  */
 function queuedPage(c: Context, q: QueuedThread): Html {
-  const [label, tone] = queuedLook(q);
   const { cpus, memoryGiB, diskGiB } = q.resources;
-  const actions = [
-    q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
-    q.status === "queued" && html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${q.id}">Archive</button>`,
-    q.status === "archived" && html`<button type="button" class="btn btn-ghost" id="unarchive" data-action="unarchive" data-thread="${q.id}">Unarchive</button>`,
-  ].filter((a) => a !== false);
   return layout(c, {
     title: q.title,
     active: q.id,
-    main: html`<header class="bar" id="bar" data-live>
-${menu}
-<div class="crumb"><a class="crumb-p" href="/">${q.project}</a><span class="sep" aria-hidden="true">/</span><h1>${q.title}</h1></div>
-<span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
-${actions.length > 0 && html`<div class="bar-actions" id="thread-actions">${actions}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
-</header>
+    main: html`${threadBar(q, queuedLook(q), [
+      q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
+      q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
+    ])}
 <div class="scroll"><div class="page queued" id="queued" data-live>
 <section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
-<ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${predecessor(c, w.thread)}</a>: ${w.why}</li>`)}</ul>
+<ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>
 ${q.status === "queued" && q.blocked && html`<p class="dim">A blocked thread stays queued. Start it now, or archive it to cancel it.</p>`}
 ${q.startNow !== null && html`<p class="dim">Start now was asked ${ago(q.startNow.at, c.now)}, so it starts without waiting once it can.</p>`}
 </section>
@@ -1161,21 +1192,26 @@ ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread i
 
 /**
  * One event of a thread page's stream: the conversation region's inside, or the new inside of each part that grew,
- * by its place among the region's `data-grow` elements. A Claude worker's frames say which view the region then
- * shows, and a frame with only that comes when the view changed and the region did not.
+ * by its place among the region's `data-grow` elements. Each frame says which view the region then shows, and a
+ * frame with only that comes when the view changed and the region did not.
  */
-export type LiveFrame = { convo: string; shows?: string } | { grow: [index: number, inside: string][]; shows?: string } | { shows: string };
+export type LiveFrame = { convo: string; shows: string } | { grow: [index: number, inside: string][]; shows: string } | { shows: string };
 
 const digest = (text: string) => createHash("sha256").update(text).digest("base64url").slice(0, 22);
-const entryDigests = new WeakMap<readonly ClaudeEntry[], string>();
+const entryDigests = new WeakMap<readonly unknown[], string>();
+const entriesDigest = (entries: readonly unknown[]) => entryDigests.get(entries) ?? entryDigests.set(entries, digest(JSON.stringify(entries))).get(entries)!;
 /**
- * Which Claude view a conversation region shows, so a poll from a page whose stream shows it can say so without
- * rendering it. A watched thread's views keep one entries array until an entry changes, so each is digested once.
+ * Which view a conversation region shows, from what `convo` renders of it, so a poll from a page whose stream shows
+ * it can say so without rendering it. A watched Claude transcript keeps one entries array until an entry changes, and
+ * so does a harness conversation's while pi-durable keeps it mounted, so each array is digested once.
  */
-function shownKey(view: ClaudeConversation, model: string | null): string {
-  let entries = entryDigests.get(view.entries);
-  if (entries === undefined) entryDigests.set(view.entries, entries = digest(JSON.stringify(view.entries)));
-  return digest(JSON.stringify([view.session, view.dropped, entries, view.readAt === null, view.working, view.usageLimit, model]));
+function shownKey(read: AgentView, model: string | null): string {
+  if (read.kind === "harness") {
+    const { entries, docs } = read.view;
+    return digest(JSON.stringify(["harness", entriesDigest(entries), docs["pi.live"] ?? null, docs["pi.inbox"] ?? null, model]));
+  }
+  const view = read.view;
+  return digest(JSON.stringify([view.session, view.dropped, entriesDigest(view.entries), view.readAt === null, view.working, view.usageLimit, model]));
 }
 
 /**
@@ -1196,20 +1232,20 @@ export function liveFrames(t: Thread, claudeModel: string | null = null, now: ()
   let shown: string | null = null;
   return (served) => {
     const view = agentView(served);
-    const region = convo(t, view, itemsOf(view, questions(), t.id), view.kind === "claude" ? claudeModel : modelOf(view.view), now()).text;
+    const model = view.kind === "claude" ? claudeModel : modelOf(view.view);
+    const region = convo(t, view, itemsOf(view, questions(), t.id), model, now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
     const changed = nextShape !== shape;
     shape = nextShape;
     parts = next;
-    const key = view.kind === "claude" ? shownKey(view.view, claudeModel) : null;
+    const key = shownKey(view, model);
     const rekeyed = key !== shown;
     shown = key;
-    const shows = key === null ? {} : { shows: key };
-    if (changed) return { convo: region, ...shows };
-    if (grew.length > 0) return { grow: grew, ...shows };
-    return rekeyed ? { shows: key! } : null;
+    if (changed) return { convo: region, shows: key };
+    if (grew.length > 0) return { grow: grew, shows: key };
+    return rekeyed ? { shows: key } : null;
   };
 }
 
@@ -1373,11 +1409,9 @@ const promptLabel: Record<PromptFrom, string> = {
   person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", nudge: "Nexus nudge", command: "Slash command", other: "Claude Code",
 };
 
-const contentText = (content: UserMessage["content"]) => typeof content === "string" ? content
-  : content.map((part: TextContent | ImageContent) => part.type === "text" ? part.text : `[${part.mimeType} image]`).join("");
-/** A committed message's text, whose images show as images. */
-const textOf = (content: UserMessage["content"]) => typeof content === "string" ? content
-  : content.map((part: TextContent | ImageContent) => part.type === "text" ? part.text : "").join("");
+/** A message's text, with what each image part becomes in it. A committed message's images show as images. */
+const messageText = (content: UserMessage["content"], image: (part: ImageContent) => string) => typeof content === "string" ? content
+  : content.map((part: TextContent | ImageContent) => part.type === "text" ? part.text : image(part)).join("");
 
 /** An image a row shows, linked to its full size. `caption` is a checkout file's path. */
 interface Shot { src: string; label: string; caption: string | null }
@@ -1452,7 +1486,7 @@ function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
 
   for (const { entry, message, place } of view.entries.flatMap((entry) => (entry.model ?? []).map((message, place) => ({ entry, message, place })))) {
     if (message.role === "user") {
-      const text = textOf(message.content);
+      const text = messageText(message.content, () => "");
       items.push({
         kind: "user", text, queued: null, at: message.timestamp, from: entry.kind === "nexus.pr-watch" ? "pr-watch" : entry.kind === "nexus.review" ? "review" : entry.kind === "nexus.nudge" ? "nudge" : "person",
         images: [...harnessShots(thread, entry.id, place, message.content), ...fileShots(thread, imagePaths(text))],
@@ -1460,7 +1494,7 @@ function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
     }
     if (message.role === "assistant") answer(message, false);
     if (message.role === "toolResult") {
-      const result: ToolResult = { state: "done", output: textOf(message.content), isError: message.isError };
+      const result: ToolResult = { state: "done", output: messageText(message.content, () => ""), isError: message.isError };
       const ms = typeof message.durationMs === "number" ? message.durationMs : null;
       const images = harnessShots(thread, entry.id, place, message.content);
       const tool = tools.get(message.toolCallId);
@@ -1480,7 +1514,7 @@ function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
   if (generation?.message !== undefined) answer(generation.message as AssistantMessage, true);
   if (generation?.retry !== undefined) items.push({ kind: "notice", text: `The model request failed and will be retried: ${generation.retry.error}`, tone: "busy" });
   for (const queued of inbox?.items ?? []) {
-    if (queued.mode !== "write") items.push({ kind: "user", text: contentText(queued.content as UserMessage["content"]), queued: queued.mode === "steer" ? "joins after this tool round" : "sends after this run", at: 0, from: "person" });
+    if (queued.mode !== "write") items.push({ kind: "user", text: messageText(queued.content as UserMessage["content"], (part) => `[${part.mimeType} image]`), queued: queued.mode === "steer" ? "joins after this tool round" : "sends after this run", at: 0, from: "person" });
   }
   return items;
 }
@@ -1574,7 +1608,7 @@ type Run =
   | { kind: "working"; since: number | null; tools: number; claude: boolean }
   | { kind: "waiting"; why: string; inTerminal: boolean }
   | { kind: "parked"; tasks: number; busy: boolean };
-function runOf(d: ThreadDetail, view: AgentView | null, items: readonly Item[]): Run {
+function runOf(d: ThreadDetail, view: AgentView | null, items: readonly Item[], now: number): Run {
   const claude = view?.kind === "claude";
   const busy = claude ? view.view.working : (view?.view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
   const parked = d.agent?.parkedTasks ?? 0;
@@ -1585,7 +1619,7 @@ function runOf(d: ThreadDetail, view: AgentView | null, items: readonly Item[]):
   if (terminal || open.some((q) => q.ask !== undefined) || (!busy && (open.length > 0 || d.thread.usageLimit !== undefined))) {
     const why = terminal ? `${d.thread.sessionWaitingMessage ?? "It waits for input"}, in the pylon's terminal.`
       : open.length > 0 ? `${open.length === 1 ? "A question waits" : `${open.length} questions wait`} for your answer, above.`
-      : `${usageLimitText(d.thread.usageLimit ?? { resetsAt: null }, Date.now())}.`;
+      : `${limitText(d.thread, now)}.`;
     return { kind: "waiting", why, inTerminal: terminal };
   }
   if (!busy) return { kind: "idle", paused: d.pylon.actualState === "paused", repliedAt: d.lastReplyAt };
@@ -1728,10 +1762,21 @@ ${choices === undefined && item.result.state === "done" && html`<pre class="t-ou
 const shotsView = (images: readonly Shot[] = []) => images.length > 0 && html`<div class="shots">${images.map((shot) =>
   html`<a class="shot" href="${shot.src}" target="_blank" rel="noopener"><img src="${shot.src}" alt="${shot.label}" loading="lazy">${shot.caption !== null && html`<span class="shot-cap">${shot.caption}</span>`}</a>`)}</div>`;
 
-/** A reply or prompt's markdown, with `end` after its last character, where a streaming reply's caret goes. */
+/**
+ * A reply or prompt's markdown, with `end` after its last character, where a streaming reply's caret goes. Every poll
+ * and stream frame renders the same finished texts again, so their markdown is kept by text, the most recently shown.
+ */
 function prose(text: string, end: Part = null): Html {
-  return markdownView(parseMarkdown(text.split(/\r?\n/)), end);
+  if (end !== null) return markdownView(parseMarkdown(text.split(/\r?\n/)), end);
+  const kept = proseKept.get(text);
+  proseKept.delete(text);
+  const out = kept ?? markdownView(parseMarkdown(text.split(/\r?\n/)), null);
+  proseKept.set(text, out);
+  if (proseKept.size > proseKeeps) proseKept.delete(proseKept.keys().next().value!);
+  return out;
 }
+const proseKept = new Map<string, Html>();
+const proseKeeps = 2_000;
 
 /** A block of the markdown that replies and prompts are written in. A list's `start` is null for bullets. */
 type Markdown =

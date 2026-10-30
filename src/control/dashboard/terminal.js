@@ -13,7 +13,7 @@ export function attachUrl(location, thread, { cols, rows }, pane = null) {
  * The terminal's status for each message of the route: `attached` clears it, and `exit` and `error` end the terminal.
  * A type this end does not know is ignored, as the route's contract asks.
  */
-export function statusOf(message) {
+function statusOf(message) {
   switch (message.type) {
     case "waiting": return { text: `Waiting for the pylon, which is ${message.pylon}. Attaching wakes it.`, over: false };
     case "attached": return { text: null, over: false };
