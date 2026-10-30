@@ -8,6 +8,7 @@ import { openPortal } from "./portals.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { parse } from "../parse.ts";
+import { serialQueue } from "../single-flight.ts";
 import type { ServiceFact } from "../protocol.ts";
 
 const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
@@ -63,7 +64,7 @@ export class GuestServices {
 	private published: { prefix: string; port: number; stripPrefix: boolean }[] | undefined;
 	private unrouted = new Map<number, string>();
 	/** Map writes and status reads, one at a time, so a map lands, and is confirmed, in the order its routes changed. */
-	private relayQueue: Promise<void> = Promise.resolve();
+	private relayQueue = serialQueue();
 	private vm: VM;
 	private dir: string;
 	readonly configPath: string;
@@ -290,12 +291,10 @@ export class GuestServices {
 		});
 	}
 	private relayStep(step: () => Promise<void>): Promise<void> {
-		const run = this.relayQueue.then(async () => {
+		return this.relayQueue.run(async () => {
 			await step();
 			this.publish();
 		});
-		this.relayQueue = run.catch(() => undefined);
-		return run;
 	}
 	/**
 	 * Reads the relay's status until it has applied the last map, for at most 5 s. A preview it has not stays unrouted,

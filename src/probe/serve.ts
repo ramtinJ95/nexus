@@ -18,6 +18,7 @@ import { output } from "../exec.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import type { PreviewAssignment } from "../project.ts";
 import type { PylonId } from "../protocol.ts";
+import { serialQueue } from "../single-flight.ts";
 import { warmHeader, type PreviewGateway, type PreviewRoute } from "./gateway.ts";
 
 /** Runs the tailscale CLI and resolves to its stdout. Rejects when it exits nonzero. */
@@ -49,7 +50,7 @@ export function createTailscaleServe(options: {
 }): TailscaleServe {
   const { cli, gateway } = options;
   const get = options.get ?? fetchGet;
-  let changes: Promise<unknown> = Promise.resolve();
+  const changes = serialQueue();
 
   async function status(signal: AbortSignal): Promise<Map<number, Listener>> {
     return parseServeStatus(await cli(["serve", "status", "--json"], signal), gateway.origin);
@@ -106,22 +107,18 @@ export function createTailscaleServe(options: {
 
   return {
     async converge(pylonId, previews, signal) {
-      const next = changes.then(() => apply(pylonId, previews, signal));
-      changes = next.catch(() => undefined); // the caller handles the error. The queue only needs to move on
-      const urls = await next;
+      const urls = await changes.run(() => apply(pylonId, previews, signal));
       await Promise.all(previews.map((p) => warmUp(urls.get(p.httpsPort)!, `${pylonId}/${p.service}`, signal)));
     },
     async withdraw(pylonId, service) {
       // The entry is then Nexus's and unmapped, which the next converge of any pylon removes. Written even when the
       // table no longer maps it, because an earlier withdraw may have failed to write.
-      const next = changes.then(async () => {
+      await changes.run(async () => {
         for (const [port, route] of gateway.routes) {
           if (route.pylonId === pylonId && route.service === service) gateway.routes.delete(port);
         }
         await writeRoutes(options.routesFile, gateway.routes);
       });
-      changes = next.catch(() => undefined);
-      await next;
     },
   };
 }

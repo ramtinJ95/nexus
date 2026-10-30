@@ -20,6 +20,7 @@ import { startRelay } from "./relay.ts";
 import { GuestServices } from "./services.ts";
 import { shellQuote as q } from "../project.ts";
 import { saveJson } from "../json-file.ts";
+import { serialQueue } from "../single-flight.ts";
 import { existsError } from "./storage.ts";
 
 /**
@@ -87,16 +88,7 @@ export const runsBesideQueue = (action: string) => besideQueue.has(action);
  * The controller's lifecycle queue. Every other action runs on it, one at a time and in order, so that none races
  * another's changes to the VM or its services. A failed action does not stop the next.
  */
-export function lifecycleQueue() {
-	let queue: Promise<unknown> = Promise.resolve();
-	return {
-		run<T>(work: () => Promise<T>): Promise<T> {
-			const next = queue.catch(() => {}).then(work);
-			queue = next;
-			return next;
-		},
-	};
-}
+export const lifecycleQueue = serialQueue;
 
 /** The guest user that services and streams run as. */
 const guestUser = "user";
