@@ -9,7 +9,7 @@ import type { Thread, ThreadId } from "./registry.ts";
 import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Review } from "./review-model.ts";
 import type { ReviewLoop } from "./review.ts";
-import type { Judgment } from "./judgment.ts";
+import type { Judgment } from "./judgment-store.ts";
 import type { AgentCall } from "../agent-usage.ts";
 import type { ImageId, JobId, NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";

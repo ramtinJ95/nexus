@@ -31,9 +31,6 @@ import type { Weighed } from "./thread-store.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
-// Temporary: Judgment moved to judgment-store.ts, and E1 deletes this re-export.
-export type { Judgment };
-
 /** A judgment as `nexus show` and the thread page show it. */
 export interface JudgmentView {
   failure: number;

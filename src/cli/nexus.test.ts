@@ -25,7 +25,7 @@ import type { Thread, ThreadId } from "../control/registry.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
 import { testPr, testReview } from "../control/test-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
-import type { Judgment } from "../control/judgment.ts";
+import type { Judgment } from "../control/judgment-store.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
 import { testApi } from "../control/api-test-kit.ts";

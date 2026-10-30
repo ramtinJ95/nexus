@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
-import type { Judgment } from "./judgment.ts";
+import type { Judgment } from "./judgment-store.ts";
 import type { Thread } from "./registry.ts";
 import { liveHashOf } from "../spawn.ts";
 import { processStream } from "../process-stream.ts";
