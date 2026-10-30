@@ -41,6 +41,13 @@ export function queueStore(db: Db, saveStartKey: (key: StartKey, thread: ThreadI
   }
 
   return {
+    participant: {
+      startQueued(id: ThreadId, at: number) {
+        const record = queuedThread(id);
+        if (record === undefined || record.status !== "queued") throw new Error(`thread ${id} is no longer queued`);
+        saveQueued({ ...record, status: "started", startedAt: at, lastError: null, firstMessage: record.message === null ? null : "pending" });
+      },
+    },
     queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
     queuedThread,
     saveQueued,

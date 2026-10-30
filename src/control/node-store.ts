@@ -56,6 +56,9 @@ export function nodeStore(db: Db) {
     upsertNode,
     nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeRow),
     node,
+    /** For ingest, in its transaction. */
+    saveObservation(observation: NodeObservation) { sql("UPDATE nodes SET observation = ? WHERE name = ?").run(JSON.stringify(observation), observation.node); },
+    saveNodeState(name: NodeName, state: NodeRecord["state"], capacity: NodeObservation["capacity"]) { sql("UPDATE nodes SET state = ?, capacity = ? WHERE name = ?").run(state, JSON.stringify(capacity), name); },
     /** Each node's tailnet node ID, without reading its observation. */
     nodeIds: (): Map<NodeName, TailnetNodeId> => new Map(sql("SELECT name, tailnet_node_id FROM nodes").all().map((r) => [r.name as NodeName, r.tailnet_node_id as TailnetNodeId])),
     /** The node with this tailnet ID and the deploy key it joined with, null for a configured node, without reading its observation. */
