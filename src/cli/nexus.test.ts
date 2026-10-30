@@ -32,7 +32,8 @@ import type { Judgment } from "../control/judgment.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
 import type { ImageId, ImageManifest, ProjectMirror, TemplateRecord } from "../images.ts";
-import type { Project, ProjectId, RemoteProject } from "../project.ts";
+import { defaultProjectResources, type Project, type ProjectId, type RemoteProject } from "../project.ts";
+import { titleOf } from "../thread-title.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
@@ -338,6 +339,12 @@ test("the URL and the proxy come from the flags, then the environment, then the 
   assert.match(bad.stderr, /cli\.json is not a CLI config/);
 });
 
+test("a thread's default title is its brief's first line that is not blank, cut to 80 characters", () => {
+  assert.equal(titleOf("\n  \n  Fix the login page  \nthen test it"), "Fix the login page");
+  assert.equal(titleOf("a".repeat(80)), "a".repeat(80));
+  assert.equal(titleOf("a".repeat(81)), `${"a".repeat(80)}...`);
+});
+
 test("project add creates a project with the contract's defaults or its flags, and maps the API's refusals", async (t) => {
   const s = await setup(t);
   const repo = "https://github.com/octocat/Hello-World.git";
@@ -347,6 +354,7 @@ test("project add creates a project with the contract's defaults or its flags, a
     id: "hello", repoUrl: repo, defaultBranch: "main", defaultNode: node,
     resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   }, "an unflagged project gets main, 2 CPUs, 6 GiB of memory and 10 GiB of disk");
+  assert.deepEqual(s.registry.project("hello" as ProjectId)?.resources, defaultProjectResources, "the resources the dashboard's new-project dialog gives");
 
   const custom = await s.json([
     "project", "add", "custom", "git@github.com:octocat/Spoon-Knife.git", "--node", node, "--branch", "dev", "--cpus", "4", "--memory", "8", "--disk", "20",

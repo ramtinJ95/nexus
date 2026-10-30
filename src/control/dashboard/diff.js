@@ -1,6 +1,7 @@
 // The diff of one changed file as the dashboard shows it, highlighted by @pierre/diffs. client.js imports this
 // module only once a diff opens, so the library loads then, and each language's grammar once a file needs it.
 import { DiffHunksRenderer, parsePatchFiles, wrapCoreCSS, wrapThemeCSS } from "@pierre/diffs";
+import { isImage } from "../../image-types.ts";
 import { themeValue } from "./theme.js";
 
 /** A diff this long is shown up to here, so a huge one does not stall the page. */
@@ -98,13 +99,12 @@ const slotName = (entry, side, line) => `note-${entry}-${side}-${line}`;
 const cursorSheet = `[data-line][data-cursor] { box-shadow: inset 2px 0 0 light-dark(var(--diffs-modified-light), var(--diffs-modified-dark)); }
 [data-column-number] { user-select: none; }`;
 
-const imageFile = /\.(?:png|jpe?g|gif|webp)$/i;
 /**
  * A changed image file's before, at the base, and after, in the working tree, each as the image route's query that
  * serves it, or why it has none. Null for any other file.
  */
 export function imageSides(file, base) {
-  if (file === undefined || !imageFile.test(file.path)) return null;
+  if (file === undefined || !isImage(file.path)) return null;
   return [
     file.status === "added" ? { label: "Before", none: "none, the file is new" } : { label: "Before", query: { source: "file", path: file.oldPath ?? file.path, base } },
     file.status === "deleted" ? { label: "After", none: "none, the file was deleted" } : { label: "After", query: { source: "file", path: file.path } },

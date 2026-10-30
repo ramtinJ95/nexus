@@ -9,7 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { addThread as addTestThread, seedRegistry } from "./test-kit.ts";
 import { usageCounter } from "./usage-counter.ts";
-import { roleOf, tokenCount, usageFilter, type AgentCall, type Tokens } from "./usage.ts";
+import { roleOf, tokenCount, usageFilter, utc, type AgentCall, type Tokens } from "./usage.ts";
 import { reviewerCaller } from "./review.ts";
 import { checkCaller, verifyCaller } from "./gate.ts";
 import { processStream } from "../process-stream.ts";
@@ -467,4 +467,9 @@ test("the usage query takes a period or a UTC day, and refuses anything else", (
 
 test("token counts read as 950, 12.3k, 1.2M", () => {
   assert.deepEqual([0, 950, 1000, 12_345, 999_499, 999_600, 1_234_567, 3_400_000_000].map(tokenCount), ["0", "950", "1k", "12.3k", "999k", "1M", "1.2M", "3.4B"]);
+});
+
+test("a time reads to the minute in UTC", () => {
+  assert.equal(utc(Date.parse("2026-10-27T09:05:59.999Z")), "2026-10-27 09:05 UTC");
+  assert.equal(utc(0), "1970-01-01 00:00 UTC");
 });

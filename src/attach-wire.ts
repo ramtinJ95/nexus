@@ -1,31 +1,16 @@
-/**
- * The attach route's WebSocket protocol, one definition for both ends: the control plane serves it, the CLI speaks
- * it, and a browser terminal on the dashboard can follow docs/cli.md, which describes the same thing.
- *
- * GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&pane=P] upgrades to a plain RFC 6455 WebSocket, with no subprotocol
- * and no extensions. After the 101, binary messages carry terminal bytes both ways, and text messages carry one JSON
- * object each, whose `type` says what it is. Either end ignores a type it does not know.
- */
+/** The attach route's parsers, for the ends that run in Node. The protocol itself is in attach-route.ts. */
 import { z } from "zod";
-import { terminalSize, type TerminalSize } from "./guest-terminal.ts";
+import { defaultTerm, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach-route.ts";
+import { terminalSize } from "./guest-terminal.ts";
 import type { ActualState } from "./reconcile.ts";
 
-export const defaultTerm = "xterm-256color";
+export { attachPath, defaultTerm, encodeMessage, type AttachErrorKind, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach-route.ts";
+
 const termPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 /** A Herdr pane's ID, such as w1:p1. */
 export const herdrPanePattern = /^w[0-9]{1,9}:p[0-9]{1,9}$/;
 
-/**
- * The opening size and TERM of the terminal. Both go in the URL, because Herdr needs a size before it starts. `pane`
- * is the pane it lands in, in place of the Claude worker's.
- */
-export interface AttachRequest { size: TerminalSize; term: string; pane?: string }
-
 export const attachRoute = /^\/v1\/threads\/([^/]+)\/attach$/;
-
-export function attachPath(thread: string, { size, term, pane }: AttachRequest): string {
-  return `/v1/threads/${encodeURIComponent(thread)}/attach?cols=${size.cols}&rows=${size.rows}&term=${encodeURIComponent(term)}${pane === undefined ? "" : `&pane=${encodeURIComponent(pane)}`}`;
-}
 
 /** The server's side of the query. Throws a message for a 400. */
 export function parseAttachQuery(query: URLSearchParams): AttachRequest {
@@ -45,25 +30,6 @@ export function parseAttachQuery(query: URLSearchParams): AttachRequest {
 /** $TERM when the guest can take it, which a terminal type name always can, and xterm-256color otherwise. */
 export function termOf(env: string | undefined): string {
   return env !== undefined && termPattern.test(env) ? env : defaultTerm;
-}
-
-/** Before `attached`, a resize replaces the size the terminal opens with. */
-export type ClientMessage = { type: "resize"; size: TerminalSize };
-
-export type AttachErrorKind = "conflict" | "failed" | "unreachable";
-/**
- * `waiting` comes on each change of the pylon's state while it does not run, `attached` once, and then exactly one
- * of `exit` or `error`, and a close with 1000. A close without one of them is a dropped link.
- */
-export type ServerMessage =
-  | { type: "waiting"; pylon: ActualState }
-  | { type: "attached" }
-  /** The program exited. 0 is Herdr's own detach. */
-  | { type: "exit"; code: number }
-  | { type: "error"; kind: AttachErrorKind; message: string };
-
-export function encodeMessage(message: ClientMessage | ServerMessage): string {
-  return JSON.stringify(message.type === "resize" ? { type: "resize", cols: message.size.cols, rows: message.size.rows } : message);
 }
 
 const typed = z.object({ type: z.string() });

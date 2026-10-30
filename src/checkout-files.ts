@@ -10,8 +10,8 @@
  * until the guest's process exits or the pylon pauses.
  */
 import { readFileSync } from "node:fs";
-import { extname } from "node:path";
 import { z } from "zod";
+import { imageType } from "./image-types.ts";
 import { openPython, type OpenPipe } from "./pipe.ts";
 import type { ByteStream } from "./protocol.ts";
 
@@ -165,15 +165,13 @@ function parsed<T>(schema: z.ZodType<T>, out: Buffer): T {
   return result.data;
 }
 
-const imageTypes: Readonly<Record<string, string>> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
-
 /**
  * The content type to serve a checkout's file as. A repository's HTML or SVG would run as a page of the API's own
  * origin, which the dashboard shares, so only raster images keep their type. Anything else is text when it decodes
  * as UTF-8 without a NUL byte, and bytes otherwise.
  */
 export function contentType(path: string, content: Buffer): string {
-  const image = imageTypes[extname(path).toLowerCase()];
+  const image = imageType(path);
   if (image !== undefined) return image;
   if (content.includes(0)) return "application/octet-stream";
   try {

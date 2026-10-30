@@ -1,5 +1,6 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
+import { attachPath, defaultTerm } from "../../attach-route.ts";
 import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing } from "./terminal.js";
 
 /** A terminal as xterm.js exposes it: what it was written, how often it was reset, and the keys and resizes it hands out. */
@@ -25,6 +26,14 @@ test("the attach route is on the page's own host, over wss behind HTTPS, with th
   assert.equal(attachUrl({ protocol: "https:", host: "nexus.example.ts.net" }, "th-0123456789ab", { cols: 120, rows: 40 }), "wss://nexus.example.ts.net/v1/threads/th-0123456789ab/attach?cols=120&rows=40&term=xterm-256color");
   assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color");
   assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }, "w2:p1"), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color&pane=w2%3Ap1", "a session's Show in terminal lands in its pane");
+});
+
+test("the attach URL's path is the route's attachPath for the same size and pane", () => {
+  const size = { cols: 100, rows: 30 };
+  for (const pane of [null, "w1:p2"]) {
+    const url = new URL(attachUrl({ protocol: "https:", host: "nexus.example.ts.net" }, "th-0123456789ab", size, pane));
+    assert.equal(url.pathname + url.search, attachPath("th-0123456789ab", { size, term: defaultTerm, ...(pane === null ? {} : { pane }) }), `pane ${pane}`);
+  }
 });
 
 test("a joined terminal waits for the pylon, takes focus once attached, and carries keys, resizes and output", () => {

@@ -1,6 +1,5 @@
-import { attentions } from "../attention.ts";
+import { attentions, needsPerson } from "../attention.ts";
 
-const needsPerson = (row) => attentions[row.attention]?.needsPerson === true;
 export const noticeText = (row) => attentions[row.attention].label;
 /** A notice opens the inbox's card for what the thread waits on. A reply waits on no one, so it opens the thread. */
 export const noticeUrl = (row) => row.attention === "reply" ? `/threads/${row.id}` : `/#needs-you:${row.id}:${row.attention}`;
@@ -28,7 +27,7 @@ export function coordinator(notify) {
       for (const row of rows) {
         const before = previous.get(row.id);
         const changed = before?.attention !== row.attention;
-        if (changed && needsPerson(row) && row.attention !== "reply") notify(row);
+        if (changed && needsPerson(row.attention) && row.attention !== "reply") notify(row);
         else if (row.attention === "reply" && !row.working
           && (changed || before?.lastReplyAt !== row.lastReplyAt || before?.working)) pending.set(row.id, now + 2000);
       }

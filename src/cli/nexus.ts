@@ -28,10 +28,11 @@ import { maxEntries, usageLimitText, type ClaudeConversation, type ClaudeEntry, 
 import { claudeFrames, queuedOf, type ClaudeFrame } from "../control/claude-conversation.ts";
 import { agentView } from "../control/thread-agent.ts";
 import { liveNote, phaseNote, roundNote, roundsSpent } from "../control/review.ts";
-import { breakdownLook, breakdowns, tokenColumns, tokenCount, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../control/usage.ts";
+import { breakdownLook, breakdowns, tokenColumns, tokenCount, utc, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../control/usage.ts";
 import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../images.ts";
-import { secretHostPattern, secretNamePattern, type Project, type SecretGrant } from "../project.ts";
+import { defaultProjectResources, secretHostPattern, secretNamePattern, type Project, type SecretGrant } from "../project.ts";
+import { titleOf } from "../thread-title.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { parse } from "../parse.ts";
 import type { ActualState } from "../reconcile.ts";
@@ -205,7 +206,6 @@ function table(rows: readonly (readonly string[])[]): string {
   return rows.map((r) => r.map((cell, i) => i === r.length - 1 ? cell : cell.padEnd(widths[i]!)).join("  ")).join("\n");
 }
 
-const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
 function backfillText(b: UsageBackfill): string {
   if (b.state === "never") return "Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.";
@@ -640,7 +640,6 @@ async function queuedThreads(api: Api, query: string): Promise<QueuedThread[]> {
 const threadRow = (t: ThreadRow) => [t.id, t.status, t.usageLimit !== undefined ? usageLimitText(t.usageLimit, Date.now()) : working(t) ? "working" : "-", `pylon ${t.pylon.actualState}`, t.project, ago(t.createdAt), t.title];
 
 /** The first line of a message, as the title of the thread it starts. */
-const titleOf = (message: string) => clip(message.split("\n").find((line) => line.trim() !== "")?.trim() ?? message, 80);
 
 async function send(api: Api, id: string, text: string, steer: boolean, requestId: string, idleMs?: number): Promise<{ submission: number } | { claude: ClaudeSent }> {
   return await api("POST", `${thread(id)}/messages`, { text, requestId, mode: steer ? "steer" : "followUp" }, idleMs) as { submission: number } | { claude: ClaudeSent };
@@ -1465,7 +1464,7 @@ const commands: Readonly<Record<string, Command>> = {
       // A forgotten URL must not quietly make a scratch project.
       if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
       const repoUrl = url ?? null;
-      const resources = { cpus: int(str(v, "cpus"), "--cpus", 2), memoryGiB: int(str(v, "memory"), "--memory", 6), diskGiB: int(str(v, "disk"), "--disk", 10) };
+      const resources = { cpus: int(str(v, "cpus"), "--cpus", defaultProjectResources.cpus), memoryGiB: int(str(v, "memory"), "--memory", defaultProjectResources.memoryGiB), diskGiB: int(str(v, "disk"), "--disk", defaultProjectResources.diskGiB) };
       const secrets = strs(v, "secret").map(secretGrantOf);
       const p = await api("POST", "/v1/projects", {
         id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,

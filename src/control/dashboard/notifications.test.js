@@ -23,6 +23,16 @@ test("a session waiting on the person notifies at once, as its row stays bright"
   update([row("waiting")], 1);
   assert.deepEqual(events.map((r) => r.attention), ["waiting"]);
 });
+test("a row whose attention becomes null or working never notifies", () => {
+  const events = [];
+  const update = coordinator((r) => events.push(r));
+  update([row("failed")], 0);
+  update([row(null)], 1);
+  update([row("working")], 2);
+  update([row(null)], 3);
+  update([row("waiting")], 4);
+  assert.deepEqual(events.map((r) => r.attention), ["waiting"]);
+});
 test("reply waits two seconds, and a follow-up cancels even when unread reply outranks working", () => {
   const events = [];
   const update = coordinator((r) => events.push(r));

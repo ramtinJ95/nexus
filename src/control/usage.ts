@@ -111,6 +111,9 @@ export function periodStart(period: Period, now: number): number | null {
   return now - (now % 86_400_000) - (days - 1) * 86_400_000;
 }
 
+/** A time to the minute, such as 2026-10-27 12:00 UTC. */
+export const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
 /** 950, 12.3k, 1.2M, 3.4B. */
 export function tokenCount(n: number): string {
   if (n < 1000) return String(n);
