@@ -29,7 +29,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { localApiWhois, PeerRefused, tailnetNodeIdPattern, verifyPeer, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPortMessage, reservedPorts, type BootInputs, type LiveSpec, type ProjectId } from "./project.ts";
-import { claudeSessionId, claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
+import { claudeSessionId, claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./session-harness.ts";
 import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
 import type { ArtifactManifest, ImageManifest, ImageRecipe, TemplateBuildInputs, TemplateManifest } from "./images.ts";
 import {
