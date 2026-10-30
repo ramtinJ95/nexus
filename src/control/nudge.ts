@@ -14,30 +14,10 @@ import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
 import { pushedBranches, type prWatcher } from "./pr-watch.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
+import type { Nudge } from "./nudge-store.ts";
 
 const text = `${nudgePrefix}
 Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you are blocked or the task needs no pull request, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
-
-export type Nudge =
-  /** `turn` is the end (the thread's lastReplyAt) of the stalled turn the latest nudge answered; `count` nudges in a row. */
-  | { state: "nudged"; turn: number; count: number }
-  /**
-   * The nudge that makes `count` for the turn that ended at `turn`, saved before it is sent. A crash after the send
-   * may let the thread end another turn first, so the next pass finishes this one under its own request ID.
-   */
-  | { state: "sending"; turn: number; count: number }
-  /** The turn after the last nudge stalled too, so the thread waits on the person. */
-  | { state: "person"; turn: number }
-  /**
-   * GitHub found a pull request on the thread's branches after the turn that ended at `turn`, which the PR watch has
-   * not linked yet. It may never link one that merged or closed first, so the turn is not searched again.
-   */
-  | { state: "opened"; turn: number }
-  /**
-   * The person wrote to the thread after its first reply, which makes it theirs for good. It is kept, since the
-   * transcript that showed the message may drop it.
-   */
-  | { state: "left-alone" };
 
 const maxNudges = 2;
 

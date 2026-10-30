@@ -152,7 +152,7 @@ A Claude worker's AskUserQuestion call is the question `ask-<call ID>`, whose `a
 
 ## Judgment records
 
-`judgments` stores one JSON record per judged failure, keyed by `failure`, the ID of the `thread.failed` event that the pylon's failure appended, with its thread in a column. `Judgment` in `src/control/judgment.ts` is the shape, and `JudgmentView` is the API's view, which `ThreadDetail.judgments` serves oldest failure first.
+`judgments` stores one JSON record per judged failure, keyed by `failure`, the ID of the `thread.failed` event that the pylon's failure appended, with its thread in a column. `Judgment` in `src/control/judgment-store.ts` is the shape, and `JudgmentView` in `src/control/judgment.ts` is the API's view, which `ThreadDetail.judgments` serves oldest failure first.
 
 - `node` is where the pylon failed, `failed` the failure's reason as the registry held it, and `startedAt` when the judgment started.
 - `request` is the brief and the token its answer echoes, saved before the brief is sent, or null when the control plane decided without a judgment because the thread's retries were spent.
@@ -165,7 +165,7 @@ A save replaces the stored record only when it is still the record the pass read
 
 ## Queued thread records
 
-`queued_threads` stores one JSON record per thread queued with `nexus start --after`, keyed by the ID the thread gets when it starts. `QueuedRecord` in `src/control/queue.ts` is the shape, and `QueuedThread` is the API's view of one that has not started.
+`queued_threads` stores one JSON record per thread queued with `nexus start --after`, keyed by the ID the thread gets when it starts. `QueuedRecord` in `src/control/queue-store.ts` is the shape, and `QueuedThread` in `src/control/queue.ts` is the API's view of one that has not started.
 
 - `id`, `title`, `project`, `startedBy` (who queued it, the thread's `startedBy` once it starts) and `createdAt` (when it was queued).
 - `after` holds the predecessor thread IDs, without repeats, each a thread or another queued record when it was queued.
@@ -178,7 +178,7 @@ What blocks a queued thread is not stored. Each pass and each view derives every
 
 ## Pipeline item records
 
-`pipeline_items` stores one JSON record per pipeline item, keyed by its ID, `it-` and 12 hex digits, in the order they were added. `ItemRecord` in `src/control/pipeline.ts` is the shape, and `PipelineItem` is the API's view.
+`pipeline_items` stores one JSON record per pipeline item, keyed by its ID, `it-` and 12 hex digits, in the order they were added. `ItemRecord` in `src/control/pipeline-store.ts` is the shape, and `PipelineItem` in `src/control/pipeline.ts` is the API's view.
 
 - `id`, `project`, `title`, `addedBy` (who added it, its thread's `startedBy`) and `addedAt`.
 - `request` is the `StartRequest` its queued thread starts with, as checked when it was added, and `message` a Nexus agent thread's first message, null for a Claude worker, whose brief is `request.claude`.

@@ -10,19 +10,20 @@ import type { DesiredRelease, Drain, ReleaseReport } from "../deploy/model.ts";
  * Nested values (a project's hosts, a pylon's boot inputs, an observation) are stored as JSON columns. Only
  * the control plane reads them, always whole, so they need no columns of their own.
  */
-import type { PrWatchState } from "./pr-watch.ts";
 import type { Sender } from "../agent-protocol.ts";
-import type { PlanningRecord } from "./planning.ts";
+import { planningStore } from "./planning-store.ts";
+import { prWatchStore } from "./pr-watch-store.ts";
 import { askQuestionId, askRecord, type Question, type WaitingAsk } from "./questions.ts";
-import type { Nudge } from "./nudge.ts";
-import type { Judgment } from "./judgment.ts";
-import type { ItemId, ItemRecord } from "./pipeline.ts";
-import type { QueuedRecord } from "./queue.ts";
+import { nudgeStore } from "./nudge-store.ts";
+import { judgmentStore } from "./judgment-store.ts";
+import { pipelineStore } from "./pipeline-store.ts";
+import { queueStore } from "./queue-store.ts";
+import type { StartKey } from "./start-request.ts";
 import type { Placement } from "./placement.ts";
 import { HttpError } from "./http-error.ts";
 import { json, jsonOrNull, openDb, type Row } from "./db.ts";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
-import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import {
   upgradeObservation, type HerdrStatus, type NodeObservation, type OlderObservation, type ReportedCapacity,
@@ -43,9 +44,8 @@ import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type Tra
 import type { AgentCall } from "../agent-usage.ts";
 import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
 
-declare const brand: unique symbol;
-/** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
-export type ThreadId = string & { readonly [brand]: "ThreadId" };
+// Temporary: ThreadId moved to ids.ts and StartKey to start-request.ts, and E1 deletes these re-exports.
+export type { StartKey, ThreadId };
 
 export interface NodeRecord {
   name: NodeName;
@@ -150,9 +150,6 @@ export type ClaudeMessageSender = Sender | "person" | "unknown";
 /** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
 export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
 
-/** A start's request ID and a hash of the body it came with, stored with the thread or queued record the start made. */
-export interface StartKey { requestId: string; body: string }
-
 function observationOf(value: unknown): NodeObservation | null {
   const o = jsonOrNull<OlderObservation>(value);
   return o === null ? null : upgradeObservation(o);
@@ -225,7 +222,12 @@ export type Registry = ReturnType<typeof openRegistry>;
 
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
 export function openRegistry(path: string, clock = Date.now) {
-  const { db, transaction, sql, setting, setSetting, recordOf, saveRecord } = openDb(path);
+  const kernel = openDb(path);
+  const { db, transaction, sql, setting, setSetting, recordOf } = kernel;
+  const nudges = nudgeStore(kernel, updateAttention);
+  const prWatches = prWatchStore(kernel, appendEvent);
+  const queue = queueStore(kernel, saveStartKey);
+  const { queuedThread, saveQueued } = queue;
 
   /**
    * Room a start placed a pylon in before its row exists, so an overlapping start sees it taken. It is held in memory,
@@ -301,19 +303,11 @@ export function openRegistry(path: string, clock = Date.now) {
     });
   }
 
-  const queuedThread = (id: ThreadId): QueuedRecord | undefined => recordOf<QueuedRecord>("queued_threads", "id", id) ?? undefined;
   const storedReviewOf = (builder: ThreadId): Review | null => {
     const record = recordOf<Review>("reviews", "builder", builder);
     return record === null ? null : storedReview(record);
   };
   const isCurrentReview = (review: Review) => JSON.stringify(storedReviewOf(review.builder)) === JSON.stringify(review);
-
-  function saveQueued(record: QueuedRecord, key?: StartKey) {
-    transaction(() => {
-      saveRecord("queued_threads", "id", record.id, record);
-      if (key !== undefined) saveStartKey(key, record.id);
-    });
-  }
 
   function saveStartKey(key: StartKey, thread: ThreadId) {
     sql("INSERT INTO start_requests (request_id, thread, body) VALUES (?, ?, ?)").run(key.requestId, thread, key.body);
@@ -417,7 +411,7 @@ export function openRegistry(path: string, clock = Date.now) {
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     const decision = needsPerson(recordOf<Review>("reviews", "builder", id))
       || sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(id) !== undefined
-      || recordOf<Nudge>("nudges", "thread", id)?.state === "person";
+      || nudges.nudge(id)?.state === "person";
     const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
@@ -893,50 +887,9 @@ export function openRegistry(path: string, clock = Date.now) {
         return answered;
       });
     },
-    planning: (thread: ThreadId): PlanningRecord | null => recordOf<PlanningRecord>("planning_threads", "thread", thread),
-    planningThreads: (): PlanningRecord[] => sql("SELECT record FROM planning_threads ORDER BY rowid").all().map((r) => json<PlanningRecord>(r.record)),
-    savePlanning(record: PlanningRecord) {
-      saveRecord("planning_threads", "thread", record.thread, record);
-    },
-    prWatch: (thread: ThreadId): PrWatchState | null => recordOf<PrWatchState>("pr_watches", "thread", thread),
-    /**
-     * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
-     * of an error that starts or clears.
-     */
-    savePrWatch(thread: ThreadId, state: PrWatchState) {
-      transaction(() => {
-        const previous = recordOf<PrWatchState>("pr_watches", "thread", thread);
-        if (state.pending !== null && previous?.pending?.id !== state.pending.id) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
-        // A link counts once the watch has read its PR, as outputs() counts it, so a placeholder never fires.
-        const linked = new Set(previous?.links.filter((l) => l.pr.url !== "").map((l) => `${l.pr.repo}#${l.pr.number}`));
-        for (const { pr } of state.links) {
-          if (pr.url !== "" && !linked.has(`${pr.repo}#${pr.number}`)) appendEvent("pull-request.linked", thread, { repo: pr.repo, number: pr.number, url: pr.url, title: pr.title, state: pr.state });
-        }
-        if ((previous?.error ?? null) === null && state.error !== null) appendEvent("pull-request.error", thread, { error: state.error });
-        if ((previous?.error ?? null) !== null && state.error === null) appendEvent("pull-request.error-cleared", thread, {});
-        saveRecord("pr_watches", "thread", thread, state);
-      });
-    },
-    judgment: (failure: number): Judgment | null => recordOf<Judgment>("judgments", "failure", failure),
-    /** The thread's judgments, oldest failure first. */
-    judgments: (thread: ThreadId): Judgment[] => sql("SELECT record FROM judgments WHERE thread = ? ORDER BY failure").all(thread).map((r) => json<Judgment>(r.record)),
-    /** Every judgment not done, whatever its thread's status, oldest failure first. */
-    unfinishedJudgments: (): Judgment[] => sql("SELECT record FROM judgments WHERE json_extract(record, '$.phase.kind') != 'done' ORDER BY failure").all().map((r) => json<Judgment>(r.record)),
-    /**
-     * Replaces the judgment as it was read, `previous`, or adds it when that is null, and runs `alongside` in the same
-     * transaction. False, with nothing written or run, when the stored record is not `previous`: another pass saved first.
-     */
-    saveJudgment(next: Judgment, previous: Judgment | null, alongside: () => void = () => {}): boolean {
-      return transaction(() => {
-        const { changes } = previous === null
-          ? sql("INSERT INTO judgments (failure, thread, record) VALUES (?, ?, ?) ON CONFLICT DO NOTHING").run(next.failure, next.thread, JSON.stringify(next))
-          : sql("UPDATE judgments SET record = ? WHERE failure = ? AND record = ?").run(JSON.stringify(next), next.failure, JSON.stringify(previous));
-        if (changes === 1) alongside();
-        return changes === 1;
-      });
-    },
-    /** The newest event when judgments began. No failure at or below it is judged. */
-    judgmentSince: (): number => sql("SELECT event FROM judgment_since").get()!.event as number,
+    ...planningStore(kernel),
+    ...prWatches,
+    ...judgmentStore(kernel),
     /**
      * The failure the thread's pylon holds: the thread.failed event its pylon's `failed` appended. Null while the pylon
      * has not failed, or once that event is pruned. A failed Claude launch appends one too, with another message.
@@ -946,17 +899,7 @@ export function openRegistry(path: string, clock = Date.now) {
         WHERE p.thread = ? ORDER BY e.id DESC LIMIT 1`).get(thread);
       return row === undefined ? null : { event: row.id as number, at: row.time as number };
     },
-    nudge: (thread: ThreadId): Nudge | null => recordOf<Nudge>("nudges", "thread", thread),
-    /** The threads with a nudge record that a later pass may still change or clear, which is every one but left-alone. */
-    nudgedThreads: (): ThreadId[] => sql("SELECT thread FROM nudges WHERE json_extract(record, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
-    /** Replaces the builder's nudge record, or with null deletes it. */
-    saveNudge(thread: ThreadId, nudge: Nudge | null) {
-      transaction(() => {
-        if (nudge === null) sql("DELETE FROM nudges WHERE thread = ?").run(thread);
-        else saveRecord("nudges", "thread", thread, nudge);
-        updateAttention(thread);
-      });
-    },
+    ...nudges,
     desiredRelease: (): DesiredRelease | null => jsonOrNull<DesiredRelease>(setting("release")),
     setDesiredRelease(release: DesiredRelease) {
       appendEvent("release.changed", null, { desired: release });
@@ -1049,12 +992,8 @@ export function openRegistry(path: string, clock = Date.now) {
       const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);
       return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };
     },
-    items: (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record)),
-    item: (id: ItemId): ItemRecord | undefined => recordOf<ItemRecord>("pipeline_items", "id", id) ?? undefined,
-    saveItem(record: ItemRecord) { saveRecord("pipeline_items", "id", record.id, record); },
-    queuedThreads: (): QueuedRecord[] => sql("SELECT record FROM queued_threads ORDER BY rowid").all().map((r) => json<QueuedRecord>(r.record)),
-    queuedThread,
-    saveQueued,
+    ...pipelineStore(kernel),
+    ...queue,
     threads: (project?: ProjectId) => withSessions(project === undefined ? sql("SELECT * FROM threads ORDER BY created_at, id").all() : sql("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id").all(project)),
     thread,
     /** The threads with any of the statuses and started by `startedBy`, each as its row holds it, without what its sessions say. */
@@ -1195,7 +1134,7 @@ export function openRegistry(path: string, clock = Date.now) {
     releasePreview(pylonId: PylonId, service: string) { sql("DELETE FROM previews WHERE pylon = ? AND service = ?").run(pylonId, service); },
     previews,
     outputs(thread: ThreadId): Output[] {
-      const watch = recordOf<PrWatchState>("pr_watches", "thread", thread);
+      const watch = prWatches.prWatch(thread);
       return [
         ...(sql("SELECT * FROM outputs WHERE thread = ? ORDER BY kind, ref").all(thread) as Row[]).map((r): Output => ({ thread, kind: r.kind as Output["kind"], ref: r.ref as string })),
         ...(watch ? watch.links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),

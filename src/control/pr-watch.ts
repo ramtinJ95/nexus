@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Inbox } from "./inbox.ts";
 import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./github.ts";
 import type { Registry, StoredThread, Thread, ThreadId } from "./registry.ts";
+import type { PrWatchState } from "./pr-watch-store.ts";
 import { singleFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "../agent-protocol.ts";
 
@@ -9,17 +10,6 @@ import { prWatchPrefix } from "../agent-protocol.ts";
 export const prWatchMs = 120_000;
 /** How many comment-only wakes in a row stop a thread's watch, until a failed check or a conflict resets the count. */
 export const commentCap = 10;
-export interface PrLink {
-  pr: PullRequest;
-  seen: string[];
-  failed: boolean;
-}
-export interface PrWatchState {
-  links: PrLink[];
-  commentWakes: number;
-  pending: { id: string; text: string } | null;
-  error: string | null;
-}
 /** A description's first paragraph past its headings, images and comments, on one line and at most 400 characters. */
 export function summaryOf(body: string): string {
   const prose = body.replace(/<!--[\s\S]*?-->/g, "").split("\n").filter((line) => !/^ {0,3}#{1,6}(\s|$)/.test(line)).join("\n");
