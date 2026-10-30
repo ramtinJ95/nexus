@@ -53,7 +53,7 @@ def main(argv):
     elif op == "read":
         sys.stdout.buffer.write(read(root, args[0], int(args[1])))
     elif op == "blob":
-        sys.stdout.buffer.write(blob(root, args[0], args[1], int(args[2])))
+        sys.stdout.buffer.write(blob(root, parse_base(args[0]), args[1], int(args[2])))
     elif op == "snapshot":
         def expired(signum, frame):
             raise subprocess.TimeoutExpired("turn snapshot", 60)
@@ -63,11 +63,22 @@ def main(argv):
         signal.alarm(0)
         answer({})
     elif op == "changes":
-        answer(changes(root, args[0]))
+        answer(changes(root, parse_base(args[0])))
     elif op == "diff":
-        answer(diff(root, args[0], args[1:]))
+        answer(diff(root, parse_base(args[0]), args[1:]))
     else:
         raise ValueError("unknown op %r" % op)
+
+
+REFS = {"head": "HEAD", "turn": "refs/nexus/turn", "start": "refs/nexus/base"}
+
+
+def parse_base(text):
+    """The base's kind and, for `turn:<id>`, the turn the caller expects the snapshot to be of."""
+    kind, colon, turn = text.partition(":")
+    if kind not in REFS:
+        raise ValueError("unknown base %r" % text)
+    return kind, turn if colon else None
 
 
 def answer(value):
@@ -131,11 +142,11 @@ def blob(root, base, path, limit):
     name = "%s:%s" % (tree, os.path.normpath(path))
     found = subprocess.run(git_command(root, ["cat-file", "-t", name]), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=GIT_TIMEOUT_S)
     if found.returncode != 0:
-        raise Refused("missing", "%s does not exist at the %s base" % (path, base.split(":", 1)[0]))
+        raise Refused("missing", "%s does not exist at the %s base" % (path, base[0]))
     if found.stdout.decode().strip() != "blob":
-        raise Refused("kind", "%s is not a file at the %s base" % (path, base.split(":", 1)[0]))
+        raise Refused("kind", "%s is not a file at the %s base" % (path, base[0]))
     if int(git(root, ["cat-file", "-s", name]).decode()) > limit:
-        raise Refused("large", "%s is over the %d-byte limit at the %s base" % (path, limit, base.split(":", 1)[0]))
+        raise Refused("large", "%s is over the %d-byte limit at the %s base" % (path, limit, base[0]))
     return git(root, ["cat-file", "blob", name])
 
 
@@ -158,27 +169,18 @@ def resolve(root, name):
 
 def base_of(root, base):
     """The tree-ish to compare with, and the commit it is, or None where the base is the empty tree."""
-    expected = base.split(":", 1)[1] if base.startswith("turn:") else None
-    base = base.split(":", 1)[0]
-    if base == "head":
-        ref = "HEAD"
-    elif base == "turn":
-        ref = "refs/nexus/turn"
-    elif base == "start":
-        ref = "refs/nexus/base"
-    else:
-        raise ValueError("unknown base %r" % base)
-    found = resolve(root, ref)
-    if base == "turn" and found is not None:
+    kind, expected = base
+    found = resolve(root, REFS[kind])
+    if kind == "turn" and found is not None:
         # The marker names the latest attempt, whose failure leaves the previous snapshot in place, and the caller's
         # turn can lag it when a turn start was lost. Either one disagreeing makes the snapshot stale.
         named = git(root, ["show", "-s", "--format=%s", found]).decode().strip()
         if any(turn is not None and named != "Nexus turn " + turn for turn in (expected, marked(turn_marker(root)))):
             found = None
     if found is None:
-        if base == "turn":
+        if kind == "turn":
             raise Refused("no-base", "the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead")
-        if base == "start":
+        if kind == "start":
             raise Refused("no-base", "the checkout has no refs/nexus/base, what its pylon booted at, because the pylon booted before Nexus recorded it. Ask for the changes since HEAD instead")
         if subprocess.run(["git", "-C", root, "rev-parse", "--git-dir"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
             raise Refused("missing", "the checkout is not a git repository")
@@ -197,7 +199,7 @@ def scratch_env(root, scratch):
     if os.path.exists(real):
         shutil.copy2(real, index)
     else:
-        git(root, ["read-tree", base_of(root, "head")[0]], env)
+        git(root, ["read-tree", base_of(root, ("head", None))[0]], env)
     git(root, ["add", "--all"], env)
     return env
 
@@ -266,33 +268,34 @@ def changes(root, base):
     tree, commit = base_of(root, base)
     with tempfile.TemporaryDirectory() as scratch:
         env = scratch_env(root, scratch)
-        status = git(root, DIFF_FLAGS + ["-z", "--name-status", tree], env).decode(errors="replace").split("\0")
-        counts = git(root, DIFF_FLAGS + ["-z", "--numstat", tree], env).decode(errors="replace").split("\0")
+        # One diff prints each file's raw record, which starts with `:` and ends with its status, then its counts.
+        fields = git(root, DIFF_FLAGS + ["-z", "--raw", "--numstat", tree], env).decode(errors="replace").split("\0")
+    files = []
     lines = {}
     i = 0
-    while i < len(counts) and counts[i] != "":
-        added, deleted, path = counts[i].split("\t", 2)
-        if path == "":  # a rename or copy: the old path and the new one follow
-            path = counts[i + 2]
-            i += 2
-        i += 1
-        binary = added == "-"
-        lines[path] = (None if binary else int(added), None if binary else int(deleted))
-    files = []
-    i = 0
-    while i < len(status) and status[i] != "":
-        letter = status[i][0]
-        if letter not in STATUSES:
-            raise RuntimeError("git reported status %r" % status[i])
-        if letter in "RC":
-            old, path = status[i + 1], status[i + 2]
-            i += 3
+    while i < len(fields) and fields[i] != "":
+        if fields[i].startswith(":"):
+            letter = fields[i].rsplit(" ", 1)[1][0]
+            if letter not in STATUSES:
+                raise RuntimeError("git reported status %r" % fields[i])
+            if letter in "RC":
+                old, path = fields[i + 1], fields[i + 2]
+                i += 3
+            else:
+                old, path = None, fields[i + 1]
+                i += 2
+            files.append({"path": path, "oldPath": old, "status": STATUSES[letter]})
         else:
-            old, path = None, status[i + 1]
-            i += 2
-        added, deleted = lines.get(path, (None, None))
-        files.append({"path": path, "oldPath": old, "status": STATUSES[letter], "additions": added, "deletions": deleted})
-    return {"base": {"kind": base.split(":", 1)[0], "commit": commit}, "files": files[:MAX_FILES], "truncated": len(files) > MAX_FILES}
+            added, deleted, path = fields[i].split("\t", 2)
+            if path == "":  # a rename or copy: the old path and the new one follow
+                path = fields[i + 2]
+                i += 2
+            i += 1
+            binary = added == "-"
+            lines[path] = (None if binary else int(added), None if binary else int(deleted))
+    for file in files:
+        file["additions"], file["deletions"] = lines.get(file["path"], (None, None))
+    return {"base": {"kind": base[0], "commit": commit}, "files": files[:MAX_FILES], "truncated": len(files) > MAX_FILES}
 
 
 def diff(root, base, paths):
@@ -327,7 +330,7 @@ def diff(root, base, paths):
     if truncated:
         # Whole lines only.
         text = text[: text.rfind(b"\n", 0, MAX_DIFF_BYTES) + 1]
-    return {"base": {"kind": base.split(":", 1)[0], "commit": commit}, "diff": text.decode(errors="replace"), "truncated": truncated}
+    return {"base": {"kind": base[0], "commit": commit}, "diff": text.decode(errors="replace"), "truncated": truncated}
 
 
 try:
