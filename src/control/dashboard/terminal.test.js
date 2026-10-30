@@ -1,9 +1,8 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { runInNewContext } from "node:vm";
 import { attachPath, defaultTerm } from "../../attach-route.ts";
 import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing } from "./terminal.js";
+import { styleAdopter } from "./term-styles.js";
 
 /** A terminal as xterm.js exposes it: what it was written, how often it was reset, and the keys and resizes it hands out. */
 function fakeTerm() {
@@ -265,11 +264,8 @@ test("after 8 failed tries the terminal ends and says to attach again", (t) => {
   assert.match(k.statuses.at(-1).text, /8 times/);
 });
 
-const termView = await readFile(new URL("./term-view.js", import.meta.url), "utf8");
-const adoptSlice = termView.slice(termView.indexOf("function adoptStyles("), termView.indexOf("\nconst ansi ="));
-
 /**
- * adoptStyles from term-view.js on a screen element shaped as xterm.js 6 builds it: its style elements and its row
+ * adoptStyles from term-styles.js on a screen element shaped as xterm.js 6 builds it: its style elements and its row
  * container as children. `change(node, kind)` is a DOM mutation of that kind on that node, which wakes the observer
  * only as the browser would for the options it observes with.
  */
@@ -299,7 +295,7 @@ function styledScreen() {
     }
   };
   const document = { adoptedStyleSheets: [] };
-  const adoptStyles = runInNewContext(`${adoptSlice}\nadoptStyles`, { CSSStyleSheet: Sheet, MutationObserver: Observer, document });
+  const { adoptStyles } = styleAdopter({ CSSStyleSheet: Sheet, MutationObserver: Observer, document });
   return { screen, style, row, copies, change, document, adoptStyles };
 }
 
