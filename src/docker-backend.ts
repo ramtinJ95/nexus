@@ -15,7 +15,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "./artifacts.ts";
-import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type VmBackend } from "./backend.ts";
+import { JobFailure, type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type VmBackend } from "./backend.ts";
 import { dockerBridgeRunArgs, dockerHostBridge, labelFilters } from "./docker-host-bridge.ts";
 import { exit, output } from "./exec.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
@@ -29,6 +29,10 @@ import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
 
 /** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
 const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;
+const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {
+  const sessions = labels[label.sessions] ?? "";
+  return sessions === "" ? null : JSON.parse(Buffer.from(sessions, "base64url").toString("utf8")) as PausedSession[];
+};
 const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
 
@@ -353,18 +357,13 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
           ...containerState(c),
           checkpoint: (labels[label.bootedFrom] || null) as CheckpointId | null,
           image: labels[label.image] as ImageId,
-          bootedAt: c.State.Status === "running" ? c.State.StartedAt : null,
         });
       }
       for (const img of checkpoints) {
         const labels = labelsOf(img);
         const pylonId = labels[label.pylon] as PylonId;
         if (pylons.has(pylonId)) continue;
-        const sessions = labels[label.sessions] ?? "";
-        pylons.set(pylonId, {
-          pylonId, vm: "stopped", checkpoint: labels[label.checkpoint] as CheckpointId, image: labels[label.image] as ImageId, bootedAt: null,
-          sessions: sessions === "" ? null : JSON.parse(Buffer.from(sessions, "base64url").toString("utf8")) as PausedSession[],
-        });
+        pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: labels[label.checkpoint] as CheckpointId, image: labels[label.image] as ImageId, sessions: decoded(labels) });
       }
       return [...pylons.values()];
     },
@@ -418,9 +417,9 @@ async function execIn(container: string, cwd: string, argv: readonly string[], t
  * removed it: a probe that died mid-pause or mid-boot, or a Docker restart. It reports as broken, so a desired
  * pause finishes the job and a desired run waits for a human, as for a VM the backend saw fail.
  */
-function containerState(c: ContainerInfo): Pick<BackendPylon, "vm" | "detail" | "cause"> {
+function containerState(c: ContainerInfo): BackendVm {
   switch (c.State.Status) {
-    case "running": return { vm: "running" };
+    case "running": return { vm: "running", bootedAt: c.State.StartedAt };
     case "restarting": return { vm: "booting" };
     case "removing": return { vm: "deleting" };
     default: return { vm: "broken", detail: `container is ${c.State.Status} (exit code ${c.State.ExitCode}) outside a completed pause`, cause: "controller" };

@@ -12,6 +12,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
+import type { BackendPylon } from "./backend.ts";
 import { bootHooks, createPylonVmBackend, hostNestsKvm, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { settled, type Inspection } from "./pylon-vm/contracts.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
@@ -96,6 +97,8 @@ async function leftInstance(instances: string, pylonId: string, state: "stopped"
 }
 
 const signal = () => AbortSignal.timeout(10_000);
+/** A field only some of the VM states carry, or undefined when this pylon's state does not. */
+const field = (p: BackendPylon | undefined, key: "cause" | "logTail" | "sessions") => p !== undefined && key in p ? (p as unknown as Record<string, unknown>)[key] : undefined;
 
 /**
  * A controller on the instance's control socket, as daemon.ts listens, answering each action from `answer`.
@@ -110,7 +113,7 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
     const action = JSON.parse(body) as Record<string, unknown>;
     try {
       const result = action.action === "inspect"
-        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 } } }
+        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 }, bootedAt: "2026-10-22T00:00:00Z" } }
         : (actions.push(action), await answer(action));
       res.end(JSON.stringify({ ok: true, result }));
     } catch (err) {
@@ -278,7 +281,7 @@ test("a stopped pylon keeps its disk size and its image", async () => {
 test("pausing a pylon whose controller died settles it on its last disk without booting it", async () => {
   const { backend, instances } = await backendWith();
   await leftInstance(instances, "pylon-dead", "running");
-  assert.deepEqual((await backend.list()).map((p) => [p.pylonId, p.vm, p.cause]), [["pylon-dead", "broken", "controller"]]);
+  assert.deepEqual((await backend.list()).map((p) => [p.pylonId, p.vm, field(p, "cause")]), [["pylon-dead", "broken", "controller"]]);
   await backend.ensurePaused("pylon-dead" as PylonId, "ckpt-dead-1", signal());
   const [pylon] = await backend.list();
   assert.equal(pylon?.vm, "stopped");
@@ -294,13 +297,13 @@ test("a pylon whose controller failed carries its controller log's last 60 lines
   await writeFile(join(await leftInstance(instances, "pylon-stopped", "stopped"), "controller.log"), "stopped cleanly\n");
   const listed = new Map((await backend.list()).map((p) => [p.pylonId, p]));
   const failed = listed.get("pylon-failed" as PylonId)!;
-  assert.deepEqual([failed.vm, failed.cause], ["broken", "controller"]);
-  assert.equal(failed.logTail, `${[...lines.slice(42), "Error: Guest command got no answer within 13000 ms"].join("\n")}\n`);
-  assert.equal(listed.get("pylon-stopped" as PylonId)!.logTail, undefined);
+  assert.deepEqual([failed.vm, field(failed, "cause")], ["broken", "controller"]);
+  assert.equal(field(failed, "logTail"), `${[...lines.slice(42), "Error: Guest command got no answer within 13000 ms"].join("\n")}\n`);
+  assert.equal(field(listed.get("pylon-stopped" as PylonId), "logTail"), undefined);
   await writeFile(join(dir, "controller.log"), `${"x".repeat(200)}\n`.repeat(60));
-  assert.equal((await backend.list()).find((p) => p.pylonId === "pylon-failed")!.logTail!.length, 8192);
+  assert.equal((field((await backend.list()).find((p) => p.pylonId === "pylon-failed"), "logTail") as string).length, 8192);
   await rm(join(dir, "controller.log"));
-  assert.equal((await backend.list()).find((p) => p.pylonId === "pylon-failed")!.logTail, "", "a controller that left no log");
+  assert.equal(field((await backend.list()).find((p) => p.pylonId === "pylon-failed"), "logTail"), "", "a controller that left no log");
 });
 
 test("a pylon's state is its own controller's answer, stopped from what its last stop left, and absent with no instance", async () => {
@@ -570,18 +573,18 @@ test("a pause keeps what it recorded beside the checkpoint, which the stopped py
     }
     return assert.fail(`unexpected ${action.action}`);
   });
-  assert.equal((await backend.list())[0]!.sessions, undefined, "a running pylon's sessions come from its guest");
+  assert.equal(field((await backend.list())[0], "sessions"), undefined, "a running pylon's sessions come from its guest");
   await backend.ensurePaused("pylon-kept" as PylonId, "ckpt-kept-1", signal());
   const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-kept-1", sessions: recorded });
-  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, p.sessions]), [["stopped", "ckpt-kept-1", recorded]]);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, field(p, "sessions")]), [["stopped", "ckpt-kept-1", recorded]]);
 });
 
 test("a stopped pylon whose pause recorded nothing reports null", async () => {
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-none", "stopped");
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-none-1" }));
-  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.sessions]), [["stopped", null]]);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "sessions")]), [["stopped", null]]);
 });
 
 test("the settle helper reads until the state leaves the ones it waits out, or nothing is left to read", async () => {
@@ -600,7 +603,7 @@ test("the artifacts listed with a list of pylons hold the checkpoints of the sto
   await leftInstance(instances, "pylon-unsaved", "stopped");
   const pylons = await backend.list();
   await writeFile(join(await leftInstance(instances, "pylon-later", "stopped"), "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-later-1" }));
-  const running = { ...pylons[0]!, pylonId: "pylon-up" as PylonId, vm: "running" as const, checkpoint: "ckpt-booted-1" as const };
+  const running = { pylonId: "pylon-up" as PylonId, vm: "running" as const, checkpoint: "ckpt-booted-1" as const, image, bootedAt: "2026-10-22T00:00:00Z" };
   assert.deepEqual(await backend.artifacts.list([...pylons, running]), [image, "ckpt-held-1"], "a pylon that stopped after the list is not counted");
   assert.deepEqual(await backend.artifacts.list(await backend.list()), [image, "ckpt-held-1", "ckpt-later-1"]);
   assert.deepEqual(await backend.artifacts.list([]), [image]);
@@ -665,7 +668,7 @@ test("a pause of a pylon whose sessions never came back records nothing, also wh
   assert.deepEqual(controller.actions.map((a) => a.action), ["stop", "stop"]);
   assert.equal(await readFile(join(dir, "controller.log"), "utf8"), "");
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-unread-2", sessions: paused });
-  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, p.sessions]), [["stopped", "ckpt-unread-2", paused]]);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, field(p, "sessions")]), [["stopped", "ckpt-unread-2", paused]]);
 });
 
 test("a pylon boots only from a template on this node that is a disk over its own image", async () => {
@@ -830,7 +833,7 @@ test("a fresh pylon whose setup failed before its first checkpoint is removed, a
   const dir = await leftInstance(instances, "pylon-nosetup", "running");
   await writeFile(join(dir, "controller.log"), "fatal: repository 'https://github.com/ramtinJ95/missing.git/' not found\n");
   await failedController(t, dir, [checkoutFailed], false);
-  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.cause]), [["broken", "setup"]]);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "cause")]), [["broken", "setup"]]);
   await assert.rejects(backend.ensureRunning(bootOf("pylon-nosetup"), live, signal()), (err: Error & { code?: string; logTail?: string }) =>
     err.code === "setup-failed" && /Setup exited 128.*had no checkpoint, so it was removed, and a retry boots the pylon fresh/.test(err.message) && err.logTail?.includes("repository 'https://github.com/ramtinJ95/missing.git/' not found") === true);
   assert.equal(existsSync(dir), false, "a retry finds the pylon absent and boots it fresh, running setup again");
@@ -856,7 +859,7 @@ test("every other startup failure is final, carries the controller log's tail, a
     await assert.rejects(backend.ensureRunning(retrySetup ? fromTemplate(pylonId) : bootOf(pylonId), live, signal()), { code: "setup-failed", message, logTail: /npm ERR! 404 left-pad/ }, what);
     assert.equal(existsSync(dir), true, what);
     const listed = (await backend.list()).find((p) => p.pylonId === pylonId);
-    assert.deepEqual([listed?.vm, listed?.cause], ["broken", cause], what);
+    assert.deepEqual([listed?.vm, field(listed, "cause")], ["broken", cause], what);
   }
 });
 
@@ -876,7 +879,7 @@ test("a VM whose setup failed on a disk that has a checkpoint is not paused, so 
   await writeFile(join(dir, "disk.qcow2"), "the last completed disk");
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-pausesaved-1" }));
   const actions = await failedController(t, dir, [checkoutFailed], true);
-  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.cause]), [["broken", "saved-setup"]], "the planner refuses it, and never asks for this pause");
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "cause")]), [["broken", "saved-setup"]], "the planner refuses it, and never asks for this pause");
   await assert.rejects(backend.ensurePaused("pylon-pausesaved" as PylonId, "ckpt-pausesaved-2", signal()), { code: "setup-failed", message: /A pause would save the failed setup onto its disk, so it is not paused\. Start again from the project/ });
   assert.deepEqual(actions, [], "nothing was stopped, recorded or removed");
   assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "the last completed disk");
@@ -902,7 +905,7 @@ test("a VM whose controller predates startupFailures is broken for an unknown re
   });
   await new Promise<void>((resolve) => server.listen(join(dir, "control.sock"), resolve));
   t.after(() => server.close());
-  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.cause]), [["broken", "unknown"]], "the planner refuses it, and never asks for this pause");
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "cause")]), [["broken", "unknown"]], "the planner refuses it, and never asks for this pause");
   await assert.rejects(backend.ensurePaused("pylon-legacy" as PylonId, "ckpt-legacy-1", signal()), { code: "setup-failed", message: /does not say whether setup failed.*so it is not paused\. Start again from the project/ });
   assert.deepEqual(actions, [], "nothing was stopped, recorded or removed");
   assert.equal(existsSync(join(dir, "disk.qcow2")), false);

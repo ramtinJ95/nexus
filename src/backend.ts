@@ -62,28 +62,31 @@ export interface VmBackend {
   processes?(): Promise<readonly { pylonId: PylonId; pid: number }[]>;
 }
 
-export interface BackendPylon {
+/** What every backend reports of a pylon, whatever its VM's state. */
+interface BackendPylonBase {
   pylonId: PylonId;
-  vm: "booting" | "running" | "stopping" | "stopped" | "deleting" | "broken";
   checkpoint: CheckpointId | null; // the checkpoint the current disk was last written as
   image: ImageId; // the image the disk is an overlay on. Observations report it as bootedFrom.image
-  bootedAt: string | null; // set while the VM runs
-  detail?: string;
-  /** Set exactly when `vm` is broken. `unknown` when the backend cannot tell why. */
-  cause?: BrokenCause | "unknown";
-  /** Set when `vm` is broken, from a backend that keeps a log of the VM's controller: that log's last lines, as read. */
-  logTail?: string;
-  /**
-   * Set exactly when `vm` is stopped: the sessions its last pause recorded, which the backend keeps beside the
-   * checkpoint because the checkpoint cannot be read while paused. Null when that pause recorded none.
-   */
-  sessions?: readonly PausedSession[] | null;
   /**
    * What the pylon reserves on its node: CPUs and memory while its VM is up, and its disk for as long as it exists,
    * paused or not. Absent from a backend that reserves nothing, such as Docker's.
    */
   holds?: Pick<BootInputs["resources"], "cpus" | "memoryGiB" | "diskGiB">;
 }
+
+/** A pylon's VM state, with what each state carries. */
+export type BackendVm =
+  | { vm: "running"; bootedAt: string }
+  /**
+   * `sessions` is what its last pause recorded, which the backend keeps beside the checkpoint because the checkpoint
+   * cannot be read while paused. Null when that pause recorded none.
+   */
+  | { vm: "stopped"; sessions: readonly PausedSession[] | null }
+  /** `unknown` when the backend cannot tell why. `logTail` is from a backend that keeps a log of the VM's controller: that log's last lines, as read. */
+  | { vm: "broken"; detail: string; cause: BrokenCause | "unknown"; logTail?: string }
+  | { vm: "booting" | "stopping" | "deleting" };
+
+export type BackendPylon = BackendPylonBase & BackendVm;
 
 /** Every call runs as `user`. */
 export interface Guest {

@@ -329,13 +329,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     switch (p.vm) {
       case "booting": case "stopping": case "deleting": return { pylonId, phase: p.vm };
       case "stopped":
-        if (p.sessions === undefined) throw new Error(`backend reports ${pylonId} stopped without saying what its pause recorded`);
         return { pylonId, phase: "stopped", checkpoint: p.checkpoint, sessions: p.sessions };
       case "broken":
-        if (p.cause === undefined) throw new Error(`backend reports ${pylonId} broken with no cause`);
-        return { pylonId, phase: "broken", detail: redacted(p.detail ?? "the backend gave no detail"), cause: p.cause, logTail: redacted(p.logTail ?? "") };
+        return { pylonId, phase: "broken", detail: redacted(p.detail), cause: p.cause, logTail: redacted(p.logTail ?? "") };
       case "running": {
-        if (p.bootedAt === null) throw new Error(`backend reports ${pylonId} running with no boot time`);
         const [ports, serviceFacts, sessionFacts, checkout, outputs, attachedClients] = await Promise.all([
           listening(pylonId), services(pylonId), sessions(pylonId), git(pylonId, p.bootedAt), declaredOutputs(pylonId), attached(pylonId),
         ]);

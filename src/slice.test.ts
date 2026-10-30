@@ -434,6 +434,10 @@ async function converge(timeoutMs = fixture.convergeMs): Promise<PlanStep[]> {
 
 const submitted = (steps: PlanStep[]) => steps.flatMap((s) => s.kind === "submit" ? [s.job.kind] : []);
 const listed = async (): Promise<BackendPylon | undefined> => (await backend.list()).find((p) => p.pylonId === pylonId);
+const bootedAt = async () => {
+  const p = await listed();
+  return p?.vm === "running" ? p.bootedAt : undefined;
+};
 const inGuest = (script: string) => backend.guest(pylonId).exec(["sh", "-c", script], { cwd: fixture.cwd, timeoutMs: 30_000 });
 
 async function assertPaused(checkpoint: CheckpointId) {
@@ -617,14 +621,14 @@ test("the in-pylon CLI reaches the probe through the host bridge, and a declared
 });
 
 test("a probe restart makes the planner re-send spawn, which leaves the running VM alone", async () => {
-  const before = (await listed())?.bootedAt;
+  const before = await bootedAt();
   assert.ok(before);
   await probe.close();
   await startTestProbe();
   const steps = await converge();
   assert.equal(steps[0]?.kind, "submit");
   assert.deepEqual(submitted(steps), ["spawn"]);
-  assert.equal((await listed())?.bootedAt, before);
+  assert.equal(await bootedAt(), before);
   assert.deepEqual(await inGuest(`cat ${fixture.marker}`), { exitCode: 0, output: `${run}\n`, truncated: false });
 });
 
@@ -638,11 +642,11 @@ test("a new preview port restarts the service with the PUBLIC_URL on it", async 
 });
 
 test("a changed overlay is written into the running pylon", { skip: fixture.overlay === null && "this backend writes no overlay" }, async () => {
-  const before = (await listed())?.bootedAt;
+  const before = await bootedAt();
   pylon.live = { ...pylon.live, overlay: fixture.overlay!(2) };
   pylon.liveHash = "live-slice-2" as LiveHash;
   assert.deepEqual(submitted(await converge()), ["spawn"]);
-  assert.equal((await listed())?.bootedAt, before);
+  assert.equal(await bootedAt(), before);
   await fixture.checkOverlay(backend.guest(pylonId), 2);
 });
 
@@ -668,7 +672,9 @@ test("a probe killed during a pause: the next ticks finish the pause", async () 
   const steps = await converge();
   assert.deepEqual(submitted(steps), fixture.partialPauseResubmits ? ["pause"] : []);
   await assertPaused(checkpoint);
-  assert.deepEqual((await listed())?.sessions?.map((s) => s.harness) ?? null, fixture.partialPauseSessions);
+  const paused = await listed();
+  assert.ok(paused?.vm === "stopped");
+  assert.deepEqual(paused.sessions?.map((s) => s.harness) ?? null, fixture.partialPauseSessions);
 });
 
 test("deleted: nothing of the pylon remains", async () => {

@@ -67,7 +67,7 @@ function fakeBackend(guest: Guest | null = null) {
     },
     async ensurePaused(id, checkpoint, signal) {
       await held(signal);
-      pylons.set(id, { pylonId: id, vm: "stopped", checkpoint, image, bootedAt: null, sessions: null });
+      pylons.set(id, { pylonId: id, vm: "stopped", checkpoint, image, sessions: null });
     },
     async ensureDeleted(id, signal) {
       await held(signal);
@@ -373,11 +373,11 @@ test("a snapshot lists the checkpoints of the stopped pylons it reports, also wh
   const { client, fake } = await setup(t);
   const down = "pylon-down" as PylonId;
   const up = "pylon-up" as PylonId;
-  fake.pylons.set(down, { pylonId: down, vm: "stopped", checkpoint: "ckpt-down-1", image, bootedAt: null, sessions: null });
+  fake.pylons.set(down, { pylonId: down, vm: "stopped", checkpoint: "ckpt-down-1", image, sessions: null });
   fake.pylons.set(up, { pylonId: up, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
   fake.backend.list = async () => {
     const listed = [...fake.pylons.values()];
-    fake.pylons.set(up, { pylonId: up, vm: "stopped", checkpoint: "ckpt-up-1", image, bootedAt: null, sessions: null });
+    fake.pylons.set(up, { pylonId: up, vm: "stopped", checkpoint: "ckpt-up-1", image, sessions: null });
     return listed;
   };
   const observed = async () => {
@@ -461,8 +461,8 @@ test("capacity counts the CPUs and memory of VMs that are up and the disk of eve
   const { client, fake } = await setup(t);
   const at = (id: string) => id as PylonId;
   fake.pylons.set(at("pylon-a"), { pylonId: at("pylon-a"), vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z", holds: { cpus: 4, memoryGiB: 8, diskGiB: 60 } });
-  fake.pylons.set(at("pylon-b"), { pylonId: at("pylon-b"), vm: "booting", checkpoint: null, image, bootedAt: null, holds: { cpus: 2, memoryGiB: 8, diskGiB: 30 } });
-  fake.pylons.set(at("pylon-c"), { pylonId: at("pylon-c"), vm: "stopped", checkpoint: "ckpt-c-1", image, bootedAt: null, sessions: null, holds: { cpus: 0, memoryGiB: 0, diskGiB: 60 } });
+  fake.pylons.set(at("pylon-b"), { pylonId: at("pylon-b"), vm: "booting", checkpoint: null, image, holds: { cpus: 2, memoryGiB: 8, diskGiB: 30 } });
+  fake.pylons.set(at("pylon-c"), { pylonId: at("pylon-c"), vm: "stopped", checkpoint: "ckpt-c-1", image, sessions: null, holds: { cpus: 0, memoryGiB: 0, diskGiB: 60 } });
   fake.pylons.set(at("pylon-d"), { pylonId: at("pylon-d"), vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
   for await (const e of client.observe(AbortSignal.timeout(5000))) {
     const capacity = (e.type === "snapshot" ? e.observation : assert.fail()).capacity ?? assert.fail();
@@ -492,7 +492,7 @@ test("a broken pylon's log tail and a failed job's log leave the node with the v
     "Error: Guest command got no answer within 13000 ms",
   ].join("\n");
   const broken = "pylon-broken" as PylonId;
-  fake.pylons.set(broken, { pylonId: broken, vm: "broken", checkpoint: null, image, bootedAt: null, detail: "the controller failed to boot the VM", cause: "controller", logTail: log });
+  fake.pylons.set(broken, { pylonId: broken, vm: "broken", checkpoint: null, image, detail: "the controller failed to boot the VM", cause: "controller", logTail: log });
   for await (const e of client.observe(AbortSignal.timeout(5000))) {
     const observed = (e.type === "snapshot" ? e.observation : assert.fail()).pylons.find((p) => p.pylonId === broken);
     assert.deepEqual(observed, { pylonId: broken, phase: "broken", detail: "the controller failed to boot the VM", cause: "controller", logTail: redactedLog });
@@ -628,7 +628,7 @@ test("a command for a pylon that is not running is refused as not-running", asyn
   const guest = fakeGuest(() => { throw new Error("no exec expected"); });
   const { client, fake } = await setup(t, {}, guest);
   await assert.rejects(client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
-  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: null });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, sessions: null });
   await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { code: "not-running" });
   assert.deepEqual(guest.execs, []);
 });
@@ -1066,9 +1066,9 @@ test("a stopped pylon's observation carries the sessions its backend kept from t
   const seen = async () => {
     for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
   };
-  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: recorded });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, sessions: recorded });
   assert.deepEqual(await seen(), { pylonId, phase: "stopped", checkpoint: "ckpt-unit-1", sessions: recorded });
-  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: null });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, sessions: null });
   assert.deepEqual(await seen(), { pylonId, phase: "stopped", checkpoint: "ckpt-unit-1", sessions: null });
 });
 
@@ -1264,7 +1264,7 @@ test("a count of attached terminals that fails is logged again after its pylon w
   const failures = () => logged.filter((line) => line.includes("attached terminals")).length;
   assert.equal(await phase(), "running");
   assert.equal(failures(), 1);
-  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, bootedAt: null, sessions: null });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, sessions: null });
   assert.equal(await phase(), "stopped");
   fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: "ckpt-unit-1", image, bootedAt: "2027-01-01T01:00:00Z" });
   assert.equal(await phase(), "running");
@@ -1776,7 +1776,7 @@ test("probe git observations derive pushed-branch outputs and bound reads across
   await snapshot();
   assert.equal(reads, 3);
   assert.equal(logged.filter((line) => line.includes(" git:")).length, 1, "persistent failures log only once");
-  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: null, image, bootedAt: null, sessions: null });
+  fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: null, image, sessions: null });
   await snapshot();
   assert.equal(reads, 3, "paused pylons are not read or woken");
   readable = true;
@@ -1910,7 +1910,7 @@ test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind 
   assert.ok(late.phase === "running");
   assert.equal(late.git, null, "late replies do not overwrite the timed-out snapshot or its cache");
   recovering = true;
-  fake.pylons.set(stalled, { ...fake.pylons.get(stalled)!, bootedAt: "2027-01-01T00:01:00Z" });
+  fake.pylons.set(stalled, { pylonId: stalled, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:01:00Z" });
   const recovered = (await snapshot()).find((p) => p.pylonId === stalled)!;
   assert.ok(recovered.phase === "running");
   assert.deepEqual(recovered.git, facts);

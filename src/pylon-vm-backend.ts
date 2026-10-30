@@ -15,7 +15,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
-import { JobFailure, type ArtifactStore, type BackendPylon, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
+import { JobFailure, type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
 import { chatgptTokenGrant, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit, shellQuote as q } from "./project.ts";
 import { isImageId, isTemplateId, maxPylonIdLength, pylonIdSchema, type PausedSession, type PylonId } from "./protocol.ts";
@@ -403,12 +403,15 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     }
   }
 
-  function vmState(instance: Inspection): Pick<BackendPylon, "vm" | "detail" | "cause"> {
+  /** A stopped instance's sessions are in its sidecar, which only list() reads. */
+  function vmState(instance: Inspection): Exclude<BackendVm, { vm: "stopped" }> | { vm: "stopped" } {
     const { status } = instance;
     switch (status.state) {
       case "starting": case "unavailable": return { vm: "booting" };
       case "running":
-        if (status.startupError === undefined) return { vm: "running" };
+        if (status.startupError === undefined) {
+          return status.bootedAt === undefined ? { vm: "broken", detail: "the controller reports running with no boot time", cause: "controller" } : { vm: "running", bootedAt: status.bootedAt };
+        }
         if (failureUnknown(status)) return { vm: "broken", detail: status.startupError, cause: "unknown" };
         if (!setupFailed(status)) return { vm: "broken", detail: status.startupError, cause: "services" };
         // A pause would save the failure onto the completed disk, so one there counts as saved too.
@@ -435,14 +438,13 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       });
       if (record === null) return null;
       const up = vmHolds.safeParse(["starting", "unavailable", "running", "stopping"].includes(instance.status.state) ? instance.status.resources : undefined);
+      const vm: BackendVm = state.vm === "stopped" ? { vm: "stopped", sessions: sidecar.sessions ?? null }
+        : state.vm === "broken" ? { ...state, logTail: await templates.controllerLogTail(instanceDir(pylonId)) } : state;
       return {
         pylonId,
-        ...state,
-        checkpoint: state.vm === "stopped" ? sidecar.pausing ?? sidecar.checkpoint : sidecar.checkpoint,
-        ...state.vm === "stopped" ? { sessions: sidecar.sessions ?? null } : {},
-        ...state.vm === "broken" ? { logTail: await templates.controllerLogTail(instanceDir(pylonId)) } : {},
+        ...vm,
+        checkpoint: vm.vm === "stopped" ? sidecar.pausing ?? sidecar.checkpoint : sidecar.checkpoint,
         image: image as ImageId,
-        bootedAt: state.vm === "running" ? instance.status.bootedAt ?? null : null,
         holds: { cpus: up.data?.cpus ?? 0, memoryGiB: up.data?.memoryGiB ?? 0, diskGiB: record.config.diskGiB },
       };
     }));
