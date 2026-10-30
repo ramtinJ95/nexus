@@ -199,13 +199,14 @@ const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "c
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
+/** What a landing that authorized its merge, or is deploying or rolling back, does now, or null for any other review. */
+const landingVerb = (r: Review): "deploys" | "rolls back" | "merges" | null =>
+  r.phase.kind === "deploying" ? "deploys" : r.phase.kind === "rolling-back" ? "rolls back" : r.phase.kind === "merging" && r.phase.authorized !== null ? "merges" : null;
 /**
- * A landing that authorized its merge, or is deploying or rolling back, is seen through, so the person cannot cancel it.
- * A review that ended for the person can be, so it stops waiting on them, as nothing else ends it once its pull request
- * merged outside it.
+ * A landing under way is seen through, so the person cannot cancel it. A review that ended for the person can be, so
+ * it stops waiting on them, as nothing else ends it once its pull request merged outside it.
  */
-const seenThrough = (r: Review) => r.phase.kind === "deploying" || r.phase.kind === "rolling-back" || (r.phase.kind === "merging" && r.phase.authorized !== null);
-export const cancellable = (r: Review) => (!ended.has(r.phase.kind) || needsPerson(r)) && !seenThrough(r);
+export const cancellable = (r: Review) => (!ended.has(r.phase.kind) || needsPerson(r)) && landingVerb(r) === null;
 
 /** A needs-person phase whose holds are `items`. A string is a reason of the loop's own. */
 export const personPhase = (...items: readonly (Hold | string)[]) => {
@@ -769,10 +770,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   function landingAhead(r: Review): string | null {
     if (isDraining(registry.drain())) return "a deploy drains the control plane";
     for (const other of registry.reviews()) {
-      if (other.id === r.id || !deploys(other)) continue;
-      if (other.phase.kind === "deploying") return `${other.id} deploys`;
-      if (other.phase.kind === "rolling-back") return `${other.id} rolls back`;
-      if (other.phase.kind === "merging" && other.phase.authorized !== null) return `${other.id} merges`;
+      const verb = other.id === r.id || !deploys(other) ? null : landingVerb(other);
+      if (verb !== null) return `${other.id} ${verb}`;
     }
     // A landing whose deploy and rollback both failed, or one with no release to roll back to, leaves its release
     // desired, which must not become the next landing's rollback target.
@@ -844,7 +843,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (gone !== null) return gone;
       if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
       // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
-      if (JSON.stringify(registry.review(r.builder)) !== JSON.stringify(r)) return r;
+      if (!registry.isCurrentReview(r)) return r;
       if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
       return { ...r, outbox: null, since: r.outbox.attempted };
     }

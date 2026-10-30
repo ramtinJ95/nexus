@@ -574,6 +574,7 @@ export function openRegistry(path: string, clock = Date.now) {
     const record = recordOf<Review>("reviews", "builder", builder);
     return record === null ? null : storedReview(record);
   };
+  const isCurrentReview = (review: Review) => JSON.stringify(storedReviewOf(review.builder)) === JSON.stringify(review);
 
   function saveQueued(record: QueuedRecord, key?: StartKey) {
     transaction(() => {
@@ -1062,6 +1063,8 @@ export function openRegistry(path: string, clock = Date.now) {
     newestEvent: () => String(sql("SELECT max(id) AS id FROM events").get()?.id ?? 0),
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     review: storedReviewOf,
+    /** Whether `review` is the builder's review as stored, so no other save came since it was read. */
+    isCurrentReview,
     reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
@@ -1074,8 +1077,8 @@ export function openRegistry(path: string, clock = Date.now) {
      */
     saveReview(review: Review, archive: readonly ThreadId[] = [], previous?: Review): boolean {
       return transaction(() => {
+        if (previous !== undefined && !isCurrentReview(previous)) return false;
         const before = storedReviewOf(review.builder);
-        if (previous !== undefined && JSON.stringify(before) !== JSON.stringify(previous)) return false;
         for (const id of archive) setThreadStatus(id, "archived");
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
