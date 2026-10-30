@@ -26,7 +26,8 @@ import { retryRefusal } from "../reconcile.ts";
 import { singleFlight } from "../single-flight.ts";
 import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";
-import { gib, refusals, weighNodes, type Weighed } from "./placement.ts";
+import { gib, refusals, weighNodes } from "./placement.ts";
+import type { Weighed } from "./thread-store.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 

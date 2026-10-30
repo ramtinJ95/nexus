@@ -5,9 +5,6 @@ import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, Placement, Registry, Room, StoredPylon, Weighed } from "./registry.ts";
 
-// Temporary: Placement, Room and Weighed moved to registry.ts, and E1 deletes this re-export.
-export type { Placement, Room, Weighed } from "./registry.ts";
-
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
 export function placeAuto(registry: Registry, need: Need): Placement {
