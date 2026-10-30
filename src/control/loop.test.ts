@@ -511,7 +511,8 @@ test("a cleanup whose delete the probe forgot across a control-plane and probe r
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts" });
+  const failure = { at: 1, code: "backend" as const, message: "boom" };
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: failure } });
 
   await archivedAgo(registry, shift, thread, archivedDiskMs);
   await until("the delete runs", () => fake.running().length === 1);
@@ -529,6 +530,7 @@ test("a cleanup whose delete the probe forgot across a control-plane and probe r
   run(t, after, fake.probe);
   await until("the cleanup is finished", () => !after.cleanupRequested(thread.pylonId) && after.pylon(thread.pylonId)?.submitted === null);
   assert.equal(after.pylon(thread.pylonId)?.failed, null);
+  assert.deepEqual(after.pylon(thread.pylonId)?.attempts, { count: 0, last: null }, "the deleted disk's failed attempts go with it");
   assert.deepEqual(after.claudeTranscript(thread.id)?.cursor, transcriptStart);
   after.setThreadStatus(thread.id, "active");
   after.recordActivity(thread.id, { human: Date.now() });

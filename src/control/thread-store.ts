@@ -479,7 +479,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     /**
      * Once the node no longer has the pylon, the disk took the Claude transcript and whatever failed on it. The thread's
      * transcript is read from the start again, keeping the stored entries, so the session's new file appends after them
-     * rather than reading as a replaced one, and the pylon's failure is cleared, so an unarchive boots it fresh.
+     * rather than reading as a replaced one, and the pylon's failure and failed attempts are cleared, so an unarchive boots
+     * it fresh.
      */
     finishCleanup(pylonId: PylonId) {
       transaction(() => {
@@ -487,7 +488,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         if (thread === undefined) return;
         sql("UPDATE claude_transcripts SET byte_offset = ?, skipping = ?, before_hash = ? WHERE thread = ?")
           .run(transcriptStart.offset, transcriptStart.skipping ? 1 : 0, transcriptStart.before, thread);
-        sql("UPDATE pylons SET failed = NULL WHERE id = ?").run(pylonId);
+        sql(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 0 WHERE id = ?`).run(pylonId);
         updateAttention(thread);
       });
     },

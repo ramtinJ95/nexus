@@ -1187,7 +1187,7 @@ test("a finished disk cleanup restarts the transcript, keeping its entries for t
   const registry = seeded(t, tempDb());
   const read = (from: number, entries: ClaudeEntry[], to: number, reset = false) => ({ session: "s1", from: cursorAt(from), entries, cursor: cursorAt(to), reset, readAt: to });
   assert.equal(registry.appendClaudeRead(threadId, read(0, [reply(0), reply(1)], 100)), true);
-  registry.savePylon({ ...registry.pylon(pylonId)!, failed: "gave up" });
+  registry.savePylon({ ...registry.pylon(pylonId)!, failed: "gave up", attempts: { count: 5, last: { at: 1, code: "backend", message: "boom" } }, retrying: true });
   registry.finishCleanup(pylonId);
   assert.deepEqual(registry.claudeTranscript(threadId)?.cursor, cursorAt(100), "no cleanup was requested, so nothing changes");
   assert.equal(registry.pylon(pylonId)?.failed, "gave up");
@@ -1198,7 +1198,7 @@ test("a finished disk cleanup restarts the transcript, keeping its entries for t
   registry.finishCleanup(pylonId);
   assert.equal(registry.cleanupRequested(pylonId), false);
   assert.deepEqual(registry.claudeTranscript(threadId), { session: "s1", cursor: transcriptStart, dropped: 0, readAt: 100 });
-  assert.equal(registry.pylon(pylonId)?.failed, null);
+  assert.deepEqual([registry.pylon(pylonId)?.failed, registry.pylon(pylonId)?.attempts, registry.pylon(pylonId)?.retrying], [null, { count: 0, last: null }, false]);
   assert.deepEqual(registry.claudeEntries(threadId), [reply(0), reply(1)]);
 
   assert.equal(registry.appendClaudeRead(threadId, read(0, [reply(2)], 50)), true);

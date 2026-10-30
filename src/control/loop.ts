@@ -186,7 +186,7 @@ export function startLoop(options: LoopOptions): Loop {
       if (nodeObservation !== null && registry.cleanupRequested(pylonId)) {
         if (!present) {
           registry.finishCleanup(pylonId);
-          stored = { ...stored, failed: null };
+          stored = withLive(registry.pylon(pylonId)!, thread, link);
         } else if (stored.submitted?.job.kind !== "delete" && desiredPhase(thread, Date.now()) !== "deleted") registry.dropCleanup(pylonId);
       }
       const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
