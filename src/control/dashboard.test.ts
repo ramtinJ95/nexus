@@ -2491,3 +2491,11 @@ test("a swap keeps what the reader filled in on each form it replaces, and the s
   assert.deepEqual(values(newAsk!), ["picked-0=A:true", "picked-0=B:false", "own-0=my own"]);
   assert.deepEqual(values(newPrompt!), ["text="], "the composer restores its own draft");
 });
+
+test("a page's icon template holds only the icons client.js clones", async (t) => {
+  const s = await seeded(t);
+  const template = /<template id="icons">(.*?)<\/template>/.exec((await s.call("GET", "/")).text)![1]!;
+  assert.deepEqual([...template.matchAll(/class="i i-([a-z]+)"/g)].map((m) => m[1]), ["chevron", "folder"]);
+  const client = await readFile(new URL("./dashboard/client.js", import.meta.url), "utf8");
+  assert.deepEqual([...new Set([...client.matchAll(/iconOf\("([a-z]+)"\)/g)].map((m) => m[1]))].sort(), ["chevron", "folder"]);
+});

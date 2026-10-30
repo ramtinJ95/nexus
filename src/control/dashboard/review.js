@@ -42,7 +42,7 @@ export function rowsOf(file) {
  * Where a row is in its file, as a note keeps it: a removed row by its old line number, any other by its new one.
  * The new file is the working tree on every base, so a note on it finds its rows again after the base changes.
  */
-export const anchorOf = (row) => row.type === "deletion" ? { side: "deletions", line: row.old } : { side: "additions", line: row.new };
+const anchorOf = (row) => row.type === "deletion" ? { side: "deletions", line: row.old } : { side: "additions", line: row.new };
 const sameAnchor = (a, b) => a.side === b.side && a.line === b.line;
 const sign = { context: " ", deletion: "-", addition: "+" };
 const quoteOf = (rows) => rows.map((row) => `${sign[row.type]}${row.text}`);
@@ -100,7 +100,7 @@ function fence(lines) {
 const untab = (text) => text.replaceAll("\t", "    ");
 
 /** The line that opens a note's entry in the review, after its number. */
-export const noteHeader = (note) => `**[${kinds[note.kind].label.toUpperCase()}]** \`${note.path}\` ${linesLabel(note.lines)}`;
+const noteHeader = (note) => `**[${kinds[note.kind].label.toUpperCase()}]** \`${note.path}\` ${linesLabel(note.lines)}`;
 
 /**
  * The review after a message is sent: `sent` is what the composer held when the send began, the review composed into
