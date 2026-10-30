@@ -34,6 +34,16 @@ test("every poll puts the current token to every probe, so a probe that missed o
   ]);
 });
 
+test("a node that joins after the handoff starts gets the token at the next poll", async () => {
+  const p = probes("rj-firebat", "infra-2");
+  const following = p.clients.slice(0, 1);
+  const handoff = chatgptTokenHandoff({ probes: () => following, token: async () => token, log: () => {} });
+  await handoff.poll();
+  following.push(p.clients[1]!);
+  await handoff.poll();
+  assert.deepEqual(p.put.map(([node]) => node), ["rj-firebat", "rj-firebat", "infra-2"]);
+});
+
 test("without a ChatGPT login the handoff puts nothing", async () => {
   const p = probes("rj-firebat");
   const logged: string[] = [];
