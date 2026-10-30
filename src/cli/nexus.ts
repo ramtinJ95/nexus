@@ -48,6 +48,10 @@ import { version } from "../version.ts";
  * that reports its version, so one that reports none is older.
  */
 const minControlVersion = "0.53.0";
+/** A control plane older than `minControlVersion`, which no retry fixes. */
+class OutdatedControl extends CliError {}
+/** What a watch or a follow reports and retries through: a control plane unreachable or failing, though not one too old. */
+const transient = (err: CliError): err is CliError & { kind: "unreachable" | "failed" } => (err.kind === "unreachable" || err.kind === "failed") && !(err instanceof OutdatedControl);
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
 const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
@@ -788,7 +792,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   const failing = new Map<"poll" | "stream", string>();
   let recovered = false;
   const failed = (source: "poll" | "stream", err: unknown) => {
-    if (!(err instanceof CliError) || (err.kind !== "unreachable" && err.kind !== "failed")) throw err;
+    if (!(err instanceof CliError) || !transient(err)) throw err;
     if (![...failing.values()].includes(err.message)) emit({ type: "error", thread: id, kind: err.kind, message: err.message }, `-- ${err.message}. Retrying`);
     failing.set(source, err.message);
   };
@@ -1075,7 +1079,7 @@ const commands: Readonly<Record<string, Command>> = {
         while (!stop.signal.aborted) {
           try { await follow(`/v1/events?${query}`, (data) => print(data as NexusEvent, stop.signal), stop.signal, (id) => query.set("since", id)); }
           catch (err) {
-            if (err instanceof CliError && err.kind !== "unreachable" && err.kind !== "failed") throw err;
+            if (err instanceof CliError && !transient(err)) throw err;
             if (!stop.signal.aborted) console.error(`nexus: ${(err as Error).message}; reconnecting`);
           }
           await sleep(1000, undefined, { signal: stop.signal }).catch(() => undefined);
@@ -1531,7 +1535,7 @@ function checkVersion(url: URL, health: unknown): void {
   const reported = (health as { version?: unknown } | null)?.version;
   const parts = versionParts(reported);
   if (parts !== null && atLeast(parts, versionParts(minControlVersion)!)) return;
-  throw new CliError("failed", `the control plane at ${url.origin} runs Nexus ${typeof reported === "string" ? reported : `older than ${minControlVersion}`}, and this CLI needs ${minControlVersion} or later. Upgrade it, as deploy/README.md describes`);
+  throw new OutdatedControl("failed", `the control plane at ${url.origin} runs Nexus ${typeof reported === "string" ? reported : `older than ${minControlVersion}`}, and this CLI needs ${minControlVersion} or later. Upgrade it, as deploy/README.md describes`);
 }
 
 async function checked(endpoint: Endpoint): Promise<Endpoint> {
@@ -1596,9 +1600,10 @@ async function run(argv: readonly string[]): Promise<void> {
   if (positionals.length < min || positionals.length > max) {
     throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
-  // Only once a command calls the API, since connect sets the URL rather than reading it.
+  // Only once a command calls the API, since connect sets the URL rather than reading it. A failed health read is
+  // not kept, so a watch's next try reads it again.
   let target: Promise<Endpoint> | undefined;
-  const endpoint = () => target ??= settings(values).then(checked);
+  const endpoint = () => target ??= settings(values).then(checked).catch((err: unknown) => { target = undefined; throw err; });
   const result = await command.run(async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs), positionals, values,
     async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path) });
   if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);

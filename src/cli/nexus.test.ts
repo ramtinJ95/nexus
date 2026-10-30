@@ -1264,15 +1264,38 @@ async function bare(t: TestContext, args: readonly string[], env: Record<string,
 test("a command refuses a control plane that reports no version, or one older than the CLI reads, and sends nothing past health", async (t) => {
   // 0.9.99 is older though it sorts after 0.53.0 as text.
   for (const [health, runs] of [[{ commit: "a".repeat(40), https: {} }, /older than \d+\.\d+\.\d+/], [{ commit: null, version: "0.9.99" }, /0\.9\.99/]] as const) {
-    const old = await versioned(t, health);
-    const res = await bare(t, ["projects"], { NEXUS_URL: old.url });
-    assert.equal(res.code, 1, res.stderr);
-    assert.match(res.stderr, new RegExp(`^nexus: the control plane at ${old.url.replaceAll(".", "\\.")} runs Nexus ${runs.source}, and this CLI needs \\d+\\.\\d+\\.\\d+ or later\\. Upgrade it, as deploy/README\\.md describes\n$`));
-    assert.deepEqual(old.paths, ["/v1/health"]);
+    // A watch and a follow retry through a failing control plane, but not through one too old.
+    for (const args of [["projects"], ["events", "--follow"], ["watch", "th-0123456789ab"]]) {
+      const old = await versioned(t, health);
+      const res = await bare(t, args, { NEXUS_URL: old.url });
+      assert.equal(res.code, 1, `${args[0]}: ${res.stderr}`);
+      assert.match(res.stderr, new RegExp(`^nexus: the control plane at ${old.url.replaceAll(".", "\\.")} runs Nexus ${runs.source}, and this CLI needs \\d+\\.\\d+\\.\\d+ or later\\. Upgrade it, as deploy/README\\.md describes\n$`), args[0]!);
+      assert.deepEqual(old.paths, ["/v1/health"], args[0]!);
+    }
   }
   const current = await versioned(t, { commit: null, version });
   assert.deepEqual(await bare(t, ["projects"], { NEXUS_URL: current.url }).then((r) => [r.code, r.stdout]), [0, "No projects.\n"]);
   assert.deepEqual(current.paths, ["/v1/health", "/v1/projects"]);
+});
+
+test("a follow whose first health read fails reads it again, and follows once the control plane answers", { timeout: 30_000 }, async (t) => {
+  const paths: string[] = [];
+  const followed = Promise.withResolvers<void>();
+  let failures = 1;
+  const server = createHttpServer((req, res) => {
+    paths.push(req.url!.split("?")[0]!);
+    if (req.url === "/v1/health" && failures-- > 0) return void res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: "starting" }));
+    withHealth((_req, stream) => {
+      stream.writeHead(200, { "content-type": "text/event-stream" }).write(": connected\n\n");
+      followed.resolve();
+    })(req, res);
+  });
+  const port = await listening(t, server);
+  t.after(() => server.closeAllConnections());
+  const child = spawn(process.execPath, [cli, "events", "--follow", "--url", `http://127.0.0.1:${port}`, "--socks", "none"]);
+  t.after(() => { child.kill(); });
+  await followed.promise;
+  assert.deepEqual(paths, ["/v1/health", "/v1/health", "/v1/events"]);
 });
 
 test("connect refuses a control plane older than the CLI reads, and saves nothing", async (t) => {
