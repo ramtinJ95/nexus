@@ -17,7 +17,7 @@ async function setup(t: import("node:test").TestContext, initial?: (gatewayOrigi
   const dir = await mkdtemp(join(tmpdir(), "nexus-serve-"));
   t.after(() => rm(dir, { recursive: true }));
   const routesFile = join(dir, "routes.json");
-  const gateway = await startGateway({ port: 0, routes: new Map(), origin: () => { throw new Error("unused"); }, onHit: () => {} });
+  const gateway = await startGateway({ port: 0, routes: new Map(), origin: () => ({ unavailable: "unused" }), onHit: () => {} });
   t.after(() => gateway.close());
   const tailscale = fakeTailscale(initial && await initial(gateway.origin));
   const warm = viaGateway(() => gateway.origin);

@@ -7,6 +7,7 @@ import { once } from "node:events";
 import { STATUS_CODES, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeader, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { pipeline } from "node:stream";
+import type { PreviewOrigin } from "../backend.ts";
 import type { ServiceName } from "../project.ts";
 import type { PylonId } from "../protocol.ts";
 
@@ -20,10 +21,12 @@ export interface GatewayOptions {
   port: number;
   /** The table to route by, as loaded from the routes file. It becomes PreviewGateway.routes. */
   routes: Map<number, PreviewRoute>;
-  /** Throws when the pylon cannot serve right now, such as when it is paused. The browser then gets a waking page. */
-  origin(route: PreviewRoute): `http://127.0.0.1:${number}`;
+  /** A browser gets a waking page for `unavailable`. A throw is a fault, which is logged and answered with 502. */
+  origin(route: PreviewRoute): PreviewOrigin | { unavailable: string };
   /** Called on the first request for a route, then at most once per hitIntervalMs. */
   onHit(hit: PreviewHit): void;
+  /** Default console.error. */
+  log?: (message: string) => void;
 }
 
 export interface PreviewGateway {
@@ -50,6 +53,7 @@ type Answer = { status: number; headers: OutgoingHttpHeaders; body: string };
 
 export async function startGateway(options: GatewayOptions): Promise<PreviewGateway> {
   const { routes } = options;
+  const log = options.log ?? console.error;
   const lastHit = new Map<string, number>();
   /** Upgraded sockets leave the HTTP server's bookkeeping, so closeAllConnections does not reach them. */
   const tunnels = new Set<Socket>();
@@ -75,9 +79,12 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
     // Reported before the origin is asked, because a hit on a paused pylon is what wakes it.
     reportHit(route, req);
     try {
-      return { origin: new URL(options.origin(route)), port };
+      const origin = options.origin(route);
+      return typeof origin === "string" ? { origin: new URL(origin), port } : waking(req, route, origin.unavailable);
     } catch (err) {
-      return waking(req, route, (err as Error).message);
+      const message = `the preview origin of ${route.service} on ${route.pylonId} failed: ${(err as Error).message}`;
+      log(message);
+      return plain(502, message);
     }
   }
 

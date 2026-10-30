@@ -17,6 +17,7 @@ import { bootHooks, createPylonVmBackend, hostNestsKvm, piChatgptLoginCommand, t
 import { settled, type Inspection } from "./pylon-vm/contracts.ts";
 import { identityOf } from "./pylon-vm/identity.ts";
 import { asUser, imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
+import { saveJson } from "./json-file.ts";
 import { chatgptTokenGrant, type BootInputs } from "./project.ts";
 import { connectProbe, type BrokenCause, type NodeName, type ProbeEvent, type PylonId, type TailnetNodeId } from "./protocol.ts";
 import { startProbe } from "./probe/server.ts";
@@ -448,15 +449,28 @@ test("a spawn with previews on a node without a preview host fails as invalid an
 test("a preview origin is the loopback portal the controller reports, and a paused or absent pylon has none", async () => {
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-origin", "running");
-  const status = (state: string) => writeFile(join(dir, "status.json"), JSON.stringify({ name: "pylon-origin", state, previews: { web: "http://127.0.0.1:40001", "port-6006": "http://127.0.0.1:40002" } }));
+  const status = (state: string, previews: Record<string, string> = { web: "http://127.0.0.1:40001", "port-6006": "http://127.0.0.1:40002" }) =>
+    saveJson(join(dir, "status.json"), { name: "pylon-origin", state, previews });
   await status("running");
   const guest = backend.guest("pylon-origin" as PylonId);
   assert.equal(guest.previewOrigin("web"), "http://127.0.0.1:40001");
   assert.equal(guest.previewOrigin("port-6006"), "http://127.0.0.1:40002");
-  assert.throws(() => guest.previewOrigin("api"), /pylon-origin has no preview of api/);
+  assert.deepEqual(guest.previewOrigin("api"), { unavailable: "pylon-origin has no preview of api" });
   await status("stopped");
-  assert.throws(() => guest.previewOrigin("web"), /pylon-origin is stopped/);
-  assert.throws(() => backend.guest("pylon-absent" as PylonId).previewOrigin("web"), /pylon-absent is not on this node/);
+  assert.deepEqual(guest.previewOrigin("web"), { unavailable: "pylon-origin is stopped" }, "a status replaced by rename is read on the next call");
+  await status("running", { web: "http://127.0.0.1:40003" });
+  assert.equal(backend.guest("pylon-origin" as PylonId).previewOrigin("web"), "http://127.0.0.1:40003");
+  assert.deepEqual(backend.guest("pylon-absent" as PylonId).previewOrigin("web"), { unavailable: "pylon-absent is not on this node" });
+});
+
+test("a status file that is not JSON, or names an origin that is not a loopback port, is a fault and throws", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-fault", "running");
+  const guest = backend.guest("pylon-fault" as PylonId);
+  await writeFile(join(dir, "status.json"), "{ not json");
+  assert.throws(() => guest.previewOrigin("web"), SyntaxError);
+  await saveJson(join(dir, "status.json"), { name: "pylon-fault", state: "running", previews: { web: "http://10.0.0.5:3000" } });
+  assert.throws(() => guest.previewOrigin("web"), /reports http:\/\/10\.0\.0\.5:3000 as the preview origin of web, which is not a loopback port/);
 });
 
 test("a raw stream runs its argv unchanged over SSH to the forwarder the controller hands out, stdout only", async (t) => {
@@ -545,7 +559,7 @@ test("ensure, restart and service-start answer once each service they were answe
     if (action.op === "status") return [...reads.shift()!.map((state, i) => fact(["api", "web"][i]!, state)), fact("port-6006", "ready")];
     // An ensure or restart of web answers about the api it references too.
     return action.action === "service-start" ? [fact("web", "starting")] : [fact("api", "starting"), fact("web", "starting")];
-  });
+  }, new Map());
   reads = [["starting", "starting"], ["failed", "ready"]];
   assert.deepEqual(await guest.services("ensure"), { services: [fact("api", "failed"), fact("web", "ready")] });
   reads = [["starting", "ready"], ["ready", "ready"]];

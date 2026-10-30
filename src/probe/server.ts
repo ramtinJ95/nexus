@@ -133,6 +133,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   if (backend.eventJournal !== undefined) await mkdir(dirname(backend.eventJournal), { recursive: true, mode: 0o700 });
   const journal = eventJournal(backend.eventJournal ?? ":memory:");
   const shutdown = new AbortController();
+  const log = options.log ?? console.error;
   const previews = options.previews === undefined ? null : {
     ...options.previews,
     gateway: await startGateway({
@@ -140,6 +141,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       routes: await readRoutes(options.previews.routesFile),
       origin: ({ pylonId, service }) => backend.guest(pylonId).previewOrigin(service),
       onHit: (hit) => emit({ type: "preview-hit", ...hit }),
+      log,
     }),
   };
   const pylons = new Map<PylonId, PylonState>();
@@ -194,7 +196,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const busy = new Map<Subject, JobId>();
   const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void }>();
   const runningJobs = new Set<Promise<void>>();
-  const log = options.log ?? console.error;
   /** Upgraded sockets, which the HTTP server no longer tracks, so close() ends them itself. */
   const streamSockets = new Set<Duplex>();
 

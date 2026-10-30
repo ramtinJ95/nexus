@@ -105,9 +105,15 @@ export interface Guest {
    * service's preview owns, or null.
    */
   unlinkPort(port: number): Promise<string | null>;
-  /** Plain-HTTP loopback origin that the probe's preview gateway forwards to. */
-  previewOrigin(service: string): `http://127.0.0.1:${number}`;
+  /**
+   * The origin that the probe's preview gateway forwards to, or why the pylon cannot serve it now, such as when it is
+   * paused. It throws only on a fault, such as a status it cannot read.
+   */
+  previewOrigin(service: string): PreviewOrigin | { unavailable: string };
 }
+
+/** A plain-HTTP loopback origin. */
+export type PreviewOrigin = `http://127.0.0.1:${number}`;
 
 /**
  * Immutable directories under /var/lib/nexus/artifacts/<id>/ with a manifest, at the same path on every

@@ -1,14 +1,14 @@
 /**
  * The Guest of one pylon-vm instance, for the probe. Every call goes through the instance's controller
  * except previewOrigin, which the preview gateway asks synchronously on every request, so it reads the
- * status file the controller rewrites after each services change.
+ * status file the controller rewrites after each services change, and parses it again only once it changed.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Guest } from "../backend.ts";
+import type { Guest, PreviewOrigin } from "../backend.ts";
 import { processStream } from "../process-stream.ts";
 import type { PylonId, ServiceFact } from "../protocol.ts";
 import type { PylonLog } from "../session-wake.ts";
@@ -72,8 +72,14 @@ const loopback = /^http:\/\/127\.0\.0\.1:\d+$/;
 const readyWaitMs = 130_000;
 const readyPollMs = 250;
 
+/**
+ * Each instance's status.json as previewOrigin last parsed it, under its inode, size and mtime. The controller replaces
+ * the file by rename, so every write gets a new inode, even two within one mtime tick.
+ */
+export type StatusCache = Map<PylonId, { stamp: string; state: z.infer<typeof statusSchema>["state"]; previews: Record<string, string> }>;
+
 /** `run` sends an action to the instance's controller, and `dir` is the instance directory. */
-export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<string, unknown>) => Promise<unknown>): Guest {
+export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<string, unknown>) => Promise<unknown>, statuses: StatusCache): Guest {
 	const name = pylonId;
 	/**
 	 * The controller only launches a service and watches its readiness itself, so that no health wait holds its
@@ -150,19 +156,25 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		},
 
 		previewOrigin(service) {
-			let text: string;
+			const path = join(dir, "status.json");
+			let status = statuses.get(pylonId);
 			try {
-				text = readFileSync(join(dir, "status.json"), "utf8");
+				const { ino, size, mtimeNs } = statSync(path, { bigint: true });
+				const stamp = `${ino}:${size}:${mtimeNs}`;
+				if (status?.stamp !== stamp) {
+					const { state, previews = {} } = statusSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+					statuses.set(pylonId, status = { stamp, state, previews });
+				}
 			} catch (err) {
-				if (existsError(err, "ENOENT")) throw new Error(`${pylonId} is not on this node`);
-				throw err;
+				if (!existsError(err, "ENOENT")) throw err;
+				statuses.delete(pylonId);
+				return { unavailable: `${pylonId} is not on this node` };
 			}
-			const status = statusSchema.parse(JSON.parse(text));
-			if (status.state !== "running") throw new Error(`${pylonId} is ${status.state}`);
-			const origin = status.previews?.[service];
-			if (origin === undefined) throw new Error(`${pylonId} has no preview of ${service}`);
+			if (status.state !== "running") return { unavailable: `${pylonId} is ${status.state}` };
+			const origin = status.previews[service];
+			if (origin === undefined) return { unavailable: `${pylonId} has no preview of ${service}` };
 			if (!loopback.test(origin)) throw new Error(`${pylonId} reports ${origin} as the preview origin of ${service}, which is not a loopback port`);
-			return origin as `http://127.0.0.1:${number}`;
+			return origin as PreviewOrigin;
 		},
 	};
 }

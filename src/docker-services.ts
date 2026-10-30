@@ -12,6 +12,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { PreviewOrigin } from "./backend.ts";
 import { exit } from "./exec.ts";
 import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ServiceFact } from "./protocol.ts";
@@ -269,11 +270,13 @@ export function dockerServices() {
       return { services: await facts(container, k, names), logs: await checked(container, `tail -n "$2" ${root}/"$1".log 2>/dev/null || true`, [name, String(lines)]) };
     },
 
-    origin(container: string, service: string): `http://127.0.0.1:${number}` {
-      const k = state(container);
+    /** A declared preview port that Docker published no loopback port for is a fault, not a wake: the container's ports are fixed at `docker run`. */
+    origin(container: string, service: string): PreviewOrigin | { unavailable: string } {
+      const k = known.get(container);
+      if (k === undefined) return { unavailable: `${container} is not running, or no spawn has reached it since the probe started` };
       const decl = k.declared[service];
       const port = decl !== undefined && wantsPreview(decl) ? decl.port : [...k.linked].find((p) => linkedName(p) === service);
-      if (port === undefined) throw new Error(`${container} has no preview of ${service}`);
+      if (port === undefined) return { unavailable: `${container} has no preview of ${service}` };
       const hostPort = k.hostPorts.get(port);
       if (hostPort === undefined) throw new Error(`Docker published no loopback port for ${service}'s port ${port} in ${container}`);
       return `http://127.0.0.1:${hostPort}`;
