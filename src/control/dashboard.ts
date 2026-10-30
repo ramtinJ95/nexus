@@ -846,7 +846,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
   const { thread: t } = d;
   const agent = c.registry.agent(t).kind;
   const read = view === null || view instanceof Error ? null : view;
-  const items = read === null ? [] : itemsOf(read, d.questions ?? [], t.id, () => promptSenders(c.registry, t.id));
+  const items = read === null ? [] : itemsOf(read, () => d.questions ?? [], t.id, () => promptSenders(c.registry, t.id));
   const run = runOf(d, read, items, c.now);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
@@ -1235,7 +1235,7 @@ export function liveFrames(t: Thread, claudeModel: string | null = null, now: ()
   return (served) => {
     const view = agentView(served);
     const model = view.kind === "claude" ? claudeModel : modelOf(view.view);
-    const region = convo(t, view, itemsOf(view, questions(), t.id, senders), model, now()).text;
+    const region = convo(t, view, itemsOf(view, questions, t.id, senders), model, now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
@@ -1523,7 +1523,7 @@ function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
   return items;
 }
 
-const itemsOf = (view: AgentView, questions: readonly Question[], thread: ThreadId, senders: () => PromptSenders): Item[] => view.kind === "claude" ? claudeItems(view.view, questions, thread, senders()) : conversationItems(view.view, thread);
+const itemsOf = (view: AgentView, questions: () => readonly Question[], thread: ThreadId, senders: () => PromptSenders): Item[] => view.kind === "claude" ? claudeItems(view.view, questions(), thread, senders()) : conversationItems(view.view, thread);
 
 /**
  * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a

@@ -35,25 +35,24 @@ import { z } from "zod";
 import { actualState, desiredPhase, retryRefusal, type ActualState, type DesiredPhase, type ThreadStatus } from "../reconcile.ts";
 import { chatgptTokenGrant, gitIdentitySchema, gitUrl, linkedName, reservedPorts, secretHostPattern, secretNamePattern, type BootInputs, type Project, type ProjectId } from "../project.ts";
 import { isImageId, type CommandResult, type NodeHealth, type NodeName, type ProbeClient, type ProbeError, type PylonCommand, type PylonId, type TailnetNodeId } from "../protocol.ts";
-import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { HarnessHost } from "../harness/host.ts";
 import { pinsSchema, type ImageId, type ImageManifest } from "../images.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
-import type { ClaudeSent, JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
+import type { JoinedNode, NodeRecord, Output, PortRange, Preview, Registry, Session, StartKey, Thread, ThreadId } from "./registry.ts";
 import { dashboard, liveFrames, partHash } from "./dashboard.ts";
-import { attachScript, checkoutDir, claudeTextProblem, focusScript, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
-import { claudeConversations, claudeFrames } from "./claude-conversation.ts";
-import { threadAgents, type AgentView, type Watch } from "./thread-agent.ts";
+import { attachScript, checkoutDir, focusScript, herdrSession, sessionHarnessSchema, type SessionHarness } from "../sessions.ts";
+import { claudeConversations } from "./claude-conversation.ts";
+import { agentView, noConversation, threadAgents, type AgentView, type Frames, type ThreadAgents, type Watch } from "./thread-agent.ts";
 import { usageFilter } from "./usage.ts";
 import type { UsageBackfillJob } from "./usage-backfill.ts";
-import { maxRecordBytes, readTranscriptImage, type ClaudeConversation } from "../claude-transcript.ts";
+import { maxRecordBytes, readTranscriptImage } from "../claude-transcript.ts";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, pathsFit, type CheckoutReader, type RefusalKind } from "../checkout-files.ts";
 import { attachRoute, herdrPanePattern, parseAttachQuery } from "../attach-wire.ts";
 import type { PullRequest } from "./github.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
-import { promptSenders, typeIntoClaude } from "./inbox.ts";
+import { promptSenders } from "./inbox.ts";
 import { HttpError, type ApiErrorCode } from "./http-error.ts";
 import { answerRefusal, askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "./questions.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../images/pylon/nexus-ask.ts";
@@ -170,34 +169,8 @@ export interface ListeningPort { port: number; service: string | null; preview: 
 /** A thread as the list reports it, with what the planner wants of its pylon and what its node last reported. */
 export type ThreadRow = Thread & { attention: Attention; desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
 
-/**
- * One event of `GET /v1/threads/:id/events`. The first carries the whole view. Each later one carries what changed
- * since the one before, each part whole: the active context when any entry changed, and each document that changed,
- * or null for one that is gone.
- */
-export interface ViewFrame {
-  entries?: readonly EntryRecord[];
-  docs?: Record<string, JsonObject | null>;
-}
-
-/** Maps each view to what one client has not seen yet, or null when nothing it shows changed. */
-export type Frames<V = ConversationView> = (view: V) => unknown;
+export type { Frames, ViewFrame } from "./thread-agent.ts";
 type EventBatch = ReturnType<Registry["eventBatch"]>;
-
-/** The frames of one client of a thread's event stream. pi-durable's views share every part a commit left alone. */
-export function viewFrames(): Frames {
-  let sent: ConversationView | null = null;
-  return (view) => {
-    const kinds = new Set([...Object.keys(view.docs), ...Object.keys(sent?.docs ?? {})]);
-    const docs = Object.fromEntries([...kinds].flatMap((kind) => view.docs[kind] === sent?.docs[kind] ? [] : [[kind, view.docs[kind] ?? null]]));
-    const frame: ViewFrame = {
-      ...view.entries === sent?.entries ? {} : { entries: view.entries },
-      ...Object.keys(docs).length === 0 ? {} : { docs },
-    };
-    sent = view;
-    return Object.keys(frame).length === 0 ? null : frame;
-  };
-}
 
 /** Streams open at once, across threads and callers. Each holds a watch and renders on every change. */
 export const maxStreams = 16;
@@ -332,9 +305,6 @@ type ImageSource = z.infer<typeof imageSourceSchema>;
 /** A transcript or harness image is named by its hash, so its link never serves other bytes. A file may change. */
 const imageCaching: Readonly<Record<ImageSource["source"], string>> = { transcript: "private, max-age=31536000, immutable", harness: "private, max-age=31536000, immutable", file: "no-cache" };
 
-/** How long a read of a Claude worker's conversation waits for its transcript before answering what is stored. */
-const claudeReadMs = 5_000;
-
 /**
  * What a route needs of a thread's status: the statuses it refuses, and whether the refusal says the pylon stays
  * paused. A deleted thread's conversation and pylon are gone, and an archived thread's pylon stays paused, so its
@@ -353,7 +323,7 @@ interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude"
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, previewPorts, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const claude = claudeConversations({ registry, probes });
-  const agents = threadAgents({ registry, harness, claude });
+  const agents: ThreadAgents = threadAgents({ registry, harness, claude, inPylon, whileRunning, wake: wakeThread, planning: options.planning ?? null });
 
   /** The thread `id` names, or the queue record of one that has not started, which has no row. */
   function lookup(id: string): { thread: Thread } | { queued: QueuedRecord } {
@@ -377,13 +347,20 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const status = need.status === undefined ? undefined : statusNeeds[need.status];
     if (status?.refuses.includes(t.status)) return `thread ${t.id} is ${t.status}${status.paused ? ", so its pylon stays paused" : ""}`;
     if (need.agent === undefined || registry.agent(t).kind === need.agent) return null;
-    return need.agent === "claude" ? `thread ${t.id} has no Claude worker` : `thread ${t.id} has no conversation`;
+    return need.agent === "claude" ? `thread ${t.id} has no Claude worker` : noConversation(t);
   }
 
   function guard(t: Thread, need: Need): Thread {
     const refused = threadRefusal(t, need);
     if (refused !== null) throw new HttpError(409, refused);
     return t;
+  }
+
+  /** The agent of a thread that has one. */
+  function agentOf(t: Thread): ThreadAgents["harness" | "claude"] {
+    const { kind } = registry.agent(t);
+    if (kind === "none") throw new HttpError(409, noConversation(t));
+    return agents[kind];
   }
 
   /** The thread with its status now, which a request that waited may have seen change. */
@@ -485,10 +462,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const pylon = registry.pylon(t.pylonId)!;
     const previews = registry.previews(pylon.pylonId);
     const watch = registry.prWatch(t.id);
-    const agent = registry.agent(t);
+    const { claudeWorker, agent } = agents[registry.agent(t).kind].detail(t);
     return {
       thread: t,
-      ...(agent.kind !== "claude" ? {} : { claudeWorker: { model: agent.worker.model, state: agent.worker.state, ...(agent.worker.message === undefined ? {} : { message: agent.worker.message }) } }),
+      ...claudeWorker === undefined ? {} : { claudeWorker },
       attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(t),
@@ -503,7 +480,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       judgments: registry.judgments(t.id).map(judgmentView),
       planning: registry.planning(t.id) !== null,
       attach: `herdr --session ${herdrSession}`,
-      agent: agent.kind !== "harness" || t.status === "deleted" ? null : { parkedTasks: harness.activity.parked(t.id).length },
+      agent,
     };
   }
 
@@ -659,8 +636,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (status === "deleted") {
       for (const s of open) if (s.thread === t.id) s.end();
       // After the status, which each agent's delete relies on.
-      const agent = registry.agent(t);
-      if (agent.kind !== "none") await agents[agent.kind].delete(t);
+      await agents[registry.agent(t).kind].delete(t);
     }
     return { ...t, status };
   }
@@ -746,71 +722,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return record.status === "started" ? registry.thread(record.id)! : queuedView(registry, record);
   }
 
-  /** A message is human activity, so the pylon wakes while the model answers. */
-  async function sendMessage(t: Thread, body: unknown) {
-    const message = parse(messageSchema, body);
-    registry.recordActivity(t.id, { human: Date.now() });
-    wakeThread(t);
-    const text = options.planning?.compose(t, message.requestId, message.text) ?? message.text;
-    const submission = await harness.send(t.id, text, message.requestId, message.mode);
-    options.planning?.sent(t, message.requestId);
-    return { submission: submission.id };
-  }
-
-  /**
-   * Types a message into the Claude worker's session in the pylon, through inPylon, so it wakes a paused pylon and
-   * resumes Claude, and is refused with a 409 until the pylon runs. Both modes go into Claude's prompt, which takes
-   * a message sent during a turn at its next step. Claude receives the text exactly, so text that cannot be typed as
-   * it is, such as one with a tab, is refused rather than changed.
-   *
-   * The request ID is recorded as sending before the probe is asked, and as sent with the answer, which a resend of
-   * the ID answers again without typing. A send whose answer never came, as one queued in the pylon behind a slow send
-   * past the probe's wait, may still be typed, so a resend of it asks the probe what became of it and answers that. A
-   * send that failed partway, or that the probe no longer knows, may have typed part of the message, so a resend of it
-   * is refused with a 422 for the person to check the conversation. A send that typed nothing, as when the pylon was
-   * not running or Claude waits at a prompt in its terminal, is forgotten, so a resend of its ID types it.
-   */
-  async function sendClaude(t: Thread, session: string | null, model: string | null, body: unknown): Promise<{ claude: ClaudeSent }> {
-    const message = parse(messageSchema, body);
-    const text = message.text.replace(/\r\n?/g, "\n").trim();
-    const problem = claudeTextProblem(text);
-    if (problem !== null) throw new HttpError(400, `Claude cannot take this message as typed: ${problem}`);
-    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`, "not-ready");
-    const stored = registry.claudeMessage(t.id, message.requestId);
-    if (stored?.state === "sent") return { claude: stored.result };
-    const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)).catch((err: Partial<ProbeError>) => {
-      if (err.code !== "unreachable") throw err;
-      throw Object.assign(new Error(`${err.message}. The message may still reach Claude, as one queued in the pylon behind an earlier send does, and reaches it at most once. Send it again under request ID ${message.requestId} to learn what became of it`), { code: "unreachable" });
-    }));
-    if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, or its pylon no longer knows how far it got, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
-    if (typed.kind === "nothing") {
-      const [message, code] = ({
-        blocked: [`Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`, "blocked"],
-        starting: [`Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`, "not-ready"],
-        moved: [`Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`, "moved"],
-      } as const)[typed.outcome];
-      throw new HttpError(409, message, code);
-    }
-    void claude.refresh(t);
-    return { claude: typed.sent };
-  }
-
-  /**
-   * Presses Esc in the Claude worker's pane, which interrupts its turn as Esc at its terminal does. A paused pylon runs no
-   * turn, so it is not woken. Nothing is pressed unless Claude works, so a dialog it waits at is never cancelled.
-   */
-  async function interruptClaude(t: Thread, session: string | null): Promise<void> {
-    if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it has no turn to interrupt`);
-    const { outcome } = await whileRunning(t, (probe, pylonId) => probe.command(pylonId, { kind: "interrupt-claude", session })) as Extract<CommandResult, { kind: "interrupt-claude" }>;
-    if (outcome === "interrupted") return;
-    throw new HttpError(409, {
-      blocked: `Claude waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it`,
-      idle: `Claude is not working, so there is no turn to interrupt, and nothing was pressed`,
-      unknown: `Herdr cannot tell yet whether Claude works or waits at a prompt, so nothing was pressed. Ask again in a moment`,
-      "not-running": `no pane runs Claude session ${session}, so there is no turn to interrupt`,
-    }[outcome], outcome === "blocked" ? "blocked" : undefined);
-  }
-
   /**
    * Runs what a human asked for in the thread's pylon, such as a link, a session open or a checkout read. Asking is
    * human activity, as a message is, so a paused pylon is woken, but the request itself needs the pylon running and
@@ -846,7 +757,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * A read a page makes by itself, such as an image's load, runs only while the pylon runs: it never wakes the pylon
    * or counts as the person's activity, so a page left open lets the pylon sleep.
    */
-  const whileRunning = <T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>) => inPylon(t, act, false);
+  function whileRunning<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>) {
+    return inPylon(t, act, false);
+  }
   const notRunning = (pylonId: PylonId, wakes: boolean) => wakes ? `pylon ${pylonId} is not running yet. This request wakes it, so ask again once it runs`
     : `pylon ${pylonId} is not running, and this request does not wake it`;
   /** Whether the node, online, reports the pylon running, as a Claude transcript's reads ask. */
@@ -935,8 +848,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
   async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>, via: typeof inPylon = inPylon): Promise<T> {
-    const agent = registry.agent(t);
-    const turn = agent.kind === "none" ? null : await agents[agent.kind].latestTurn(t);
+    const turn = await agents[registry.agent(t).kind].latestTurn(t);
     return via(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
@@ -1023,12 +935,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** What a thread page shows: a Claude worker's transcript as last read, the harness conversation's view, or none. */
   async function conversation(t: Thread): Promise<AgentView | null> {
-    const agent = registry.agent(t);
-    switch (agent.kind) {
-      case "harness": return { kind: "harness", view: await agents.harness.view(t) };
-      case "claude": return { kind: "claude", view: await agents.claude.view(t) };
-      case "none": return null;
-    }
+    const view = await agents[registry.agent(t).kind].view(t);
+    return view === null ? null : agentView(view);
   }
 
   function recordImage(body: unknown): ImageManifest {
@@ -1075,8 +983,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const turnRequests = turnGate(draining);
   async function turnsRunning(): Promise<boolean> {
     if (turnRequests.busy() || options.turnsStarting?.()) return true;
-    for (const t of registry.threads()) {
-      if (t.status === "deleted" || registry.agent(t).kind !== "harness") continue;
+    for (const t of registry.harnessThreads()) {
+      if (t.status === "deleted") continue;
       const { docs } = await agents.harness.view(t);
       const live = docs["pi.live"];
       const inbox = docs["pi.inbox"];
@@ -1131,22 +1039,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/events$/, ([, id]) => {
       const t = thread(id!, { status: "kept", agent: "harness" });
-      return { stream: (res) => stream(res, t, () => agents.harness.watch(t), viewFrames()) };
+      return { stream: (res) => stream(res, t, () => agents.harness.watch(t), agents.harness.frames()) };
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, ([, id]) => {
       const t = thread(id!, { status: "kept", agent: "claude" });
-      return { stream: (res) => stream(res, t, () => agents.claude.watch(t), claudeFrames()) };
+      return { stream: (res) => stream(res, t, () => agents.claude.watch(t), agents.claude.frames()) };
     }],
     ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
-      const t = thread(id!);
-      return {
-        stream(res) {
-          const agent = registry.agent(t);
-          return agent.kind === "claude"
-            ? stream<ClaudeConversation>(res, guard(t, { status: "kept" }), () => agents.claude.watch(t), liveFrames(t, agent.worker.model, Date.now, () => registry.questions(t.id), () => promptSenders(registry, t.id)))
-            : stream<ConversationView>(res, guard(t, { status: "kept", agent: "harness" }), () => agents.harness.watch(t), liveFrames(t));
-        },
-      };
+      const t = thread(id!, { status: "kept" });
+      const agent = agentOf(t);
+      return { stream: (res) => stream(res, t, () => agent.watch(t), liveFrames(t, registry.claudeWorker(t.id)?.model ?? null, Date.now, () => registry.questions(t.id), () => promptSenders(registry, t.id))) };
     }],
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, { person: "edit a project" }, async ([, id], r) => {
       const { autoReview, pipeline, ...patch } = parse(projectEditSchema, await r.body());
@@ -1237,10 +1139,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // The body first, so the thread's status is read after the last await before the message is submitted.
     ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, { person: "message a thread", startsTurn: true }, async (m, r) => {
       const body = await r.body();
-      const t = thread(m[1]!);
-      const agent = registry.agent(t);
-      if (agent.kind !== "claude") return { status: 202, body: await sendMessage(guard(t, { status: "open", agent: "harness" }), body) };
-      return { status: 202, body: await sendClaude(guard(t, { status: "open" }), agent.worker.session, agent.worker.model, body) };
+      const t = thread(m[1]!, { status: "open" });
+      return { status: 202, body: await agentOf(t).send(t, parse(messageSchema, body)) };
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/review$/, { person: "start a review" }, async (m, r) => {
       const body = parse(reviewSchema, await r.body({}));
@@ -1275,11 +1175,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (answered.proposal !== undefined) await options.pipeline?.poll();
       return ok(answered);
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, { person: "abort a thread's turn" }, async (m, r) => {
-      const t = thread(m[1]!);
-      const agent = registry.agent(t);
-      if (agent.kind === "claude") await interruptClaude(guard(t, { status: "kept" }), agent.worker.session);
-      else await harness.abort(guard(t, { status: "kept", agent: "harness" }).id);
+    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, { person: "abort a thread's turn" }, async (m) => {
+      const t = thread(m[1]!, { status: "kept" });
+      await agents[registry.agent(t).kind].abort(t);
       return noContent;
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, { person: "retry a thread's turn", startsTurn: true }, async (m) => {
@@ -1328,10 +1226,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return ok(await inCheckout(thread(m[1]!), (c) => c.diff(base, paths)));
     }],
     ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => {
-      const t = thread(m[1]!);
-      if (registry.agent(t).kind !== "claude") return ok(await agents.harness.view(guard(t, { status: "kept", agent: "harness" })));
-      await Promise.race([claude.refresh(guard(t, { status: "kept" })), sleep(claudeReadMs, undefined, { ref: false })]);
-      return ok(claude.view(t));
+      const t = thread(m[1]!, { status: "kept" });
+      return ok(await agents[registry.agent(t).kind].read(t));
     }],
     ["GET", /^\/v1\/images$/, () => ok(imagesView(registry))],
     ["POST", /^\/v1\/images$/, { open: "recording an image boots nothing until a deployer rolls it out" }, async (_, r) => created(recordImage(await r.body()))],
@@ -1449,9 +1345,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** The pane a terminal attached to the thread lands in: its Claude worker's, while the node reports it. */
   function agentPane(t: Thread): string | null {
-    const agent = registry.agent(t);
-    if (agent.kind !== "claude" || agent.worker.session === null) return null;
-    return registry.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === agent.worker.session)?.herdrPane ?? null;
+    const session = registry.claudeWorker(t.id)?.session ?? null;
+    if (session === null) return null;
+    return registry.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === session)?.herdrPane ?? null;
   }
 
   /** The pylon of a thread, as serveAttach asks for it. */
@@ -1470,7 +1366,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       open({ size, term, pane }) {
         registry.recordActivity(t.id, { human: Date.now() });
         wake(node);
-        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", pane ?? agentPane(registry.thread(t.id)!) ?? ""]);
+        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", pane ?? agentPane(t) ?? ""]);
       },
     };
   }
