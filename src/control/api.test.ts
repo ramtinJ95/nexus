@@ -984,6 +984,23 @@ test("linking a port goes through the node's probe, gives it an https port at on
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000, title: "App" })).status, 400, "a preview has no title");
 });
 
+test("a preview that finds no free port answers 503, and any other allocation fault 500", async (t) => {
+  const s = await withThread(t);
+  const allocate = s.registry.allocatePreviews;
+  s.registry.allocatePreviews = (pylon, services) => allocate(pylon, services, { first: 10200, last: 10199 });
+  const full = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
+  assert.equal(full.status, 503);
+  assert.match(full.body.error, /no https port is free for the preview of port-3000/);
+  s.registry.allocatePreviews = () => { throw new Error("database is locked"); };
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 500, body: { error: "database is locked" } });
+});
+
+test("a node's probe that refuses the control plane answers 502", async (t) => {
+  const s = await withThread(t);
+  s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat refused this caller"), { code: "forbidden" }); });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 502, body: { error: "rj-firebat refused this caller" } });
+});
+
 test("linking a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {
   const s = await withThread(t);
   s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
@@ -2870,6 +2887,12 @@ test("an event cursor older than what the log retains is refused with 409", asyn
   for (const path of ["/v1/events?since=1", "/v1/events?since=1&follow=true"]) {
     assert.deepEqual(await s.call("GET", path), { status: 409, body: { error: "event cursor expired; retained events cannot fill the gap" } });
   }
+});
+
+test("an event read that fails for any other reason answers 500, not the expired cursor's 409", async (t) => {
+  const s = await setup(t);
+  s.registry.eventBatch = () => { throw new Error("database disk image is malformed"); };
+  assert.deepEqual(await s.call("GET", "/v1/events?since=0"), { status: 500, body: { error: "database disk image is malformed" } });
 });
 
 test("event followers replay a disconnect gap with since and filter without losing order", async (t) => {

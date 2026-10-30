@@ -496,12 +496,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons");
     const probe = registry.node(name) === undefined ? undefined : probes.get(name);
     if (probe === undefined) throw new HttpError(404, `no node ${name}`);
-    try {
-      return await probe.health();
-    } catch (err) {
-      if ((err as Partial<ProbeError>).code === "unreachable") throw new HttpError(503, (err as Error).message);
-      throw err;
-    }
+    return probe.health();
   }
 
   /**
@@ -744,9 +739,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     } catch (err) {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
       guard(current(t), { status: "pylon" });
-      const code = (err as Partial<ProbeError>).code;
-      if (code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
-      if (code === "unreachable") throw new HttpError(503, (err as Error).message);
+      if ((err as Partial<ProbeError>).code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
       if (err instanceof CheckoutRefused) throw new HttpError(refusalStatus[err.kind], err.message);
       throw err;
     }
@@ -867,11 +860,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   async function linkPort(t: Thread, body: unknown): Promise<Preview> {
     const { port } = parse(previewSchema, body);
     const { service } = await pylonCommand(t, { kind: "link-port", port });
-    try {
-      registry.allocatePreviews(t.pylonId, [service], previewPorts);
-    } catch (err) {
-      throw new HttpError(503, (err as Error).message);
-    }
+    registry.allocatePreviews(t.pylonId, [service], previewPorts);
     wakeThread(t);
     return registry.previews(t.pylonId).find((p) => p.service === service)!;
   }
@@ -1031,10 +1020,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       const kinds = r.query.getAll("kind");
       if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
       const filter: EventFilter = { kinds, ...(r.query.has("thread") ? { thread: r.query.get("thread")! } : {}), ...(r.query.has("project") ? { project: r.query.get("project")! } : {}) };
-      const read = (from: string) => {
-        try { return registry.eventBatch(from, filter); }
-        catch (err) { throw new HttpError(409, (err as Error).message); }
-      };
+      const read = (from: string) => registry.eventBatch(from, filter);
       const first = read(since);
       if (r.query.get("follow") !== "true") return ok(first.events);
       return { stream: (res) => followEvents(res, first, read) };
@@ -1436,7 +1422,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     server.on("request", (req, res) => {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
-        send(res, errorStatus(err), errorBody(err));
+        const reply = errorReply(err);
+        send(res, reply.status, reply.body);
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -1444,7 +1431,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       socket.on("error", () => undefined);
       upgraded.add(socket);
       socket.once("close", () => upgraded.delete(socket));
-      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorStatus(err), errorBody(err)));
+      upgrade(req, socket, head).catch((err: unknown) => refuseUpgrade(socket, errorReply(err)));
     });
     return server;
   }
@@ -1580,12 +1567,22 @@ function pathOf(url: string | undefined): string | null {
   }
 }
 
-const errorBody = (err: unknown): { error: string; code?: ApiErrorCode } =>
-  err instanceof HttpError && err.code !== undefined ? { error: err.message, code: err.code } : { error: (err as Error).message };
-const errorStatus = (err: unknown) => err instanceof HttpError ? err.status : err instanceof DeployDraining ? 409 : err instanceof BodyTooLarge ? 413 : 500;
+/** A node's probe refusing the control plane is a bad gateway, not a refusal of the caller. */
+const probeStatus: Record<ProbeError["code"], number> = { unreachable: 503, "not-running": 409, forbidden: 502 };
+type ErrorReply = { status: number; body: { error: string; code?: ApiErrorCode } };
+
+function errorReply(err: unknown): ErrorReply {
+  const error = (err as Error).message;
+  if (err instanceof HttpError) return { status: err.status, body: err.code === undefined ? { error } : { error, code: err.code } };
+  if (err instanceof DeployDraining) return { status: 409, body: { error } };
+  if (err instanceof BodyTooLarge) return { status: 413, body: { error } };
+  const code = (err as Partial<ProbeError>).code;
+  if (code !== undefined && Object.hasOwn(probeStatus, code)) return { status: probeStatus[code], body: code === "not-running" ? { error, code } : { error } };
+  return { status: 500, body: { error } };
+}
 
 /** An API error reply written on a socket that never upgraded. */
-function refuseUpgrade(socket: Duplex, status: number, error: ReturnType<typeof errorBody>) {
+function refuseUpgrade(socket: Duplex, { status, body: error }: ErrorReply) {
   if (socket.destroyed) return;
   const body = JSON.stringify(error);
   socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncache-control: no-store\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
