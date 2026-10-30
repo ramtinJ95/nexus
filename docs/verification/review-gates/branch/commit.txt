@@ -1,1 +1,1 @@
-branch: 451c62c refactor(github): send every request through one call, keep the ETag cache by recent use, and drop an old head's commit resources
+branch: ba12f7c fix(github): keep the cache bounded when a late not-modified answer returns an evicted resource, and forget closed PRs' heads

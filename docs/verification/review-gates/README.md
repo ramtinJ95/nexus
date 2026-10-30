@@ -16,7 +16,7 @@ docs/verification/review-gates/run.sh origin/main HEAD
 
 | Step | main | branch |
 |---|---|---|
-| The PR watch's first pass | Its 2 PR reads went one at a time, and the pass took 636 ms. | Its 2 PR reads were in flight together, and the pass took 333 ms. `github.log` shows `/pulls/186` and `/pulls/185` requested in the same millisecond. |
+| The PR watch's first pass | Its 2 PR reads went one at a time, and the pass took 617 ms. | Its 2 PR reads were in flight together, and the pass took 340 ms. `github.log` shows `/pulls/186` and `/pulls/185` requested in the same millisecond. |
 | Both links read | `[[186,true],[185,true]]` | The same. |
 | The held review, as `GET /v1/threads/<builder>` returns it | `needs-person` with the reserved hold, no `cause`. | The same, with `cause: "policy"`. |
 | A push to #185 | A new round, `reviewing` at `b3ee8a6`. | The same. |
