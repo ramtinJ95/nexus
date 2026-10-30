@@ -8,7 +8,7 @@ Nexus adapts code from the projects under Adapted code. A comment beside the ada
 
 https://github.com/pingdotgg/t3code
 
-Adapted in `src/control/dashboard.ts` (`clock` and the tool-call summaries), `src/control/dashboard/client.js` (`clock` and the review notes on a diff, after `AnnotatableCodeView` and `DiffCommentAnnotation`) and `src/control/dashboard/review.js` (the quote's fence, after `formatReviewCommentFence`).
+Adapted in `src/control/dashboard.ts` (`clock` and the tool-call summaries), `src/control/dashboard/page.js` (`clock`), `src/control/dashboard/checkout.js` (the review notes on a diff, after `AnnotatableCodeView` and `DiffCommentAnnotation`) and `src/control/dashboard/review.js` (the quote's fence, after `formatReviewCommentFence`).
 
 ```
 MIT License
