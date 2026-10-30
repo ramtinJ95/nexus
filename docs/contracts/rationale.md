@@ -11,14 +11,14 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | Module | Owns | Side |
 |---|---|---|
 | [`src/ids.ts`](../../src/ids.ts) | The shared IDs: nodes, pylons, jobs, projects, artifacts and live hashes. It imports nothing | Both |
-| [`src/protocol.ts`](../../src/protocol.ts) | The ID schemas, the `Job` union, deadlines, the retry table, observations, synchronous commands, streams, `ProbeClient`, `routeAuth` | Both. The wire encoding stays behind two parse functions |
+| [`src/protocol/`](../../src/protocol) | One file per message family, each with its types and its wire codec: the ID schemas and shared fields (`fields.ts`), the `Job` union, deadlines, the retry table and `JobFailure` (`jobs.ts`), observations (`observations.ts`), synchronous commands (`commands.ts`), streams (`streams.ts`), probe errors (`http.ts`), artifact copies (`artifacts.ts`), `routeAuth` (`routes.ts`) and `ProbeClient` (`client.ts`) | Both. Each family's wire encoding stays behind its own parse and encode functions, and the probe never loads `client.ts` |
 | [`src/reconcile.ts`](../../src/reconcile.ts) | The desired phase, the planner, the derived actual state, and record writes from observations | Control plane, pure |
 | [`src/probe/run.ts`](../../src/probe/run.ts) | `runJob`, `runCommand` and `commandPolicies` | Probe |
 | [`src/backend.ts`](../../src/backend.ts) | `VmBackend`, `Guest`, `ArtifactStore`, and the pi-sandbox fork's mapping and changes | Probe |
 | [`src/project.ts`](../../src/project.ts) | The `.amp/services.yaml` schema, `Project`, `BootInputs` and `LiveSpec`, the overlay, and the in-pylon API | Both |
 | [`src/images.ts`](../../src/images.ts) | The image recipe and build, template keys, template choice, and garbage | Both |
 
-A reconcile tick traces through three files. `src/reconcile.ts` plans, `src/protocol.ts` carries, and `src/probe/run.ts` executes against `src/backend.ts`'s `VmBackend`.
+A reconcile tick traces through three files. `src/reconcile.ts` plans, `src/protocol/` carries, and `src/probe/run.ts` executes against `src/backend.ts`'s `VmBackend`.
 
 - **The control plane is the only writer.** Every record comes from `NodeObservation` facts. `Pylon.desiredState` and `actualState` become derived values, not stored fields.
 - **A spawn converges to a spec.** `BootInputs` apply when the VM boots. `LiveSpec` (previews and overlay files) applies on every spawn and is hashed. After a probe restart its observations report `liveHash: null`, and the planner sends spawn again. The probe persists nothing of its own.

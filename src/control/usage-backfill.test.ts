@@ -9,7 +9,8 @@ import { openRegistry, type Registry, type Thread, type ThreadId } from "./regis
 import { addThread as addTestThread, seedRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { desiredPhase, envelope } from "../reconcile.ts";
-import type { JobId, NodeName, NodeObservation, PylonId, PylonObservation } from "../protocol.ts";
+import type { JobId, NodeName, PylonId } from "../ids.ts";
+import type { NodeObservation, PylonObservation } from "../protocol/observations.ts";
 import type { ImageId } from "../images.ts";
 
 const image: ImageId = "img-000000000000";

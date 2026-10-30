@@ -1,10 +1,12 @@
 /** The probe's job runner and command runner: they turn protocol jobs and commands into VmBackend and session calls. */
 import { isPortableArtifactId, type NodeName, type PortableArtifactId, type PylonId } from "../ids.ts";
-import type { ArtifactCopy, CommandResult, Job, PylonCommand } from "../protocol.ts";
+import { JobFailure, type Job } from "../protocol/jobs.ts";
+import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
+import type { ArtifactCopy } from "../protocol/artifacts.ts";
 import type { PreviewAssignment, ServiceName } from "../project.ts";
 import { checkoutDir } from "../session-harness.ts";
 import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "../sessions.ts";
-import { JobFailure, type SecretSource, type VmBackend } from "../backend.ts";
+import { type SecretSource, type VmBackend } from "../backend.ts";
 
 /** Linking or unlinking a pylon's port together with its preview route, so no snapshot read overlaps either. */
 export interface PortLinks {

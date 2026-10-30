@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
-import type { NodeName } from "../protocol.ts";
+import type { NodeName } from "../ids.ts";
 
 const token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJoYXJuZXNzIn0.c2ln";
 

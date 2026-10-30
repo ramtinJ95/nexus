@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { imageType } from "./image-types.ts";
 import { openPython, type OpenPipe } from "./pipe.ts";
-import type { ByteStream } from "./protocol.ts";
+import type { ByteStream } from "./protocol/streams.ts";
 
 const helper = readFileSync(new URL("./checkout-files.py", import.meta.url));
 

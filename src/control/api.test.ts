@@ -51,7 +51,11 @@ import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
 import { releaseOutcome, reportStates, tokenDigest, type ReleaseReport } from "../deploy/model.ts";
 import { call as callJson, testImage, until } from "../test-kit.ts";
-import type { ByteStream, CommandResult, InterruptClaudeOutcome, JobId, NodeHealth, NodeName, NodeObservation, PausedSession, PylonCommand, PylonId, ServiceFact, StreamEnd, TailnetNodeId } from "../protocol.ts";
+import type { JobId, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeObservation, PausedSession, ServiceFact } from "../protocol/observations.ts";
+import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";
+import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
+import type { NodeHealth } from "../protocol/client.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;

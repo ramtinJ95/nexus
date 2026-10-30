@@ -22,7 +22,11 @@ import type { Placement } from "./placement.ts";
 import { HttpError } from "./http-error.ts";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
-import { upgradeObservation, type HerdrStatus, type JobStatus, type NodeName, type NodeObservation, type OlderObservation, type PylonId, type ReportedCapacity, type Subject, type TailnetNodeId } from "../protocol.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { JobStatus, Subject } from "../protocol/jobs.ts";
+import {
+  upgradeObservation, type HerdrStatus, type NodeObservation, type OlderObservation, type ReportedCapacity,
+} from "../protocol/observations.ts";
 import type { BootInputs, Project, ProjectId } from "../project.ts";
 import type { SessionHarness } from "../sessions.ts";
 import type { BuildingTemplate, ImageId, ImageManifest, TemplateId, TemplateRecord, ThreadSetup } from "../images.ts";

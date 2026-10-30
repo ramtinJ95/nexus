@@ -7,7 +7,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { join } from "node:path";
 import type { ImageId, ImageManifest } from "./images.ts";
-import type { NodeName } from "./protocol.ts";
+import type { NodeName } from "./ids.ts";
 
 /** Waits for the check. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
 export async function until(what: string, check: () => boolean | Promise<boolean>, timeoutMs = 60_000): Promise<void> {

@@ -5,7 +5,7 @@
  */
 import { linkedName, reservedPorts } from "./project.ts";
 import type { ServiceName } from "./project.ts";
-import type { ServiceFact } from "./protocol.ts";
+import type { ServiceFact } from "./protocol/observations.ts";
 
 /** A supervised service, as the preview rules see it. `previewed` is whether it publishes a preview. */
 export interface PreviewService {

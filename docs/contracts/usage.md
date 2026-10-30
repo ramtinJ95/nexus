@@ -1,6 +1,6 @@
 # Nexus contracts: usage
 
-Status: agreed on 2026-10-22. A first slice is implemented: the planner, the probe's job and observe routes, and the Docker test backend. The types are in [`src/protocol.ts`](../../src/protocol.ts), [`src/reconcile.ts`](../../src/reconcile.ts), [`src/backend.ts`](../../src/backend.ts), [`src/project.ts`](../../src/project.ts) and [`src/images.ts`](../../src/images.ts). The reasons are in [rationale.md](rationale.md).
+Status: agreed on 2026-10-22. A first slice is implemented: the planner, the probe's job and observe routes, and the Docker test backend. The types are in [`src/protocol/`](../../src/protocol), [`src/reconcile.ts`](../../src/reconcile.ts), [`src/backend.ts`](../../src/backend.ts), [`src/project.ts`](../../src/project.ts) and [`src/images.ts`](../../src/images.ts). The reasons are in [rationale.md](rationale.md).
 
 The control plane decides every lifecycle step. A probe runs explicit jobs and reports what it sees. A probe never dials the control plane, never decides to wake, pause or move a pylon, and writes no durable Nexus record. Every record in SQLite has one writer, the control plane.
 
@@ -8,7 +8,7 @@ The control plane decides every lifecycle step. A probe runs explicit jobs and r
 
 ### What a probe accepts
 
-A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the only authentication, and the home tailnet's policy stays unchanged, with no tags and no ACL edits. The probe asks its local `tailscaled` who the peer is (LocalAPI `whois`) and compares the peer's stable node ID with the one its config names for the route (`routeAuth` and `ProbeAuthConfig` in [`src/protocol.ts`](../../src/protocol.ts)).
+A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the only authentication, and the home tailnet's policy stays unchanged, with no tags and no ACL edits. The probe asks its local `tailscaled` who the peer is (LocalAPI `whois`) and compares the peer's stable node ID with the one its config names for the route (`routeAuth` and `ProbeAuthConfig` in [`src/protocol/routes.ts`](../../src/protocol/routes.ts)).
 
 | Route | Caller | Purpose |
 |---|---|---|

@@ -5,7 +5,8 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { nodeNameSchema, type TailnetNodeId } from "../protocol.ts";
+import type { TailnetNodeId } from "../ids.ts";
+import { nodeNameSchema } from "../protocol/fields.ts";
 import { digestPattern } from "../deploy/model.ts";
 import { HttpError } from "./http-error.ts";
 import type { JoinedNode, Registry } from "./registry.ts";

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
 import { startGateway } from "./gateway.ts";
 import { createTailscaleServe, parseServeStatus, tailscaleCli } from "./serve.ts";
 

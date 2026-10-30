@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { startImageRollout, type ImageOperation, type ImageRollout } from "./image-rollout.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
-import type { JobEnvelope, JobErrorCode, JobId, JobStatus, NodeName, ProbeClient, TailnetNodeId } from "../protocol.ts";
+import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
+import type { JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { testImage, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;

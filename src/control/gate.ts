@@ -13,7 +13,10 @@
  * have run something already. It is thrown away, and the check starts again in a fresh one.
  */
 import { checkCaller, verifyCaller } from "../agent-protocol.ts";
-import type { ByteStream, NodeName, ProbeClient, ProbeError } from "../protocol.ts";
+import type { NodeName } from "../ids.ts";
+import type { ByteStream } from "../protocol/streams.ts";
+import type { ProbeError } from "../protocol/http.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { checkoutDir } from "../sessions.ts";
 import { runningProbe } from "./observed.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";

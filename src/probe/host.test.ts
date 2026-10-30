@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { parseLoadavg, parseMeminfo, parseResident, parseStat, readNodeHealth } from "./host.ts";
-import type { NodeName, PylonId } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
 
 const fixtures = new URL("../fixtures/host/", import.meta.url).pathname;
 const node = "rj-firebat" as NodeName;

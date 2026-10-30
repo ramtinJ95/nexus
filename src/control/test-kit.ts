@@ -4,7 +4,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { newPylonRecord } from "../tick.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ProjectId, RemoteProject } from "../project.ts";
 import type { Registry, StoredPylon, Thread, ThreadId } from "./registry.ts";
 

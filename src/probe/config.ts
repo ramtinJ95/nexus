@@ -10,7 +10,10 @@ import { z } from "zod";
 import type { SecretSource } from "../backend.ts";
 import type { ImageId } from "../images.ts";
 import { parseJson } from "../parse.ts";
-import { heldSecrets, isImageId, nodeNameSchema, probePort, tailnetNodeIdSchema, type ProbeAuthConfig } from "../protocol.ts";
+import { isImageId } from "../ids.ts";
+import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
+import { heldSecrets } from "../protocol/observations.ts";
+import { probePort, type ProbeAuthConfig } from "../protocol/routes.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 /** Tailscale's address ranges. BlockList compares parsed addresses, so every spelling of an address matches. */

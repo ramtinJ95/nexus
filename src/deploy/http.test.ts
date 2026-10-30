@@ -5,7 +5,7 @@ import { createServer as createNetServer } from "node:net";
 import { once } from "node:events";
 import { DeployHttpError, jsonRequest } from "./http.ts";
 import { joinControlPlane } from "./setup.ts";
-import type { TailnetNodeId } from "../protocol.ts";
+import type { TailnetNodeId } from "../ids.ts";
 
 test("node requests verify the control identity before sending the root credential", async (t) => {
   const seen: string[] = [];

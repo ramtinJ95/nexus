@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Guest } from "./backend.ts";
-import type { DeclaredOutput } from "./protocol.ts";
+import type { DeclaredOutput } from "./protocol/observations.ts";
 import { fakeGuest } from "./fake-guest.ts";
 import { addOutput, listOutputs, OutputRefused, outputsDir } from "./outputs.ts";
 

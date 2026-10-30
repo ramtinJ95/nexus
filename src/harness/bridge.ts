@@ -11,7 +11,9 @@
  * It imports only the probe client, because one runs per busy pylon and each costs a Node process.
  */
 import { once } from "node:events";
-import { connectProbe, type ByteStream, type NodeName, type PylonId, type TailnetNodeId } from "../protocol.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { ByteStream } from "../protocol/streams.ts";
+import { connectProbe } from "../protocol/client.ts";
 import { localApiWhois } from "../tailscale.ts";
 
 /** How to reach and verify the pylon's probe. `tailscaled` is the control plane's LocalAPI socket. */

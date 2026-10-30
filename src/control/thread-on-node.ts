@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
 import { scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
 import { callText } from "../test-kit.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";

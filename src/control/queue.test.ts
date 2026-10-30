@@ -12,7 +12,8 @@ import { queuedView, threadQueue, waitOf, type QueuedRecord } from "./queue.ts";
 import { personPhase, type Phase, type Review } from "./review-model.ts";
 import { threadStarter, type StartRequest } from "./threads.ts";
 import { newPylonRecord } from "../tick.ts";
-import type { LiveHash, NodeName, NodeObservation, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeObservation } from "../protocol/observations.ts";
 import type { ProjectId } from "../project.ts";
 import { testImage } from "../test-kit.ts";
 

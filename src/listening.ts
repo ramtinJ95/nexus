@@ -8,7 +8,7 @@
  */
 import type { Guest } from "./backend.ts";
 import { reservedPorts } from "./project.ts";
-import type { ListeningFact } from "./protocol.ts";
+import type { ListeningFact } from "./protocol/observations.ts";
 
 /** The kernel's TCP_LISTEN state, as /proc/net/tcp prints it. */
 const listenState = "0A";

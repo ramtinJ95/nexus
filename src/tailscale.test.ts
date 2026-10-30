@@ -7,7 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { localApiWhois, localApiWhoisNode, PeerRefused, verifyPeer, type Whois } from "./tailscale.ts";
-import type { TailnetNodeId } from "./protocol.ts";
+import type { TailnetNodeId } from "./ids.ts";
 
 // A stand-in for tailscaled's LocalAPI on a Unix socket. The real daemon is never contacted.
 test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node ID", async (t) => {

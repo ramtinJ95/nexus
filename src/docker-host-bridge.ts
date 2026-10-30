@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { docker, label } from "./docker-cli.ts";
 import { listenHostBridge, type HostBridge } from "./host-bridge.ts";
-import type { PylonId } from "./protocol.ts";
+import type { PylonId } from "./ids.ts";
 
 const tokenLabel = "nexus.bridge-token";
 

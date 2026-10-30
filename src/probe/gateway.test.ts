@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
 import { startGateway, warmHeader, type GatewayOptions, type PreviewHit, type PreviewRoute } from "./gateway.ts";
 
 const pylonId = "pylon-gw" as PylonId;

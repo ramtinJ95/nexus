@@ -8,7 +8,9 @@ import { openHarnessHost, type ConversationId, type HarnessHost } from "../harne
 import { scriptedModel, scriptedModels, type ScriptedRequest } from "../harness/test-fixture.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { newPylonRecord } from "../tick.ts";
-import type { LiveHash, NodeHealth, NodeName, PylonId, PylonObservation, TailnetNodeId } from "../protocol.ts";
+import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { PylonObservation } from "../protocol/observations.ts";
+import type { NodeHealth } from "../protocol/client.ts";
 import type { ProjectId } from "../project.ts";
 import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
 import { briefOf, judgmentPass, type Judgment, type JudgmentPass } from "./judgment.ts";

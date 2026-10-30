@@ -4,7 +4,9 @@
  * a snapshot from a node puts its list again unless the last put that succeeded sent the same list to the same probe
  * boot. A join puts every node's. A probe from before this answers 404 and keeps probe.json's.
  */
-import { ProbeHttpError, type NodeName, type ProbeClient } from "../protocol.ts";
+import type { NodeName } from "../ids.ts";
+import { ProbeHttpError } from "../protocol/http.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { Registry } from "./registry.ts";
 

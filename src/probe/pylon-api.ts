@@ -15,7 +15,8 @@ import type { HostBridgeAnswer } from "../host-bridge.ts";
 import type { PortLinks } from "./run.ts";
 import { addOutput, listOutputs, OutputRefused } from "../outputs.ts";
 import { serviceDecl, serviceName, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
-import type { DeclaredOutput, PylonId, ServiceFact } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
+import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
 import { parseJson } from "../parse.ts";
 
 /** What `nexus info --json` prints: /home/user/.nexus/pylon.json, which renderOverlay writes. */

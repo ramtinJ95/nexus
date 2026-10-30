@@ -7,7 +7,7 @@
  */
 import { readFileSync } from "node:fs";
 import { openPython, type OpenPipe } from "./pipe.ts";
-import { frame, type StreamEnd } from "./protocol.ts";
+import { frame, type StreamEnd } from "./protocol/streams.ts";
 
 const relay = readFileSync(new URL("./guest-terminal.py", import.meta.url));
 

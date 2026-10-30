@@ -5,7 +5,7 @@
  */
 import type { ProjectId } from "../project.ts";
 import type { AgentCall, AgentKind, Tokens } from "../agent-usage.ts";
-import type { NodeName } from "../protocol.ts";
+import type { NodeName } from "../ids.ts";
 import { HttpError } from "./http-error.ts";
 import type { ThreadId } from "./registry.ts";
 

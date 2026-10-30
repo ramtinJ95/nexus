@@ -14,7 +14,7 @@ export type Whois = (address: string, port: number) => Promise<TailnetNodeId | n
 /** Whois with the node's MagicDNS name, such as infra-testbench.example.ts.net, which tailscaled reports as Node.Name. */
 export type WhoisNode = (address: string, port: number) => Promise<{ id: TailnetNodeId; host: string } | null>;
 
-/** Tailscale's stable node ID. The bootstrap deployer checks it without protocol.ts, whose zod it does not have. */
+/** Tailscale's stable node ID. The bootstrap deployer checks it without protocol/fields.ts, whose zod it does not have. */
 export const tailnetNodeIdPattern = /^n[A-Za-z0-9]+$/;
 
 export const linuxTailscaledSocket = "/var/run/tailscale/tailscaled.sock";

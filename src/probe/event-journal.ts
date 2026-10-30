@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import type { PylonEvent, ReportedEvent } from "../events.ts";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
 
 
 export function eventJournal(path: string) {

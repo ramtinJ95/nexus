@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { registryLocator } from "./locator.ts";
 import { openRegistry, type ThreadId } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
-import { probePort, type NodeName, type NodeObservation, type PylonId, type PylonObservation } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
+import type { NodeObservation, PylonObservation } from "../protocol/observations.ts";
+import { probePort } from "../protocol/routes.ts";
 
 const node = "infra-testbench" as NodeName;
 const threadId = "th-1" as ThreadId;

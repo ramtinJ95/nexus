@@ -10,10 +10,14 @@ import { nodePylons } from "./placement.ts";
 import { openRegistry, type PortRange, type Registry, type Thread } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
+import type { JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { Job, JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type {
-  BrokenCause, CommandResult, Job, JobEnvelope, JobErrorCode, JobId, JobStatus, ListeningFact, LiveHash, NodeName, NodeObservation, PreviewRouteFact, ProbeClient, ProbeEvent, PylonCommand, PylonId, PylonObservation, RunningFacts, ServiceFact, SessionFact, SubmitReply, TailnetNodeId,
-} from "../protocol.ts";
-import { upgradeObservation } from "../protocol.ts";
+  BrokenCause, ListeningFact, NodeObservation, PreviewRouteFact, ProbeEvent, PylonObservation, RunningFacts, ServiceFact, SessionFact,
+} from "../protocol/observations.ts";
+import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
+import type { ProbeClient } from "../protocol/client.ts";
+import { upgradeObservation } from "../protocol/observations.ts";
 import { chatgptTokenGrant, liveHashOf, type LiveSpec, type ProjectId } from "../project.ts";
 import type { CheckpointId, ImageId } from "../images.ts";
 import type { ReportedEvent } from "../events.ts";

@@ -12,7 +12,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { checkoutReader, CheckoutRefused } from "../checkout-files.ts";
 import { processStream } from "../process-stream.ts";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { scriptedModel, scriptedModels } from "./test-fixture.ts";
 import { writeThread } from "./thread-doc.ts";

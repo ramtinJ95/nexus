@@ -10,7 +10,7 @@ import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay
 import { readJson, saveJson } from "../json-file.ts";
 import { parse } from "../parse.ts";
 import { serialQueue } from "../single-flight.ts";
-import type { ServiceFact } from "../protocol.ts";
+import type { ServiceFact } from "../protocol/observations.ts";
 
 const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
 type Entry = {

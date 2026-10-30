@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createDockerBackend } from "./docker-backend.ts";
 import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { dockerServices } from "./docker-services.ts";
-import type { PylonId } from "./protocol.ts";
+import type { PylonId } from "./ids.ts";
 import { checkoutDir } from "./sessions.ts";
 import { freePort } from "./test-kit.ts";
 

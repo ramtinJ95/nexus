@@ -1,5 +1,6 @@
 import type { BootInputs } from "../project.ts";
-import { countedCapacity, heldSecrets, type NodeCapacity, type NodeName, type NodeObservation, type PylonId, type PylonObservation } from "../protocol.ts";
+import type { NodeName, PylonId } from "../ids.ts";
+import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, Registry, StoredPylon } from "./registry.ts";

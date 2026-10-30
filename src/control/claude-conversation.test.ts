@@ -11,7 +11,9 @@ import { addThread, seedRegistry } from "./test-kit.ts";
 import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
 import { claudeHook } from "../../images/pylon/nexus-ask.ts";
-import type { ByteStream, LiveHash, NodeName, ProbeClient } from "../protocol.ts";
+import type { LiveHash, NodeName } from "../ids.ts";
+import type { ByteStream } from "../protocol/streams.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import type { ImageId } from "../images.ts";
 import { until } from "../test-kit.ts";
 

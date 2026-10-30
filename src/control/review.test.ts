@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry, type Registry, type Thread, type ThreadId } from "./registry.ts";
 import { newPylonRecord } from "../tick.ts";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts";
+import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
@@ -912,6 +912,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
     "Always needs the person: changes to the tailnets, as it changes src/tailscale.ts.",
   ]);
   assert.deepEqual(holds("src/control/holds.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/holds.ts."]);
+  assert.deepEqual(holds("src/protocol/routes.ts"), ["Always needs the person: changes to login or auth, as it changes src/protocol/routes.ts."]);
 });
 
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {

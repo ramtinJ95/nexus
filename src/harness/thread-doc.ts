@@ -5,7 +5,7 @@
  */
 import type { Context } from "@earendil-works/chord";
 import { defineDocFamily, type ConversationId, type DocumentReader, type Tx } from "@earendil-works/pi-durable";
-import type { PylonId } from "../protocol.ts";
+import type { PylonId } from "../ids.ts";
 
 export type ThreadInfo = { threadId: string; pylonId: PylonId };
 

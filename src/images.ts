@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { canonicalSha256, effectiveAllowedHosts, type Checkout, type Project, type RemoteProject } from "./project.ts";
-import type { JobEnvelope } from "./protocol.ts";
+import type { JobEnvelope } from "./protocol/jobs.ts";
 import { isImageId, isTemplateId, type ArtifactId, type ImageId, type NodeName, type PortableArtifactId, type ProjectId, type TemplateId } from "./ids.ts";
 
 // Temporary: the artifact IDs moved to ids.ts, and E1 deletes this re-export.

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maxRecordBytes, parseRecord, readTranscript, readTranscriptImage, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import { localPipes } from "./fake-guest.ts";
-import type { ByteStream } from "./protocol.ts";
+import type { ByteStream } from "./protocol/streams.ts";
 
 const fixture = await readFile(new URL("./fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
 const lines = fixture.split("\n").filter((line) => line !== "");

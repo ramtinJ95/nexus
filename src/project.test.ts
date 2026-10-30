@@ -10,7 +10,7 @@ import { z } from "zod";
 import { actionSchema } from "./pylon-vm/contracts.ts";
 import { GuestServices } from "./pylon-vm/services.ts";
 import { bootSecrets, chatgptTokenGrant, effectiveAllowedHosts, githubTokenGrant, installFileCommand, parseServicesFile, renderOverlay, secretHostPattern, secretNamePattern, serviceDecl, type ParsesTo, type Project, type ProjectId, type PylonOverlay } from "./project.ts";
-import type { NodeName, PylonId } from "./protocol.ts";
+import type { NodeName, PylonId } from "./ids.ts";
 
 const usageExample = `
 services:

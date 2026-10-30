@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import type { Guest } from "./backend.ts";
 import { exit } from "./exec.ts";
 import { unusedGuest } from "./fake-guest.ts";
-import type { SessionFact } from "./protocol.ts";
+import type { SessionFact } from "./protocol/observations.ts";
 import { closeSession, herdrSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 
 const cwd = "/home/user";

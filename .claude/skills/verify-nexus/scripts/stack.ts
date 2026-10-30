@@ -30,7 +30,8 @@ import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
-import { probePort, type NodeName, type TailnetNodeId } from "../../../../src/protocol.ts";
+import type { NodeName, TailnetNodeId } from "../../../../src/ids.ts";
+import { probePort } from "../../../../src/protocol/routes.ts";
 import type { ImageId, ImageManifest } from "../../../../src/images.ts";
 import type { Project, ProjectId } from "../../../../src/project.ts";
 

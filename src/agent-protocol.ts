@@ -5,7 +5,7 @@
  */
 import { randomBytes } from "node:crypto";
 import type { z } from "zod";
-import { tailnetNodeIdSchema } from "./protocol.ts";
+import { tailnetNodeIdSchema } from "./protocol/fields.ts";
 
 /** Who starts a reviewer thread, as its `startedBy`. */
 export const reviewerCaller = "nexus-review";

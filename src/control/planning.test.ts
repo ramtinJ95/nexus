@@ -12,7 +12,7 @@ import { threadQueue } from "./queue.ts";
 import { openRegistry, type Thread } from "./registry.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { threadStarter } from "./threads.ts";
-import type { NodeName, TailnetNodeId } from "../protocol.ts";
+import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { ProjectId } from "../project.ts";
 import { testImage } from "../test-kit.ts";
 
