@@ -1559,7 +1559,7 @@ test("a stalled Claude launch reports its screen and failed attention without re
   let launches = 0;
   const probe: ProbeClient = { ...fake.probe, command: async () => {
     launches++;
-    throw new Error("Claude launch stalled: no UserPromptSubmit within 30 seconds. The pane showed:\nChoose the text style");
+    return { kind: "open-session", herdrPane: "w1:p1", stalled: "no UserPromptSubmit within 30 seconds. The pane showed:\nChoose the text style" };
   } };
   const loop = run(t, registry, probe, { log: () => {} });
   await until("worker stalled", () => registry.claudeWorker(thread.id)?.state === "stalled");
@@ -1568,6 +1568,19 @@ test("a stalled Claude launch reports its screen and failed attention without re
   assert.match(registry.claudeWorker(thread.id)!.message!, /Choose the text style/);
   assert.ok(registry.events().some((e) => e.kind === "thread.failed" && String(e.payload.message).includes("Choose the text style")));
   assert.ok(registry.events().some((e) => e.kind === "attention.changed" && e.payload.attention === "failed"));
+});
+
+test("a launch error that says the launch stalled is a failed launch, since only the result marks a stall", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const fake = fakeNode({ autoFinish: true });
+  const probe: ProbeClient = { ...fake.probe, command: async () => {
+    throw new Error("Claude launch stalled: no UserPromptSubmit within 30 seconds");
+  } };
+  run(t, registry, probe, { log: () => {} });
+  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
+  assert.match(registry.claudeWorker(thread.id)!.message!, /Claude launch stalled: no UserPromptSubmit/);
 });
 
 test("a submission receipt wins over a late launch error without a contradictory failed event", async (t) => {
@@ -1590,6 +1603,23 @@ test("a submission receipt wins over a late launch error without a contradictory
   assert.equal(registry.claudeWorker(thread.id)!.message, undefined);
   assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
   assert.equal(registry.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "working");
+});
+
+test("a submission receipt wins over a late stalled result without a contradictory failed event", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const fake = fakeNode({ autoFinish: true });
+  const probe: ProbeClient = { ...fake.probe, command: async (_pylon, command) => {
+    if (command.kind !== "open-session") throw new Error("wrong command");
+    registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: command.resume! } });
+    return { kind: "open-session", herdrPane: "w1:p1", stalled: "no UserPromptSubmit within 30 seconds" };
+  } };
+  const loop = run(t, registry, probe);
+  await until("worker submitted", () => registry.claudeWorker(thread.id)?.state === "started");
+  await loop.wake(node);
+  assert.equal(registry.claudeWorker(thread.id)!.state, "started");
+  assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
 });
 
 test("a failed launch persists the same diagnostic it publishes and never resubmits", async (t) => {

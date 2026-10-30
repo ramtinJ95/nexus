@@ -14,7 +14,7 @@
  */
 import type { Readable } from "node:stream";
 import { isPortableArtifactId, type ArtifactCopy, type BrokenCause, type ByteStream, type CommandResult, type Job, type JobErrorCode, type NodeName, type PausedSession, type PylonCommand, type PylonId, type ServiceFact } from "./protocol.ts";
-import { checkoutDir, closeSession, dropFailedSession, interruptClaude, openSession, sendToClaude } from "./sessions.ts";
+import { checkoutDir, closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "./sessions.ts";
 import { type BootInputs, type LiveSpec, type OverlayFile, type PreviewAssignment, type ServiceDecl, type ServiceName } from "./project.ts";
 import type { ArtifactManifest, CheckpointId, ImageId, ImageRecipe, PortableArtifactId, TemplateBuildInputs, TemplateId } from "./images.ts";
 import type { HostBridge } from "./probe/pylon-api.ts";
@@ -270,7 +270,13 @@ export async function runCommand(pylonId: PylonId, command: Exclude<PylonCommand
       return { kind: "exec", ...await guest.exec(command.argv, { cwd: command.cwd, timeoutMs: command.timeoutMs }) };
     case "open-session": {
       const { harness, title, resume, prompt, model } = command;
-      return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(model === undefined ? {} : { model }), ...(prompt === undefined ? {} : { prompt }), ...(resume === undefined ? {} : { resume }) }) };
+      try {
+        return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(model === undefined ? {} : { model }), ...(prompt === undefined ? {} : { prompt }), ...(resume === undefined ? {} : { resume }) }) };
+      } catch (err) {
+        // An unprompted open's caller reads only the pane, so it would take a stall for a session that started.
+        if (!(err instanceof LaunchStalled) || prompt === undefined) throw err;
+        return { kind: "open-session", herdrPane: err.herdrPane, stalled: err.message };
+      }
     }
     case "close-session":
       return { kind: "close-session", outcome: await closeSession(guest, command.herdrPane, command.session) };

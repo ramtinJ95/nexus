@@ -1,0 +1,16 @@
++0.087s worker pending
++0.550s probe 25888 listening on 17490, from <main checkout>/src
++2.154s probe stderr: pylon-th-verify git: checkout facts unavailable; retrying on the next git poll
++2.199s worker starting
++32.981s pylon-th-verify: tick failed: verify-node: POST /v1/pylons/pylon-th-verify/commands: HTTP 500: Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:
+user@pylon:/tmp/nexus-stall-main-probe/repo$ $'claude' $'--session-id' $'616a7bb1-6c4a-450f-b2d2-73909eca83da' $'--model' $'claude-opus-5-5' $'--permission-mode' $'bypassPermissions' $'--settings' $'{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"mkdir -p /tmp/nexus-stall-main-probe/home/.nexus/claude-launches/616a7bb1-6c4a-450f-b2d2-73909eca83da && touch /tmp/nexus-stall-main-probe/home/.nexus/claude-launches/616a7bb1-6c4a-450f-b2d2-73909eca83da/submitted"}]}]}}' $'Reply with exactly the words: stall verified.'
+stand-in claude: waiting at its first screen, and never taking the prompt
++33.062s worker failed
++33.062s worker state: failed
++33.062s worker message:
+Claude launch did not complete; attach to check before starting another session: verify-node: POST /v1/pylons/pylon-th-verify/commands: HTTP 500: Claude launch stalled: no UserPromptSubmit within 30 seconds; attach before starting another session. The pane showed:
+user@pylon:/tmp/nexus-stall-main-probe/repo$ $'claude' $'--session-id' $'616a7bb1-6c4a-450f-b2d2-73909eca83da' $'--model' $'claude-opus-5-5' $'--permission-mode' $'bypassPermissions' $'--settings' $'{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"mkdir -p /tmp/nexus-stall-main-probe/home/.nexus/claude-launches/616a7bb1-6c4a-450f-b2d2-73909eca83da && touch /tmp/nexus-stall-main-probe/home/.nexus/claude-launches/616a7bb1-6c4a-450f-b2d2-73909eca83da/submitted"}]}]}}' $'Reply with exactly the words: stall verified.'
+stand-in claude: waiting at its first screen, and never taking the prompt
++33.064s thread.failed events: 1
++33.065s attention: failed
++33.076s 1 workspace(s), 1 pane(s) left open
