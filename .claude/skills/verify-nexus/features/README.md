@@ -31,6 +31,7 @@ This directory is the maintained source for verifying what a Nexus user can do w
 - Every mutation needs a second, read-only view, such as `show` after `archive`, or the CLI after a dashboard click, plus the Docker side effect the feature names.
 - Name the feature ID and entry point in each step name, such as `msg-cli-send` or `archive-ui-click`.
 - Report an unreachable entry point with the command you tried and the unmet precondition. Never report a skipped entry point as verified through a sibling.
+- Commit no evidence. Put it in the pull request, as [the skill's Evidence section](../SKILL.md#evidence) says.
 
 ## Feature entry contract
 
