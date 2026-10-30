@@ -112,7 +112,7 @@ test("a predecessor is waiting, landed or blocked by what its thread, review and
 
   const b = f.thread("th-b");
   f.links(b, f.pr(5, "open"));
-  f.review(b, personPhase("the rounds ran out"));
+  f.review(b, personPhase("rounds", "the rounds ran out"));
   assert.equal(wait(f.registry, b), "blocked: its review ended for the person: the rounds ran out");
   f.review(b, { kind: "landed", commit: "m" }, "m");
   assert.equal(wait(f.registry, b), "landed: PR #9 merged");

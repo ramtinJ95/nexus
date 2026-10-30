@@ -133,17 +133,26 @@ export type Phase =
   /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
   | { kind: "landed"; commit: string }
   /**
-   * Ended, for the person to decide. `reasons` say exactly which condition failed or which reserved case applies, and
-   * `holds` are the same, one per reason in its order, with the code that decides each one's rule. `unreviewed` is a
-   * head the PR moved to after the last round, which no round of this review reviews.
+   * Ended, for the person to decide. `cause` is which part of the loop held it. `reasons` say exactly which condition
+   * failed or which reserved case applies, and `holds` are the same, one per reason in its order, with the code that
+   * decides each one's rule. `unreviewed` is a head the PR moved to after the last round, which no round of this review
+   * reviews.
    */
-  | { kind: "needs-person"; reasons: string[]; holds: Hold[]; label?: Label; unreviewed?: string }
+  | { kind: "needs-person"; cause: HoldCause; reasons: string[]; holds: Hold[]; label?: Label; unreviewed?: string }
   /** The PR merged or closed outside a review that does not land it, so nothing was left to review. */
   | { kind: "merged" }
   | { kind: "closed" }
   /** The person archived or deleted one of the review's threads, or, as `by`, cancelled the review itself. */
   | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
   | { kind: "cancelled"; who: "person"; by: string };
+/**
+ * Why a review is held: its `rounds` ran out; a `gate` failed where it failed before, or the builder answered it
+ * without a push; the check or live check gave `no-verdict`; an `agent` gave no answer the loop could read; the merge
+ * `policy` holds it, or GitHub would not merge; the PR closed or merged `outside` the review; a `thread` of it is not
+ * active; or its `deploy` or rollback failed. A record saved before causes is `unrecorded`, unless its label says its
+ * rounds ran out.
+ */
+export type HoldCause = "rounds" | "gate" | "no-verdict" | "agent" | "policy" | "outside" | "thread" | "deploy" | "unrecorded";
 /** The "needs human review" label on the PR, which only a review whose rounds ran out gets. */
 export type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };
 export type PhaseKind = Phase["kind"];
@@ -210,22 +219,26 @@ const landingVerb = (r: Review): "deploys" | "rolls back" | "merges" | null =>
  */
 export const cancellable = (r: Review) => (!ended.has(r.phase.kind) || needsPerson(r)) && landingVerb(r) === null;
 
-/** A needs-person phase whose holds are `items`. A string is a reason of the loop's own. */
-export const personPhase = (...items: readonly (Hold | string)[]) => {
+/** A needs-person phase for `cause` whose holds are `items`. A string is a reason of the loop's own. */
+export const personPhase = (cause: HoldCause, ...items: readonly (Hold | string)[]) => {
   const holds = items.map((h): Hold => typeof h === "string" ? { code: "loop", text: h } : h);
-  return { kind: "needs-person" as const, reasons: holds.map((h) => h.text), holds };
+  return { kind: "needs-person" as const, cause, reasons: holds.map((h) => h.text), holds };
 };
 
 /**
  * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
- * priorities, one saved before waivers has none, and holds and a waiver saved before hold codes get them from their texts.
+ * priorities, one saved before waivers has none, holds and a waiver saved before hold codes get them from their texts,
+ * and a hold saved before causes gets one from its label.
  */
 export function storedReview(record: Review): Review {
   const { phase, waiver } = record;
   return {
     ...record, maxRounds: Math.min(record.maxRounds, maxRounds), auto: record.auto ?? false,
     waiver: waiver == null ? null : { ...waiver, codes: waiver.codes ?? waiver.holds.map(legacyHoldCode) },
-    phase: phase.kind === "needs-person" && phase.holds === undefined ? { ...phase, holds: phase.reasons.map((text) => ({ code: legacyHoldCode(text), text })) } : phase,
+    phase: phase.kind === "needs-person" ? {
+      ...phase, cause: phase.cause ?? (phase.label === undefined ? "unrecorded" : "rounds"),
+      holds: phase.holds ?? phase.reasons.map((text) => ({ code: legacyHoldCode(text), text })),
+    } : phase,
     asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
     rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } }),
   };
@@ -270,17 +283,40 @@ export const tokenBlocks = <T extends { token: string }>(replies: readonly strin
 export const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null =>
   tokenBlocks(replies, fence, schema, token).at(-1) ?? null;
 
-const checkFinding = (round: Round): Finding[] => round.check?.passed === false
-  ? [{ id: "CHECK", priority: "P0", where: ".nexus/check", summary: `.nexus/check failed at ${round.head}`, detail: round.check.output }] : [];
-const liveFailed = (round: Round): round is Round & { live: { kind: "ran"; passed: false } } => round.live?.kind === "ran" && !round.live.passed;
-const liveFinding = (round: Round): Finding[] => liveFailed(round)
-  ? [{ id: "LIVE", priority: "P0", where: ".nexus/verify", summary: `The live check failed at ${round.head}`, detail: round.live.output }] : [];
-const conflictFinding = (round: Round): Finding[] => round.conflict === undefined ? [] : [{
-  id: "CONFLICT", priority: "P0", where: `origin/${round.conflict.base}`, summary: `The branch conflicts with ${round.conflict.base}, so ${round.head} cannot merge`,
-  detail: `Rebase the branch onto the current base: git fetch origin && git rebase origin/${round.conflict.base}. Resolve each conflict so that both sides' intent survives: keep what ${round.conflict.base} changed and what this pull request adds. Run the typecheck and the full test suite again, then push with git push --force-with-lease. The rebased head gets a new review round. If you cannot resolve a conflict, reject CONFLICT with the reason, and the person takes over.`,
-}];
-/** What the builder must answer for a round: the reviewer's findings, a failed check or live check, and a conflict with the base. */
-export const findingsOf = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...checkFinding(round), ...liveFinding(round), ...conflictFinding(round)];
+/**
+ * A gate that stopped an approval: the P0 `finding` the builder answers, what `failed`, the `verdict` its findings
+ * message gives, the hold's `code` and its text once the builder `pushedNothing` for it, and the gate's `output`.
+ */
+interface GateFailure { kind: "check" | "live" | "conflict"; finding: Finding; failed: string; verdict: string; code: HoldCode; pushedNothing: string; output: string | null }
+const gates = {
+  check: (head: string, output: string): GateFailure => ({
+    kind: "check", finding: { id: "CHECK", priority: "P0", where: ".nexus/check", summary: `.nexus/check failed at ${head}`, detail: output }, failed: ".nexus/check failed",
+    verdict: "the repository's checks failed after the reviewer approved", code: "check-failed", pushedNothing: `.nexus/check failed at ${head}, and the builder pushed nothing for it`, output: checkOutput(output),
+  }),
+  live: (head: string, output: string): GateFailure => ({
+    kind: "live", finding: { id: "LIVE", priority: "P0", where: ".nexus/verify", summary: `The live check failed at ${head}`, detail: output }, failed: "The live check failed",
+    verdict: "the live check failed after the reviewer approved and the repository's checks passed", code: "live-failed", pushedNothing: `The live check failed at ${head}, and the builder pushed nothing for it`, output: liveOutput(output),
+  }),
+  conflict: (head: string, base: string): GateFailure => ({
+    kind: "conflict", finding: {
+      id: "CONFLICT", priority: "P0", where: `origin/${base}`, summary: `The branch conflicts with ${base}, so ${head} cannot merge`,
+      detail: `Rebase the branch onto the current base: git fetch origin && git rebase origin/${base}. Resolve each conflict so that both sides' intent survives: keep what ${base} changed and what this pull request adds. Run the typecheck and the full test suite again, then push with git push --force-with-lease. The rebased head gets a new review round. If you cannot resolve a conflict, reject CONFLICT with the reason, and the person takes over.`,
+    }, failed: `The branch conflicted with ${base}`,
+    verdict: `the reviewer approved, but the branch conflicts with ${base}, so it cannot merge`, code: "loop", pushedNothing: `The branch conflicts with ${base}, and the builder did not rebase it`, output: null,
+  }),
+};
+/**
+ * The gate that failed at `round`, or null. A round fails at most one: the check runs only after an approval, the
+ * live check only after the check passes, and a conflict is recorded only when a merge after both is refused.
+ */
+const gateFailure = (round: Round): GateFailure | null => round.check?.passed === false ? gates.check(round.head, round.check.output)
+  : round.live?.kind === "ran" && !round.live.passed ? gates.live(round.head, round.live.output)
+  : round.conflict !== undefined ? gates.conflict(round.head, round.conflict.base) : null;
+/** What the builder must answer for a round: the reviewer's findings, and the finding of a gate that failed. */
+export const findingsOf = (round: Round): Finding[] => {
+  const gate = gateFailure(round);
+  return [...round.verdict?.findings ?? [], ...gate === null ? [] : [gate.finding]];
+};
 /** An approval with no blocking finding open, the check included. */
 const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some(blocks);
 /**
@@ -301,12 +337,15 @@ export function cannotLand(r: Review, builder: Pick<Thread, "status">, pr?: Pick
   return null;
 }
 /**
- * Whether the review is held for the person, with rounds left and no label, after an approval that a failed check, a
- * failed live check or a conflict stopped, which a new head may answer. An approval has no blocking finding of the
- * reviewer's, so the blocking ones are the loop's own. Changes the reviewer requested stay the person's.
+ * Whether the review is held for the person, for another cause than its rounds running out and with rounds left,
+ * after an approval whose only blocking finding is a gate that failed, which a new head may answer. Changes the
+ * reviewer requested stay the person's.
  */
-const heldForGate = (r: Review) => r.phase.kind === "needs-person" && r.phase.label === undefined && r.merged === null && roundsSpent(r) < r.maxRounds
-  && r.rounds.at(-1)!.verdict?.verdict === "approve" && findingsOf(r.rounds.at(-1)!).some(blocks);
+const heldForGate = (r: Review) => {
+  const round = r.rounds.at(-1)!;
+  return r.phase.kind === "needs-person" && r.phase.cause !== "rounds" && r.merged === null && roundsSpent(r) < r.maxRounds
+    && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks) && gateFailure(round) !== null;
+};
 /** The rounds that count against the limit. One that approves again the head its previous round approved reviewed nothing new. */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
@@ -378,13 +417,11 @@ End your reply with exactly one block like this, with JSON in it:
 function builderFindings(r: Review, token: string): string {
   const n = roundsSpent(r);
   const round = r.rounds.at(-1)!;
-  const failed = round.check?.passed === false || liveFailed(round);
+  const gate = gateFailure(round);
   const findings = findingsOf(round);
-  // The builder got the notes already with the approval that the check then failed, or that the conflict stopped.
-  const notes = failed || round.conflict !== undefined ? [] : findings.filter((f) => !blocks(f));
-  const verdict = round.check?.passed === false ? "the repository's checks failed after the reviewer approved"
-    : failed ? "the live check failed after the reviewer approved and the repository's checks passed"
-    : round.conflict !== undefined ? `the reviewer approved, but the branch conflicts with ${round.conflict.base}, so it cannot merge` : "changes requested";
+  // The builder got the notes already with the approval that the gate then stopped.
+  const notes = gate !== null ? [] : findings.filter((f) => !blocks(f));
+  const verdict = gate?.verdict ?? "changes requested";
   return `${reviewPrefix}
 Round ${n} of at most ${r.maxRounds} on pull request #${r.pr.number} (${r.pr.url}), reviewed at ${round.head} by a reviewer on ${r.models.reviewer}: ${verdict}.
 
@@ -454,12 +491,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
   /** When the loop last read each capped held review's PR itself, in place of the PR watch. A restart reads it again. */
   const cappedReads = new Map<string, number>();
+  /** The check thread or verify pylon `phase` holds, and the runs it is one of. */
+  const gateThread = (phase: Phase): { thread: ThreadId; runs: CheckRuns } | null =>
+    (phase.kind === "checking" || phase.kind === "verifying") && phase.thread !== null ? { thread: phase.thread, runs: phase.kind === "checking" ? checks : live } : null;
   const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
-    if (r.phase.kind === "checking" && r.phase.thread !== null) checks.discard(r.phase.thread);
-    if (r.phase.kind === "verifying" && r.phase.thread !== null) live.discard(r.phase.thread);
+    const gate = gateThread(r.phase);
+    if (gate !== null) gate.runs.discard(gate.thread);
     return { ...r, phase, outbox: null };
   };
-  const toPerson = (r: Review, ...items: (Hold | string)[]): Review => end(r, personPhase(...items));
+  const toPerson = (r: Review, cause: HoldCause, ...items: (Hold | string)[]): Review => end(r, personPhase(cause, ...items));
   /** Only a PR of the repository releases come from deploys once it merges. */
   const deploys = (r: Pick<Review, "pr">) => r.pr.repo.toLowerCase() === release.repo.toLowerCase();
   /** Makes `commit` the desired release, unless it is already, and marks the deploy or rollback requested. */
@@ -473,19 +513,21 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The PR watch reads GitHub only every two minutes, so the loop asks GitHub itself before it acts on an open PR. */
   const endedOnGitHub = async (r: Review) => outside(r, (await read(r)).pr.state);
   /** The rounds ran out without an approval the checks passed, so the PR gets the label that asks for the person. */
-  const ranOut = (r: Review, ...items: (Hold | string)[]): Review => end(r, { ...personPhase(...items), label: { state: "adding" } });
+  const ranOut = (r: Review, ...items: (Hold | string)[]): Review => end(r, { ...personPhase("rounds", ...items), label: { state: "adding" } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
   /** Past every check, a review stops at approval, or lands when asked to. */
   const checked = (r: Review): Review => ({ ...r, phase: r.land === null ? { kind: "approved" } : { kind: "merging", authorized: null } });
   /**
-   * A failed check or live check goes back to the builder as a P0 finding, unless no round is left, or it failed at a
-   * head where it had failed before, which a fix the reviewer approved did not change.
+   * The failed check or live check of `next`'s round goes back to the builder as a P0 finding, unless no round is left,
+   * or it failed at a head where it had failed before, which a fix the reviewer approved did not change.
    */
-  const gateFailed = (r: Review, next: Review, what: string, code: HoldCode, failedBefore: (earlier: Round) => boolean, output: string): Review => {
+  const gateFailed = (r: Review, next: Review): Review => {
     const head = r.rounds.at(-1)!.head;
-    const again = r.rounds.slice(0, -1).some((earlier) => earlier.head === head && failedBefore(earlier)) ? [{ code, text: `${what} failed again at ${head}, where it failed before.` }] : [];
-    if (roundsSpent(r) >= r.maxRounds) return ranOut(next, { code, text: `${what} failed at ${head} after the last round this review allows.` }, ...again, output);
-    if (again.length) return toPerson(next, ...again, output);
+    const gate = gateFailure(next.rounds.at(-1)!)!;
+    const output = gate.output === null ? [] : [gate.output];
+    const again = r.rounds.slice(0, -1).some((earlier) => earlier.head === head && gateFailure(earlier)?.kind === gate.kind) ? [{ code: gate.code, text: `${gate.failed} again at ${head}, where it failed before.` }] : [];
+    if (roundsSpent(r) >= r.maxRounds) return ranOut(next, { code: gate.code, text: `${gate.failed} at ${head} after the last round this review allows.` }, ...again, ...output);
+    if (again.length) return toPerson(next, "gate", ...again, ...output);
     return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
   };
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
@@ -499,7 +541,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. */
   const newHead = (r: Review, head: string, base: string, why: string): Review => {
     const n = roundsSpent(r);
-    if (n >= r.maxRounds) return end(r, { ...personPhase(`${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`), label: { state: "adding" }, unreviewed: head });
+    if (n >= r.maxRounds) return end(r, { ...personPhase("rounds", `${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`), label: { state: "adding" }, unreviewed: head });
     const next: Review = { ...r, rounds: [...r.rounds, { head, verdict: null, check: null, answers: null }] };
     return send(next, "reviewer", (token) => nextRound(next, r.rounds.at(-1)!, token, base), { kind: "reviewing" });
   };
@@ -529,7 +571,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   async function waitOn(r: Review, phase: Extract<Phase, { kind: "reviewing" | "fixing" }>, state: AgentState, missing: string | null = null): Promise<Review> {
     const who = phase.kind === "reviewing" ? "reviewer" : "builder";
-    if (now() - r.since > answerMs) return toPerson(r, `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
+    if (now() - r.since > answerMs) return toPerson(r, "agent", `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
     // Until the request goes again, `since` is before `retryAt`, and the turn that ended is the failure already counted,
     // whose end a Claude worker's transcript and its hook may each report at another time.
     if (phase.failing !== undefined && r.since < phase.failing.retryAt) return now() < phase.failing.retryAt ? r : resend(r, who);
@@ -537,10 +579,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (ended === null || running || now() - ended <= replyGraceMs) return r;
     if (failed !== null) {
       const count = (phase.failing?.count ?? 0) + 1;
-      if (count > retryMs.length) return toPerson(r, `The ${who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
+      if (count > retryMs.length) return toPerson(r, "agent", `The ${who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
       return { ...r, phase: { kind: phase.kind, failing: { count, last: failed, retryAt: now() + retryMs[count - 1]! } } };
     }
-    if (r.nudges >= maxNudges) return toPerson(r, `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
+    if (r.nudges >= maxNudges) return toPerson(r, "agent", `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
     return send(r, who, (token) => reminder(who, missing, token), { kind: phase.kind }, r.nudges + 1);
   }
 
@@ -560,6 +602,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     async fixing(r, phase, builder) {
       const n = roundsSpent(r);
       const round = r.rounds.at(-1)!;
+      const gate = gateFailure(round);
       const state = await agentState(builder, r.since);
       const found = answeredSince(state) ? latest(state.replies, "nexus-review-answers", answersSchema, r.expect) : null;
       if (found === null) return waitOn(r, phase, state);
@@ -571,26 +614,18 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const withAnswers = withRound(r, { answers: found.answers });
       const fixed = found.answers.some((a) => a.action === "fixed");
       const snapshot = await read(r);
-      if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
+      if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, "outside", `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
         const { ended, running } = state;
         if (ended === null || running) return waitOn(r, phase, state);
         if (now() - ended < pushGraceMs) return r;
-        if (round.check?.passed !== false && !liveFailed(round)) return waitOn(r, phase, state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
+        if (gate === null || gate.kind === "conflict") return waitOn(r, phase, state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
-      // The reviewer cannot change a check's result, so a failed check at an unmoved head is the person's.
-      if (round.check?.passed === false && snapshot.detail.head === round.head) {
-        const answer = found.answers.find((a) => a.id === "CHECK");
-        return toPerson(withAnswers, { code: "check-failed", text: `.nexus/check failed at ${round.head}, and the builder pushed nothing for it${answer === undefined ? "." : `: ${answer.reason}`}` }, checkOutput(round.check.output));
-      }
-      if (liveFailed(round) && snapshot.detail.head === round.head) {
-        const answer = found.answers.find((a) => a.id === "LIVE");
-        return toPerson(withAnswers, { code: "live-failed", text: `The live check failed at ${round.head}, and the builder pushed nothing for it${answer === undefined ? "." : `: ${answer.reason}`}` }, liveOutput(round.live.output));
-      }
-      if (round.conflict !== undefined && snapshot.detail.head === round.head) {
-        const answer = found.answers.find((a) => a.id === "CONFLICT");
-        return toPerson(withAnswers, `The branch conflicts with ${round.conflict.base}, and the builder did not rebase it${answer === undefined ? "." : `: ${answer.reason}`}`);
+      // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
+      if (gate !== null && snapshot.detail.head === round.head) {
+        const answer = found.answers.find((a) => a.id === gate.finding.id);
+        return toPerson(withAnswers, "gate", { code: gate.code, text: `${gate.pushedNothing}${answer === undefined ? "." : `: ${answer.reason}`}` }, ...gate.output === null ? [] : [gate.output]);
       }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.
       if (snapshot.detail.head === round.head && approves(round)) return { ...withAnswers, phase: checking(), nudges: 0 };
@@ -600,14 +635,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
     async checking(r, phase, builder) {
       const round = r.rounds.at(-1)!;
-      if (now() - phase.startedAt > checkMs) return toPerson(r, { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
+      if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
       if (phase.thread === null) return await endedOnGitHub(r) ?? { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
       const state = checks.poll(phase.thread, round.head);
       if (state.kind === "void") {
         checks.discard(phase.thread);
         return { ...r, phase: { ...phase, thread: null } };
       }
-      if (state.kind === "unrunnable") return toPerson(r, { code: "check-failed", text: `.nexus/check could not run at ${round.head}.` }, checkOutput(state.output));
+      if (state.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check could not run at ${round.head}.` }, checkOutput(state.output));
       if (state.kind !== "done") return r;
       // Read while the check thread is held, so a read that fails is retried with the check's result. A landing tried
       // again keeps the round's live check, which ran at the same head.
@@ -616,12 +651,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
       if (verifies) return { ...next, phase: { kind: "verifying", startedAt: now(), thread: null } };
       if (state.passed) return checked(round.live === undefined ? withRound(next, { live: { kind: "absent" } }) : next);
-      return gateFailed(r, next, ".nexus/check", "check-failed", (earlier) => earlier.check?.passed === false, checkOutput(state.output));
+      return gateFailed(r, next);
     },
     async verifying(r, phase, builder) {
       const round = r.rounds.at(-1)!;
       const refused = phase.refused === undefined ? [] : [`No node could take its verify pylon: ${phase.refused}`];
-      if (now() - phase.startedAt > checkMs) return toPerson(r, { code: "live-failed", text: `The live check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` }, ...refused);
+      if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` }, ...refused);
       if (phase.thread === null) {
         const gone = await endedOnGitHub(r);
         if (gone !== null) return gone;
@@ -638,12 +673,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         live.discard(phase.thread);
         return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } };
       }
-      if (state.kind === "unrunnable") return toPerson(r, { code: "live-failed", text: `The live check could not run at ${round.head}.` }, liveOutput(state.output));
+      if (state.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check could not run at ${round.head}.` }, liveOutput(state.output));
       if (state.kind !== "done") return r;
       live.discard(phase.thread);
       const next = withRound({ ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } }, { live: { kind: "ran", thread: phase.thread, passed: state.passed, output: state.output } });
       if (state.passed) return checked(next);
-      return gateFailed(r, next, "The live check", "live-failed", liveFailed, liveOutput(state.output));
+      return gateFailed(r, next);
     },
     async merging(r, phase, builder) {
       const head = r.rounds.at(-1)!.head;
@@ -666,11 +701,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       };
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
-        if (snapshot.detail.head !== head) return toPerson(r, { code: "not-approved-head", text: `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.` });
+        if (snapshot.detail.head !== head) return toPerson(r, "outside", { code: "not-approved-head", text: `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.` });
         // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
         if (phase.authorized !== head) {
           const { all, left } = await holds();
-          if (left.length) return toPerson(r, `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...all);
+          if (left.length) return toPerson(r, "outside", `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...all);
         }
         commit = snapshot.detail.mergeCommit;
       } else {
@@ -680,14 +715,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         // between attempts and branch protection may not enforce them.
         const { all, left } = await holds();
         if (left.length === 1 && left[0]!.code === "conflict") return rebase(r, snapshot.detail.base);
-        if (left.length) return toPerson(r, ...all);
+        if (left.length) return toPerson(r, "policy", ...all);
         if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         reads.delete(prKey(r));
         if (merged.kind !== "merged") {
           // GitHub may learn of a conflict only when asked to merge.
           if (merged.kind === "refused" && (await read(r)).pr.conflict === true) return rebase(r, snapshot.detail.base);
-          return toPerson(r, merged.kind === "denied"
+          return toPerson(r, "policy", merged.kind === "denied"
             ? `The control plane's GitHub token cannot merge (${merged.message}). Merging needs a token with write access to ${r.pr.repo}'s contents and pull requests, which only the person can grant.`
             : `GitHub refused the merge: ${merged.message}`);
         }
@@ -701,12 +736,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const view = releaseView(registry, release.self, now());
       const outcome = releaseOutcome(view, phase.commit);
       if (outcome === "healthy") return { ...r, phase: { kind: "landed", commit: phase.commit } };
-      if (outcome === "superseded") return toPerson(r, `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
+      if (outcome === "superseded") return toPerson(r, "deploy", `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
       if (outcome === "pending" && now() < phase.deadline) return r;
       const why = outcome === "failed"
         ? `The deploy of ${phase.commit} failed: ${failedNodes(view, phase.commit)}.`
         : `Not every service reported healthy at ${phase.commit} within ${deployMs / 60_000} minutes.`;
-      if (phase.previous === null) return toPerson(r, why, "There is no previous release to roll back to.");
+      if (phase.previous === null) return toPerson(r, "deploy", why, "There is no previous release to roll back to.");
       return { ...r, phase: { kind: "rolling-back", commit: phase.commit, previous: phase.previous, why, requested: false, deadline: now() + deployMs } };
     },
     async "rolling-back"(r, phase) {
@@ -714,13 +749,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const view = releaseView(registry, release.self, now());
       const outcome = releaseOutcome(view, phase.previous);
       const revert = `${phase.commit} is still on the default branch, so revert it before the next deploy.`;
-      if (outcome === "healthy") return toPerson(r, phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
-      if (outcome === "superseded") return toPerson(r, phase.why, `Another release, ${view.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
+      if (outcome === "healthy") return toPerson(r, "deploy", phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
+      if (outcome === "superseded") return toPerson(r, "deploy", phase.why, `Another release, ${view.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
       if (outcome === "pending" && now() < phase.deadline) return r;
       const failed = outcome === "failed"
         ? failedNodes(view, phase.previous)
         : `not every service reported healthy within ${deployMs / 60_000} minutes`;
-      return toPerson(r, phase.why, `The rollback to ${phase.previous} failed too: ${failed}. The fleet needs the person now.`, revert);
+      return toPerson(r, "deploy", phase.why, `The rollback to ${phase.previous} failed too: ${failed}. The fleet needs the person now.`, revert);
     },
   };
 
@@ -753,7 +788,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const phase = r.phase;
     if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
     const stale: Hold = { code: "stale-head", text: `The pull request's head moved to ${head} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.` };
-    return { ...r, phase: { ...phase, ...personPhase(...phase.holds.filter((h) => h.code !== "stale-head"), stale), unreviewed: head } };
+    return { ...r, phase: { ...phase, ...personPhase(phase.cause, ...phase.holds.filter((h) => h.code !== "stale-head"), stale), unreviewed: head } };
   }
 
   async function step(r: Review): Promise<Review> {
@@ -782,7 +817,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (r.phase.kind === "needs-person" && r.phase.label?.state === "adding") {
       const result = await github.label(r.pr.repo, r.pr.number, humanLabel);
       if (result.kind === "labelled") return { ...r, phase: { ...r.phase, label: { state: "added" } } };
-      return { ...r, phase: { ...r.phase, label: { state: "failed", why: result.message }, ...personPhase(...r.phase.holds,
+      return { ...r, phase: { ...r.phase, label: { state: "failed", why: result.message }, ...personPhase(r.phase.cause, ...r.phase.holds,
         `Nexus could not add the label "${humanLabel}" to pull request #${r.pr.number} (${result.message}). Labelling needs a token that may write issues or pull requests, which only the person can grant.`) } };
     }
     if (ended.has(r.phase.kind) && r.outbox === null) return r;
@@ -799,7 +834,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (landing || t?.status === "active") continue;
       // The loop archives a builder and a reviewer only as their review lands, so here the person did.
       if (t?.status === "archived" || t?.status === "deleted") return end(r, { kind: "cancelled", who, status: t.status });
-      return toPerson(r, `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
+      return toPerson(r, "thread", `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
     if (r.outbox !== null) {
       if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
@@ -821,7 +856,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * archived in the transaction that saves it, and never later. A thread in a turn, such as one the person is talking
    * to, stays open.
    */
-  const gateThread = (r: Review) => (r.phase.kind === "checking" || r.phase.kind === "verifying") ? r.phase.thread : null;
   const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
 
@@ -830,7 +864,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const reviews = registry.reviewsToStep(settledKinds);
     // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
     // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.
-    const held = new Set(reviews.flatMap((r) => (r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread !== null ? [r.phase.thread] : []));
+    const held = new Set(reviews.flatMap((r) => gateThread(r.phase)?.thread ?? []));
     for (const t of registry.storedThreads({ status: ["active", "idle", "archived"], startedBy: checkCaller })) if (!held.has(t.id)) checks.discard(t.id);
     for (const t of registry.storedThreads({ status: ["active"], startedBy: verifyCaller })) if (t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
     for (const stored of reviews) {
@@ -844,8 +878,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
           // A save made while this step ran, such as the person's land or cancel, wins, and the next pass steps from it.
           // A gate thread the step started is then no review's, so it goes now rather than at the next pass's sweep.
           if (!registry.saveReview(next, archive.map((t) => t.id), r)) {
-            const started = gateThread(next);
-            if (started !== null && started !== gateThread(r)) (next.phase.kind === "checking" ? checks : live).discard(started);
+            const started = gateThread(next.phase);
+            if (started !== null && started.thread !== gateThread(r.phase)?.thread) started.runs.discard(started.thread);
             break;
           }
           for (const t of archive) deps.wake(t);
