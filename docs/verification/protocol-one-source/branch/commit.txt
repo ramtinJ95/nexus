@@ -1,0 +1,1 @@
+6b38699 refactor(project): check ServiceDecl and PreviewLink against their schemas

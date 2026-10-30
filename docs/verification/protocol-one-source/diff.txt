@@ -1,0 +1,53 @@
+--- main/capture.txt
++++ branch/capture.txt
+@@ -1,20 +1,20 @@
+ job 404: resolved "unknown"
+-job 500: Error {"message":"probe-node: GET /v1/jobs/job-1: HTTP 500: boom"}
+-observe 502: Error {"message":"probe-node: GET /v1/observe: HTTP 502: bad gateway"}
+-observe 403: Error {"message":"probe-node refused this caller","code":"forbidden"}
+-command 409: Error {"message":"probe-node: pylon-th-1 is not running","code":"not-running"}
+-command 400: Error {"message":"probe-node: POST /v1/pylons/pylon-th-1/commands: HTTP 400: command.argv: Too small"}
+-command 403: Error {"message":"probe-node refused this caller","code":"forbidden"}
+-health 500: Error {"message":"probe-node: GET /v1/node-health: HTTP 500: boom"}
+-putSecret 400: Error {"message":"probe-node: PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: HTTP 400: unknown secret"}
+-putPeers 404: Error {"message":"probe-node: PUT /v1/peers: HTTP 404: no such route"}
+-putPeers 409: Error {"message":"probe-node: PUT /v1/peers: HTTP 409: conflict"}
+-putPeers 403: Error {"message":"probe-node refused this caller","code":"forbidden"}
++job 500: ProbeHttpError {"message":"probe-node: GET /v1/jobs/job-1: HTTP 500: boom","status":500}
++observe 502: ProbeHttpError {"message":"probe-node: GET /v1/observe: HTTP 502: bad gateway","status":502}
++observe 403: ProbeHttpError {"message":"probe-node refused this caller","code":"forbidden","status":403}
++command 409: ProbeHttpError {"message":"probe-node: pylon-th-1 is not running","code":"not-running","status":409}
++command 400: ProbeHttpError {"message":"probe-node: POST /v1/pylons/pylon-th-1/commands: HTTP 400: command.argv: Too small","status":400}
++command 403: ProbeHttpError {"message":"probe-node refused this caller","code":"forbidden","status":403}
++health 500: ProbeHttpError {"message":"probe-node: GET /v1/node-health: HTTP 500: boom","status":500}
++putSecret 400: ProbeHttpError {"message":"probe-node: PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: HTTP 400: unknown secret","status":400}
++putPeers 404: ProbeHttpError {"message":"probe-node: PUT /v1/peers: HTTP 404: no such route","status":404}
++putPeers 409: ProbeHttpError {"message":"probe-node: PUT /v1/peers: HTTP 409: conflict","status":409}
++putPeers 403: ProbeHttpError {"message":"probe-node refused this caller","code":"forbidden","status":403}
+ manifest 404: resolved null
+-manifest 500: Error {"message":"probe-node: GET /v1/manifests/img-abc: HTTP 500: boom"}
+-stream 409: Error {"message":"probe-node: pylon-th-1 is not running","code":"not-running"}
+-stream 403: Error {"message":"probe-node refused this caller","code":"forbidden"}
+-stream 500: Error {"message":"probe-node: GET /v1/pylons/pylon-th-1/stream?request=%7B%22argv%22%3A%5B%22cat%22%5D%7D: HTTP 500: boom"}
++manifest 500: ProbeHttpError {"message":"probe-node: GET /v1/manifests/img-abc: HTTP 500: boom","status":500}
++stream 409: ProbeHttpError {"message":"probe-node: pylon-th-1 is not running","code":"not-running","status":409}
++stream 403: ProbeHttpError {"message":"probe-node refused this caller","code":"forbidden","status":403}
++stream 500: ProbeHttpError {"message":"probe-node: GET /v1/pylons/pylon-th-1/stream?request=%7B%22argv%22%3A%5B%22cat%22%5D%7D: HTTP 500: boom","status":500}
+ stream from another node: Error {"message":"probe-node: 127.0.0.1:<port> is tailnet node nOTHER, expected nPROBE","code":"forbidden"}
+ putPeers with whois failing: Error {"message":"probe-node: tailscaled is down","code":"unreachable"}
+ stream with whois failing: Error {"message":"tailscaled is down"}
+@@ -22,12 +22,12 @@
+ deployer request to another node: Error {"message":"deployment endpoint has the wrong tailnet identity"}
+ bytes another node received: 0
+ fetchArtifact 409: resolved {"refused":"holds other bytes"}
+-fetchArtifact 500: Error {"message":"127.0.0.1:<port>: GET /v1/artifacts/img-abc?sha256=0000000000000000000000000000000000000000000000000000000000000000: HTTP 500: boom"}
++fetchArtifact 500: ProbeHttpError {"message":"127.0.0.1:<port>: GET /v1/artifacts/img-abc?sha256=0000000000000000000000000000000000000000000000000000000000000000: HTTP 500: boom","status":500}
+ fetchArtifact from a node not a peer: Error {"message":"127.0.0.1:<port> is tailnet node nPROBE, which is not a configured peer","code":"forbidden"}
+ whois 200: resolved "nPEER"
+ whois 404: resolved null
+ whois 500: Error {"message":"tailscaled whois 100.64.0.7:41641: HTTP 500: boom"}
+-whois with a 2 MiB answer: Error {"message":"tailscaled whois 100.64.0.7:41641: Unexpected token 'x', \"xxxxxxxxxx\"... is not valid JSON"}
++whois with a 2 MiB answer: Error {"message":"tailscaled whois 100.64.0.7:41641 response too large"}
+ certificate 403: Error {"message":"tailscaled certificate: HTTP 403"}
+ certificate with a 129 KiB answer: Error {"message":"tailscaled certificate response too large"}
+ certificate with no pair: Error {"message":"tailscaled certificate response has no certificate/key pair"}

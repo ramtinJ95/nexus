@@ -1,0 +1,151 @@
+# main's code, 90f4299 Cut the pylon-vm fork's guest and controller calls for ordinary reads, and drop its leftovers (#324), with the branch's tests
+✔ node requests verify the control identity before sending the root credential
+✔ health requests bound the whole response, not just connecting
+✔ a refused request carries its status and whole body, and a long join refusal reaches the person as the control plane's words
+✔ a node request to the wrong tailnet identity sends no byte, not even the request line
+✔ callers that are not the configured node get 403
+✔ the control plane's list of peers replaces probe.json's, and only the control plane may put it
+✔ the client refuses a probe that whois does not name
+✔ the client sends nothing, not even the request line, to a peer that whois does not name
+✔ a repeated jobId returns the job's current status
+✔ one job per subject: a second gets busy
+✔ an expired envelope is rejected and not recorded
+✔ malformed envelopes and envelopes for another node are invalid
+✔ build and drop jobs reach the backend, and one that names a checkpoint or a path is refused at the door
+✔ a peer probe fetches an artifact as its manifest in a header and its archive as the body, and other bytes are refused unsent
+✔ the control plane reads the manifest of an artifact the node holds, and a peer may not
+✔ fetch-artifact imports from the peer probe, and refuses a copy whose sha256 differs from the job's
+✔ a job past its deadline fails with deadline
+✔ spawn checks secret grants before booting
+✔ a spawn granted a held secret boots before the control plane hands it over, rather than failing for good
+✔ a snapshot lists the checkpoints of the stopped pylons it reports, also when a pylon stops while it is read
+✔ observe starts with a snapshot carrying the applied liveHash, and a new probe reports none
+✔ a spawn without its sessions reaches the backend as such, and its pylon reports no liveHash until a spawn that brings them back
+✔ capacity counts the CPUs and memory of VMs that are up and the disk of every pylon, paused ones included
+✔ a broken pylon's log tail and a failed job's log leave the node with the values it holds and secret-shaped text redacted
+✔ node health is the control plane's to read, read-only, with the backend's storage and its pylons' processes
+✔ a held secret from the control plane is held, applied to the running pylons, and then reported as one the node holds
+✔ a held secret is taken only from the control plane, only under a held name, and only as a token, and a refusal never echoes the value
+✔ an observer learns at once that the probe got a held secret it did not have
+✔ observations say the node nests KVM only when its backend does
+✔ observations name the secrets the node holds, never their values, and whether it has a git SSH key
+✔ commands run in a running pylon's guest and return its result
+✔ a command for a pylon that is not running is refused as not-running
+✔ a command or job body over a mebibyte is refused and reaches no guest
+✔ malformed commands get 400 and reach no guest
+✔ a message that resumes its Claude session publishes the session's new pane at once
+✔ a message for a Claude session is typed into its pane, and the result says how Claude took it
+✔ two messages for one Claude session run one after the other, so the session opens once and their typing never overlaps
+✔ the outcome of a Claude send waits for one queued behind a slow send, types nothing, and says when a send failed or is unknown
+✔ a prompted Claude launch sent again while the first still runs waits for it
+✔ each command kind waits for the reads or its Claude session or nothing, publishes a snapshot or not, and a send is remembered by its request ID
+✔ the command policy table gives each kind its lock, its memory by request ID, its snapshot publishing and whether it may be sent again
+✔ a failing command rejects with the guest's error
+✔ observations carry session facts from Herdr, and null when Herdr cannot be read
+✔ a stopped pylon's observation carries the sessions its backend kept from the pause
+✔ NEXUS_API calls reach the API as the pylon the bridge named, get the URL once a spawn publishes the preview, and end with the probe
+✔ observations carry the pylon's declared outputs
+✔ a raw pipe carries stdout only, and its stderr goes to the probe's log
+✔ stdin reaches the guest process, and close ends it
+✔ a checkout read fits the probe's stream request and comes back through it
+✔ a process that closes its stdin still delivers its output and exit code
+✔ a caller that resets its stream connection during whois does not take the probe down
+✔ a stream to a pylon that is not running is refused as not-running
+✔ a stream request with a pty is refused with 400, and one without the pty key is served
+✔ terminals attached to Herdr in the guest, such as nexus attach, count as attached clients
+✔ a count of attached terminals that fails reads as none, is logged once, and fails nothing else of the observation
+✔ a dropped connection is a lost stream, and the guest process's stdin ends
+✔ spawn publishes its previews, a hit arrives on observe, pause keeps them and delete unpublishes them
+✔ observations carry the supervisor's services, and null when it cannot be read
+✔ observations carry the ports the guest listens on, and one that starts listening between snapshots publishes a snapshot
+✔ a link-port command links the port in the guest, answers its service, and publishes a snapshot
+✔ opening or closing a session publishes a snapshot that lists the change
+✔ an unlink-port command waits for a read in flight, which is published before it answers, and the next read leaves the port out
+✔ observations report the previews of the pylon's last successful spawn, not of a spawn that failed
+✔ an unlinked port's route is withdrawn at once, and the pylon counts as unapplied until a spawn that started after it
+✔ a spawn planned before an unlink that reaches the probe after it leaves the port unrouted, until the port is linked again
+✔ NEXUS_API's unpreview withdraws the port's route and its preview lets a spawn route it again, as the commands do
+✔ a spawn that started before an unlink leaves the unlinked port unrouted, so a pause right after keeps no route to it
+✔ a service declared under an unlinked port's name with a preview is routed again once a read shows it
+✔ after a probe restart a paused pylon keeps its preview, and a hit gets the waking page and is reported
+✔ probe git observations derive pushed-branch outputs and bound reads across snapshots and failures
+✔ a branch pushed just after a git read reaches the snapshots only once that read is gitPollMs old
+✔ stalled controller RPCs cannot hold healthy pylon facts or pile up behind later snapshots
+✔ parseServicesFile accepts the usage example as written, adding no defaults
+✔ parseServicesFile accepts preview links, a fixed port and the remaining fields
+✔ parseServicesFile rejects duplicate keys
+✔ parseServicesFile rejects an alias bomb
+✔ parseServicesFile rejects an unknown top-level key
+✔ parseServicesFile rejects an unknown service field
+✔ parseServicesFile rejects a missing command
+✔ parseServicesFile rejects a bad service name
+✔ parseServicesFile rejects an absolute cwd
+✔ parseServicesFile rejects a cwd that leaves the repo
+✔ parseServicesFile rejects a health path without a slash
+✔ parseServicesFile rejects a preview URL that is neither a path nor http(s)
+✔ parseServicesFile rejects duplicate preview folders
+✔ parseServicesFile rejects PORT in env
+✔ parseServicesFile rejects PUBLIC_URL in env
+✔ parseServicesFile rejects a NEXUS_ name in env
+✔ parseServicesFile rejects a fixed port that is Nexus's own
+✔ parseServicesFile rejects duplicate fixed ports
+✔ parseServicesFile rejects a reference to an unknown service
+✔ parseServicesFile rejects a reference to a service without a preview
+✔ parseServicesFile rejects a misspelled reference
+✔ parseServicesFile rejects a reference cycle
+✔ parseServicesFile rejects an unterminated reference
+✔ parseServicesFile rejects service keys that collapse to one string
+✔ parseServicesFile rejects an env key that is not a string
+✔ parseServicesFile rejects a file over 1 MiB
+✔ parseServicesFile rejects a self reference
+✔ parseServicesFile rejects an empty file
+✔ parseServicesFile accepts a reference chain that is not a cycle
+✔ parseServicesFile and the pylon's supervisor accept exactly the same files
+✔ the in-pylon API's serviceDecl and the controller's service-start accept exactly the same services
+✔ effectiveAllowedHosts joins project hosts, login hosts and secret hosts, sorted and deduped
+✔ effectiveAllowedHosts lets a project reach its own HTTPS repo host, and adds nothing for an SSH one
+✔ effectiveAllowedHosts of a scratch project adds no repo host and keeps its grants' hosts
+✔ a pylon is granted the ChatGPT token exactly when its project has the chatgpt login
+✔ renderOverlay renders the profile script, pylon.json and PYLON.md
+✔ the profile script exports the NEXUS_ facts to a login shell, quoting every value
+✔ pylon.json carries the overlay facts for nexus info --json
+✔ PYLON.md tells the agent its hosts, previews, logins and how to declare outputs
+✔ PYLON.md of a pylon granted the ChatGPT token says pi is signed in to it, and device-code only for the other logins
+✔ PYLON.md tells Claude Code to have a shepherdr reviewer check its diff before a pull request, and whether pi is signed in for it
+✔ PYLON.md of a scratch project with GitHub access says nothing is kept and how to publish without inventing an author
+✔ PYLON.md of a scratch project without GitHub access says how to get it and to ask for a git author
+✔ PYLON.md of a clone names its remote, and never infers an author from GitHub access
+✔ a secret grant names an upper-case variable and sends it to hostnames of two labels or more
+✔ a schema and an interface that differ by one field fail the typecheck's ParsesTo check
+✖ src/protocol.test.ts
+✖ src/tailscale.test.ts
+ℹ tests 120
+ℹ pass 118
+ℹ fail 2
+✖ failing tests:
+# tsc --noEmit
+src/project.test.ts(12,173): error TS2305: Module '"./project.ts"' has no exported member 'ParsesTo'.
+src/project.test.ts(407,3): error TS2578: Unused '@ts-expect-error' directive.
+src/project.test.ts(409,3): error TS2578: Unused '@ts-expect-error' directive.
+src/protocol.test.ts(5,3): error TS2724: '"./protocol.ts"' has no exported member named 'brokenCauses'. Did you mean 'BrokenCause'?
+src/protocol.test.ts(5,17): error TS2305: Module '"./protocol.ts"' has no exported member 'closeSessionOutcomes'.
+src/protocol.test.ts(5,53): error TS2724: '"./protocol.ts"' has no exported member named 'interruptClaudeOutcomes'. Did you mean 'InterruptClaudeOutcome'?
+src/protocol.test.ts(6,21): error TS2724: '"./protocol.ts"' has no exported member named 'probeErrorCodes'. Did you mean 'JobErrorCode'?
+src/protocol.test.ts(6,38): error TS2724: '"./protocol.ts"' has no exported member named 'ProbeHttpError'. Did you mean 'ProbeError'?
+src/protocol.test.ts(6,54): error TS2724: '"./protocol.ts"' has no exported member named 'sendClaudeOutcomes'. Did you mean 'SendClaudeOutcome'?
+src/protocol.test.ts(7,26): error TS2305: Module '"./protocol.ts"' has no exported member 'CloseSessionOutcome'.
+src/protocol.test.ts(327,16): error TS18046: 'missing' is of type 'unknown'.
+src/protocol.test.ts(328,16): error TS18046: 'missing' is of type 'unknown'.
+src/protocol.test.ts(329,25): error TS18046: 'missing' is of type 'unknown'.
+src/protocol.test.ts(332,50): error TS18046: 'invalid' is of type 'unknown'.
+src/protocol.test.ts(332,88): error TS18046: 'invalid' is of type 'unknown'.
+src/protocol.test.ts(336,21): error TS18046: 'forbidden' is of type 'unknown'.
+src/protocol.test.ts(336,39): error TS18046: 'forbidden' is of type 'unknown'.
+src/protocol.test.ts(336,55): error TS18046: 'forbidden' is of type 'unknown'.
+src/protocol.test.ts(340,21): error TS18046: 'stopped' is of type 'unknown'.
+src/protocol.test.ts(340,37): error TS18046: 'stopped' is of type 'unknown'.
+src/protocol.test.ts(340,51): error TS18046: 'stopped' is of type 'unknown'.
+src/protocol.test.ts(342,63): error TS18046: 'conflict' is of type 'unknown'.
+src/tailscale.test.ts(9,44): error TS2305: Module '"./tailscale.ts"' has no exported member 'PeerRefused'.
+src/tailscale.test.ts(9,57): error TS2305: Module '"./tailscale.ts"' has no exported member 'verifyPeer'.
+src/tailscale.test.ts(91,40): error TS7006: Parameter 'id' implicitly has an 'any' type.
