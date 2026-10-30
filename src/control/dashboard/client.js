@@ -134,7 +134,7 @@ function swap(regions) {
 // older text back. Its frames come in order: the region whole, then the parts that grew since.
 let stream = null;
 let frames = 0;
-// Which Claude view the stream last rendered, which a poll of a streaming page names instead of rendering it.
+// Which view the stream last rendered, which a poll of a streaming page names instead of rendering it.
 let shows = null;
 const streaming = () => stream?.readyState === EventSource.OPEN;
 function follow(url) {

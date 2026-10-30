@@ -838,7 +838,7 @@ function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentVi
   const items = read === null ? [] : itemsOf(read, d.questions ?? [], t.id);
   const run = runOf(d, read, items);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
-  const shows = streaming && read?.kind === "claude" ? shownKey(read.view, model) : null;
+  const shows = streaming && read !== null ? shownKey(read, model) : null;
   const [label, tone] = threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon });
   const open = t.status === "active" || t.status === "idle";
   const actions = [
@@ -1184,21 +1184,26 @@ ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread i
 
 /**
  * One event of a thread page's stream: the conversation region's inside, or the new inside of each part that grew,
- * by its place among the region's `data-grow` elements. A Claude worker's frames say which view the region then
- * shows, and a frame with only that comes when the view changed and the region did not.
+ * by its place among the region's `data-grow` elements. Each frame says which view the region then shows, and a
+ * frame with only that comes when the view changed and the region did not.
  */
-export type LiveFrame = { convo: string; shows?: string } | { grow: [index: number, inside: string][]; shows?: string } | { shows: string };
+export type LiveFrame = { convo: string; shows: string } | { grow: [index: number, inside: string][]; shows: string } | { shows: string };
 
 const digest = (text: string) => createHash("sha256").update(text).digest("base64url").slice(0, 22);
-const entryDigests = new WeakMap<readonly ClaudeEntry[], string>();
+const entryDigests = new WeakMap<readonly unknown[], string>();
+const entriesDigest = (entries: readonly unknown[]) => entryDigests.get(entries) ?? entryDigests.set(entries, digest(JSON.stringify(entries))).get(entries)!;
 /**
- * Which Claude view a conversation region shows, so a poll from a page whose stream shows it can say so without
- * rendering it. A watched thread's views keep one entries array until an entry changes, so each is digested once.
+ * Which view a conversation region shows, from what `convo` renders of it, so a poll from a page whose stream shows
+ * it can say so without rendering it. A watched Claude transcript keeps one entries array until an entry changes, and
+ * so does a harness conversation's while pi-durable keeps it mounted, so each array is digested once.
  */
-function shownKey(view: ClaudeConversation, model: string | null): string {
-  let entries = entryDigests.get(view.entries);
-  if (entries === undefined) entryDigests.set(view.entries, entries = digest(JSON.stringify(view.entries)));
-  return digest(JSON.stringify([view.session, view.dropped, entries, view.readAt === null, view.working, view.usageLimit, model]));
+function shownKey(read: AgentView, model: string | null): string {
+  if (read.kind === "harness") {
+    const { entries, docs } = read.view;
+    return digest(JSON.stringify(["harness", entriesDigest(entries), docs["pi.live"] ?? null, docs["pi.inbox"] ?? null, model]));
+  }
+  const view = read.view;
+  return digest(JSON.stringify([view.session, view.dropped, entriesDigest(view.entries), view.readAt === null, view.working, view.usageLimit, model]));
 }
 
 /**
@@ -1219,20 +1224,20 @@ export function liveFrames(t: Thread, claudeModel: string | null = null, now: ()
   let shown: string | null = null;
   return (served) => {
     const view = agentView(served);
-    const region = convo(t, view, itemsOf(view, questions(), t.id), view.kind === "claude" ? claudeModel : modelOf(view.view), now()).text;
+    const model = view.kind === "claude" ? claudeModel : modelOf(view.view);
+    const region = convo(t, view, itemsOf(view, questions(), t.id), model, now()).text;
     const next = [...region.matchAll(grown)].map((m) => m[1]!);
     const nextShape = region.replace(grown, "<!--grow-->");
     const grew = next.flatMap((inside, i): [number, string][] => inside === parts[i] ? [] : [[i, inside]]);
     const changed = nextShape !== shape;
     shape = nextShape;
     parts = next;
-    const key = view.kind === "claude" ? shownKey(view.view, claudeModel) : null;
+    const key = shownKey(view, model);
     const rekeyed = key !== shown;
     shown = key;
-    const shows = key === null ? {} : { shows: key };
-    if (changed) return { convo: region, ...shows };
-    if (grew.length > 0) return { grow: grew, ...shows };
-    return rekeyed ? { shows: key! } : null;
+    if (changed) return { convo: region, shows: key };
+    if (grew.length > 0) return { grow: grew, shows: key };
+    return rekeyed ? { shows: key } : null;
   };
 }
 
@@ -1751,10 +1756,21 @@ ${choices === undefined && item.result.state === "done" && html`<pre class="t-ou
 const shotsView = (images: readonly Shot[] = []) => images.length > 0 && html`<div class="shots">${images.map((shot) =>
   html`<a class="shot" href="${shot.src}" target="_blank" rel="noopener"><img src="${shot.src}" alt="${shot.label}" loading="lazy">${shot.caption !== null && html`<span class="shot-cap">${shot.caption}</span>`}</a>`)}</div>`;
 
-/** A reply or prompt's markdown, with `end` after its last character, where a streaming reply's caret goes. */
+/**
+ * A reply or prompt's markdown, with `end` after its last character, where a streaming reply's caret goes. Every poll
+ * and stream frame renders the same finished texts again, so their markdown is kept by text, the most recently shown.
+ */
 function prose(text: string, end: Part = null): Html {
-  return markdownView(parseMarkdown(text.split(/\r?\n/)), end);
+  if (end !== null) return markdownView(parseMarkdown(text.split(/\r?\n/)), end);
+  const kept = proseKept.get(text);
+  proseKept.delete(text);
+  const out = kept ?? markdownView(parseMarkdown(text.split(/\r?\n/)), null);
+  proseKept.set(text, out);
+  if (proseKept.size > proseKeeps) proseKept.delete(proseKept.keys().next().value!);
+  return out;
 }
+const proseKept = new Map<string, Html>();
+const proseKeeps = 2_000;
 
 /** A block of the markdown that replies and prompts are written in. A list's `start` is null for bullets. */
 type Markdown =

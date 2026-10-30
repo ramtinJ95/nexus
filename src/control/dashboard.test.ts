@@ -1160,20 +1160,25 @@ test("a thread page's stream sends its conversation, then only the text that gre
   assert.match(page, new RegExp(`<div class="convo" id="convo" data-rendered-reply-at="" data-live data-stream="/threads/${fix.id}/stream">`));
 
   const stream = s.events(`/threads/${fix.id}/stream`);
+  const grew = async () => {
+    const { grow, shows } = await stream.next();
+    assert.equal(typeof shows, "string", "each frame names the view it shows");
+    return { grow };
+  };
   const first = await stream.next();
   assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
   assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Bash npm run build 1 line › npm run build compiling", "Hal"]);
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), { grow: [[0, "2 lines"], [1, "compiling\nlinking\n"], [2, '<p>Half an &lt;answer&gt;<span class="caret" aria-hidden="true"></span></p>']] },
+  assert.deepEqual(await grew(), { grow: [[0, "2 lines"], [1, "compiling\nlinking\n"], [2, '<p>Half an &lt;answer&gt;<span class="caret" aria-hidden="true"></span></p>']] },
     "the line count, the output and the answer grow in place, escaped as the page escapes them");
   transcript.docs["pi.live"] = live("Half an <answer> and more", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), { grow: [[2, '<p>Half an &lt;answer&gt; and more<span class="caret" aria-hidden="true"></span></p>']] }, "only the parts that grew");
+  assert.deepEqual(await grew(), { grow: [[2, '<p>Half an &lt;answer&gt; and more<span class="caret" aria-hidden="true"></span></p>']] }, "only the parts that grew");
   transcript.docs["pi.live"] = live("Half an <answer> and more\n\n- **one**\n```sh\nnpm te <!--/grow-->", "compiling\nlinking\n");
   s.fake.commit(fix.id);
-  assert.deepEqual(await stream.next(), {
+  assert.deepEqual(await grew(), {
     grow: [[2, '<p>Half an &lt;answer&gt; and more</p><ul><li><p><strong>one</strong></p></li></ul><pre class="code">npm te &lt;!--/grow--&gt;<span class="caret" aria-hidden="true"></span></pre>']],
   }, "markdown blocks grow in place, an open fence is code so far, the caret trails the last character, and text cannot close the part");
 
@@ -2369,4 +2374,54 @@ test("the sidebar's release lines read as the release view does: stale and missi
     [node, "control: aaaaaaaaaaaa · healthy ()", "probe: aaaaaaaaaaaa · pending (deployer report is stale)"],
     [tower, "probe: unknown · pending (no deployer report)"],
   ]);
+});
+
+/** The page's conversation region: its named view, and what it renders. */
+function convoRegion(html: string) {
+  const tag = /<div class="convo" id="convo" data-rendered-reply-at="\d*"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
+  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
+}
+
+test("a poll of a streaming harness thread's page names the view its stream shows rather than render it", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const transcript = s.fake.transcript(fix.id);
+  transcript.messages.push({ role: "user", content: "Build it", timestamp: Date.now() }, assistant([bash("c1", "npm run build")], "toolUse"));
+  transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [1] }, tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\n" }] };
+  const stream = s.events(`/threads/${fix.id}/stream`);
+  t.after(() => stream.close());
+  const first = await stream.next();
+  const polled = convoRegion((await s.call("GET", `/threads/${fix.id}?streaming=1`)).text);
+  assert.deepEqual(polled, { named: first.shows, inside: "" }, "the poll names the view the stream's frame shows and renders none");
+  const unstreamed = convoRegion((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.equal(unstreamed.named, undefined);
+  assert.match(unstreamed.inside, /npm run build/, "a poll from a page that does not stream renders the conversation");
+
+  transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [1] }, tools: [{ callId: "c1", name: "bash", status: "running", output: "compiling\nlinking\n" }] };
+  s.fake.commit(fix.id);
+  const grew = await stream.next();
+  assert.ok(grew.grow !== undefined && grew.shows !== first.shows, "output that grew is another view");
+  assert.equal(convoRegion((await s.call("GET", `/threads/${fix.id}?streaming=1`)).text).named, grew.shows);
+});
+
+test("a finished text renders as it did uncached, and a streaming answer keeps its caret whatever was rendered of the same text", async (t) => {
+  const s = await seeded(t);
+  const thread = await s.start("acme", "Fix checkout");
+  const text = `Done: **${randomUUID()}** and \`code\`.\n\n- one\n- two`;
+  const reply = (entries: ClaudeEntry[]): ClaudeConversation => ({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
+  const rendered = (liveFrames(thread)(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo;
+  assert.equal((liveFrames(thread)(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo, rendered, "a render from the cache is the render it keeps");
+  assert.match(rendered, /<strong>[^<]+<\/strong> and <code>code<\/code>\.<\/p><ul><li><p>one<\/p><\/li><li><p>two<\/p><\/li><\/ul>/);
+
+  const caret = '<span class="caret" aria-hidden="true"></span>';
+  const harness = (committed: string | null, streaming: string | null) => ({
+    conversation: { id: 1 },
+    entries: committed === null ? [] : [{ id: 1, conversationId: 1, kind: "pi.assistant", model: [assistant([{ type: "text", text: committed }])] }],
+    docs: streaming === null ? {} : { "pi.live": { run: { taskId: 1, inputs: [1] }, tools: [], generation: { attempt: 1, message: assistant([{ type: "text", text: streaming }], "pending") } } },
+  }) as never;
+  const streamed = `Streaming ${randomUUID()}`;
+  const carets = (view: never) => (liveFrames(thread)(view) as { convo: string }).convo.split(caret).length - 1;
+  assert.equal(carets(harness(null, streamed)), 1);
+  assert.equal(carets(harness(streamed, null)), 0, "the finished text is not the streaming render");
+  assert.equal(carets(harness(streamed, streamed)), 1, "nor the streaming render the finished one");
 });
