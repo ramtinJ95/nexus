@@ -1,6 +1,6 @@
 # Review step reads verification
 
-Verified in this task's pylon on 2026-10-30, on branch `simplify/w4-review-reads`, against main at 74c09ae. No live control plane, node, image, GitHub repository or other thread was touched.
+Verified in this task's pylon on 2026-10-30, on branch `simplify/w4-review-reads`, against main at c91b4db. No live control plane, node, image, GitHub repository or other thread was touched.
 
 ## How to rerun
 

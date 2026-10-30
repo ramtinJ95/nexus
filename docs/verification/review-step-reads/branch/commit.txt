@@ -1,1 +1,1 @@
-branch: 321204e perf(control): read only the threads and reviews each periodic pass acts on
+branch: a9648a3 docs: describe the review loop's per-pass reads and the passes' narrow thread reads
