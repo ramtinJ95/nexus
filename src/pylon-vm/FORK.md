@@ -8,7 +8,7 @@ This directory is a fork of pi-sandbox, MIT-licensed, by Igor Warzocha. Its lice
 
 Nexus owns this code and does not track upstream. pi-sandbox stays the reference to compare designs against. The pi extension entry (`index.ts`) and the changelog tool (`changelog.ts`) were not copied.
 
-Nexus calls it only through `run` in `client.ts`, from `src/pylon-vm-backend.ts` and `src/pylon-vm-templates.ts`. The probe's end of the host bridge (`src/probe/pylon-api.ts`) takes its socket path and header name from `host-bridge.ts`. Changes from upstream:
+Nexus calls it only through `run` in `client.ts`, from `src/pylon-vm-backend.ts` and `src/pylon-vm-templates.ts`. The probe's end of the host bridge (`pylonVmHostBridge` in `src/pylon-vm-backend.ts`, listening through `src/host-bridge.ts`) takes its socket path and header name from `host-bridge.ts`. Changes from upstream:
 
 - The controller is started from `daemon.ts` with Node's type stripping, so there is no `dist/` build. The client spawns it with its own Node binary, `process.execPath`, so it needs no `node` on PATH and runs no `node --version` check first. It still hands the controller its PATH, through which Gondolin finds QEMU.
 - `run` takes the state root as an argument instead of reading `PI_SANDBOX_HOME`.

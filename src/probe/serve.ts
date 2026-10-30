@@ -13,7 +13,8 @@
  * The serve config is one object per node, so converges change it one at a time. Warming runs outside that.
  */
 import { setTimeout as delay } from "node:timers/promises";
-import { JobFailure, type TailscaleServe } from "../backend.ts";
+import { JobFailure } from "../backend.ts";
+import type { TailscaleServe } from "./run.ts";
 import { output } from "../exec.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import type { PreviewAssignment } from "../project.ts";

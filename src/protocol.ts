@@ -29,35 +29,24 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { localApiWhois, PeerRefused, tailnetNodeIdPattern, verifyPeer, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPortMessage, reservedPorts, type BootInputs, type LiveSpec, type ProjectId } from "./project.ts";
-import { claudeSessionId, claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
+import { claudeSessionId, claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./session-harness.ts";
 import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
-import type {
-  ArtifactManifest, CheckpointId, ImageId, ImageManifest, ImageRecipe, PortableArtifactId, ArtifactId, TemplateBuildInputs, TemplateId, TemplateManifest,
-} from "./images.ts";
+import type { ArtifactManifest, ImageManifest, ImageRecipe, TemplateBuildInputs, TemplateManifest } from "./images.ts";
+import {
+  isImageId, isPortableArtifactId, isTemplateId, maxPylonIdLength, type ArtifactId, type CheckpointId, type ImageId, type JobId, type LiveHash,
+  type NodeName, type PortableArtifactId, type PylonId, type TailnetNodeId, type TemplateId,
+} from "./ids.ts";
 
-declare const brand: unique symbol;
-type Brand<T, B extends string> = T & { readonly [brand]: B };
+// Temporary: the IDs moved to ids.ts, and E1 deletes this re-export.
+export { isImageId, isPortableArtifactId, isTemplateId, maxPylonIdLength } from "./ids.ts";
+export type { JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
 
-export type NodeName = Brand<string, "NodeName">; // "rj-firebat", "infra-testbench"
 /** A tailnet machine name, which is one DNS label, so at most 63 characters. */
 export const nodeNameSchema = z.string()
   .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "must be a lowercase tailnet machine name of at most 63 characters")
   .refine((name) => name !== "auto", "auto is what `start --node auto` asks for, so no node may be named it")
   .transform((name) => name as NodeName);
-/** `pylon-${threadId}`. At most 40 characters, the pi-sandbox name limit, so thread IDs are at most 34. */
-export type PylonId = Brand<string, "PylonId">;
-export const maxPylonIdLength = 40;
 export const pylonIdSchema = z.string().max(maxPylonIdLength).regex(/^[a-z][a-z0-9-]*$/);
-/**
- * Image and template IDs as the control plane mints them, a kind and a few lowercase letters or digits. They
- * name directories in a node's artifact store, so an ID with a separator or a dot is refused before it is used.
- */
-export const isImageId = (id: unknown): id is ImageId => typeof id === "string" && /^img-[a-z0-9]{1,40}$/.test(id);
-export const isTemplateId = (id: unknown): id is TemplateId => typeof id === "string" && /^tpl-[a-z0-9]{1,40}$/.test(id);
-export const isPortableArtifactId = (id: unknown): id is PortableArtifactId => isImageId(id) || isTemplateId(id);
-export type JobId = Brand<string, "JobId">; // UUID minted by the control plane
-/** sha256 of the canonical LiveSpec. Observations echo it, so the planner sees drift without a counter. */
-export type LiveHash = Brand<string, "LiveHash">;
 
 // Jobs: Amp's spawn, pause and delete, plus the artifact work Amp does on its own servers.
 
@@ -280,7 +269,7 @@ export type ProbeEvent =
 // Synchronous guest operations. They are not reconciled and not queued behind lifecycle jobs.
 // Everything runs as `user`. pi-sandbox fixes the shell user for the life of an instance, and `user`
 // has passwordless sudo, so a root command is `["sudo", ...]`. What each kind waits for, whether it publishes a
-// snapshot and whether a caller may send it again is commandPolicies in backend.ts.
+// snapshot and whether a caller may send it again is commandPolicies in probe/run.ts.
 
 export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */
@@ -449,8 +438,6 @@ const nodeHealthSchema = z.looseObject({
 /** The secrets whose values the control plane holds and hands to every probe, which no node's secret file may set. */
 export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
 
-/** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
-export type TailnetNodeId = Brand<string, "TailnetNodeId">;
 export const tailnetNodeIdSchema = z.string()
   .regex(tailnetNodeIdPattern, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)")
   .transform((id) => id as TailnetNodeId);
@@ -542,7 +529,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
     },
-    /** Never retried here. commandPolicies in backend.ts says which kinds a caller may send again. */
+    /** Never retried here. commandPolicies in probe/run.ts says which kinds a caller may send again. */
     async command(pylonId, command) {
       const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
       const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);

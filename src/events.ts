@@ -1,4 +1,4 @@
-import type { PylonId } from "./protocol.ts";
+import type { PylonId } from "./ids.ts";
 import { z } from "zod";
 
 export const sessionActivityTtlMs = 30 * 60_000;

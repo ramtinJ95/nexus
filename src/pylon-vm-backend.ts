@@ -11,7 +11,7 @@
  * only on their own node, one per pylon.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { chmod, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
@@ -27,12 +27,12 @@ import { finishRelaunch, pauseSessions, type RelaunchMark } from "./session-wake
 import { checkoutDir, sessionHarnessSchema } from "./sessions.ts";
 import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
-import { hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
-import { pylonVmHostBridge } from "./probe/pylon-api.ts";
+import { bridgePylonHeader, hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
+import { listenHostBridge, type HostBridge } from "./host-bridge.ts";
 import { asUser, controllerLog, pylonGuest, type StatusCache } from "./pylon-vm/pylon-guest.ts";
 import { readJson, saveJson } from "./json-file.ts";
 import { alive, readIdentity } from "./pylon-vm/identity.ts";
-import { directory, existsError, readRecord } from "./pylon-vm/storage.ts";
+import { directory, existsError, privateDirectory, readRecord } from "./pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
   /**
@@ -240,6 +240,27 @@ function bootRemotes(repo: RepoInit): string[] {
 /** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
 function checkoutCommands({ url, checkout }: CloneRepo): string[] {
   return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(checkoutDir, "HEAD")}`, checkoutDir)];
+}
+
+/**
+ * The pylon VM backend's bridge: a Unix socket under the state root, which each instance's controller forwards
+ * the guest's requests to with the instance name in a header (src/pylon-vm/host-bridge.ts). The socket is
+ * private to the probe's user, so only the controllers can set that header.
+ */
+export function pylonVmHostBridge(stateRoot: string): HostBridge {
+  const path = hostBridgeSocket(stateRoot);
+  const listen = listenHostBridge({ path }, async (req) => {
+    const name = req.headers[bridgePylonHeader];
+    return req.url === "/v1/request" && pylonIdSchema.safeParse(name).success ? name as PylonId : null;
+  });
+  return async (answer) => {
+    // The probe can start before the backend's first action makes the state root, so the bridge makes it as the fork does.
+    await privateDirectory(stateRoot);
+    await rm(path, { force: true }); // left by a probe that did not close
+    const bridge = await listen(answer);
+    await chmod(path, 0o600);
+    return bridge;
+  };
 }
 
 export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend {

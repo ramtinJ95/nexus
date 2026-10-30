@@ -1,7 +1,7 @@
 import { pylonEventSchema, type PylonEvent } from "../events.ts";
 /**
- * The probe's answers to the in-pylon `nexus` CLI (PylonApiRequest in project.ts), and the listener a backend's
- * host bridge delivers them through. The bridge names the calling pylon from the VM or container the request
+ * The probe's answers to the in-pylon `nexus` CLI (PylonApiRequest in project.ts), which a backend's host bridge
+ * (host-bridge.ts) delivers. The bridge names the calling pylon from the VM or container the request
  * came through, so the guest holds no token and nothing here takes identity from the request. Everything else
  * in a request is the guest's, so it is parsed here.
  *
@@ -9,18 +9,14 @@ import { pylonEventSchema, type PylonEvent } from "../events.ts";
  * output or a port the agent can fix, such as a missing file or a port a service's preview owns, and 500 for a failed guest operation, whose message the
  * guest's own refusals (an unknown service, a declared name given to `service start`) come through in.
  */
-import { chmod, rm } from "node:fs/promises";
-import { once } from "node:events";
-import { createServer, type IncomingMessage } from "node:http";
 import { z } from "zod";
-import type { Guest, PortLinks } from "../backend.ts";
+import type { Guest } from "../backend.ts";
+import type { HostBridgeAnswer } from "../host-bridge.ts";
+import type { PortLinks } from "./run.ts";
 import { addOutput, listOutputs, OutputRefused } from "../outputs.ts";
 import { serviceDecl, serviceName, type PreviewAssignment, type PylonApiRequest, type ServiceName } from "../project.ts";
-import { pylonIdSchema, type DeclaredOutput, type PylonId, type ServiceFact } from "../protocol.ts";
-import { bridgePylonHeader, hostBridgeSocket } from "../pylon-vm/host-bridge.ts";
-import { privateDirectory } from "../pylon-vm/storage.ts";
+import type { DeclaredOutput, PylonId, ServiceFact } from "../protocol.ts";
 import { parseJson } from "../parse.ts";
-import { BodyTooLarge, readBody } from "../request-body.ts";
 
 /** What `nexus info --json` prints: /home/user/.nexus/pylon.json, which renderOverlay writes. */
 export const pylonInfoFile = "/home/user/.nexus/pylon.json";
@@ -53,12 +49,6 @@ export interface PylonApiReplies {
   "output-add": { output: DeclaredOutput };
   "output-list": { outputs: readonly DeclaredOutput[] };
 }
-
-/** One NEXUS_API call, from the pylon the bridge named. A 200 body is JSON, any other is plain text. */
-export type HostBridgeAnswer = (pylonId: PylonId, body: string) => Promise<{ status: number; body: string }>;
-
-/** A backend's end of NEXUS_API. The probe starts it once and closes it when it closes. */
-export type HostBridge = (answer: HostBridgeAnswer) => Promise<{ close(): Promise<void> }>;
 
 export interface PylonApiDeps {
   event?(pylon: PylonId, event: PylonEvent): void;
@@ -217,59 +207,5 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
     republished() {
       for (const wake of waiters) wake();
     },
-  };
-}
-
-/**
- * An HTTP listener for NEXUS_API calls. `identify` names the calling pylon from what the bridge attached to the
- * request, or returns null for a request no bridge sent, which gets a 404.
- */
-export function listenHostBridge(
-  at: { path: string } | { host: string; port: number },
-  identify: (req: IncomingMessage) => Promise<PylonId | null>,
-): HostBridge {
-  return async (answer) => {
-    const server = createServer((req, res) => {
-      const reply = async (): Promise<{ status: number; body: string }> => {
-        const pylonId = await identify(req);
-        if (pylonId === null) return { status: 404, body: `no route ${req.method} ${req.url}` };
-        if (req.method !== "POST") return { status: 405, body: "NEXUS_API takes POST only" };
-        return answer(pylonId, await readBody(req));
-      };
-      reply().then(
-        ({ status, body }) => res.writeHead(status, { "content-type": status === 200 ? "application/json" : "text/plain; charset=utf-8" }).end(body),
-        (err: unknown) => res.writeHead(err instanceof BodyTooLarge ? 413 : 500, { "content-type": "text/plain; charset=utf-8" }).end((err as Error).message),
-      );
-    });
-    if ("path" in at) server.listen(at.path);
-    else server.listen(at.port, at.host);
-    await once(server, "listening");
-    return {
-      close: () => new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        server.closeAllConnections();
-      }),
-    };
-  };
-}
-
-/**
- * The pylon VM backend's bridge: a Unix socket under the state root, which each instance's controller forwards
- * the guest's requests to with the instance name in a header (src/pylon-vm/host-bridge.ts). The socket is
- * private to the probe's user, so only the controllers can set that header.
- */
-export function pylonVmHostBridge(stateRoot: string): HostBridge {
-  const path = hostBridgeSocket(stateRoot);
-  const listen = listenHostBridge({ path }, async (req) => {
-    const name = req.headers[bridgePylonHeader];
-    return req.url === "/v1/request" && pylonIdSchema.safeParse(name).success ? name as PylonId : null;
-  });
-  return async (answer) => {
-    // The probe can start before the backend's first action makes the state root, so the bridge makes it as the fork does.
-    await privateDirectory(stateRoot);
-    await rm(path, { force: true }); // left by a probe that did not close
-    const bridge = await listen(answer);
-    await chmod(path, 0o600);
-    return bridge;
   };
 }

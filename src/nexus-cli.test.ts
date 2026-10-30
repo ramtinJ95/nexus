@@ -10,7 +10,8 @@ import type { Guest } from "./backend.ts";
 import { fakeGuest } from "./fake-guest.ts";
 import { renderOverlay, type ProjectId, type ServiceDecl } from "./project.ts";
 import type { DeclaredOutput, NodeName, PylonId, ServiceFact } from "./protocol.ts";
-import { createPylonApi, listenHostBridge, pylonInfoFile } from "./probe/pylon-api.ts";
+import { listenHostBridge } from "./host-bridge.ts";
+import { createPylonApi, pylonInfoFile } from "./probe/pylon-api.ts";
 import { freePort } from "./test-kit.ts";
 
 const cli = fileURLToPath(new URL("../images/pylon/nexus", import.meta.url));
