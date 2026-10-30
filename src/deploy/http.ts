@@ -1,6 +1,6 @@
 import { request } from "node:http";
 import { BodyTooLarge, readBody } from "../request-body.ts";
-import type { Whois } from "../tailscale.ts";
+import { PeerRefused, verifyPeer, type Whois } from "../tailscale.ts";
 
 /** A deployment API answer other than 200. `body` is the whole response, and the message only its start. */
 export class DeployHttpError extends Error {
@@ -35,11 +35,8 @@ export async function jsonRequest(url: URL, method: string, body: unknown, token
     });
     req.on("error", reject);
     req.on("socket", (socket) => {
-      socket.once("connect", () => {
-        void (async () => {
-          if (peer !== undefined && await peer.whois(socket.remoteAddress!, socket.remotePort!) !== peer.id) throw new Error("deployment endpoint has the wrong tailnet identity");
-          req.end(payload);
-        })().catch((error: Error) => req.destroy(error));
+      (peer === undefined ? Promise.resolve() : verifyPeer(socket, peer.whois, (id) => id === peer.id)).then(() => req.end(payload), (error: Error) => {
+        req.destroy(error instanceof PeerRefused && error.peer !== null ? new Error("deployment endpoint has the wrong tailnet identity") : error);
       });
     });
   });

@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { once } from "node:events";
+import { connect, createServer as createNetServer, type AddressInfo } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localApiWhois, localApiWhoisNode } from "./tailscale.ts";
+import { localApiWhois, localApiWhoisNode, PeerRefused, verifyPeer, type Whois } from "./tailscale.ts";
+import type { TailnetNodeId } from "./protocol.ts";
 
 // A stand-in for tailscaled's LocalAPI on a Unix socket. The real daemon is never contacted.
 test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node ID", async (t) => {
@@ -73,4 +76,32 @@ test("LocalAPI certificates use cert-only access, request renewal, and reject in
   await assert.rejects(localApiCertificate("dashboard.example.ts.net", socketPath), /pair/);
   body = "x".repeat(129 * 1024);
   await assert.rejects(localApiCertificate("dashboard.example.ts.net", socketPath), /too large/);
+});
+
+test("verifyPeer asks whois once a connecting socket connects, and refuses a socket that closed first or a node the caller does not accept", async (t) => {
+  const server = createNetServer((socket) => socket.end()).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const { port } = server.address() as AddressInfo;
+  const asked: [string, number][] = [];
+  const whois: Whois = async (address, remotePort) => { asked.push([address, remotePort]); return "nPeer" as TailnetNodeId; };
+
+  const connecting = connect(port, "127.0.0.1");
+  assert.equal(connecting.connecting, true);
+  await verifyPeer(connecting, whois, (id) => id === "nPeer");
+  assert.deepEqual(asked, [["127.0.0.1", port]], "whois got the address the socket connected to");
+  connecting.destroy();
+
+  const refused = await verifyPeer(connect(port, "127.0.0.1"), whois, () => false).then(() => assert.fail("accepted"), (err: unknown) => err);
+  assert.ok(refused instanceof PeerRefused);
+  assert.deepEqual(refused.peer, { address: "127.0.0.1", port, id: "nPeer" });
+  assert.equal(refused.message, `127.0.0.1:${port} is tailnet node nPeer`);
+  await assert.rejects(verifyPeer(connect(port, "127.0.0.1"), async () => null, () => true), { peer: { address: "127.0.0.1", port, id: null }, message: `127.0.0.1:${port} is tailnet node unknown` });
+  await assert.rejects(verifyPeer(connect(port, "127.0.0.1"), async () => { throw new Error("tailscaled is down"); }, () => true), { message: "tailscaled is down" });
+
+  const closed = new Promise<number>((resolve) => { const probe = createNetServer().listen(0, "127.0.0.1", () => { const free = (probe.address() as AddressInfo).port; probe.close(() => resolve(free)); }); });
+  const unconnected = connect(await closed, "127.0.0.1").on("error", () => undefined);
+  asked.length = 0;
+  await assert.rejects(verifyPeer(unconnected, whois, () => true), { peer: null, message: "the connection closed before whois" });
+  assert.deepEqual(asked, [], "whois is not asked about a socket with no peer");
 });

@@ -5,7 +5,7 @@
 import { X509Certificate } from "node:crypto";
 import { createSecureContext } from "node:tls";
 import { request } from "node:http";
-import { isIPv6 } from "node:net";
+import { isIPv6, type Socket } from "node:net";
 import { BodyTooLarge, readBody } from "./request-body.ts";
 import type { TailnetNodeId } from "./protocol.ts";
 
@@ -73,6 +73,31 @@ function localApiGet(socketPath: string, path: string, what: string, limit: numb
     req.end();
   });
 }
+
+/**
+ * Why verifyPeer refused a connection. `peer` is null when it closed before whois could ask, and otherwise the
+ * address it came from and the node whois named there, null for none.
+ */
+export class PeerRefused extends Error {
+  readonly peer: { address: string; port: number; id: TailnetNodeId | null } | null;
+  constructor(peer: PeerRefused["peer"]) {
+    super(peer === null ? "the connection closed before whois" : `${peer.address}:${peer.port} is tailnet node ${peer.id ?? "unknown"}`);
+    this.peer = peer;
+  }
+}
+
+/**
+ * Resolves once whois names the socket's peer as a node `accepts`, waiting first for a socket still connecting.
+ * Rejects with PeerRefused, or with whois's own error when tailscaled cannot answer.
+ */
+export async function verifyPeer(socket: Socket, whois: Whois, accepts: (id: TailnetNodeId) => boolean): Promise<void> {
+  if (socket.connecting) await new Promise((settled) => socket.once("connect", settled).once("close", settled));
+  const { remoteAddress: address, remotePort: port } = socket;
+  if (address === undefined || port === undefined) throw new PeerRefused(null);
+  const id = await whois(address, port);
+  if (id === null || !accepts(id)) throw new PeerRefused({ address, port, id });
+}
+
 
 export interface Certificate { key: string; cert: string }
 

@@ -27,7 +27,7 @@ import { Agent, request, type IncomingMessage } from "node:http";
 import { PassThrough, type Duplex, type Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { localApiWhois, tailnetNodeIdPattern, type Whois } from "./tailscale.ts";
+import { localApiWhois, PeerRefused, tailnetNodeIdPattern, verifyPeer, type Whois } from "./tailscale.ts";
 import { chatgptTokenGrant, reservedPortMessage, reservedPorts, type BootInputs, type LiveSpec, type ProjectId } from "./project.ts";
 import { claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "./sessions.ts";
 import { asSent, named, nonEmpty, parse, parseJson, unchecked } from "./parse.ts";
@@ -457,18 +457,15 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (body !== null) req.setHeader("content-type", contentType);
       // A body can be a secret, so not even the request line goes out until whois names the connected peer.
       req.once("socket", (socket) => {
-        const verify = () => {
-          const { remoteAddress, remotePort } = socket;
-          if (remoteAddress === undefined || remotePort === undefined) return req.destroy(probeError("unreachable", `${node}: the connection closed before whois`));
-          whois(remoteAddress, remotePort).then((id) => {
-            if (id !== expected) return req.destroy(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
-            req.end(body ?? undefined);
-          }, (err: Error) => req.destroy(err));
-        };
-        if (socket.connecting) socket.once("connect", verify);
-        else verify();
+        verifyPeer(socket, whois, (id) => id === expected).then(() => req.end(body ?? undefined), (err: Error) => req.destroy(refusal(err, "connection")));
       });
     });
+  }
+
+  /** A ProbeError for verifyPeer's refusal, and whois's own error as it is. */
+  function refusal(err: Error, what: "connection" | "stream"): Error {
+    if (!(err instanceof PeerRefused)) return err;
+    return err.peer === null ? probeError("unreachable", `${node}: the ${what} closed before whois`) : probeError("forbidden", `${node}: ${err.message}, expected ${expected}`);
   }
 
   async function call(method: "GET" | "PUT" | "POST", path: string, body: string | null = null, timeoutMs = requestTimeoutMs, contentType?: string): Promise<{ status: number; body: string }> {
@@ -535,20 +532,11 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
         req.on("upgrade", (_res, socket, head) => {
           // Node hands over an upgraded socket without its error handler. A reset ends the stream as lost.
           socket.on("error", () => undefined);
-          const { remoteAddress, remotePort } = socket;
-          if (remoteAddress === undefined || remotePort === undefined) {
-            socket.destroy();
-            return reject(probeError("unreachable", `${node}: the stream closed before whois`));
-          }
-          whois(remoteAddress, remotePort).then((id) => {
-            if (id !== expected) {
-              socket.destroy();
-              return reject(probeError("forbidden", `${node}: ${remoteAddress}:${remotePort} is tailnet node ${id ?? "unknown"}, expected ${expected}`));
-            }
+          verifyPeer(socket, whois, (id) => id === expected).then(() => {
             // pi-env pings every 5 s, but a terminal can be silent for hours.
             socket.setTimeout(0);
             resolve(clientByteStream(socket, head));
-          }, (err: unknown) => { socket.destroy(); reject(err); });
+          }, (err: Error) => { socket.destroy(); reject(refusal(err, "stream")); });
         });
         req.on("response", (res) => {
           text(res).then((body) => reject(
@@ -1062,16 +1050,7 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
   const where = `${peer.host}:${peer.port}`;
   return new Promise((resolve, reject) => {
     const req = request({ host: peer.host, port: peer.port, method: "GET", path, agent: false, timeout: artifactIdleMs, signal }, (res) => {
-      const { remoteAddress, remotePort } = res.socket;
-      if (remoteAddress === undefined || remotePort === undefined) {
-        res.destroy();
-        return reject(probeError("unreachable", `${where}: the connection closed before whois`));
-      }
-      check.whois(remoteAddress, remotePort).then((id) => {
-        if (id === null || !check.peers.includes(id)) {
-          res.destroy();
-          return reject(probeError("forbidden", `${where} is tailnet node ${id ?? "unknown"}, which is not a configured peer`));
-        }
+      verifyPeer(res.socket, check.whois, (id) => check.peers.includes(id)).then(() => {
         if (res.statusCode === 409) return text(res).then((refused) => resolve({ refused }), reject);
         if (res.statusCode !== 200) return text(res).then((body) => reject(new Error(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`)), reject);
         let manifest: ArtifactManifest;
@@ -1082,7 +1061,11 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
           return reject(new Error(`${where}: GET ${path} sent no readable manifest: ${(err as Error).message}`));
         }
         resolve({ manifest, stream: res });
-      }, (err: unknown) => { res.destroy(); reject(err); });
+      }, (err: Error) => {
+        res.destroy();
+        if (!(err instanceof PeerRefused)) return reject(err);
+        reject(err.peer === null ? probeError("unreachable", `${where}: the connection closed before whois`) : probeError("forbidden", `${where} is tailnet node ${err.peer.id ?? "unknown"}, which is not a configured peer`));
+      });
     });
     req.on("timeout", () => req.destroy(new Error(`${where} sent nothing for ${artifactIdleMs} ms`)));
     req.on("error", (err) => reject(signal.aborted ? err : probeError("unreachable", `${where}: ${err.message}`)));

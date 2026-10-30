@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { once } from "node:events";
 import { DeployHttpError, jsonRequest } from "./http.ts";
 import { joinControlPlane } from "./setup.ts";
@@ -41,4 +42,16 @@ test("a refused request carries its status and whole body, and a long join refus
   assert.equal(error.message, `deployment API HTTP 409: ${error.body.slice(0, 1000)}`, "logs keep the message they had");
   const deployer = { controlUrl: url.href, controlNodeId: "nControl", token: "a".repeat(64) };
   await assert.rejects(joinControlPlane(deployer, "join-token", async () => "nControl" as TailnetNodeId), { message: `the control plane at ${url.href} did not take the join: ${refusal}` });
+});
+
+test("a node request to the wrong tailnet identity sends no byte, not even the request line", async (t) => {
+  const received: Buffer[] = [];
+  const closed = Promise.withResolvers<void>();
+  const server = createNetServer((socket) => socket.on("data", (chunk: Buffer) => received.push(chunk)).on("close", () => closed.resolve())).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const url = new URL(`http://127.0.0.1:${(server.address() as { port: number }).port}/v1/deployer`);
+  await assert.rejects(jsonRequest(url, "POST", { join: "token" }, "secret", { id: "nControl", whois: async () => "nWrong" as TailnetNodeId }), { message: "deployment endpoint has the wrong tailnet identity" });
+  await closed.promise;
+  assert.equal(Buffer.concat(received).length, 0, "the other node received no bytes");
 });
