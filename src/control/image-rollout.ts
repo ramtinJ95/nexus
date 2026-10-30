@@ -20,9 +20,6 @@ import { HttpError } from "./http-error.ts";
 import type { NodeRecord, RecordedImage, Registry } from "./registry.ts";
 import type { ImageOperation, ImageStep, Outcome } from "./image-store.ts";
 
-// Temporary: ImageOperation moved to image-store.ts, and E1 deletes this re-export.
-export type { ImageOperation } from "./image-store.ts";
-
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 export type ImageEntry = RecordedImage & { nodes: NodeName[] };
 export interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
