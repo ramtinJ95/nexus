@@ -1,0 +1,42 @@
+branch: 67a8e13 docs(cli): bump the CLI to 0.52.0 and describe the shared connection and the waits
+
+$ nexus --version
+nexus 0.52.0
+ (exit 0, 0 CONNECTs)
+
+$ nexus project add verify --scratch --node verify-node
+Added scratch project verify on verify-node
+ (exit 0, 1 CONNECTs)
+
+$ nexus project edit verify --pipeline start
+Updated project verify, auto review off, pipeline starts items. Existing threads keep their boot settings and grants; start a new thread to apply them.
+ (exit 0, 1 CONNECTs)
+
+$ nexus item add --project verify --message Build A --after ,
+nexus: --after needs a thread. Run nexus --help for usage
+ (exit 64, 0 CONNECTs)
+
+$ nexus items --json
+[]
+ (exit 0, 1 CONNECTs)
+
+$ nexus item add --project verify --message Build B --model claude-opus-5-5
+nexus: --model requires --claude. Run nexus --help for usage
+ (exit 64, 0 CONNECTs)
+
+started th-5f98ab77c157
+
+$ timeout 6 node src/cli/nexus.ts watch th-5f98ab77c157 --interval 250
+-- active, pylon unknown
+ (exit 124, 2 CONNECTs)
+
+$ nexus threads
+th-5f98ab77c157  active  -  pylon unknown  verify  6s ago  watched
+ (exit 0, 2 CONNECTs)
+
+$ nexus watch th-5f98ab77c157 --interval 60000 under a shell that is then killed
+ the orphan exited within 2 s
+
+$ nexus events --follow under a shell that is then killed
+ the orphan exited within 1 s
+
