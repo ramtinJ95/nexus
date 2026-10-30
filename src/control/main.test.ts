@@ -162,7 +162,7 @@ test("a registry and control.json from before join tokens come up with the same 
     registry.close();
     const raw = new DatabaseSync(db);
     const version = raw.prepare("PRAGMA user_version").get()!.user_version as number;
-    raw.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 2}`);
+    raw.exec(`DROP TABLE join_tokens; DROP TABLE joined_nodes; PRAGMA user_version = ${version - 3}`);
     raw.close();
   } });
   assert.deepEqual(plane.followed, [

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
+import { nodePylons } from "./placement.ts";
 import { openRegistry, type PortRange, type Registry, type Thread } from "./registry.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
 import { envelope, ingest as realIngest } from "../reconcile.ts";
@@ -774,7 +775,7 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
 
   fake.setSessions(thread.pylonId, []);
   await until("the closed session is removed", () => registry.sessions(thread.pylonId).length === 0);
-  assert.deepEqual(registry.orphans(), []);
+  assert.deepEqual(nodePylons(registry, registry.node(fake.probe.node)!)?.orphaned, []);
 });
 
 test("with the real ingest, a paused pylon lists its sessions as paused, and once it runs again they run, with the status each read gives", async (t) => {
@@ -1442,7 +1443,7 @@ test("a node reporting a pylon the registry places on another node gets no ports
 
   elsewhere.pylons.set(thread.pylonId, { ...home.pylons.get(thread.pylonId)!, services: [] } as PylonObservation);
   elsewhere.setServices(thread.pylonId, [web]);
-  await until("the copy is recorded as an orphan", () => registry.orphans().some((o) => o.node === peer));
+  await until("the copy is listed as an orphan", () => nodePylons(registry, registry.node(peer)!)?.orphaned.includes(thread.pylonId) === true);
   await loop.wake(firebat);
   assert.deepEqual(registry.previews(thread.pylonId), []);
   assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);

@@ -8,7 +8,7 @@
  * - The actual state shown in the dashboard is derived from the last observation and the job in flight.
  * - Drift between a running pylon and its LiveSpec is detected by hash, not by a generation counter.
  * - The planner runs only for pylons in the registry. A pylon a node reports that the registry does not
- *   know is an orphan. The dashboard lists it, and only a human deletes it.
+ *   know is an orphan. The dashboard lists it from the node's observation, and only a human deletes it.
  */
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -248,7 +248,6 @@ export type RegistryWrite =
   | { record: "output"; pylonId: PylonId; kind: "branch" | "diff" | "preview" | "file"; ref: string }
   | { record: "preview"; pylonId: PylonId; service: string; httpsPort: number; ready: boolean }
   | { record: "activity"; pylonId: PylonId; human: number | null; agent: number | null }
-  | { record: "orphan"; node: NodeName; pylonId: PylonId }
   | { record: "job"; status: JobStatus };
 
 /**
@@ -266,7 +265,7 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  * last observation ingested for it, or "absent". A deleted thread's pylon that the node neither lists nor routes is
  * left out once nothing is left to tear down. Every write is an upsert, so ingesting an event twice is harmless.
  *
- * - A pylon missing from `known` is an orphan, and nothing else is written for it, not even a preview hit.
+ * - Nothing is written for a pylon missing from `known`, an orphan, not even a preview hit.
  * - A snapshot is the whole node, so a known pylon it omits is ingested as "absent".
  * - Sessions are written as the pylon's whole list whenever it differs from the previous observation's, and whenever
  *   the pylon is in `unlisted`, as loop.ts names each pylon whose list this control plane has not written since it
@@ -292,7 +291,7 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
 export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set()): readonly RegistryWrite[] {
   const observed = (pylon: PylonObservation): RegistryWrite[] => {
     const previous = known.get(pylon.pylonId);
-    return previous === undefined ? [{ record: "orphan", node, pylonId: pylon.pylonId }] : pylonWrites(pylon.pylonId, previous, pylon, now, unlisted.has(pylon.pylonId));
+    return previous === undefined ? [] : pylonWrites(pylon.pylonId, previous, pylon, now, unlisted.has(pylon.pylonId));
   };
   switch (event.type) {
     case "session-event": return [];
@@ -309,9 +308,7 @@ export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<Pyl
     }
     case "pylon": return observed(event.pylon);
     case "job": return [{ record: "job", status: event.status }];
-    case "preview-hit": return known.has(event.pylonId)
-      ? [{ record: "activity", pylonId: event.pylonId, human: Date.parse(event.at), agent: null }]
-      : [{ record: "orphan", node, pylonId: event.pylonId }];
+    case "preview-hit": return known.has(event.pylonId) ? [{ record: "activity", pylonId: event.pylonId, human: Date.parse(event.at), agent: null }] : [];
   }
 }
 

@@ -494,9 +494,9 @@ test("ingest: a preview is ready while the running pylon lists it on its port", 
   ] satisfies RegistryWrite[]);
 });
 
-test("ingest: a pylon the registry does not know is an orphan, and nothing else", () => {
+test("ingest: a pylon the registry does not know is an orphan, and nothing is written for it", () => {
   const stranger = { ...runningWith({ sessions: [working] }), pylonId: "pylon-x" as PylonId };
-  assert.deepEqual(ingest({ type: "pylon", pylon: stranger }, node, knows(), now), [{ record: "orphan", node, pylonId: "pylon-x" as PylonId }]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: stranger }, node, knows(), now), []);
 });
 
 test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known pylons it omits", () => {
@@ -514,7 +514,6 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
     { record: "node", node, state: "online", capacity: observation.capacity },
     { record: "job", status },
     { record: "activity", pylonId, human: now, agent: null },
-    { record: "orphan", node, pylonId: "pylon-x" as PylonId },
     { record: "sessions", pylonId: gone, sessions: [] },
   ] satisfies RegistryWrite[]);
   assert.throws(() => ingest({ type: "snapshot", observation }, peer, known, now), /names node rj-firebat/);
@@ -528,9 +527,7 @@ test("ingest: job events and preview hits", () => {
   ]);
 });
 
-test("ingest: a preview hit for a pylon the registry does not know is an orphan, not activity", () => {
+test("ingest: a preview hit for a pylon the registry does not know writes nothing, not even activity", () => {
   const stranger = "pylon-x" as PylonId;
-  assert.deepEqual(ingest({ type: "preview-hit", pylonId: stranger, service: "web", at: "2027-01-01T00:00:05Z", login: null }, node, knows(), now), [
-    { record: "orphan", node, pylonId: stranger },
-  ]);
+  assert.deepEqual(ingest({ type: "preview-hit", pylonId: stranger, service: "web", at: "2027-01-01T00:00:05Z", login: null }, node, knows(), now), []);
 });

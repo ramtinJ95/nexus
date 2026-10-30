@@ -119,7 +119,6 @@ export interface Preview { pylon: PylonId; service: string; httpsPort: number; r
 /** The https ports a node's previews are published on, both ends included. */
 export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
-export interface Orphan { node: NodeName; pylonId: PylonId }
 
 /**
  * How far a source of usage was read: a pylon's transcript, by its path, to a byte offset with the SHA-256 of the up
@@ -384,6 +383,9 @@ const migrations: readonly string[] = [
   // Each deleted thread's conversation the harness aborted, so a start aborts only those a crashed delete left. It
   // touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS aborted_conversations (conversation TEXT PRIMARY KEY) STRICT;`,
+  // The dashboard and the API list a node's orphans from its observation, so nothing read this table. Dropping it
+  // touches nothing an earlier migration needs, so a registry rewound past it applies it again unchanged.
+  `DROP TABLE IF EXISTS orphans;`,
 ];
 
 type Row = Record<string, unknown>;
@@ -1434,7 +1436,6 @@ export function openRegistry(path: string, clock = Date.now) {
         ...(watch ? watch.links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : []),
       ];
     },
-    orphans: () => (sql("SELECT * FROM orphans ORDER BY node, pylon_id").all() as Row[]).map((r): Orphan => ({ node: r.node as NodeName, pylonId: r.pylon_id as PylonId })),
 
     /** The latest job the node reported for a pylon or an artifact. */
     job(subject: Subject): JobStatus | undefined {
@@ -1526,9 +1527,6 @@ export function openRegistry(path: string, clock = Date.now) {
       case "preview":
         // A port the control plane no longer assigns, such as a released one, has no row to mark.
         sql("UPDATE previews SET ready = ? WHERE pylon = ? AND service = ? AND https_port = ?").run(write.ready ? 1 : 0, write.pylonId, write.service, write.httpsPort);
-        return;
-      case "orphan":
-        sql("INSERT INTO orphans (node, pylon_id) VALUES (?, ?) ON CONFLICT DO NOTHING").run(write.node, write.pylonId);
         return;
       case "job":
         // For the dashboard. The tick settles its own job against the observation, which may lag this. A snapshot read

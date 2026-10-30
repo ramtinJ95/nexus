@@ -322,7 +322,7 @@ test("failures from before judgments, projects without the pipeline and threads 
   await first.close();
   const db = new DatabaseSync(join(dir, "registry.db"));
   const version = db.prepare("PRAGMA user_version").get()!.user_version as number;
-  db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 5}`);
+  db.exec(`DROP TABLE judgments; DROP TABLE judgment_since; PRAGMA user_version = ${version - 6}`);
   db.close();
 
   const w = await open(t, dir);

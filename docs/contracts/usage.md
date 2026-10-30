@@ -37,7 +37,7 @@ for (const pylon of registry.livePylons()) {
 }
 ```
 
-`planPylon` is pure. It reads the desired phase (derived from the thread and its activity), the probe's last observation and any job in flight, and returns one step. The tick runs on every observation event and every 5 seconds. A pylon a probe reports that the registry does not know becomes an orphan record, and only a human deletes it.
+`planPylon` is pure. It reads the desired phase (derived from the thread and its activity), the probe's last observation and any job in flight, and returns one step. The tick runs on every observation event and every 5 seconds. A pylon a probe reports that the registry does not know is an orphan. `nexus nodes` and the dashboard list it from the probe's observation, and only a human deletes it.
 
 ### Call site: opening a terminal from the dashboard
 
