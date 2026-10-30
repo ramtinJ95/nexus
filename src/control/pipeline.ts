@@ -14,7 +14,7 @@ import { singleFlight } from "../single-flight.ts";
 import type { ProjectId } from "../project.ts";
 import { HttpError } from "./http-error.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
-import { liveNote, phaseNote } from "./review.ts";
+import { liveNote, phaseNote } from "./review-model.ts";
 import type { Registry, ThreadId } from "./registry.ts";
 import { checkStart, startKey, type StartRequest } from "./threads.ts";
 

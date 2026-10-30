@@ -35,8 +35,9 @@ import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptS
 import type { Sender } from "../agent-protocol.ts";
 import { promptSenders, type PromptSenders } from "./inbox.ts";
 import { queuedOf } from "./claude-conversation.ts";
-import { blocks as blocking, cancellable, cannotLand, findingsOf, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review.ts";
-import { heldBy, holdRule, reservedNames } from "./policy.ts";
+import { blocks as blocking, cancellable, cannotLand, findingsOf, liveNote, phaseNote, pushedHead, roundNote, roundsSpent, type Review } from "./review-model.ts";
+import { holdRule, reservedNames } from "./holds.ts";
+import { heldBy } from "./policy.ts";
 import { askedIn, askQuestionId, type AnswerRefusal, type AskedQuestion, type Question } from "./questions.ts";
 import { gib, nodePylons, overcommitted } from "./placement.ts";
 import { itemView, type ItemPhase, type PipelineItem } from "./pipeline.ts";

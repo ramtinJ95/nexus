@@ -65,7 +65,8 @@ import type { Planning } from "./planning.ts";
 import { queuedView, type QueuedRecord, type QueuedThread, type ThreadQueue } from "./queue.ts";
 import { nodePylons, overcommitted, type NodePylons } from "./placement.ts";
 import { listsRunning, observedPylon } from "./observed.ts";
-import { maxRounds, type Review, type ReviewLoop } from "./review.ts";
+import { maxRounds, type Review } from "./review-model.ts";
+import type { ReviewLoop } from "./review.ts";
 import { watchStopped } from "./pr-watch.ts";
 import { judgmentView, type JudgmentView } from "./judgment.ts";
 

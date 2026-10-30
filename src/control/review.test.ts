@@ -9,8 +9,10 @@ import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../protocol.ts"
 import type { AutoReview, ProjectId, SecretGrant } from "../project.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, landingHolds, reservedNames, type HoldCode } from "./policy.ts";
-import { humanLabel, landable, phaseNote, reviewLoop, type HoldCause, type Review, type ReviewDeps } from "./review.ts";
+import { holdRule, reservedNames, type HoldCode } from "./holds.ts";
+import { landingHolds } from "./policy.ts";
+import { humanLabel, landable, phaseNote, type HoldCause, type Review } from "./review-model.ts";
+import { reviewLoop, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReplies, agentState, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -909,6 +911,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
     "Always needs the person: changes to secrets, as it changes deploy/README.md, src/control/credentials.ts.",
     "Always needs the person: changes to the tailnets, as it changes src/tailscale.ts.",
   ]);
+  assert.deepEqual(holds("src/control/holds.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/holds.ts."]);
 });
 
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {
