@@ -40,6 +40,7 @@ export function herdrArgs(args: readonly string[]): HerdrArgs {
   for (let i = 0; i < end; i++) {
     const word = args[i]!;
     if (!word.startsWith("--")) words.push(word);
+    else if (word in flags) throw new Error(`herdr ${args.join(" ")} repeats ${word}`);
     else flags[word] = valuelessFlags.has(word) ? "" : args[++i]!;
   }
   return { command: words.slice(0, 2).join(" "), operands: words.slice(2), flags, rest: args.slice(end + 1) };

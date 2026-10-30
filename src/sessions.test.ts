@@ -66,14 +66,14 @@ test("a Claude Code session opens in its own workspace in the checkout and resum
   assert.ok(start, "an agent start ran");
   assert.equal(start.command, "agent start");
   assert.match(start.operands[0]!, /^[a-z][a-z0-9_-]{0,31}$/, "the agent name is one Herdr accepts");
-  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
+  assert.deepEqual([start.operands.length, start.flags, start.rest], [1, { "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
 });
 
 test("a pi session resumes from its session file, and a shell starts no agent", async () => {
   const pi = herdrUp();
   await openSession(pi, { harness: "pi", title: "plan", cwd: "/home/user", resume: "/home/user/.pi/agent/sessions/s.jsonl" });
   const start = herdrExecs(pi.execs).find((c) => c.command === "agent start")!;
-  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "pi", "--pane": "w1:p1", "--timeout": "30000" }, ["--session", "/home/user/.pi/agent/sessions/s.jsonl"]]);
+  assert.deepEqual([start.operands.length, start.flags, start.rest], [1, { "--session": "nexus", "--kind": "pi", "--pane": "w1:p1", "--timeout": "30000" }, ["--session", "/home/user/.pi/agent/sessions/s.jsonl"]]);
 
   const shell = herdrUp();
   assert.equal(await openSession(shell, { harness: "shell", title: "sh", cwd: "/home/user" }), "w1:p1");
@@ -101,7 +101,7 @@ test("a fresh Claude Code session starts under an ID of its own, and a fresh pi 
   const pi = herdrUp();
   await openSession(pi, { harness: "pi", title: "plan", cwd: "/home/user" });
   const piStart = herdrExecs(pi.execs).find((c) => c.command === "agent start")!;
-  assert.deepEqual([piStart.flags, piStart.rest], [{ "--session": "nexus", "--kind": "pi", "--pane": "w1:p1", "--timeout": "30000" }, []]);
+  assert.deepEqual([piStart.operands.length, piStart.flags, piStart.rest], [1, { "--session": "nexus", "--kind": "pi", "--pane": "w1:p1", "--timeout": "30000" }, []]);
 });
 
 test("a harness that fails to start rolls its workspace back, and the failure shows the pane's screen", async () => {
@@ -360,7 +360,7 @@ test("relaunch opens only the recorded sessions that are not already live, into 
   ]);
   assert.deepEqual(creates.map((c) => c.flags), [{ "--cwd": "/home/user/app", "--label": "plan", "--no-focus": "" }, { "--cwd": "/gone", "--label": "broken", "--no-focus": "" }]);
   const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
-  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "pi", "--pane": "w10:p1", "--timeout": "30000" }, ["--session", "/home/user/.pi/agent/sessions/old.jsonl"]]);
+  assert.deepEqual([start.operands.length, start.flags, start.rest], [1, { "--session": "nexus", "--kind": "pi", "--pane": "w10:p1", "--timeout": "30000" }, ["--session", "/home/user/.pi/agent/sessions/old.jsonl"]]);
 });
 
 test("a pylon that never paused has nothing to relaunch and starts no Herdr server", async () => {
@@ -382,7 +382,7 @@ test("a pane Herdr restored without its agent gets the agent started in place", 
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => [o.result, "herdrPane" in o ? o.herdrPane : null]), [["relaunched", "w1:p1"]]);
   const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
-  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
+  assert.deepEqual([start.operands.length, start.flags, start.rest], [1, { "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
 });
 
 test("a Claude session whose pane cannot be inspected is neither started again nor closed in any of its panes", async () => {
@@ -420,7 +420,7 @@ test("a pane Herdr still reports as Claude, but that runs only its shell, gets C
   });
   assert.deepEqual((await relaunchSessions(guest)).map((o) => [o.result, "herdrPane" in o ? o.herdrPane : null]), [["relaunched", "w1:p1"]]);
   const start = herdrExecs(guest.execs).find((c) => c.command === "agent start")!;
-  assert.deepEqual([start.flags, start.rest], [{ "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
+  assert.deepEqual([start.operands.length, start.flags, start.rest], [1, { "--session": "nexus", "--kind": "claude", "--pane": "w1:p1", "--timeout": "30000" }, ["--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions"]]);
 });
 
 test("pi run by node counts as running from its script's name", async () => {
@@ -715,7 +715,7 @@ function launchPylon(options: { shellReady?: boolean; starts?: boolean; submits?
     if (argv[3] === "shell-ready") return { exitCode: options.shellReady === false ? 1 : 0, output: "" };
     if (argv[3] === "claude-submitted") return { exitCode: files.has(argv[4]!) ? 0 : 1, output: "" };
     if (call?.marker != null && call.command === "pane run") {
-      if (files.has(call.marker)) return { exitCode: 75, output: "" };
+      if (argv[2]!.startsWith("mkdir") && files.has(call.marker)) return { exitCode: 75, output: "" };
       files.set(call.marker, "");
       return herdrServer(call);
     }
@@ -1170,7 +1170,10 @@ test("a failed chunk stops the typing before Enter, and the error says how far i
   assert.deepEqual(w.herdrCalls().map((call) => call.command), ["pane send-text", "pane send-text"]);
 });
 
-const pressed = (w: ReturnType<typeof claudeWorkers>) => herdrExecs(w.guest.execs).filter((c) => c.command === "pane send-keys").map((c) => c.operands);
+const pressed = (w: ReturnType<typeof claudeWorkers>) => herdrExecs(w.guest.execs).filter((c) => c.command === "pane send-keys").map((c) => {
+  assert.deepEqual([c.flags, c.rest], [{ "--session": "nexus" }, []], "a key press names only its pane and keys");
+  return c.operands;
+});
 
 test("an interrupt presses Esc, and only Esc, in the pane of a working Claude, and nothing for an idle Claude, a dialog or a state Herdr cannot tell", async (t) => {
   const working = claudeWorkers(t, [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })], { ...runningClaude });
