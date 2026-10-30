@@ -9,7 +9,7 @@ import type { ItemId } from "./pipeline-store.ts";
 import { openRegistry, type Registry, type ThreadId } from "./registry.ts";
 import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
-import type { StartRequest } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 import { threadServices } from "./thread-services.ts";
 import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
 import type { PipelineSetting } from "./project.ts";

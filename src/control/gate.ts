@@ -20,7 +20,7 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { checkoutDir } from "../session-harness.ts";
 import { runningProbe } from "./observed.ts";
 import type { Registry, Thread, ThreadId } from "./registry.ts";
-import type { StartRequest } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 
 /** pylon-vm's 3 GiB floor for each of two inner pylons, and 2 GiB for the verify stack's control plane and probe. */
 export const verifyMemoryGiB = 8;

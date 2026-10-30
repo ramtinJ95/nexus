@@ -16,7 +16,8 @@ import { HttpError } from "./http-error.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { liveNote, phaseNote } from "./review-model.ts";
 import type { Registry, ThreadId } from "./registry.ts";
-import { checkStart, startKey, type StartRequest } from "./threads.ts";
+import { checkStart, startKey } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 
 export const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;

@@ -15,9 +15,6 @@ import { pylonLive } from "./live.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
 import type { StartRequest } from "./start-request.ts";
 
-// Temporary: StartRequest moved to start-request.ts, and E1 deletes this re-export.
-export type { StartRequest };
-
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
 

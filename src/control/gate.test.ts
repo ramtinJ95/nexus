@@ -12,7 +12,7 @@ import { processStream } from "../process-stream.ts";
 import { checkoutDir } from "../session-harness.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
-import type { StartRequest } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 
 const node = "node" as NodeName;

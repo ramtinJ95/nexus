@@ -15,7 +15,8 @@ import type { ProjectId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "./registry.ts";
-import { checkStart, newThreadId, resourcesOf, type StartRequest } from "./threads.ts";
+import { checkStart, newThreadId, resourcesOf } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 
 /** What one predecessor means for the queued thread. */

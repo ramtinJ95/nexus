@@ -65,7 +65,7 @@ import { pylonRoutes } from "./api/pylon-routes.ts";
 import { imageRoutes } from "./api/image-routes.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import type { ImageRollout } from "./image-rollout.ts";
-import type { StartRequest } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 import type { Pipeline } from "./pipeline.ts";
 import type { Planning } from "./planning.ts";
 import type { ThreadQueue } from "./queue.ts";

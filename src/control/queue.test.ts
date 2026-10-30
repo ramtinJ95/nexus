@@ -10,7 +10,8 @@ import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { queuedView, threadQueue, waitOf } from "./queue.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import { personPhase, type Phase } from "./review-model.ts";
-import { threadStarter, type StartRequest } from "./threads.ts";
+import { threadStarter } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 import type { NodeName, ProjectId, PylonId, TailnetNodeId } from "../ids.ts";
 import { tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
 

@@ -22,7 +22,7 @@ import { tempDir, watch } from "../test-kit.ts";
 import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "../agent-protocol.ts";
 import type { CheckState } from "./gate.ts";
-import type { StartRequest } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 import { HttpError } from "./http-error.ts";
 
 const node = "node" as NodeName;

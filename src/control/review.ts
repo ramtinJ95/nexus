@@ -39,7 +39,7 @@ import {
   landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, roundsSpent, settledKinds, verdictSchema,
   type Finding, type HoldCause, type Phase, type PhaseKind, type Review, type Round, type Waiver,
 } from "./review-model.ts";
-import type { StartRequest } from "./threads.ts";
+import type { StartRequest } from "./start-request.ts";
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;

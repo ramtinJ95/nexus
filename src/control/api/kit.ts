@@ -10,7 +10,7 @@ import type { TurnGate } from "../drain.ts";
 import { HttpError } from "../http-error.ts";
 import type { Registry, StartKey, Thread, ThreadId } from "../registry.ts";
 import type { ThreadAgents, ThreadHarness } from "../thread-agent.ts";
-import type { StartRequest } from "../threads.ts";
+import type { StartRequest } from "../start-request.ts";
 import type { Access } from "./access.ts";
 import type { PylonAccess } from "./pylon-access.ts";
 import type { EventStreams } from "./sse.ts";
