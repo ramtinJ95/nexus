@@ -54,6 +54,17 @@ test("the checked-in recipe loads, with pins.json as its pins and build.sh left 
   assert.deepEqual([modes["nexus"], modes["nexus-claude-hook"], modes["nexus-kvm"], modes["nexus-turn.ts"], modes["checkout-files.py"]], ["755", "755", "755", "644", "644"]);
 });
 
+test("each helper the Dockerfile installs in /usr/local/bin finds every module it imports there, and the contract imports nothing", async () => {
+  const dockerfile = await readFile(join(pylonRecipeDir, "Dockerfile"), "utf8");
+  const installed = new Set([...dockerfile.matchAll(/^COPY (\S+) \/usr\/local\/bin\/\1$/gm)].map((m) => m[1]!));
+  assert.ok(installed.has("nexus-claude-hook"), "the Dockerfile installs the hook");
+  for (const helper of installed) {
+    const source = await readFile(join(pylonRecipeDir, helper), "utf8");
+    for (const [, name] of source.matchAll(/^import [^;]* from "\.\/([^"]+)";$/gm)) assert.ok(installed.has(name!), `${helper} imports ./${name}, which the Dockerfile installs beside it`);
+  }
+  assert.doesNotMatch(await readFile(join(pylonRecipeDir, "nexus-contract.ts"), "utf8"), /^(import\b|export [^;]* from )/m);
+});
+
 test("a recipe is every file under its directory and the shared checkout helper, nested ones by posix path, sorted", async (t) => {
   const dir = await recipeDir(t, {
     "pins.json": JSON.stringify(pins),
