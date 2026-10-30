@@ -15,7 +15,7 @@ const defaultGraceMs = 180_000;
 export function usageLimitResumer(options: { registry: Registry; inbox: Inbox; clock?: () => number; graceMs?: number }) {
   const { registry, inbox, clock = Date.now, graceMs = defaultGraceMs } = options;
   async function tick() {
-    for (const { id: thread } of registry.threads()) {
+    for (const { id: thread } of registry.storedThreads({ status: ["active", "idle"] })) {
       // Read again after the sends before it, which another thread's archive or continue may have outrun. From here to
       // the inbox fencing the request ID nothing awaits, so the stop and session it checks are the ones it sends for.
       const t = registry.thread(thread);

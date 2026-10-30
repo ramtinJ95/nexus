@@ -140,7 +140,9 @@ export function builderNudger(options: { registry: Registry; github: Pick<GitHub
   }
 
   async function pass() {
-    for (const { id } of registry.threads()) {
+    // A thread archived since its nudge has its record cleared, so an unarchived one starts its count over.
+    const ids = new Set([...registry.storedThreads({ status: ["active", "idle"] }).map((t) => t.id), ...registry.nudgedThreads()]);
+    for (const id of ids) {
       // Read again after the passes before it, which another thread's sends may have outrun.
       const t = registry.thread(id);
       if (t === undefined) continue;

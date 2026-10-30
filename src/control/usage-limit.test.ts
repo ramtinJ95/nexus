@@ -139,14 +139,26 @@ test("close waits for the pass in flight", async (t) => {
 
 test("a pass that throws rejects every poll that joined it, and the next poll runs a new pass", async (t) => {
   const f = fixture(t);
-  const threads = f.registry.threads;
-  f.registry.threads = () => { throw new Error("database is locked"); };
+  const threads = f.registry.storedThreads;
+  f.registry.storedThreads = () => { throw new Error("database is locked"); };
   await Promise.all([
     assert.rejects(f.resumer.poll(), /database is locked/),
     assert.rejects(f.resumer.poll(), /database is locked/),
   ]);
-  f.registry.threads = threads;
+  f.registry.storedThreads = threads;
   await f.resumer.poll();
   assert.equal(f.typed.length, 1);
   await f.resumer.close();
+});
+
+test("a pass reads no archived or deleted thread", async (t) => {
+  const f = fixture(t, { resetsAt }, ["th-1", "th-archived", "th-deleted"]);
+  f.registry.setThreadStatus("th-archived" as ThreadId, "archived");
+  f.registry.setThreadStatus("th-deleted" as ThreadId, "deleted");
+  const read: ThreadId[] = [];
+  const registry = { ...f.registry, thread: (id: ThreadId) => { read.push(id); return f.registry.thread(id); } };
+  const resumer = usageLimitResumer({ registry, inbox: async () => "delivered", clock: () => resetsAt + graceMs, graceMs });
+  await resumer.poll();
+  assert.deepEqual(read, ["th-1"]);
+  assert.equal(registry.events("0", { kinds: ["usage-limit.continued"] }).length, 1);
 });

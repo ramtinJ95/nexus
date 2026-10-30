@@ -451,11 +451,14 @@ export function judgmentPass(options: {
   }
 
   async function pass() {
-    for (const { id } of registry.threads()) {
+    // A judgment of a thread archived or deleted since it started still steps, to its end.
+    const startable = new Set(registry.storedThreads({ status: ["active", "idle"] }).map((t) => t.id));
+    const ids = new Set([...registry.unfinishedJudgments().map((j) => j.thread), ...startable]);
+    for (const id of ids) {
       try {
         for (const j of registry.judgments(id)) await step(j);
         // Read again after the steps, which may have retried the pylon.
-        await start(registry.thread(id)!);
+        if (startable.has(id)) await start(registry.thread(id)!);
         errors.delete(id);
       } catch (err) {
         const message = (err as Error).message;

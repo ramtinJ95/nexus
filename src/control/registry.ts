@@ -1083,6 +1083,9 @@ export function openRegistry(path: string, clock = Date.now) {
     /** Whether `review` is the builder's review as stored, so no other save came since it was read. */
     isCurrentReview,
     reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
+    /** The reviews but those whose phase is one of `settled` with no message left to send. */
+    reviewsToStep: (settled: readonly string[]): Review[] => sql(`SELECT record FROM reviews WHERE json_extract(record, '$.phase.kind') NOT IN (SELECT value FROM json_each(?))
+      OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(JSON.stringify(settled)).map((r) => storedReview(json<Review>(r.record))),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
@@ -1193,6 +1196,8 @@ export function openRegistry(path: string, clock = Date.now) {
     judgment: (failure: number): Judgment | null => recordOf<Judgment>("judgments", "failure", failure),
     /** The thread's judgments, oldest failure first. */
     judgments: (thread: ThreadId): Judgment[] => sql("SELECT record FROM judgments WHERE thread = ? ORDER BY failure").all(thread).map((r) => json<Judgment>(r.record)),
+    /** Every judgment not done, whatever its thread's status, oldest failure first. */
+    unfinishedJudgments: (): Judgment[] => sql("SELECT record FROM judgments WHERE json_extract(record, '$.phase.kind') != 'done' ORDER BY failure").all().map((r) => json<Judgment>(r.record)),
     /**
      * Replaces the judgment as it was read, `previous`, or adds it when that is null, and runs `alongside` in the same
      * transaction. False, with nothing written or run, when the stored record is not `previous`: another pass saved first.
@@ -1218,6 +1223,8 @@ export function openRegistry(path: string, clock = Date.now) {
       return row === undefined ? null : { event: row.id as number, at: row.time as number };
     },
     nudge: (thread: ThreadId): Nudge | null => recordOf<Nudge>("nudges", "thread", thread),
+    /** The threads with a nudge record that a later pass may still change or clear, which is every one but left-alone. */
+    nudgedThreads: (): ThreadId[] => sql("SELECT thread FROM nudges WHERE json_extract(record, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
     /** Replaces the builder's nudge record, or with null deletes it. */
     saveNudge(thread: ThreadId, nudge: Nudge | null) {
       transaction(() => {

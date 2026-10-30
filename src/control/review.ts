@@ -196,6 +196,8 @@ export interface Review {
 }
 
 const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "cancelled"] as const;
+/** The ended phases a step does nothing more for once the review has no message left to send, which a pass skips. */
+export const settledKinds = ["landed", "merged", "closed", "cancelled"] as const satisfies readonly PhaseKind[];
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
@@ -825,14 +827,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   async function pass() {
     reads = new Map();
-    const reviews = registry.reviews();
+    const reviews = registry.reviewsToStep(settledKinds);
     // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
     // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.
     const held = new Set(reviews.flatMap((r) => (r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread !== null ? [r.phase.thread] : []));
-    for (const t of registry.threads()) {
-      if (t.startedBy === checkCaller && t.status !== "deleted" && !held.has(t.id)) checks.discard(t.id);
-      if (t.startedBy === verifyCaller && t.status === "active" && t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
-    }
+    for (const t of registry.storedThreads({ status: ["active", "idle", "archived"], startedBy: checkCaller })) if (!held.has(t.id)) checks.discard(t.id);
+    for (const t of registry.storedThreads({ status: ["active"], startedBy: verifyCaller })) if (t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
     for (const stored of reviews) {
       let r = stored;
       try {
