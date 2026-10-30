@@ -1488,7 +1488,10 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
 });
 
 test("the thread list leaves deleted threads out when asked, as the dashboard asks and `threads --all` does not", async (t) => {
+  // The list orders by creation time, then ID, so the second thread starts a millisecond later.
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await withThread(t);
+  t.mock.timers.tick(1);
   const gone = (await s.call("POST", "/v1/threads", { project: "acme", title: "Old spike" })).body as Thread;
   assert.equal((await s.call("DELETE", `/v1/threads/${gone.id}`)).status, 200);
   const ids = async (path: string) => ((await s.call("GET", path)).body as ThreadRow[]).map((r) => r.id);

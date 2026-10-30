@@ -22,6 +22,8 @@ const laptop = "nLAPTOP" as TailnetNodeId;
 const block = (token: string, items: unknown[]) => `\`\`\`nexus-plan\n${JSON.stringify({ token, items })}\n\`\`\``;
 const a = { key: "a", title: "A", brief: "Build A." };
 const b = { key: "b", title: "B", brief: "Build B.", after: ["a"] };
+/** Each pass asks at a later millisecond, so a later block's cards list after an earlier one's rather than by block hash. */
+let asked = Date.now();
 
 test("a plan block is read only with its thread's token, as an ordered list of items each waiting on earlier ones or on pipeline items", () => {
   const [plan] = planBlocks([`Here is the plan.\n${block("tok", [a, { ...b, after: ["a", "it-0123456789ab"] }])}`], "tok");
@@ -59,7 +61,7 @@ async function fixture(t: import("node:test").TestContext, path = ":memory:", fa
   const start = threadStarter({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {} });
   const queue = threadQueue({ registry, gate: turnGate(() => false), startThread: start, send: (id, text, requestId) => fake.harness.send(id, text, requestId, "followUp") });
   const items = pipeline({ registry, queue });
-  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies });
+  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies, now: () => ++asked });
   t.after(async () => { await plans.close(); await items.close(); await queue.close(); });
   return {
     registry, fake, plans, items, queue,
