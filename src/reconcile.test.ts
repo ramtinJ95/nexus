@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  actualState, backoffMs, desiredPhase, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
+  actualState, archivedDiskMs, backoffMs, desiredPhase, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "./ids.ts";
@@ -214,6 +214,17 @@ test("desiredPhase", () => {
     [{}, "paused"],
   ];
   for (const [f, expected] of cases) assert.equal(desiredPhase(facts(f), now), expected, JSON.stringify(f));
+
+  const archived = facts({ status: "archived", archivedAt: 0, lastHumanActivityAt: 0, lastAgentActivityAt: 0 });
+  assert.equal(desiredPhase(archived, archivedDiskMs - 60_000), "paused", "23h59m after the archive the disk stays");
+  assert.equal(desiredPhase(archived, archivedDiskMs), "deleted", "24 hours after it the pylon goes");
+  assert.equal(desiredPhase({ ...archived, readingUsage: true }, archivedDiskMs - 60_000), "reading");
+  assert.equal(desiredPhase({ ...archived, readingUsage: true }, archivedDiskMs), "deleted", "the usage backfill boots no expired disk");
+  for (const status of ["active", "idle"] as const) {
+    for (const activity of [{}, { agentTurnRunning: true }, { lastHumanActivityAt: archivedDiskMs }]) {
+      assert.notEqual(desiredPhase({ ...archived, status, ...activity }, archivedDiskMs * 2), "deleted", `${status} ${JSON.stringify(activity)}`);
+    }
+  }
 });
 
 test("requiredArtifacts lists the image first", () => {

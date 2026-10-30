@@ -35,14 +35,21 @@ export interface ActivityFacts {
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
   /** The usage backfill reads this archived thread's pylon now. */
   readingUsage?: boolean;
+  /** When the thread was archived, present only while it is. */
+  archivedAt?: number;
 }
 
 /** Amp's numbers. */
 export const idlePolicy = { agentIdleMs: 5 * 60_000, humanIdleMs: 20 * 60_000 } as const;
+/** How long an archived thread keeps its pylon's disk. */
+export const archivedDiskMs = 24 * 60 * 60_000;
 
 export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
-  if (a.status === "archived") return a.readingUsage === true ? "reading" : "paused";
+  if (a.status === "archived") {
+    return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? "deleted"
+      : a.readingUsage === true ? "reading" : "paused";
+  }
   // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.
   const busy = a.agentTurnRunning || (a.sessionActiveUntil ?? 0) > now
     || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs

@@ -9,7 +9,7 @@ const owners: Record<string, string[]> = {
   "thread-store.ts": [
     "threads", "pylons", "sessions", "previews", "outputs", "jobs", "events", "event_receipts", "session_activity", "session_order",
     "session_order_floor", "claude_workers", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders",
-    "thread_attention", "start_requests", "aborted_conversations",
+    "thread_attention", "start_requests", "aborted_conversations", "thread_archives",
   ],
   "node-store.ts": ["nodes", "join_tokens", "joined_nodes"],
   "project-store.ts": ["projects"],

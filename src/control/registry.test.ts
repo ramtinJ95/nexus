@@ -9,7 +9,7 @@ import { openRegistry, type Registry } from "./registry.ts";
 import type { StoredPylon } from "./thread-store.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { reviewPrefix } from "../agent-protocol.ts";
-import { seedRegistry, testPylon, testProject, testRegistry, testThread } from "./test-kit.ts";
+import { seedRegistry, testPylon, testProject, testRegistry, testReview, testThread } from "./test-kit.ts";
 import { rewindTo, versionBefore } from "./schema-kit.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { PullRequest } from "./github.ts";
@@ -1183,6 +1183,31 @@ test("a Claude worker's transcript survives reopening, keeps its newest entries,
   assert.deepEqual(second.claudeTranscript(threadId), { session: "s2", cursor: cursorAt(0), dropped: 0, readAt: 400 });
 });
 
+test("a thread records when it was archived, keeps the first time across archives, and forgets it on any other status", (t) => {
+  let now = 5_000;
+  const registry = seeded(t, tempDb(), () => now);
+  assert.equal(registry.thread(threadId)?.archivedAt, undefined);
+  registry.setThreadStatus(threadId, "archived");
+  assert.equal(registry.thread(threadId)?.archivedAt, 5_000);
+  now = 6_000;
+  registry.setThreadStatus(threadId, "archived");
+  assert.equal(registry.thread(threadId)?.archivedAt, 5_000, "archiving again keeps the first time");
+  assert.equal(registry.threads().find((x) => x.id === threadId)?.archivedAt, 5_000, "a list reads it too");
+
+  registry.setThreadStatus(threadId, "active");
+  assert.equal(registry.thread(threadId)?.archivedAt, undefined);
+  now = 7_000;
+  registry.setThreadStatus(threadId, "archived");
+  assert.equal(registry.thread(threadId)?.archivedAt, 7_000, "the next archive counts from its own time");
+
+  registry.setThreadStatus(threadId, "active");
+  now = 8_000;
+  assert.equal(registry.saveReview(testReview({ builder: threadId, reviewer: threadId }), [threadId]), true);
+  assert.equal(registry.thread(threadId)?.archivedAt, 8_000, "a review's landing archives through the same path");
+  registry.setThreadStatus(threadId, "deleted");
+  assert.equal(registry.thread(threadId)?.archivedAt, undefined);
+});
+
 test("a Claude worker's messages answer their resends, and its transcript and messages outlive an archive but not a delete", (t) => {
   const registry = seeded(t, tempDb());
   const result = { session: "s1", outcome: "queued", resumed: false } as const;
@@ -1424,6 +1449,21 @@ test("the migration that adds pipeline items turns the pipeline on for project n
   assert.equal(again.project("nexus" as ProjectId)?.pipeline, null, "the person turned it off, and a rewound registry keeps it off");
 });
 
+test("the migration that records archive times stamps each thread archived before it with its own time, and no other", (t) => {
+  const path = tempDb();
+  const registry = seed(openRegistry(path, () => 1_000));
+  registry.createThread({ ...thread, id: "th-2" as ThreadId, pylonId: "pylon-th-2" as PylonId }, { ...pylon, pylonId: "pylon-th-2" as PylonId, thread: "th-2" as ThreadId });
+  registry.setThreadStatus(threadId, "archived");
+  registry.close();
+  rewindTo(path, versionBefore(/thread_archives/));
+  const before = Date.now();
+  const upgraded = testRegistry(t, path);
+  const after = Date.now();
+  const stamp = upgraded.thread(threadId)?.archivedAt;
+  assert.ok(stamp !== undefined && stamp >= Math.floor(before / 1000) * 1000 && stamp <= after, `the stamp ${stamp} is the migration's time`);
+  assert.equal(upgraded.thread("th-2" as ThreadId)?.archivedAt, undefined, "an active thread gets none");
+});
+
 test("judgments begin at the newest event, so failures from before are never judged, and a rewound registry keeps that watermark", (t) => {
   const path = tempDb();
   const registry = seed(openRegistry(path));
@@ -1607,7 +1647,7 @@ test("storedThreads reads only the threads' own rows, by status and by who start
   assert.deepEqual(idsOf({ status: ["archived"], startedBy: "nLAPTOP" }), ["th-reading"]);
   assert.deepEqual(idsOf({ status: [] }), []);
   for (const stored of registry.storedThreads()) {
-    const { working: _w, workingSince: _ws, sessionTurnRunning: _st, sessionActiveUntil: _sa, sessionWaiting: _sw, sessionWaitingMessage: _sm, usageLimit: _u, readingUsage: _r, ...own } = registry.thread(stored.id)!;
+    const { working: _w, workingSince: _ws, sessionTurnRunning: _st, sessionActiveUntil: _sa, sessionWaiting: _sw, sessionWaitingMessage: _sm, usageLimit: _u, readingUsage: _r, archivedAt: _a, ...own } = registry.thread(stored.id)!;
     assert.deepEqual(stored, own, `${stored.id} has no session facts`);
   }
   assert.equal(registry.threadStatus("th-reading" as ThreadId), "archived");

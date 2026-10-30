@@ -252,4 +252,9 @@ export const migrations: readonly string[] = [
   // unknown. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS claude_senders (thread TEXT NOT NULL, request_id TEXT NOT NULL, sender TEXT NOT NULL, text_sha256 TEXT NOT NULL,
      PRIMARY KEY (thread, request_id)) STRICT;`,
+  // When each archived thread was archived, which deletes its pylon a day later. A thread archived before has no time,
+  // so it gets this migration's, and no disk goes until a day after it. It touches nothing an earlier migration made, so a
+  // registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS thread_archives (thread TEXT PRIMARY KEY REFERENCES threads (id), archived_at INTEGER NOT NULL) STRICT;
+   INSERT OR IGNORE INTO thread_archives SELECT id, CAST(strftime('%s', 'now') AS INTEGER) * 1000 FROM threads WHERE status = 'archived';`,
 ];

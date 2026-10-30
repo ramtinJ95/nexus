@@ -57,7 +57,7 @@ exec ./${file} </dev/null 2>&1`;
 
 /**
  * What a run is: the script, who starts its pylon and how, and what becomes of the pylon afterwards. A check thread is
- * deleted. A verify pylon is archived, so the person can unarchive one to see what its live check left.
+ * deleted. A verify pylon is archived, so the person can unarchive one within 24 hours to see what its live check left.
  */
 interface Gate { caller: string; pylon: string; script: string; request(builder: Thread, branch: string, head: string): StartRequest; after: "deleted" | "archived" }
 export const checkGate: Gate = {
