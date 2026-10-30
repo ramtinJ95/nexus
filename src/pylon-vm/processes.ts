@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
-import { checked, guestExists } from "./guest.ts";
-import { shellQuote as q } from "../project.ts";
+import { direct, readGuestFile } from "./guest.ts";
 
-const root = "/var/lib/pi-sandbox/commands";
+/** Every boot makes it empty and private (runtime.ts), so a handle's directory and the worker never outlive the boot. */
+export const commandsRoot = "/var/lib/pi-sandbox/commands";
+const workerPath = `${commandsRoot}/worker.py`;
+const expired = "Command status expired. Completed handles retain status for 128 commands";
 const completedLimit = 128;
 const outcome = z.strictObject({
 	exitCode: z.number().int(),
@@ -74,26 +76,41 @@ const worker = [
 	"open(path+'/done.tmp','w').write(json.dumps({'exitCode':code,'truncated':truncated}))",
 	"os.rename(path+'/done.tmp',path+'/done')",
 ].join("\n");
+/** argv: the command's directory, then the worker's. It makes the directory and leaves the worker running on its own. */
+const launcher = "import os,subprocess,sys; os.mkdir(sys.argv[1],0o700); subprocess.Popen(['python3']+sys.argv[2:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)";
 
-// Only the short launcher is SDK-tracked. Long waits never hold Gondolin's
+type Command = {
+	path: string;
+	offset: number;
+	decoder: StringDecoder;
+	final?: { exitCode: number; truncated: boolean };
+	cursor: Promise<unknown>;
+};
+
+// Only the short launcher is a guest command. Long waits never hold Gondolin's
 // foreground exec/file-RPC lock. Handles belong to this controller lifetime.
 export class GuestProcesses {
-	private commands = new Map<
-		string,
-		{
-			path: string;
-			offset: number;
-			decoder: StringDecoder;
-			final?: { exitCode: number; truncated: boolean };
-			cursor: Promise<unknown>;
-		}
-	>();
+	private commands = new Map<string, Command>();
 	private vm: VM;
 	/** Aborted when the controller stops, which ends every status wait and file operation so the stop can settle it (runtime.ts). */
 	private stopping: AbortSignal;
+	private worker: Promise<void> | undefined;
 	constructor(vm: VM, stopping: AbortSignal) {
 		this.vm = vm;
 		this.stopping = stopping;
+	}
+	private read(path: string): Promise<Buffer | null> {
+		return readGuestFile(this.vm, path, this.stopping);
+	}
+	private remove(path: string): Promise<void> {
+		return this.vm.fs.deleteFile(path, { recursive: true, force: true, signal: this.stopping });
+	}
+	private installWorker(): Promise<void> {
+		this.worker ??= this.vm.fs.writeFile(workerPath, worker, { signal: this.stopping }).catch((error: unknown) => {
+			this.worker = undefined;
+			throw error;
+		});
+		return this.worker;
 	}
 	async launch(
 		cmd: string,
@@ -102,27 +119,22 @@ export class GuestProcesses {
 		deadlineSeconds = 0,
 	): Promise<string> {
 		const handle = randomUUID();
-		const path = `${root}/${handle}`;
-		await checked(this.vm, `mkdir -p ${q(path)}; chmod 700 ${q(path)}`);
-		await this.vm.fs.writeFile(`${path}/worker.py`, worker, { signal: this.stopping });
-		await checked(
-			this.vm,
-			`python3 -c ${q("import subprocess,sys; subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)")} python3 ${q(`${path}/worker.py`)} ${q(cmd)} ${q(cwd)} ${q(path)} ${q(String(cleanup))} ${q(String(deadlineSeconds))}`,
-		);
+		const path = `${commandsRoot}/${handle}`;
+		await this.installWorker();
+		const started = await direct(this.vm, ["python3", "-c", launcher, path, workerPath, cmd, cwd, path, String(cleanup), String(deadlineSeconds)], 30000);
+		if (started.exitCode !== 0)
+			throw new Error(`Guest command exited ${started.exitCode}: ${started.stderr || started.stdout}`);
 		const deadline = Date.now() + 5000;
+		let pid: Buffer | null;
 		while (true) {
 			// The worker writes pid before done, so a done seen first settles whether pid will ever appear.
-			const done = await guestExists(this.vm, `${path}/done`);
-			if (await guestExists(this.vm, `${path}/pid`)) break;
-			if (done) {
-				const { exitCode } = outcome.parse(
-					JSON.parse(await this.vm.fs.readFile(`${path}/done`, { encoding: "utf8", signal: this.stopping })),
-				);
-				const output = await this.vm.fs.readFile(`${path}/output`, {
-					encoding: "utf8",
-					signal: this.stopping,
-				});
-				await checked(this.vm, `rm -rf ${q(path)}`);
+			const done = await this.read(`${path}/done`);
+			pid = await this.read(`${path}/pid`);
+			if (pid !== null) break;
+			if (done !== null) {
+				const { exitCode } = outcome.parse(JSON.parse(done.toString("utf8")));
+				const output = (await this.read(`${path}/output`))?.toString("utf8");
+				await this.remove(path);
 				throw new Error(
 					`Guest command could not start: its worker wrote done but never pid, so spawning it failed (exit ${exitCode}): ${output || "(no output)"}`,
 				);
@@ -133,37 +145,29 @@ export class GuestProcesses {
 				);
 			await new Promise((accept) => setTimeout(accept, 50));
 		}
-		z.number()
-			.int()
-			.positive()
-			.parse(
-				Number(await this.vm.fs.readFile(`${path}/pid`, { encoding: "utf8", signal: this.stopping })),
-			);
+		z.number().int().positive().parse(Number(pid.toString("utf8")));
 		this.commands.set(handle, {
 			path,
 			offset: 0,
 			decoder: new StringDecoder("utf8"),
 			cursor: Promise.resolve(),
 		});
-		if (this.commands.size > completedLimit) {
-			const completed: string[] = [];
-			for (const [id, command] of this.commands)
-				if (
-					command.final ||
-					(await guestExists(this.vm, `${command.path}/done`))
-				)
-					completed.push(id);
-			for (const id of completed.slice(
-				0,
-				Math.max(0, completed.length - completedLimit),
-			)) {
-				const command = this.commands.get(id)!;
-				await command.cursor.catch(() => {});
-				await checked(this.vm, `rm -rf ${q(command.path)}`);
-				this.commands.delete(id);
-			}
-		}
+		await this.pruneCompleted();
 		return handle;
+	}
+	/** Forgets the oldest completed commands past the newest 128, and removes the directory of each not yet consumed. */
+	private async pruneCompleted(): Promise<void> {
+		if (this.commands.size <= completedLimit) return;
+		const completed: [string, Command][] = [];
+		for (const entry of this.commands)
+			if (entry[1].final || (await this.read(`${entry[1].path}/done`)) !== null) completed.push(entry);
+		for (const [handle, command] of completed.slice(0, Math.max(0, completed.length - completedLimit))) {
+			if (!command.final) {
+				await command.cursor.catch(() => {});
+				await this.remove(command.path);
+			}
+			this.commands.delete(handle);
+		}
 	}
 	async status(
 		pid: string,
@@ -180,79 +184,51 @@ export class GuestProcesses {
 			throw new Error(
 				"Unknown or expired command handle. Completed status is bounded; handles do not survive stop or controller restart",
 			);
-		// Only short probes and output consumption share the cursor, never waits.
+		// Only short reads and output consumption share the cursor, never waits.
 		if (command.final)
 			return { pid, running: false, output: "", ...command.final };
 		const deadline = Date.now() + timeoutMs;
+		let done: Buffer | null;
 		while (true) {
 			this.stopping.throwIfAborted();
-			if (this.commands.get(pid) !== command)
-				throw new Error(
-					"Command status expired. Completed handles retain status for 128 commands",
-				);
-			const probe = command.cursor
-				.catch(() => {})
-				.then(
-					async () =>
-						command.final ||
-						(await guestExists(this.vm, `${command.path}/done`)),
-				);
+			if (this.commands.get(pid) !== command) throw new Error(expired);
+			const probe = command.cursor.catch(() => {}).then(() => (command.final ? null : this.read(`${command.path}/done`)));
 			command.cursor = probe;
-			if ((await probe) || Date.now() >= deadline) break;
+			done = await probe;
+			if (done !== null || command.final || Date.now() >= deadline) break;
 			await new Promise((accept) => setTimeout(accept, 100));
 		}
 		const consume = command.cursor
 			.catch(() => {})
 			.then(async () => {
-				if (this.commands.get(pid) !== command)
-					throw new Error(
-						"Command status expired. Completed handles retain status for 128 commands",
-					);
+				if (this.commands.get(pid) !== command) throw new Error(expired);
 				if (command.final)
 					return { pid, running: false, output: "", ...command.final };
-				const done = (await guestExists(this.vm, `${command.path}/done`))
-					? outcome.parse(
-							JSON.parse(
-								await this.vm.fs.readFile(`${command.path}/done`, {
-									encoding: "utf8",
-									signal: this.stopping,
-								}),
-							),
-						)
-					: undefined;
-				const bytes = (await guestExists(this.vm, `${command.path}/output`))
-					? Buffer.from(await this.vm.fs.readFile(`${command.path}/output`, { signal: this.stopping }))
-					: Buffer.alloc(0);
+				// done was read before output, so an output read after a done holds all of it.
+				const final = done === null ? undefined : outcome.parse(JSON.parse(done.toString("utf8")));
+				const bytes = (await this.read(`${command.path}/output`)) ?? Buffer.alloc(0);
 				let output =
 					bytes.length > command.offset
 						? command.decoder.write(bytes.subarray(command.offset))
 						: "";
 				command.offset = Math.max(command.offset, bytes.length);
-				if (done) {
+				if (final) {
 					output += command.decoder.end();
-					await checked(this.vm, `rm -rf ${q(command.path)}`);
-					command.final = done;
-					const completed = [...this.commands].filter(
-						([, value]) => value.final,
-					);
-					for (const [handle] of completed.slice(
-						0,
-						Math.max(0, completed.length - completedLimit),
-					))
-						this.commands.delete(handle);
+					await this.remove(command.path);
+					command.final = final;
 				}
 				return {
 					pid,
-					running: !done,
+					running: !final,
 					output,
-					truncated:
-						done?.truncated ??
-						(await guestExists(this.vm, `${command.path}/truncated`)),
-					...(done ?? {}),
+					truncated: final?.truncated ?? (await this.read(`${command.path}/truncated`)) !== null,
+					...(final ?? {}),
 				};
 			});
 		command.cursor = consume;
-		return consume;
+		const result = await consume;
+		if (!result.running) await this.pruneCompleted();
+		return result;
 	}
 	async kill(pid: string): Promise<unknown> {
 		const command = this.commands.get(pid);

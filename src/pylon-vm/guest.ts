@@ -57,6 +57,24 @@ export function freeReservedSlots(vm: VM): void {
 	held.waiting.clear();
 }
 
+/** Runs `run` while it holds one of the VM's command slots. Its wait ends after `waitMs`, but the slot is held until the guest answers. */
+async function counted<T>(vm: VM, waitMs: number, run: () => Promise<T>): Promise<T> {
+	const held = slotsOf(vm);
+	// Not Gondolin's signal, whose abort would end the wait and leave the command running uncounted.
+	const expiry = AbortSignal.timeout(waitMs);
+	const expired = new Promise<never>((_, reject) =>
+		expiry.addEventListener("abort", () => reject(new Error(`Guest command got no answer within ${waitMs} ms. Once started, it holds a command slot until it answers`)), { once: true }),
+	);
+	await Promise.race([takeSlot(held, expiry), expired]);
+	return Promise.race([run().finally(() => giveSlot(held)), expired]);
+}
+/**
+ * Runs `argv` in the guest as it is, with no shell and no watchdog, so only for a command that ends on its own within
+ * `timeoutMs`. Nothing stops it in the guest after that.
+ */
+export function direct(vm: VM, argv: string[], timeoutMs = 3000): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+	return counted(vm, timeoutMs + 10000, async () => await vm.exec(argv, { cwd: "/" }));
+}
 export async function execute(
 	vm: VM,
 	cmd: string,
@@ -95,24 +113,13 @@ export async function execute(
 		" result={'state':'timed-out'}",
 		"sys.stderr.write(json.dumps(result))",
 	].join("\n");
-	const held = slotsOf(vm);
-	const waitMs = timeoutMs + 10000;
-	// Not Gondolin's signal, whose abort would end the wait and leave the command running uncounted.
-	const expiry = AbortSignal.timeout(waitMs);
-	const expired = new Promise<never>((_, reject) =>
-		expiry.addEventListener("abort", () => reject(new Error(`Guest command got no answer within ${waitMs} ms. Once started, it holds a command slot until it answers`)), { once: true }),
+	const result = await counted(vm, timeoutMs + 10000, async () =>
+		await vm.exec(["python3", "-c", watchdog, cmd, String(timeoutMs / 1000)], {
+			cwd,
+			stdout: sink,
+			stderr: "buffer",
+		}),
 	);
-	await Promise.race([takeSlot(held, expiry), expired]);
-	const result = await Promise.race([
-		vm
-			.exec(["python3", "-c", watchdog, cmd, String(timeoutMs / 1000)], {
-				cwd,
-				stdout: sink,
-				stderr: "buffer",
-			})
-			.finally(() => giveSlot(held)),
-		expired,
-	]);
 	const output = Buffer.concat(chunks).toString("utf8");
 	if (result.exitCode !== 0)
 		throw new Error(
@@ -138,8 +145,15 @@ export async function checked(
 		);
 	return result.output;
 }
-export async function guestExists(vm: VM, path: string): Promise<boolean> {
-	return (await execute(vm, `test -e ${q(path)}`, "/", 3000)).exitCode === 0;
+/** The guest file's bytes, or null when it does not exist. A read goes over sandboxd's file RPC and starts no process. */
+export async function readGuestFile(vm: VM, path: string, signal?: AbortSignal): Promise<Buffer | null> {
+	try {
+		return await vm.fs.readFile(path, signal ? { signal } : {});
+	} catch (error) {
+		// sandboxd names the open's Zig error (sandboxd/main.zig, file_read_failed), which Gondolin puts in the message.
+		if (error instanceof Error && error.message.endsWith("file_read_failed: FileNotFound")) return null;
+		throw error;
+	}
 }
 export const serviceRoot = "/var/lib/pi-sandbox/services";
 export const stagingRoot = "/var/lib/pi-sandbox/staging";

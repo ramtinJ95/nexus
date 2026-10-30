@@ -3,7 +3,7 @@ import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { linkedName, parseServicesFile, relayPorts, reservedPortMessage, reservedPorts, serviceReference, shellQuote as q, wantsPreview, withPublicUrls } from "../project.ts";
 import { configSchema, type Service } from "./contracts.ts";
-import { checked, guestExists, serviceRunning, startService, stopService } from "./guest.ts";
+import { checked, direct, readGuestFile, serviceRunning, startService, stopService } from "./guest.ts";
 import { openPortal } from "./portals.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
 import { readJson, saveJson } from "../json-file.ts";
@@ -48,6 +48,8 @@ export class GuestServices {
 	private attached = new Map<number, Awaited<ReturnType<typeof openPortal>>>();
 	private adHocConfig: Record<string, Service> = {};
 	private declaredNames = new Set<string>();
+	/** The services file's last parse, and the stamp `stat` gave the file then. */
+	private declared: { stamp: string; services: Record<string, Service> } | undefined;
 	/** What each service was last started with, as envKey gives it. A stop removes it. */
 	private wanted = new Map<string, string>();
 	/** Why the last start of a service failed. Cleared by the next start, or a stop. */
@@ -114,15 +116,22 @@ export class GuestServices {
 		}
 		await this.routes();
 	}
-	/** A repo without the file declares no services. */
+	/** A repo without the file declares no services. The file is parsed again only once its size, inode or mtime changed. */
 	private async declaredFile(): Promise<Record<string, Service>> {
-		if (!(await guestExists(this.vm, this.configPath))) return {};
-		if ((await this.vm.fs.stat(this.configPath)).size > 1048576)
+		const stat = await direct(this.vm, ["stat", "-c", "%s %i %y", this.configPath]);
+		if (stat.exitCode !== 0) {
+			if (stat.stderr.includes("No such file or directory")) return {};
+			throw new Error(`${this.configPath} could not be read: ${stat.stderr.trim()}`);
+		}
+		const stamp = stat.stdout.trim();
+		if (this.declared?.stamp === stamp) return this.declared.services;
+		if (Number(stamp.split(" ")[0]) > 1048576)
 			throw new Error("Service YAML exceeds 1 MiB");
-		const text = await this.vm.fs.readFile(this.configPath, {
-			encoding: "utf8",
-		});
-		return configSchema.parse(parseServicesFile(text)).services;
+		const text = await readGuestFile(this.vm, this.configPath);
+		if (text === null) return {};
+		const services = configSchema.parse(parseServicesFile(text.toString("utf8"))).services;
+		this.declared = { stamp, services };
+		return services;
 	}
 	private async declarations(): Promise<Record<string, Service>> {
 		const services = await this.declaredFile();
@@ -396,12 +405,10 @@ export class GuestServices {
 		await portal.close();
 		return null;
 	}
-	private listening(port: number): Promise<boolean> {
-		return this.answers(port);
-	}
-	private async healthy(name: string, entry: Entry): Promise<boolean> {
+	/** `running` is whether its process runs, when the caller has just asked. */
+	private async healthy(name: string, entry: Entry, running?: boolean): Promise<boolean> {
 		if (entry.service.health === "process")
-			return serviceRunning(this.vm, name);
+			return running ?? serviceRunning(this.vm, name);
 		return this.answers(entry.port, entry.service.health);
 	}
 	private async answers(port: number, path?: string): Promise<boolean> {
@@ -585,7 +592,7 @@ export class GuestServices {
 	private async fact(name: string, entry: Entry): Promise<ServiceFact> {
 		const running = await serviceRunning(this.vm, name);
 		const state =
-			running && (await this.healthy(name, entry))
+			running && (await this.healthy(name, entry, running))
 				? "ready"
 				: this.failures.has(name)
 					? "failed"
@@ -608,7 +615,7 @@ export class GuestServices {
 	private async linkedFact(port: number): Promise<ServiceFact> {
 		return {
 			name: linkedName(port),
-			state: (await this.listening(port)) ? "ready" : "stopped",
+			state: (await this.answers(port)) ? "ready" : "stopped",
 			port,
 			declared: false,
 			wantsPreview: true,
