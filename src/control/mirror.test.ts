@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { projectMirror } from "./mirror.ts";
-import type { ProjectId, RemoteProject } from "../project.ts";
-import type { NodeName } from "../ids.ts";
+import type { RemoteProject } from "./project.ts";
+import type { NodeName, ProjectId } from "../ids.ts";
 import { tempDir } from "../test-kit.ts";
 
 const dir = await tempDir("nexus-mirror-test-");

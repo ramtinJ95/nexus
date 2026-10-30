@@ -30,10 +30,10 @@ import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
-import type { NodeName, TailnetNodeId } from "../../../../src/ids.ts";
+import type { NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
 import type { ImageId, ImageManifest } from "../../../../src/images.ts";
-import type { Project, ProjectId } from "../../../../src/project.ts";
+import type { Project } from "../../../../src/control/project.ts";
 
 const exec = promisify(execFile);
 /** Aborted by SIGTERM or SIGINT. Killing the docker CLI cancels its build, so no image lands after `verify-nexus down`. */

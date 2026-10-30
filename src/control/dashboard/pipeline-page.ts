@@ -1,5 +1,5 @@
 /** Renders the pipeline page: each project's items with the phase their records put them in. */
-import type { Project } from "../../project.ts";
+import type { Project } from "../project.ts";
 import { itemView, type ItemPhase, type PipelineItem } from "../pipeline.ts";
 import { Html, html, dot, state, menu, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";

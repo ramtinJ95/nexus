@@ -19,7 +19,8 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | [`src/spawn.ts`](../../src/spawn.ts) | What a spawn carries: `BootInputs`, `LiveSpec` and its hash, `RepoInit`, `GitIdentity` and `PylonResources` | Both |
 | [`src/secret-grants.ts`](../../src/secret-grants.ts) | `SecretGrant`, its name and host patterns, and the GitHub and ChatGPT grants | Both |
 | [`src/shell.ts`](../../src/shell.ts) | `shellQuote` and `installFileCommand` | Both |
-| [`src/project.ts`](../../src/project.ts) | `Project`, its effective allowlist, and the overlay with its PYLON.md guide | Control plane. No node code imports it |
+| [`src/control/project.ts`](../../src/control/project.ts) | `Project` and its effective allowlist | Control plane. No node code imports it |
+| [`src/control/overlay.ts`](../../src/control/overlay.ts) | The pylon overlay with its PYLON.md guide | Control plane. No node code imports it |
 | [`src/images.ts`](../../src/images.ts) | The image recipe and ID, template keys and build inputs, and the artifact manifests | Both |
 | [`src/control/templates.ts`](../../src/control/templates.ts) | Template records, template choice, setup hashes, and garbage | Control plane |
 

@@ -1,5 +1,5 @@
 /** `nexus projects`, `project edit` and `project add`. */
-import { defaultProjectResources, type Project } from "../../project.ts";
+import { defaultProjectResources, type Project } from "../../control/project.ts";
 import { secretHostPattern, secretNamePattern, type SecretGrant } from "../../secret-grants.ts";
 import { CliError } from "../transport.ts";
 import { type Command, str, strs, int, resourcesOf, placementOptions, table } from "../kit.ts";

@@ -3,18 +3,10 @@ import type { NodeName, PylonId } from "../ids.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
-import type { NodeRecord, Registry, StoredPylon } from "./registry.ts";
+import type { NodeRecord, Placement, Registry, Room, StoredPylon, Weighed } from "./registry.ts";
 
-/**
- * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
- * could run the pylon has left once it boots there, or why the node could not.
- */
-export type Placement =
-  | { how: "default" | "named"; node: NodeName }
-  | { how: "auto"; node: NodeName; weighed: readonly Weighed[] };
-export type Weighed = { node: NodeName; left: Room } | { node: NodeName; refused: string };
-/** Uncommitted CPUs and memory, and free disk. CPUs may go below zero, because VMs share a node's CPUs. */
-export interface Room { cpus: number; memoryGiB: number; diskGiB: number }
+// Temporary: Placement, Room and Weighed moved to registry.ts, and E1 deletes this re-export.
+export type { Placement, Room, Weighed } from "./registry.ts";
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 

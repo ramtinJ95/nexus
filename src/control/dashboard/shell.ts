@@ -3,7 +3,7 @@
  * dialogs, and the not-found page.
  */
 import { countedCapacity } from "../../protocol/observations.ts";
-import { defaultProjectResources } from "../../project.ts";
+import { defaultProjectResources } from "../project.ts";
 import { githubTokenGrant } from "../../secret-grants.ts";
 import { defaultClaudeModel } from "../../claude-state.ts";
 import type { NodeRecord, Thread, ThreadId } from "../registry.ts";

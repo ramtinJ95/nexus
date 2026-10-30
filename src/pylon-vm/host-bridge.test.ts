@@ -4,7 +4,7 @@ import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nexusApi } from "../project.ts";
+import { nexusApi } from "../control/overlay.ts";
 import type { PylonId } from "../ids.ts";
 import type { HostBridgeAnswer } from "../host-bridge.ts";
 import { pylonVmHostBridge } from "../pylon-vm-backend.ts";

@@ -1,6 +1,6 @@
 /** The control plane's template policy: which template a thread boots from, and which artifacts are garbage. */
 import { canonicalSha256, type Checkout } from "../spawn.ts";
-import { effectiveAllowedHosts, type Project, type RemoteProject } from "../project.ts";
+import { effectiveAllowedHosts, type Project, type RemoteProject } from "./project.ts";
 import type { JobEnvelope } from "../protocol/jobs.ts";
 import { isImageId, isTemplateId, type ArtifactId, type ImageId, type NodeName, type PortableArtifactId, type ProjectId, type TemplateId } from "../ids.ts";
 import type { TemplateBuildInputs, TemplateKey } from "../images.ts";

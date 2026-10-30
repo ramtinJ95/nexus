@@ -9,7 +9,7 @@
  * earlier pass meant to do, so a control plane that restarts mid-operation carries on from the stored operation.
  */
 import { imageIdOf, type ImageId, type ImageManifest, type ImageRecipe } from "../images.ts";
-import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
+import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
@@ -18,32 +18,10 @@ import { failureMessage } from "../reconcile.ts";
 import { jobOutcome, submitJob } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
 import type { NodeRecord, RecordedImage, Registry } from "./registry.ts";
+import type { ImageOperation, ImageStep, Outcome } from "./image-store.ts";
 
-/** One node's part of an image operation. */
-export interface ImageStep {
-  node: NodeName;
-  /**
-   * done: the node's observation lists the image. skipped: the node was offline when the rollout began, so it fetches
-   * the image on first use (planPylon's missing-artifact rule).
-   */
-  state: "pending" | "running" | "done" | "failed" | "skipped";
-  /** The job last sent for this step, saved before it is sent, so a restarted control plane asks the probe about it. */
-  job: { id: JobId; notAfter: string } | null;
-  reason: string | null;
-}
-
-type Outcome = { state: "running" } | { state: "done"; finishedAt: number } | { state: "failed"; finishedAt: number; reason: string };
-
-/**
- * A build has one step, on the image build node, and keeps the release whose recipe it sent, which a control plane
- * deployed while it runs must not record in its place. A rollout has one step per registry node.
- */
-export type ImageOperation = ({ kind: "build"; release: string | null } | { kind: "rollout" }) & {
-  image: ImageId;
-  requestedBy: TailnetNodeId;
-  requestedAt: number;
-  steps: readonly ImageStep[];
-} & Outcome;
+// Temporary: ImageOperation moved to image-store.ts, and E1 deletes this re-export.
+export type { ImageOperation } from "./image-store.ts";
 
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 export type ImageEntry = RecordedImage & { nodes: NodeName[] };

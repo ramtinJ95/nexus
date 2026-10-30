@@ -11,7 +11,7 @@ import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { connectProbe, type ProbeClient } from "../protocol/client.ts";
 import { canDeploy } from "./releases.ts";
 import { gitIdentitySchema } from "../spawn.ts";
-import { gitUrl } from "../project.ts";
+import { gitUrl } from "./project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";

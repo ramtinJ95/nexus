@@ -2,7 +2,6 @@ import { attentionOf, type Attention } from "./attention.ts";
 import { pylonEventSchema } from "../events.ts";
 import type { ReportedEvent } from "../events.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
-import type { DesiredRelease, Drain, ReleaseReport } from "../deploy/model.ts";
 /**
  * The registry: every Nexus record, in one SQLite file. The control plane process is its only writer, and
  * it holds one connection, so every write is a synchronous statement and no two writes interleave.
@@ -20,45 +19,42 @@ import { queueStore } from "./queue-store.ts";
 import { reviewStore } from "./review-store.ts";
 import { questionStore } from "./question-store.ts";
 import { usageStore } from "./usage-store.ts";
+import { releaseStore } from "./release-store.ts";
+import { nodeStore } from "./node-store.ts";
+import { projectStore } from "./project-store.ts";
+import { imageStore } from "./image-store.ts";
 import type { StartKey } from "./start-request.ts";
-import type { Placement } from "./placement.ts";
 import { HttpError } from "./http-error.ts";
 import { json, jsonOrNull, openDb, type Row } from "./db.ts";
 import type { ActivityFacts, RegistryWrite, ThreadStatus } from "../reconcile.ts";
-import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
+import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
-import {
-  upgradeObservation, type HerdrStatus, type NodeObservation, type OlderObservation, type ReportedCapacity,
-} from "../protocol/observations.ts";
+import type { HerdrStatus, NodeObservation } from "../protocol/observations.ts";
 import type { BootInputs } from "../spawn.ts";
-import type { Project } from "../project.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SessionHarness } from "../sessions.ts";
-import type { BuildingTemplate, TemplateRecord, ThreadSetup } from "./templates.ts";
-import type { ImageId, ImageManifest, TemplateId } from "../images.ts";
+import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "../tick.ts";
-import type { ImageOperation } from "./image-rollout.ts";
 import { needsPerson, type Review } from "./review-model.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 
-// Temporary: ThreadId moved to ids.ts and StartKey to start-request.ts, and E1 deletes these re-exports.
+// Temporary: ThreadId moved to ids.ts, StartKey to start-request.ts, and NodeRecord, JoinedNode and RecordedImage to their stores, and E1 deletes these re-exports.
 export type { StartKey, ThreadId };
+export type { JoinedNode, NodeRecord } from "./node-store.ts";
+export type { RecordedImage } from "./image-store.ts";
 
-export interface NodeRecord {
-  name: NodeName;
-  tailnetHost: string;
-  tailnetNodeId: TailnetNodeId;
-  state: "online" | "offline";
-  /** As the probe reported it, which the API sends. Null for a node never observed. */
-  capacity: ReportedCapacity | null;
-  /** The probe's latest observation. While the node is offline the dashboard shows it, marked stale. */
-  observation: NodeObservation | null;
-}
-
-/** A node that joined with a token rather than being named in control.json. `deployKey` is the digest of its deployer's token. */
-export interface JoinedNode extends Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId"> { deployKey: string; joinedAt: number }
+/**
+ * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
+ * could run the pylon has left once it boots there, or why the node could not.
+ */
+export type Placement =
+  | { how: "default" | "named"; node: NodeName }
+  | { how: "auto"; node: NodeName; weighed: readonly Weighed[] };
+export type Weighed = { node: NodeName; left: Room } | { node: NodeName; refused: string };
+/** Uncommitted CPUs and memory, and free disk. CPUs may go below zero, because VMs share a node's CPUs. */
+export interface Room { cpus: number; memoryGiB: number; diskGiB: number }
 
 /** A thread's own row, without what its sessions and the usage backfill say. */
 export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt"> {
@@ -97,12 +93,6 @@ export interface ClaudeWorker { prompt: string; state: string; model: string | n
  * check thread has. A thread's start gives it a conversation ID or a Claude worker, never both.
  */
 export type ThreadAgent = { kind: "harness"; conversationId: string } | { kind: "claude"; worker: ClaudeWorker } | { kind: "none" };
-
-/**
- * An image's manifest and `release`, the full commit of the control plane release whose recipe built it. Null when that is
- * unknown, as for a build from a dev checkout or an image recorded through POST /v1/images.
- */
-export type RecordedImage = ImageManifest & { release: string | null };
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
 export type StoredPylon = Omit<PylonRecord, "desired" | "thread"> & { thread: ThreadId };
@@ -143,28 +133,6 @@ export type ClaudeMessage = { state: "sending" } | { state: "sent"; result: Clau
 export type ClaudeMessageSender = Sender | "person" | "unknown";
 /** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
 export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
-
-function observationOf(value: unknown): NodeObservation | null {
-  const o = jsonOrNull<OlderObservation>(value);
-  return o === null ? null : upgradeObservation(o);
-}
-
-/** A row written before images recorded their release has none. */
-function recordedImage(r: Row): RecordedImage {
-  const image = json<ImageManifest & { release?: string | null }>(r.manifest);
-  return { ...image, release: image.release ?? null };
-}
-
-function nodeRow(r: Row): NodeRecord {
-  return {
-    name: r.name as NodeName,
-    tailnetHost: r.tailnet_host as string,
-    tailnetNodeId: r.tailnet_node_id as TailnetNodeId,
-    state: r.state as NodeRecord["state"],
-    capacity: jsonOrNull(r.capacity),
-    observation: observationOf(r.observation),
-  };
-}
 
 function threadRow(r: Row): StoredThread {
   return {
@@ -217,11 +185,13 @@ export type Registry = ReturnType<typeof openRegistry>;
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
 export function openRegistry(path: string, clock = Date.now) {
   const kernel = openDb(path);
-  const { db, transaction, sql, setting, setSetting, recordOf } = kernel;
+  const { db, transaction, sql, recordOf } = kernel;
   const nudges = nudgeStore(kernel, updateAttention);
   const prWatches = prWatchStore(kernel, appendEvent);
   const queue = queueStore(kernel, saveStartKey);
   const { queuedThread, saveQueued } = queue;
+  const nodes = nodeStore(kernel);
+  const { node } = nodes;
 
   /**
    * Room a start placed a pylon in before its row exists, so an overlapping start sees it taken. It is held in memory,
@@ -247,29 +217,9 @@ export function openRegistry(path: string, clock = Date.now) {
     return row && pylonRow(row);
   }
 
-  function node(name: NodeName): NodeRecord | undefined {
-    const row = sql("SELECT * FROM nodes WHERE name = ?").get(name);
-    return row && nodeRow(row);
-  }
-
-  function upsertNode(node: Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">) {
-    sql(`INSERT INTO nodes (name, tailnet_host, tailnet_node_id, state) VALUES (?, ?, ?, 'offline')
-      ON CONFLICT (name) DO UPDATE SET tailnet_host = excluded.tailnet_host, tailnet_node_id = excluded.tailnet_node_id`).run(node.name, node.tailnetHost, node.tailnetNodeId);
-  }
-
-  function project(id: ProjectId): Project | undefined {
-    const row = sql("SELECT record FROM projects WHERE id = ?").get(id);
-    return row && json<Project>(row.record);
-  }
-
   const pylonsOn = (node: NodeName) => sql("SELECT * FROM pylons WHERE node = ? ORDER BY id").all(node).map(pylonRow);
 
   const sessions = (pylon: PylonId) => sql("SELECT * FROM sessions WHERE pylon = ? ORDER BY id").all(pylon).map(sessionRow);
-
-  function image(id: ImageId): RecordedImage | undefined {
-    const row = sql("SELECT manifest FROM images WHERE id = ?").get(id);
-    return row && recordedImage(row);
-  }
 
   /** The highest journal sequence applied from the node, or null before its first. */
   function eventReceipt(node: NodeName): number | null {
@@ -627,69 +577,11 @@ export function openRegistry(path: string, clock = Date.now) {
       return row === undefined ? null : { event: row.id as number, at: row.time as number };
     },
     ...nudges,
-    desiredRelease: (): DesiredRelease | null => jsonOrNull<DesiredRelease>(setting("release")),
-    setDesiredRelease(release: DesiredRelease) {
-      appendEvent("release.changed", null, { desired: release });
-      setSetting("release", JSON.stringify(release));
-    },
-    releaseReports(): ReleaseReport[] {
-      return sql("SELECT record FROM release_reports ORDER BY node, role").all().map((r) => JSON.parse(r.record as string) as ReleaseReport);
-    },
-    reportRelease(report: ReleaseReport) {
-      const previous = sql("SELECT record FROM release_reports WHERE node = ? AND role = ?").get(report.node, report.role);
-      const { observedAt: _, ...state } = report;
-      const before = previous === undefined ? null : json<ReleaseReport>(previous.record);
-      if (before === null || before.state !== report.state || before.commit !== report.commit || before.target !== report.target || before.reason !== report.reason) appendEvent("release.changed", null, state);
-      sql("INSERT INTO release_reports VALUES (?, ?, ?) ON CONFLICT(node, role) DO UPDATE SET record = excluded.record").run(report.node, report.role, JSON.stringify(report));
-    },
-    drain: (): Drain | null => jsonOrNull<Drain>(setting("deploy-drain")),
-    /** Null is stored as the JSON text null, which reads back as null. */
-    setDrain(drain: Drain | null) { setSetting("deploy-drain", JSON.stringify(drain)); },
+    ...releaseStore(kernel, appendEvent),
 
-    /** Nodes come from the config file or a join. Their state and capacity come from observations. */
-    upsertNode,
-    nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeRow),
-    node,
-    /** Each node's tailnet node ID, without reading its observation. */
-    nodeIds: (): Map<NodeName, TailnetNodeId> => new Map(sql("SELECT name, tailnet_node_id FROM nodes").all().map((r) => [r.name as NodeName, r.tailnet_node_id as TailnetNodeId])),
-    /** The node with this tailnet ID and the deploy key it joined with, null for a configured node, without reading its observation. */
-    nodeByTailnetId(id: TailnetNodeId): { name: NodeName; deployKey: string | null } | undefined {
-      const row = sql("SELECT name, deploy_key FROM nodes LEFT JOIN joined_nodes USING (name) WHERE tailnet_node_id = ?").get(id);
-      return row === undefined ? undefined : { name: row.name as NodeName, deployKey: row.deploy_key as string | null };
-    },
-    /** The loop marks a node offline when its observe link stays down. Every other node fact comes through apply. */
-    markOffline(name: NodeName) { sql("UPDATE nodes SET state = ? WHERE name = ?").run("offline", name); },
-    addJoinToken(hash: string, expiresAt: number) { sql("INSERT INTO join_tokens (hash, expires_at) VALUES (?, ?)").run(hash, expiresAt); },
-    joinToken(hash: string): { expiresAt: number; usedAt: number | null } | undefined {
-      const row = sql("SELECT expires_at, used_at FROM join_tokens WHERE hash = ?").get(hash);
-      return row === undefined ? undefined : { expiresAt: row.expires_at as number, usedAt: row.used_at as number | null };
-    },
-    /** Records the node and uses up its token, or does neither when the token was used or expired meanwhile. */
-    joinNode(hash: string, node: Omit<JoinedNode, "joinedAt">, at: number): boolean {
-      return transaction(() => {
-        if (sql("UPDATE join_tokens SET used_at = ?, used_by = ? WHERE hash = ? AND used_at IS NULL AND expires_at > ?").run(at, node.tailnetNodeId, hash, at).changes === 0) return false;
-        upsertNode(node);
-        sql("INSERT INTO joined_nodes VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET deploy_key = excluded.deploy_key, joined_at = excluded.joined_at").run(node.name, node.deployKey, at);
-        return true;
-      });
-    },
-    joinedNodes: (): JoinedNode[] => sql("SELECT nodes.*, deploy_key, joined_at FROM joined_nodes JOIN nodes USING (name) ORDER BY name").all().map((r) => ({
-      name: r.name as NodeName, tailnetHost: r.tailnet_host as string, tailnetNodeId: r.tailnet_node_id as TailnetNodeId, deployKey: r.deploy_key as string, joinedAt: r.joined_at as number,
-    })),
+    ...nodes,
 
-    editProject(id: ProjectId, edit: (stored: Project) => Project): Project | undefined {
-      return transaction(() => {
-        const stored = project(id);
-        if (stored === undefined) return undefined;
-        const edited = edit(stored);
-        sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(edited), id);
-        return edited;
-      });
-    },
-    updateProject(project: Project) { sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(project), project.id); },
-    createProject(project: Project) { sql("INSERT INTO projects (id, record) VALUES (?, ?)").run(project.id, JSON.stringify(project)); },
-    projects: () => (sql("SELECT record FROM projects ORDER BY id").all() as Row[]).map((r) => json<Project>(r.record)),
-    project,
+    ...projectStore(kernel),
 
     /**
      * A thread and its pylon are created together, because a thread always has exactly one pylon. A `queued` thread's
@@ -874,30 +766,7 @@ export function openRegistry(path: string, clock = Date.now) {
       return row && json<JobStatus>(row.status);
     },
 
-    /** Kept in the manifest column, so a control plane older than `release` still reads the row. */
-    saveImage(manifest: ImageManifest, release: string | null) { sql("INSERT INTO images (id, manifest) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET manifest = excluded.manifest").run(manifest.id, JSON.stringify({ ...manifest, release })); },
-    image,
-    images: () => (sql("SELECT manifest FROM images ORDER BY id").all() as Row[]).map(recordedImage),
-    /** The image every new pylon boots. Only a recorded image can become current, and the one it replaces becomes the previous image. */
-    setCurrentImage(id: ImageId) {
-      transaction(() => {
-        if (image(id) === undefined) throw new Error(`no image ${id} is recorded`);
-        const current = setting("current");
-        if (current !== null && current !== id) setSetting("previous-image", current);
-        setSetting("current", id);
-      });
-    },
-    currentImage: (): ImageId | null => setting("current") as ImageId | null,
-    previousImage: (): ImageId | null => setting("previous-image") as ImageId | null,
-    /** The latest image build or rollout. One runs at a time, and it stays readable once it has finished. */
-    imageOperation: (): ImageOperation | null => jsonOrNull<ImageOperation>(setting("image-operation")),
-    saveImageOperation(operation: ImageOperation) { setSetting("image-operation", JSON.stringify(operation)); },
-
-    saveTemplate(template: TemplateRecord) { sql("INSERT INTO templates (id, project, record) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record").run(template.id, template.key.project, JSON.stringify(template)); },
-    templates: (project: ProjectId) => (sql("SELECT record FROM templates WHERE project = ? ORDER BY id").all(project) as Row[]).map((r) => json<TemplateRecord>(r.record)),
-    /** The builds the node's loop pass moves along, in every project. */
-    buildingTemplates: (node: NodeName) => (sql("SELECT record FROM templates WHERE json_extract(record, '$.state') = 'building' AND json_extract(record, '$.on') = ? ORDER BY id").all(node) as Row[]).map((r) => json<BuildingTemplate>(r.record)),
-    deleteTemplate(id: TemplateId) { sql("DELETE FROM templates WHERE id = ?").run(id); },
+    ...imageStore(kernel),
 
     /**
      * Stores the node's new observation together with the writes ingest derived from it. One transaction,

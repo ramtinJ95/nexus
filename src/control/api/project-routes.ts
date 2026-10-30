@@ -7,7 +7,7 @@ import type { Pipeline } from "../pipeline.ts";
 import { HttpError } from "../http-error.ts";
 import { chatgptTokenGrant, secretHostPattern, secretNamePattern } from "../../secret-grants.ts";
 import { gitIdentitySchema } from "../../spawn.ts";
-import { gitUrl, type Project } from "../../project.ts";
+import { gitUrl, type Project } from "../project.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);

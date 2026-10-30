@@ -22,7 +22,7 @@ import type { JobId, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { ImageId } from "../images.ts";
-import { defaultProjectResources } from "../project.ts";
+import { defaultProjectResources } from "./project.ts";
 import { githubTokenGrant } from "../secret-grants.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";

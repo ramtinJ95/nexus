@@ -1,6 +1,6 @@
 # Nexus contracts: usage
 
-Status: agreed on 2026-10-22. A first slice is implemented: the planner, the probe's job and observe routes, and the Docker test backend. The types are in [`src/protocol/`](../../src/protocol), [`src/reconcile.ts`](../../src/reconcile.ts), [`src/backend.ts`](../../src/backend.ts), [`src/services-file.ts`](../../src/services-file.ts), [`src/spawn.ts`](../../src/spawn.ts), [`src/project.ts`](../../src/project.ts), [`src/images.ts`](../../src/images.ts) and [`src/control/templates.ts`](../../src/control/templates.ts). The reasons are in [rationale.md](rationale.md).
+Status: agreed on 2026-10-22. A first slice is implemented: the planner, the probe's job and observe routes, and the Docker test backend. The types are in [`src/protocol/`](../../src/protocol), [`src/reconcile.ts`](../../src/reconcile.ts), [`src/backend.ts`](../../src/backend.ts), [`src/services-file.ts`](../../src/services-file.ts), [`src/spawn.ts`](../../src/spawn.ts), [`src/control/project.ts`](../../src/control/project.ts), [`src/images.ts`](../../src/images.ts) and [`src/control/templates.ts`](../../src/control/templates.ts). The reasons are in [rationale.md](rationale.md).
 
 The control plane decides every lifecycle step. A probe runs explicit jobs and reports what it sees. A probe never dials the control plane, never decides to wake, pause or move a pylon, and writes no durable Nexus record. Every record in SQLite has one writer, the control plane.
 
