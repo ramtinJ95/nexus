@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Nexus's live check: boots the checkout as the local stack and drives one thread through its life with the real CLI,
-# start, a tool call, archive, unarchive and delete. Exits 0 only if every step did what it should. It needs what
-# `verify-nexus up` needs, Docker among it, so a verify pylon cannot run it until its image has a backend for the
-# stack's pylons (docs/design.md, open questions), and Nexus has no .nexus/verify that calls it yet.
+# start, a message its agent answers after a tool call, the changes that call made, archive, unarchive and delete.
+# Exits 0 only if every step did what it should. .nexus/verify runs it in a verify pylon, with Docker from the
+# pylon image.
 set -euo pipefail
 V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
 fail() { echo "live check: $*" >&2; exit 1; }
@@ -24,6 +24,8 @@ until_json live-running 120 '.pylon.actualState == "running"' show "$T"
 "$V" cli live-send -- send "$T" "bash: echo live > live.txt && cat live.txt" --request-id live:1 --json >/dev/null
 for _ in $(seq 1 20); do [ "$("$V" pylon live-disk "$T" -- cat live.txt 2>/dev/null)" = live ] && break; sleep 3; done
 [ "$("$V" pylon live-disk "$T" -- cat live.txt)" = live ] || fail "the tool call left no live.txt"
+until_json live-answer 60 '.entries[-1] | .kind == "pi.assistant" and (tostring | contains("scripted answer after toolResult"))' conversation "$T"
+until_json live-changes 60 '.files | any(.path == "live.txt" and .status == "added")' changes "$T"
 "$V" cli live-archive -- archive "$T" --json >/dev/null
 until_json live-paused 120 '.pylon.actualState == "paused"' show "$T"
 "$V" cli live-unarchive -- unarchive "$T" --json >/dev/null
@@ -31,4 +33,4 @@ until_json live-woken 120 '.pylon.actualState == "running"' show "$T"
 [ "$("$V" pylon live-disk-after-wake "$T" -- cat live.txt)" = live ] || fail "live.txt did not survive the archive"
 "$V" cli live-delete -- delete "$T" --json >/dev/null
 until_json live-deleted 60 '.[] | select(.id == "'"$T"'") | .status == "deleted"' threads --all
-echo "live check: a thread started, ran a tool, was archived, woke with its disk, and was deleted"
+echo "live check: a thread started, its agent ran a tool and answered, its changes listed live.txt, it was archived, woke with its disk, and was deleted"
