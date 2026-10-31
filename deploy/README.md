@@ -228,7 +228,24 @@ The probe runs as the system user `nexus`. These are its paths:
 | `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints. |
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
 | `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. Mode 0600. |
+| `/var/lib/nexus/shutdown.json` | The pylons the node's last shutdown found running, which the next boot wakes, and why a pause did not finish. Mode 0600. `shutdownFile` in `probe.json` moves it. |
 | `/opt/nexus/current` | The release the probe runs. |
+
+### A shutdown or reboot pauses the pylons
+
+A clean `sudo reboot` or `sudo poweroff` of a node pauses its running pylons first, as an archive does, so each keeps its disk, services and sessions. systemd stops `nexus-probe` with SIGTERM. The probe asks `systemctl is-system-running`, and only when that prints `stopping` does it refuse new jobs and pause every running pylon. It writes them to `/var/lib/nexus/shutdown.json` before the first pause. The probe of the next boot reports them, and the control plane wakes each one whose thread is not archived. Restarting the probe alone, with `sudo systemctl restart nexus-probe` or a deploy, still leaves every pylon running.
+
+The unit's `TimeoutStopSec=180` bounds the wait, and the probe gives the pauses 150 s of it. A pylon whose pause fails or runs out of time comes back failed, and `nexus show` gives the reason the shutdown recorded. Retry it with `nexus retry-pylon`. The journal lists each pylon the stop paused, with its time:
+
+```sh
+journalctl -b -1 -u nexus-probe | grep -E 'SIGTERM|paused in|not paused'
+```
+
+A power cut pauses nothing, as before. A crash in the middle of a shutdown leaves the file in place, so a pylon whose pause had not finished comes back failed, and one that had paused wakes as after a clean reboot.
+
+A node whose encrypted root waits for its unlock over SSH, such as `infra-testbench`, does nothing special. Its pylons stay paused until someone unlocks it, and wake once its probe reports in.
+
+The next deploy installs the new unit file, as it does every release, so this needs no step by hand.
 
 ### GitHub access for a project's agents
 
