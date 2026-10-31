@@ -101,6 +101,8 @@ document.addEventListener("submit", async (event) => {
   } catch (err) {
     starting = false;
     showError("start-error", err);
+    // The footer stays in view while the body scrolls, so the error line above it may not be: scroll down to it.
+    dialog.scrollTop = dialog.scrollHeight;
     const submit = document.querySelector("#start button[type=submit]");
     if (submit !== null) submit.disabled = false;
   }
@@ -162,6 +164,7 @@ document.addEventListener("submit", async (event) => {
     await openStart(project.id);
   } catch (err) {
     showError("project-error", err);
+    projectDialog.scrollTop = projectDialog.scrollHeight;
   } finally {
     adding = false;
     submit.disabled = false;

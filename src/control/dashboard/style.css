@@ -739,14 +739,15 @@ h4.md-h { font-size: 1.07em; }
 .usage-notes .ov { margin-top: 6px; font-size: 12px; }
 
 /* the start-a-thread and new-project dialogs */
-.modal { margin: 96px auto auto; width: 540px; max-width: calc(100vw - 24px); padding: 0; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--pop); }
+.modal { margin: 96px auto auto; width: 540px; max-width: calc(100vw - 24px); max-height: calc(100% - 120px); overflow: auto; padding: 0; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--pop); }
 .modal::backdrop { background: rgba(0, 0, 0, 0.28); backdrop-filter: blur(2px); }
-.modal header { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 0 20px; }
+/* the header and footer pad into the space the form leaves around them, so they cover what scrolls beneath without moving */
+.modal header { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px 20px; margin-bottom: -10px; position: sticky; top: 0; z-index: 1; background: var(--bg); }
 .modal h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .modal-empty { padding: 14px 20px 20px; display: grid; gap: 12px; justify-items: start; }
 .form { padding: 10px 20px 18px; display: grid; gap: 6px; }
 .form label, .seg legend { font-size: 12px; color: var(--text-2); margin-top: 8px; }
-.form input:not([type]), .form select { font: 13.5px var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; height: 36px; padding: 0 11px; width: 100%; min-width: 0; }
+.form input:not([type]), .form input[type="number"], .form select { font: 13.5px var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; height: 36px; padding: 0 11px; width: 100%; min-width: 0; }
 .form #start-title { font-size: 15px; height: 40px; }
 .form textarea { font: 13.5px/1.5 var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; width: 100%; min-width: 0; min-height: 96px; max-height: 40vh; resize: vertical; field-sizing: content; }
 #start-claude-fields { display: grid; gap: 6px; }
@@ -765,7 +766,7 @@ h4.md-h { font-size: 1.07em; }
 .two.three { grid-template-columns: 1fr 1fr 1fr; }
 .hint { font-size: 12px; color: var(--text-3); margin: 10px 0 0; }
 .hint b { color: var(--text-2); font-weight: 500; }
-.modal footer { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
+.modal footer { display: flex; justify-content: flex-end; gap: 6px; margin: 0 -20px -18px; padding: 12px 20px 18px; position: sticky; bottom: 0; background: var(--bg); }
 
 .scrim { display: none; }
 
@@ -827,7 +828,7 @@ h4.md-h { font-size: 1.07em; }
   .ov.usage-t th:first-child { width: 40%; }
   .usage-t td:first-child { overflow-wrap: anywhere; }
 
-  .modal { margin-top: 12px; }
+  .modal { margin-top: 12px; max-height: calc(100% - 24px); }
   .seg, .two { grid-template-columns: 1fr; }
 }
 
