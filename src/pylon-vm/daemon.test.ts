@@ -5,12 +5,13 @@ import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { saveJson } from "../json-file.ts";
-import { directory, privateDirectory } from "./storage.ts";
+import { directory, existsError, privateDirectory } from "./storage.ts";
 
 const name = "pylon-t1";
 const spec = { resources: { cpus: 1, memoryGiB: 1 }, allowedHosts: [], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null };
@@ -55,7 +56,17 @@ async function controller(t: TestContext) {
 		child.kill("SIGUSR2");
 		await until(() => log.includes(`injected accept error ${n}\n`));
 	};
-	await until(() => existsSync(join(dir, "control.sock")));
+	// bind creates control.sock before listen, so a connect between them is refused.
+	for (const deadline = Date.now() + 30_000; ; await delay(10)) {
+		if (child.exitCode !== null) throw new Error(`controller exited ${child.exitCode}:\n${log}`);
+		const refused = await new Promise<boolean>((accept, reject) => {
+			const socket = connect(join(dir, "control.sock"));
+			socket.once("connect", () => (socket.destroy(), accept(false)));
+			socket.once("error", (error) => (existsError(error, "ECONNREFUSED") || existsError(error, "ENOENT") ? accept(true) : reject(error)));
+		});
+		if (!refused) break;
+		if (Date.now() > deadline) throw new Error(`controller did not listen within 30 s:\n${log}`);
+	}
 	return { dir, child, exited, post, inspect, failAccept, log: () => log };
 }
 
