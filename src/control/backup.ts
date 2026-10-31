@@ -97,7 +97,8 @@ export async function backup(options: { config: ControlPlaneConfig; root: string
       const copy = join(dir, source.name);
       await mkdir(dirname(copy), { recursive: true, mode: 0o700 });
       if (source.kind === "sqlite") {
-        // A read-only connection reads one snapshot through the live WAL, which a copy of the file would miss.
+        // A read-only connection reads one snapshot through the live WAL, which a copy of the file would miss. On a stopped
+        // database it leaves a -wal and -shm behind, which SQLite, run as root, gives the database's owner.
         const db = new DatabaseSync(source.path, { readOnly: true });
         try { db.exec(`VACUUM INTO ${quoted(copy)}`); } finally { db.close(); }
         const broken = integrity(copy);

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { test, type TestContext } from "node:test";
 import { chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -187,4 +188,31 @@ test("restore on a stopped control plane puts back the backed-up state with its 
   assert.ok(tables(m.paths.storage).length > 0);
   assert.deepEqual((await readdir(join(m.dir, "var-lib-nexus-control"))).filter((f) => f.includes(".restore-")), []);
   assert.equal((await verify(join(m.root, nameOf(m.day(1))))).ok, true);
+});
+
+const sudo = (() => { try { execFileSync("sudo", ["-n", "true"], { stdio: "ignore" }); return true; } catch { return false; } })();
+
+test("a backup as root of a stopped control plane leaves its databases openable and writable by their owner", { skip: !sudo && "needs passwordless sudo" }, async (t) => {
+  const m = await controlPlane(t);
+  await m.stop();
+  assert.deepEqual((await readdir(join(m.dir, "var-lib-nexus-control"))).filter((f) => /-(wal|shm)$/.test(f)), [], "closed, so no sidecars");
+  const script = `import { backup } from ${JSON.stringify(resolve(import.meta.dirname, "backup.ts"))};
+await backup({ config: ${JSON.stringify(m.config)}, root: ${JSON.stringify(m.root)}, etc: ${JSON.stringify(m.etc)}, now: new Date(${m.day(1).getTime()}), keep: 7 });`;
+  try {
+    execFileSync("sudo", ["-n", "sh", "-c", 'umask 0077 && exec node --input-type=module -e "$1"', "sh", script], { stdio: "inherit" });
+  } finally {
+    execFileSync("sudo", ["-n", "rm", "-rf", m.root]);
+  }
+  const owner = process.getuid!();
+  const left = await readdir(join(m.dir, "var-lib-nexus-control"));
+  assert.ok(left.includes("registry.db-wal") && left.includes("harness.sqlite-shm"), `SQLite left the sidecars a root owner would lock out: ${left.join(", ")}`);
+  for (const file of left) {
+    assert.equal((await stat(join(m.dir, "var-lib-nexus-control", file))).uid, owner, file);
+  }
+  const registry = openRegistry(m.paths.db);
+  registry.createProject(project("after"));
+  assert.ok(registry.project("after" as ProjectId));
+  registry.close();
+  const storage = await openNodeSqliteStorage(m.paths.storage);
+  await storage.close(context);
 });
