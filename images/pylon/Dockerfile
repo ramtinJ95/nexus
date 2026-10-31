@@ -60,7 +60,9 @@ RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh \
 
 # gh from its release tarball, checked like Node. git asks gh for github.com credentials, and gh reads GH_TOKEN
 # when git asks, so the placeholder that Gondolin mints on each boot is never stored. The helper lives in
-# /etc/gitconfig, which no dotfiles layer replaces.
+# /etc/gitconfig, which no dotfiles layer replaces. push.negotiate makes a push first find the commits the
+# remote shares, as a fetch does. Without it a checkout that has not fetched since the remote's main moved can
+# hold none of the tips the remote advertises, and then sends the branch's whole history, which GitHub refuses with 413.
 ARG GH_VERSION
 ARG GH_SHA256
 RUN cd /tmp \
@@ -69,7 +71,8 @@ RUN cd /tmp \
  && tar -xzf gh.tgz \
  && install -m 0755 "gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
  && rm -r gh.tgz "gh_${GH_VERSION}_linux_amd64" \
- && git config --system credential.https://github.com.helper '!/usr/local/bin/gh auth git-credential'
+ && git config --system credential.https://github.com.helper '!/usr/local/bin/gh auth git-credential' \
+ && git config --system push.negotiate true
 
 # Neovim for the review-pane mod, which needs 0.10 or later where bookworm ships 0.7. Its release tarball is
 # checked and unpacked into /usr/local like Node's, so nvim finds its runtime at ../share/nvim/runtime from its binary.
