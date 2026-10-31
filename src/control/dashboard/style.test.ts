@@ -135,3 +135,10 @@ test("a dialog ends inside the window at every width, and scrolls with its heade
     assert.deepEqual([declarations(".modal footer", at).get("position"), declarations(".modal footer", at).get("bottom")], ["sticky", "0"], at);
   }
 });
+
+test("a dialog's number inputs look like its other fields and shrink to their column, so the resource row fits at every width", () => {
+  const rule = styleRules().find((r) => r.at === "" && r.selector.split(", ").includes(".form input:not([type])"))!;
+  assert.ok(rule.selector.split(", ").includes('.form input[type="number"]'), rule.selector);
+  assert.match(rule.body, /width:\s*100%;/);
+  assert.match(rule.body, /min-width:\s*0;/);
+});
