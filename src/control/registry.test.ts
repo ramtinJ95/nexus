@@ -1194,9 +1194,9 @@ test("a finished disk cleanup restarts the transcript, keeping its entries for t
 
   registry.requestCleanup(pylonId, threadId);
   registry.requestCleanup(pylonId, threadId);
-  assert.equal(registry.cleanupRequested(pylonId), true);
+  assert.notEqual(registry.cleanupRequestedAt(pylonId), undefined);
   registry.finishCleanup(pylonId);
-  assert.equal(registry.cleanupRequested(pylonId), false);
+  assert.equal(registry.cleanupRequestedAt(pylonId), undefined);
   assert.deepEqual(registry.claudeTranscript(threadId), { session: "s1", cursor: transcriptStart, dropped: 0, readAt: 100 });
   assert.deepEqual([registry.pylon(pylonId)?.failed, registry.pylon(pylonId)?.attempts, registry.pylon(pylonId)?.retrying], [null, { count: 0, last: null }, false]);
   assert.deepEqual(registry.claudeEntries(threadId), [reply(0), reply(1)]);
@@ -1209,7 +1209,7 @@ test("a finished disk cleanup restarts the transcript, keeping its entries for t
 
   registry.requestCleanup(pylonId, threadId);
   registry.dropCleanup(pylonId);
-  assert.equal(registry.cleanupRequested(pylonId), false);
+  assert.equal(registry.cleanupRequestedAt(pylonId), undefined);
   assert.deepEqual(registry.claudeTranscript(threadId)?.cursor, cursorAt(10), "a dropped cleanup leaves the read where it stands");
 });
 
@@ -1218,7 +1218,7 @@ test("a thread delete clears a requested disk cleanup with everything else it cl
   assert.equal(registry.appendClaudeRead(threadId, { session: "s1", from: transcriptStart, entries: [reply(0)], cursor: cursorAt(9), reset: false, readAt: 9 }), true);
   registry.requestCleanup(pylonId, threadId);
   registry.setThreadStatus(threadId, "deleted");
-  assert.equal(registry.cleanupRequested(pylonId), false);
+  assert.equal(registry.cleanupRequestedAt(pylonId), undefined);
   assert.equal(registry.claudeTranscript(threadId), undefined);
   assert.deepEqual(registry.claudeEntries(threadId), []);
 });

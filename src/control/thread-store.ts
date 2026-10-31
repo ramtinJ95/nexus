@@ -475,7 +475,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     requestCleanup(pylonId: PylonId, thread: ThreadId) {
       sql("INSERT OR IGNORE INTO disk_cleanups (pylon, thread, requested_at) VALUES (?, ?, ?)").run(pylonId, thread, clock());
     },
-    cleanupRequested: (pylonId: PylonId): boolean => sql("SELECT 1 FROM disk_cleanups WHERE pylon = ?").get(pylonId) !== undefined,
+    cleanupRequestedAt: (pylonId: PylonId): number | undefined => sql("SELECT requested_at FROM disk_cleanups WHERE pylon = ?").get(pylonId)?.requested_at as number | undefined,
     /**
      * Once the node no longer has the pylon, the disk took the Claude transcript and whatever failed on it. The thread's
      * transcript is read from the start again, keeping the stored entries, so the session's new file appends after them
@@ -492,7 +492,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         updateAttention(thread);
       });
     },
-    /** An unarchive came before the delete ran, and the old disk booted, so nothing of it is forgotten. */
+    /** An unarchive came before the delete ran, and the old disk booted since, so nothing of it is forgotten. */
     dropCleanup(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
     claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
       const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
