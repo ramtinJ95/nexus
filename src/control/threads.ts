@@ -9,7 +9,7 @@ import type { ImageId, ProjectId, TemplateId, ThreadId } from "../ids.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "../tick.ts";
 import { HttpError } from "./http-error.ts";
-import { placeAuto, placeNear } from "./placement.ts";
+import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
 import type { Placement, Thread } from "./thread-store.ts";
 import { pylonLive } from "./live.ts";
 import type { Registry } from "./registry.ts";
@@ -123,6 +123,9 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       : request.near !== undefined ? placeNear(registry, need, request.near)
       : { how: "default", node: project.defaultNode as NodeName };
     const { node } = placement;
+    // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
+    const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
+    if (short !== null) throw new HttpError(409, `${node} ${short}`);
     const release = registry.reserve(pylonId, node, resources);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.

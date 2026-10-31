@@ -8,6 +8,7 @@ import type { ServiceName } from "../services-file.ts";
 import { checkoutDir } from "../session-harness.ts";
 import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "../sessions.ts";
 import { type SecretSource, type VmBackend } from "../backend.ts";
+import { diskRefusal, readDisks } from "../disk-space.ts";
 
 /** Linking or unlinking a pylon's port together with its preview route, so no snapshot read overlaps either. */
 export interface PortLinks {
@@ -45,6 +46,8 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         for (const grant of job.boot.network.secrets) {
           if (deps.secrets.value(grant.name) === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
         }
+        // A pylon that is up already holds its overlay.
+        if (deps.backend.storage !== undefined && ["absent", "stopped"].includes(await deps.backend.state(job.pylonId))) await refuseShortDisk(deps.backend.storage, job.boot.resources.diskGiB);
         await deps.backend.ensureRunning(job.boot, job.live, signal, job.relaunch ?? true);
         await deps.serve.converge(job.pylonId, job.live.previews, signal);
         return;
@@ -60,6 +63,7 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         await deps.backend.buildImage(job.image, job.recipe, deps.node, signal);
         return;
       case "build-template":
+        if (deps.backend.storage !== undefined) await refuseShortDisk(deps.backend.storage, job.inputs.resources.diskGiB);
         await deps.backend.buildTemplate(job.template, job.inputs, signal);
         return;
       case "fetch-artifact": {
@@ -90,6 +94,16 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
     }
     throw new JobFailure("backend", err instanceof Error ? err.message : String(err));
   }
+}
+
+/**
+ * A boot or a template build on a backend that keeps its disks in `storage` fails as capacity, which the planner
+ * retries, when the disk would leave that filesystem short, since its overlay there can grow to the disk's size.
+ */
+async function refuseShortDisk(storage: string, diskGiB: number): Promise<void> {
+  const [pylons] = await readDisks(storage, []);
+  const short = diskRefusal(pylons, pylons.freeGiB, diskGiB);
+  if (short !== null) throw new JobFailure("capacity", `this node ${short}`);
 }
 
 type CommandKind = PylonCommand["kind"];
