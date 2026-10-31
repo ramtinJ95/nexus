@@ -1,5 +1,6 @@
 /** The free space of the filesystems Nexus writes to on a node, and the two limits on it. */
 import { stat, statfs } from "node:fs/promises";
+import { JobFailure } from "./protocol/jobs.ts";
 import type { DiskFact } from "./protocol/observations.ts";
 
 const gib = 2 ** 30;
@@ -44,3 +45,13 @@ export function diskRefusal(d: DiskFact, freeGiB: number, diskGiB: number): stri
 }
 
 export const diskText = (d: DiskFact) => `${tenth(d.freeGiB)} of ${tenth(d.totalGiB)} GiB free at ${d.paths.join(", ")}${lowDisk(d) ? ", low" : ""}`;
+
+/**
+ * A boot or a template build fails as capacity, which the planner retries, when its disk would leave the filesystem of
+ * `storage`, where the backend keeps its disks, short, since its overlay there can grow to the disk's size.
+ */
+export async function refuseShortDisk(storage: string, diskGiB: number): Promise<void> {
+  const [pylons] = await readDisks(storage, []);
+  const short = diskRefusal(pylons, pylons.freeGiB, diskGiB);
+  if (short !== null) throw new JobFailure("capacity", `this node ${short}`);
+}

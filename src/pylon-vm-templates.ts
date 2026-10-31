@@ -9,6 +9,7 @@ import { constants } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { refuseShortDisk } from "./disk-space.ts";
 import { JobFailure } from "./protocol/jobs.ts";
 import type { ArtifactDirectory } from "./artifacts.ts";
 import type { TemplateManifest } from "./images.ts";
@@ -54,6 +55,8 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
       throw failure ?? new Error(`template ${name} did not prepare, and its build left nothing`);
     }
     signal.throwIfAborted();
+    // Only here, so a replay that publishes or sweeps what an earlier build left is never refused.
+    await refuseShortDisk(stateRoot, prepare.config.diskGiB);
     try {
       await run(stateRoot, { action: "prepare", name, config: prepare.config, boot: prepare.boot, labels: { [imageLabel]: prepare.manifest.key.image } }, signal);
     } catch (err) {
