@@ -2214,6 +2214,26 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
   }
 });
 
+test("the side nodes mark a node with a low filesystem, and its page lists each filesystem with its paths", async (t) => {
+  const disks = [
+    { paths: ["/var/lib/nexus/pylons", "/var/lib/nexus/artifacts"], totalGiB: 100, freeGiB: 15, pylons: true as const },
+    { paths: ["/opt/nexus/releases"], totalGiB: 500, freeGiB: 400 },
+  ];
+  const health: NodeHealth = {
+    node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: null, memory: null, disk: { path: "/var/lib/nexus/pylons", totalGiB: 100, freeGiB: 15 }, disks, temperatures: null, pylons: [],
+  };
+  const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => health };
+  const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
+  const capacity = testCapacity({ diskFreeGiB: 15, disks });
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
+  assert.match(nodes, /<em title="15\.0 of 100\.0 GiB free at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts, low">disk low<\/em>/);
+  const text = textOf((await s.call("GET", `/nodes/${node}`)).text.split('id="node-health"')[1]!);
+  assert.ok(text.includes("Disk 15 of 100 GiB free at /var/lib/nexus/pylons , /var/lib/nexus/artifacts low 400 of 500 GiB free at /opt/nexus/releases Temperatures"), text);
+  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ ...disks[0]!, freeGiB: 20 }] }) });
+  assert.doesNotMatch((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /disk low/, "20 GiB of 100 is not low");
+});
+
 test("a node's page shows its health as its probe reads it, unknown where the host exposes nothing, and only to a deployer", async (t) => {
   let health: NodeHealth = {
     node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },

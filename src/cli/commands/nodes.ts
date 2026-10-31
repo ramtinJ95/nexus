@@ -3,13 +3,14 @@ import type { NodeSummary } from "../../control/wire.ts";
 import type { NodePylons } from "../../control/placement.ts";
 import type { NodeCapacity } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
+import { diskText, lowDisk } from "../../disk-space.ts";
 import { type Command, ago, table, gib } from "../kit.ts";
 
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
 function capacityText(c: Partial<NodeCapacity>, overcommitted: boolean): string {
   const counted = c.committedDiskGiB !== undefined;
   const n = (v: number | undefined, known = true) => v === undefined || !known ? "unknown" : gib(v);
-  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed${overcommitted ? ", overcommitted" : ""}, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free`;
+  return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed${overcommitted ? ", overcommitted" : ""}, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free${(c.disks ?? []).filter(lowDisk).map((d) => `, disk low at ${d.paths.join(", ")}`).join("")}`;
 }
 
 /**
@@ -35,7 +36,7 @@ function healthText(h: NodeHealth): string {
     `load: ${load === null ? "unknown" : `${load.one.toFixed(2)} ${load.five.toFixed(2)} ${load.fifteen.toFixed(2)} (1, 5, 15 min)`} on ${h.cpus} CPUs`,
     `memory: ${memory === null ? "unknown" : `${gib(memory.availableGiB)} of ${gib(memory.totalGiB)} GiB available`}`,
     `swap: ${memory === null ? "unknown" : memory.swapTotalGiB === 0 ? "none" : `${gib(memory.swapTotalGiB - memory.swapFreeGiB)} of ${gib(memory.swapTotalGiB)} GiB used`}`,
-    `disk: ${gib(h.disk.freeGiB)} of ${gib(h.disk.totalGiB)} GiB free at ${h.disk.path}`,
+    ...h.disks?.map((d) => `disk: ${diskText(d)}`) ?? [`disk: ${gib(h.disk.freeGiB)} of ${gib(h.disk.totalGiB)} GiB free at ${h.disk.path}`],
     `temperatures: ${temperatures === null ? "unknown" : temperatures.map((t) => `${t.sensor} ${t.celsius.toFixed(1)} °C`).join(", ")}`,
     ...pylons === null ? ["pylons: unknown"] : pylons.length === 0 ? ["pylons: none running"]
       : pylons.map((p) => `pylon: ${p.pylonId}, ${p.processes} ${p.processes === 1 ? "process" : "processes"}, ${gib(p.cpuPercent)}% CPU, ${gib(p.residentGiB)} GiB resident`),
