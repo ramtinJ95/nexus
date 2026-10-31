@@ -225,11 +225,13 @@ The probe runs as the system user `nexus`. These are its paths:
 | --- | --- |
 | `/etc/nexus/probe.json` | The config. `src/probe/config.ts` parses it. |
 | `/etc/nexus/secrets.env` | Secret values, `NAME=value` per line. Mode 0640, owner `root:nexus`. |
-| `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints. |
+| `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints, and each instance's `controller.log`, which its controller rotates at 10 MiB into `controller.log.1` and `controller.log.2`. |
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
 | `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. Mode 0600. |
 | `/var/lib/nexus/shutdown.json` | The pylons the node's last shutdown found running, which the next boot wakes, and why a pause did not finish. Mode 0600. `shutdownFile` in `probe.json` moves it. |
 | `/opt/nexus/current` | The release the probe runs. |
+
+The probe reports the free space of each filesystem that holds one of these paths, `/var/lib/nexus` with its Docker and Gondolin caches, `/var/lib/nexus-control` and `/opt/nexus/releases`. `nexus nodes` marks a node with a filesystem under 10% or 20 GiB free, whichever is larger, and `nexus node <name>` lists each one. No start, wake or template build goes to a node whose pylons' filesystem would keep less than max(10 GiB, 5%) free after the pylon's disk, as [the design's placement](../docs/design.md#placement) describes.
 
 ### A shutdown or reboot pauses the pylons
 
