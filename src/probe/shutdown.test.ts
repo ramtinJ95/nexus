@@ -91,3 +91,11 @@ test("a drain that throws still closes the probe", async () => {
   await assert.rejects(closeProbe(probe, "SIGTERM", () => {}, async () => "stopping"), /list failed/);
   assert.deepEqual(calls, [`drain ${shutdownPauseMs}`, "close"]);
 });
+
+test("the shutdown record is saved into a state directory that does not exist yet", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-shutdown-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "state", "shutdown.json");
+  await saveShutdownRecord(path, new Map([["pylon-a" as PylonId, {}]]));
+  assert.deepEqual(await readShutdownRecord(path), new Map([["pylon-a", {}]]));
+});

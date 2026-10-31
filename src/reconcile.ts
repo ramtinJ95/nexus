@@ -301,7 +301,8 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  * - A stopped or broken pylon newly marked wakeAfterBoot is agent activity at `now`: the node's shutdown paused it while
  *   it ran, so it runs again for agentIdleMs, resumed from that checkpoint, and then sleeps under the idle policy. An
  *   archived thread ignores activity, so its pylon stays paused. Agent, not human, because a boot is not a person, and
- *   human activity says someone works on the thread.
+ *   human activity says someone works on the thread. A marked pylon in `unlisted` counts again, so a control plane
+ *   that stopped between ingesting the mark and the spawn still wakes it once it starts.
  */
 export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set()): readonly RegistryWrite[] {
   const observed = (pylon: PylonObservation): RegistryWrite[] => {
@@ -369,7 +370,7 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   for (const [key, p] of isReady) if (!wasReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: true });
   for (const [key, p] of wasReady) if (!isReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: false });
 
-  const woke = markedForWake(current) && !markedForWake(previous);
+  const woke = markedForWake(current) && (unlisted || !markedForWake(previous));
   const agent = woke || after.sessions?.some((s) => harnessNamed(s.harness)?.activity !== "hooks" && s.state === "running" && s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });

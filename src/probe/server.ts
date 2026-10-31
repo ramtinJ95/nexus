@@ -413,11 +413,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     await saveRecord(record);
     const outcomes = await Promise.all(targets.map(async (pylonId): Promise<DrainOutcome> => {
       const pausing = Date.now();
-      // Busy only with a job the wait above gave up on, as it ran past the shutdown's time.
-      const status = busy.has(pylonId) ? null : await start({
+      const budget = left();
+      // Busy only with a job the wait above gave up on, as it ran past the shutdown's time. The race bounds a backend
+      // that does not stop at the abort, as pylon-vm's stop does not.
+      const status = busy.has(pylonId) ? null : await Promise.race([start({
         jobId: randomUUID() as JobId, node, issuedAt: new Date(pausing).toISOString(), notAfter: new Date(pausing).toISOString(),
         job: { kind: "pause", pylonId, checkpoint: `ckpt-${pylonId.replace(/^pylon-/, "")}-shutdown-${startedAt}` },
-      }, pylonId, left()).ended;
+      }, pylonId, budget).ended, delay(budget, null, { ref: false })]);
       if (status?.state === "succeeded") return { pylonId, pausedInMs: Date.now() - pausing };
       const failed = status?.state === "failed" && status.code !== "deadline" ? status.message : outOfTime;
       record.set(pylonId, { failed });
@@ -648,6 +650,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       server.closeAllConnections();
       for (const socket of streamSockets) socket.destroy();
       await Promise.allSettled([...runningJobs.keys()]);
+      // A spawn that woke a pylon drops its mark, which a restart right after must not read back.
+      await recordSaves.run(async () => {});
       await Promise.all([closed, previews?.gateway.close(), bridge?.close()]);
       journal.close();
     },

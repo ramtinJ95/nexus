@@ -474,6 +474,12 @@ test("ingest: a stopped pylon newly marked for a wake after its node's boot is a
   assert.deepEqual(ingest({ type: "snapshot", observation: testObservation(node, { pylons: [woken] }) }, node, knows(woken), now).filter((w) => w.record === "activity"), []);
 });
 
+test("ingest: a marked pylon this control plane has not listed since it started is agent activity again, so a restart between the mark and the spawn still wakes it", () => {
+  const woken: PylonObservation = { ...stoppedPylon(pylonId, { checkpoint: lastCheckpoint, sessions: null }), wakeAfterBoot: true };
+  assert.deepEqual(ingest({ type: "pylon", pylon: woken }, node, knows(woken), now, new Set([pylonId])).filter((w) => w.record === "activity"), [{ record: "activity", pylonId, human: null, agent: now }]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint) }, node, knows(stopped(lastCheckpoint)), now, new Set([pylonId])).filter((w) => w.record === "activity"), [], "no mark, no activity");
+});
+
 test("ingest: a broken pylon newly marked for a wake is agent activity too, and a pylon without the mark is none", () => {
   const woken: PylonObservation = { ...broken, wakeAfterBoot: true };
   assert.deepEqual(ingest({ type: "pylon", pylon: woken }, node, knows(runningWith({ sessions: [] })), now), [{ record: "activity", pylonId, human: null, agent: now }]);

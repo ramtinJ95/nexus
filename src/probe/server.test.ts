@@ -2083,6 +2083,32 @@ test("a drain records why a pause failed, and a pause still running when its tim
   assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed: failures[pylonA] }, [pylonB]: { failed: failures[pylonB] } } });
 });
 
+test("a drain keeps its time though the backend's pause ignores the abort, and records that pylon as out of time", async (t) => {
+  const file = await shutdownFile(t);
+  const { probe, fake } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonA, up(pylonA));
+  fake.backend.ensurePaused = () => new Promise((resolve) => setTimeout(resolve, 1_500));
+  const started = Date.now();
+  const outcomes = await probe.drain(300);
+  const took = Date.now() - started;
+  assert.ok(took >= 300 && took < 2_000, `${took} ms`);
+  const failed = "it did not pause within the shutdown's 0.3 s";
+  assert.deepEqual(outcomes, [{ pylonId: pylonA, failed }]);
+  assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed } } });
+});
+
+test("a close right after a wake leaves the record without the woken pylon, so a restart does not mark it again", async (t) => {
+  const file = await shutdownFile(t);
+  await writeFile(file, JSON.stringify({ pylons: { [pylonA]: {} } }));
+  const { probe, client, fake } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonA, down(pylonA, "ckpt-a-shutdown-1"));
+  const wake = envelope({ ...spawnJob, pylonId: pylonA, boot: { ...boot, pylonId: pylonA, source: { kind: "resume", checkpoint: "ckpt-a-shutdown-1" } } } as Job, node, Date.now());
+  await client.submit(wake);
+  assert.equal((await finished(client, wake.jobId)).state, "succeeded");
+  await probe.close();
+  assert.deepEqual(await recordIn(file), { pylons: {} });
+});
+
 test("the next boot's probe marks for a wake each pylon the shutdown paused, says why on one it did not finish, and the draining probe shows no mark", async (t) => {
   const file = await shutdownFile(t);
   const draining = await setup(t, { shutdownFile: file, log: () => {} });

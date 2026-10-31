@@ -82,7 +82,7 @@ export async function readShutdownRecord(path: string): Promise<ShutdownRecord> 
 }
 
 export function saveShutdownRecord(path: string, record: ShutdownRecord): Promise<void> {
-  return saveJson(path, { pylons: Object.fromEntries(record) });
+  return saveJson(path, { pylons: Object.fromEntries(record) }, { mkdir: true });
 }
 
 /**
