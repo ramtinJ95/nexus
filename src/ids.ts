@@ -24,7 +24,7 @@ export type ImageId = `img-${string}`;
  * not one key: the same key built twice, or on two nodes at once, gives two IDs, so a node's bytes under one ID never change.
  */
 export type TemplateId = `tpl-${string}`;
-/** ckpt-<thread id>-<n>, minted by the control plane for each pause. */
+/** ckpt-<thread id>-<n>, minted by the control plane for each pause, or ckpt-<thread id>-shutdown-<epoch ms> by a probe draining for its node's shutdown. */
 export type CheckpointId = `ckpt-${string}`;
 export type ArtifactId = ImageId | TemplateId | CheckpointId;
 /** What drop-artifact may name. A checkpoint leaves a node only through delete of its pylon. */

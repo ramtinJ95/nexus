@@ -57,6 +57,8 @@ const configSchema = z.strictObject({
     z.strictObject({ kind: z.literal("docker"), images: z.record(z.custom<ImageId>(isImageId, "must be an image ID, such as img-000000000000"), z.string()), labels: z.record(z.string(), z.string()).default({}), artifacts: absolutePath.optional() }),
   ])),
   secretsFile: absolutePath,
+  /** In the probe's state directory, so the next boot's probe reads what the node's shutdown paused. */
+  shutdownFile: absolutePath.default("/var/lib/nexus/shutdown.json"),
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
   previews: z.strictObject({
     /** The gateway's loopback port. Keep it fixed: the serve entries that proxy to it are how the probe knows its own. */
