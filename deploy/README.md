@@ -308,6 +308,7 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 | `/var/lib/nexus-control/harness.sqlite` | The harness: every thread's conversation. |
 | `/var/lib/nexus-control/harness-credentials.json` | The harness's model login and installation ID. Mode 0600. |
 | `/opt/nexus/control-current` | The release the control plane runs, apart from the probe's link. |
+| `/var/backups/nexus` | The daily backups, as [Daily backup](#daily-backup) describes. Root, mode 0700. |
 
 `control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`), the model new threads start with (`harness.model`), and the https ports previews are allocated from on each node (`previewPorts`, 10200 to 10999 when omitted). A node's `tailnetHost` is its MagicDNS name, such as `infra-testbench.example.ts.net`, because preview URLs name it and its `tailscale serve` certificate is for that name. Each probe's `auth.controlPlane` must be the control plane's own stable node ID, `self.tailnetNodeId`. `"resumeAfterUsageLimit": true` makes the control plane type a continue into each Claude worker that stopped on its usage limit, three minutes after the limit resets, as [the CLI's usage-limit stops](../docs/cli.md#usage-limit-stops-0210) describe. It is off when omitted.
 
@@ -383,6 +384,42 @@ What each place holds:
 - The control plane holds the access and refresh tokens in `harness-credentials.json`, as before. It refreshes them when less than 10 minutes remain and sends the access token to every probe every 60 seconds over the tailnet, and at once to a probe that reports it has none. It asks tailscaled who answered on the connection before it sends any byte, so a node that took over a probe's name gets nothing. `journalctl -u nexus-control` names a probe it could not reach, never the token.
 - Each probe holds the current access token in memory, and so does the controller of each running pylon. Root on a node can read it there, as it can read `secrets.env`, and use it until it expires. Neither process writes it to disk or to a log, and it never reaches the registry, the events or the observation.
 - A pylon holds only a placeholder, which changes on every boot. Its agents can spend the ChatGPT subscription through `api.openai.com`, but cannot read the token.
+
+### Daily backup
+
+The control role installs `nexus-backup.timer`, which runs `nexus-backup.service` as root once a day, at a random time in the hour after midnight, and on the next boot after a missed day. The control plane's unit wants the timer, so the start that follows a deploy starts it too. Each run writes one directory, `/var/backups/nexus/<UTC time>`, such as `2026-10-31T00-23-41Z`, on the control plane's machine only. It holds credentials, so `/var/backups/nexus` and each backup are `root:root`, mode 0700, and every file in them is mode 0600. A backup holds:
+
+| File in the backup | Copied from | How |
+| --- | --- | --- |
+| `registry.db` | `db` in `control.json`, `/var/lib/nexus-control/registry.db` | SQLite's `VACUUM INTO` from a read-only connection, so the copy is one consistent snapshot of the live database |
+| `harness.sqlite` | `harness.storage`, `/var/lib/nexus-control/harness.sqlite` | the same |
+| `harness-credentials.json` | `harness.credentials`, `/var/lib/nexus-control/harness-credentials.json` | its bytes as they are |
+| `github-token` | `github.tokenFile`, only when it lies outside `/etc/nexus` | its bytes as they are |
+| `etc/<path>` | every file under `/etc/nexus`: `control.json`, `probe.json`, `deployer.json` with the deployer's token, `secrets.env`, `github-token`, `git_ed25519`, `git_known_hosts` | its bytes as they are |
+
+After the copies, the run checks each copied database with `PRAGMA integrity_check`, and then writes `manifest.json` last: each file's source path, size, SHA-256, and the source's mode and owner. A directory without a manifest is incomplete, and nothing counts it as a backup. Only once the new backup verifies does the run delete older ones, keeping the newest 7, along with any incomplete directory a crashed run left. A run that fails removes its own directory, leaves the earlier backups as they were, and fails the unit, so `systemctl status nexus-backup` and `journalctl -u nexus-backup` say why. A missing source fails the run, so a control plane that has not started yet, with no registry, has no backup.
+
+To see the newest complete backup, how old it is and whether it still verifies, run the check. It prints one JSON line and exits 1 when there is no complete backup or the newest does not verify. `nexus doctor` is to call the same check:
+
+```sh
+sudo node /opt/nexus/control-current/src/control/backup.ts check
+```
+
+To run a backup now, `sudo systemctl start nexus-backup`.
+
+### Restore a backup
+
+A restore puts every file of a chosen backup back where the manifest says it came from, with its recorded mode and owner, and replaces each database whole, removing its stale `-wal` and `-shm` first. Files that are not in the backup stay as they are. It refuses to run while the control plane, the deployer's timer or the deployer's service is active, because the deployer can restart the control plane, and it refuses a backup that does not verify:
+
+```sh
+sudo systemctl stop nexus-deployer.timer nexus-deployer.service nexus-control.service
+ls /var/backups/nexus
+sudo node /opt/nexus/control-current/src/control/backup.ts restore 2026-10-31T00-23-41Z
+sudo systemctl start nexus-control.service
+sudo systemctl start nexus-deployer.timer
+```
+
+The registry and the conversations come back as they were at the backup, so what the control plane recorded after it is lost. A restored `/etc/nexus/probe.json` or `secrets.env` takes effect once the probe restarts. Owners are numeric, so a restore suits the machine the backup was taken on.
 
 ## Build the pylon image
 
