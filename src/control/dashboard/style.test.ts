@@ -111,3 +111,13 @@ test("no selector list has two rules at one level, where the later would silentl
 test("only [hidden] uses !important, as it must beat every display rule", () => {
   assert.deepEqual(styleRules().filter(({ body }) => body.includes("!important")).map(({ selector }) => selector), ["[hidden]"]);
 });
+
+test("a file's diff tab wraps its rows of controls, so a narrow panel never scrolls sideways under its header", () => {
+  const top = (selector: string) => {
+    const body = styleRules().find((r) => r.at === "" && r.selector === selector)?.body ?? "";
+    return new Map([...body.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [name!, value!.trim()]));
+  };
+  for (const row of [".fv-head", ".review-bar", ".note-head .note-kinds"]) assert.equal(top(row).get("flex-wrap"), "wrap", row);
+  // The note kinds reuse .fv-layout, whose flex: none would keep them on one line wider than the panel.
+  assert.equal(top(".note-head .note-kinds").get("flex"), "0 1 auto");
+});
