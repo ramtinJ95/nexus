@@ -32,8 +32,8 @@ Preconditions:
 - **Fold.** Clear the filter with `fill "#filter" ""`, then `click "#group-spoon > summary"`, and `eval "() => document.getElementById('group-spoon').open"` prints `false`. `fill "#filter" "beta"` opens it with only `browse: beta` shown, and clearing the filter folds it again. Capture `snapshot --filename browse-fold-filter.md` while it is open. Click the summary once more to unfold it.
 - **Open from the list.** Run `$V browser browse-ui-pick -- click "role=link[name=\"browse: alpha\"]"`. The URL is `/threads/$TA`.
 - **Errors.**
-  - `$V cli browse-missing -- show th-000000000000 --json` exits 4 with stderr `{"error":"no thread th-000000000000","kind":"not-found","status":404}`.
-  - `$V cli browse-bad -- show --json` exits 64 before any request, with stderr `{"error":"show takes 1 argument, got 0","kind":"invalid","status":null}`.
+  - `$V cli browse-missing -- show th-000000000000 --json` exits 4 with stderr `{"error":"no thread th-000000000000","kind":"not-found","status":404,"code":null}`.
+  - `$V cli browse-bad -- show --json` exits 64 before any request, with stderr `{"error":"show takes 1 argument, got 0","kind":"invalid","status":null,"code":null}`.
   - `$V cli browse-down -- threads --json --url http://127.0.0.1:1 --socks none` exits 2 with `kind` `unreachable` and `status` null.
 - **Proof.** The recorded CLI steps, plus `browse-ui.md`, `browse-ui.png`, `browse-filter.md`, `browse-filter-after-poll.md`, `browse-no-match.md` and `browse-fold-filter.md`.
 

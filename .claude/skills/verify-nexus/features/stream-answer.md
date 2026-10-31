@@ -46,7 +46,7 @@ Preconditions:
 ## Gotchas
 
 - Start the watch before the send. A watch started later misses the first `live` events, and its rate covers only part of the answer.
-- `watch` ends on a deleted thread, a closed pipe, or when its parent process exits, which it checks after each poll. A watch left behind with a trailing `&` by a shell that then returns has lost its parent: one ran 30 s and stopped before the answer ended. Keep its shell alive with `& wait` in a background command.
+- `watch` ends on a deleted thread, a closed pipe, SIGINT, SIGTERM or SIGHUP, or when its parent process exits, which it checks every second. A watch left behind with a trailing `&` by a shell that then returns has lost its parent: one ran 30 s and stopped before the answer ended. Keep its shell alive with `& wait` in a background command.
 - The watch runs outside `$V cli`. `$V cli` writes stdout to its file as the command runs, but echoes it and writes `.exit` only when the command ends, and the file has no timestamps.
 - The dashboard's script is a minified ES module, so its variables are out of a page `eval`'s reach. The `eval` steps see the page's streams only through the `stream-hook` step's `EventSource` wrapper, and read the conversation's scroller as `#scroll`. A page loaded again, by `goto` or a reload, needs the hook again.
 - Headless Chromium keeps every tab visible, so a second tab does not hide the first. The hidden step overrides `document.visibilityState` on the page and dispatches `visibilitychange`, and `delete document.visibilityState` restores it.
