@@ -90,6 +90,8 @@ const maxSecretBytes = 16_384;
 const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
 const sum = (pylons: readonly BackendPylon[], resource: keyof NonNullable<BackendPylon["holds"]>) => pylons.reduce((total, p) => total + (p.holds?.[resource] ?? 0), 0);
 const claudeSendMemoryMs = 60 * 60_000;
+/** How long a drain waits for its last events to leave for each observer. */
+const observerFlushMs = 1_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -169,7 +171,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   };
   const jobs = new Map<JobId, { status: JobStatus; finishedAt: number | null }>();
   const busy = new Map<Subject, JobId>();
-  const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void }>();
+  /** `flushed` settles once the observer's last write has left the probe, or failed to. */
+  const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void; flushed(): Promise<void> }>();
   /** Each running job's run, which settles once its result is published. */
   const runningJobs = new Map<Promise<JobStatus>, Job>();
   /** Aborted once the node's shutdown drains the probe, which then starts no job but the drain's own pauses. */
@@ -408,7 +411,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     const record: ShutdownRecord = new Map([...lastShutdown].filter(([id]) => present.has(id)));
     for (const pylonId of targets) record.set(pylonId, {});
     await saveRecord(record);
-    return Promise.all(targets.map(async (pylonId): Promise<DrainOutcome> => {
+    const outcomes = await Promise.all(targets.map(async (pylonId): Promise<DrainOutcome> => {
       const pausing = Date.now();
       // Busy only with a job the wait above gave up on, as it ran past the shutdown's time.
       const status = busy.has(pylonId) ? null : await start({
@@ -421,20 +424,24 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       await saveRecord(record);
       return { pylonId, failed };
     }));
+    // close() destroys the observe streams at once, which would drop the snapshot that shows the pylons paused.
+    await Promise.race([Promise.all([...observers].map((o) => o.flushed())), delay(observerFlushMs, undefined, { ref: false })]);
+    return outcomes;
   }
 
   async function observe(res: ServerResponse) {
     // Events that arrive while the first snapshot is built go out after it, in order, except older snapshots.
     const queued: ProbeEvent[] = [];
     let write = (event: ProbeEvent) => { queued.push(event); };
-    const observer = { write: (event: ProbeEvent) => write(event), drop: (err: Error) => res.destroy(err) };
+    let sent = Promise.resolve();
+    const observer = { write: (event: ProbeEvent) => write(event), drop: (err: Error) => res.destroy(err), flushed: () => sent };
     observers.add(observer);
     const timer = setInterval(() => { snapshot().then((observation) => write({ type: "snapshot", observation }), observer.drop); }, snapshotIntervalMs);
     res.on("close", () => { observers.delete(observer); clearInterval(timer); });
     const first = await snapshot();
     res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-store" });
     res.write(encodeProbeEvent({ type: "snapshot", observation: first }));
-    write = (event) => { res.write(encodeProbeEvent(event)); };
+    write = (event) => { sent = new Promise((resolve) => res.write(encodeProbeEvent(event), () => resolve())); };
     // Reads run in order, so a queued snapshot was read before `first`. Sent after it, it would undo newer state.
     for (const event of queued) if (event.type !== "snapshot") write(event);
   }

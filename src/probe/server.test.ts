@@ -2016,6 +2016,25 @@ test("a drain for the node's shutdown records every running pylon before its fir
   assert.deepEqual(ended, new Set([pylonA, pylonB, pylonC]), "the control plane sees each pause as a job");
 });
 
+test("the control plane gets the snapshot that shows a drained pylon paused, though the probe closes as soon as the drain ends", async (t) => {
+  const { probe, fake, client } = await setup(t, { log: () => {} });
+  fake.pylons.set(pylonA, up(pylonA));
+  const events = client.observe(new AbortController().signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  const seen: ProbeEvent[] = [];
+  const read = (async () => {
+    try {
+      for (let e = await events.next(); !e.done; e = await events.next()) seen.push(e.value);
+    } catch { /* The close ends the stream. */ }
+  })();
+
+  await probe.drain(5_000);
+  await probe.close();
+  await read;
+  const phases = seen.flatMap((e) => e.type === "snapshot" ? e.observation.pylons.filter((p) => p.pylonId === pylonA).map((p) => p.phase) : []);
+  assert.equal(phases.at(-1), "stopped", JSON.stringify(seen.map((e) => e.type)));
+});
+
 test("a drain stops a running spawn, lets a pause the control plane sent finish, and refuses every new job with draining until close", async (t) => {
   const file = await shutdownFile(t);
   const { probe, fake, client, base } = await setup(t, { shutdownFile: file, log: () => {} });
