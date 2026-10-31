@@ -35,7 +35,8 @@ export interface PylonOverlay {
  *   of its secrets, its preview URLs, that work survives sleep only on disk, how to declare
  *   outputs, that pi is signed in to ChatGPT when the pylon was granted the ChatGPT token, that other logins use
  *   the device-code flow (S5: the browser callback listens inside the guest), and that Claude Code has a shepherdr
- *   reviewer check its diff before a pull request, which runs only when pi is signed in.
+ *   reviewer check its diff before a pull request, which runs only when pi is signed in, and the shell pitfalls
+ *   (`pkill -f` matching its own command, Claude Code refusing a leading `sleep`) that agents otherwise repeat.
  *   The image imports this file from ~/.claude/CLAUDE.md and links it as ~/.pi/agent/AGENTS.md, so the
  *   overlay never edits dotfiles.
  */
@@ -131,9 +132,13 @@ nexus output list
 ${logins}
 ## Review before a pull request
 
-This is for Claude Code, whose shepherdr mod gives it the \`mcp__shepherdr__agents\` tool. Before you open a pull request or push to one, have a shepherdr \`reviewer\` check the diff. Spawn it with \`agent_type: "reviewer"\`, the pull request's base branch as \`base\`, and a message that says what the change is for. The reviewer is a read-only pi worker in a new Herdr tab of this pylon, on the model the person's \`reviewer\` profile names. Fix the findings you accept. Then say in your reply, and in the pull request, which findings you accepted and which you rejected, and why. Without the tool, say the review was skipped.
+This is for Claude Code, whose shepherdr mod gives it the \`mcp__shepherdr__agents\` tool. Before you open a pull request or push to one, have a shepherdr \`reviewer\` check the diff. Spawn it with \`agent_type: "reviewer"\`, a \`label\` that names its tab, such as \`review\`, the pull request's base branch as \`base\`, and a message that says what the change is for. The reviewer is a read-only pi worker in a new Herdr tab of this pylon, on the model the person's \`reviewer\` profile names. Fix the findings you accept. Then say in your reply, and in the pull request, which findings you accepted and which you rejected, and why. Without the tool, say the review was skipped.
 
 ${reviewLogin}
+
+## Shell
+
+\`pkill -f\` and \`pgrep -f\` also match the shell that runs them, so they kill the command they are in. Stop a process by a PID you saved, or with a pattern the shell's own command line cannot match, such as \`pkill -f '[s]tack.ts'\`. Claude Code alone refuses a command that starts with a long \`sleep\`, so to wait there, loop on the condition (\`until <check>; do sleep 2; done\`) or run the command in the background.
 
 ## Services
 
