@@ -57,9 +57,12 @@ export interface NodeObservation {
 
 /**
  * What a node has, and what its pylons reserve of it. A VM that is up holds its CPUs and memory, and every pylon holds
- * its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only.
+ * its disk size until it is deleted, so a paused pylon counts toward `committedDiskGiB` only. `disks`: each filesystem
+ * Nexus writes to, absent from a probe older than the field.
  */
-export interface NodeCapacity { cpus: number; committedCpus: number; memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number; committedDiskGiB: number }
+export interface NodeCapacity { cpus: number; committedCpus: number; memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number; committedDiskGiB: number; disks?: readonly DiskFact[] }
+/** A filesystem, once, with the paths Nexus writes to on it. `pylons`: it holds the pylons' disks and their overlays. */
+export interface DiskFact { paths: readonly string[]; totalGiB: number; freeGiB: number; pylons?: true }
 /**
  * A node's capacity as its probe reported it. A probe from before pylons were counted reports no CPUs and no committed
  * disk, and its committed memory is always 0.

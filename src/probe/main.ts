@@ -41,6 +41,8 @@ const probe = await startProbe({
   secrets,
   shutdownFile: config.shutdownFile,
   ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
+  // /var/lib/nexus, the probe user's home, holds the Docker and Gondolin caches of image builds.
+  watched: [...config.backend.artifacts === undefined ? [] : [config.backend.artifacts], "/var/lib/nexus", "/var/lib/nexus-control", "/opt/nexus/releases"],
 });
 console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend`);
 

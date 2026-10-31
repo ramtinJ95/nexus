@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { createServer, request } from "node:http";
 import { Readable } from "node:stream";
@@ -561,6 +561,27 @@ test("node health is the control plane's to read, read-only, with the backend's 
   delete backend.processes;
   callAs(controlPlane);
   assert.equal((await client.health()).pylons, null, "a backend that cannot name its pylons' processes");
+});
+
+test("the snapshot's capacity and node health report each filesystem Nexus writes to once, the pylons' first, and leave out a path that is absent", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "nexus-watched-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const [storage, artifacts] = [join(root, "pylons"), join(root, "artifacts")];
+  await Promise.all([mkdir(storage), mkdir(artifacts)]);
+  const { client } = await setup(t, { backend: { ...fakeBackend().backend, storage }, watched: [artifacts, join(root, "absent")] });
+  const snapshot = await (async () => {
+    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
+  })();
+  const disks = snapshot!.capacity?.disks;
+  assert.deepEqual(disks?.map((d) => [d.paths, d.pylons]), [[[storage, artifacts], true]], "one filesystem holds both directories");
+  assert.equal(disks![0]!.freeGiB, snapshot!.capacity!.diskFreeGiB);
+  assert.deepEqual((await client.health()).disks?.map((d) => d.paths), [[storage, artifacts]]);
+
+  const docker = await setup(t, { watched: [artifacts] });
+  for await (const e of docker.client.observe(AbortSignal.timeout(5000))) {
+    assert.equal(e.type === "snapshot" && e.observation.capacity?.disks?.some((d) => d.pylons === true), false, "a backend that keeps no pylon disks marks no filesystem as the pylons'");
+    break;
+  }
 });
 
 test("a held secret from the control plane is held, applied to the running pylons, and then reported as one the node holds", async (t) => {

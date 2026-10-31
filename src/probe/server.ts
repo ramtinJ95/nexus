@@ -65,6 +65,8 @@ export interface ProbeOptions {
   listeningPollMs?: number;
   /** The node's shutdown record, in the probe's state directory (see shutdown.ts). Omitted: it lives in memory only. */
   shutdownFile?: string;
+  /** The paths Nexus writes to besides the backend's storage, whose filesystems the node reports. */
+  watched?: readonly string[];
 }
 
 export interface Probe {
@@ -230,7 +232,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (changed.some(Boolean)) await publishSnapshot();
   }, () => shutdown.signal.aborted);
 
-  const storage = backend.storage ?? "/";
+  const storage = backend.storage ?? null;
+  const watched = options.watched ?? [];
 
   /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
   const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
@@ -291,7 +294,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const jobs = retainedJobs();
-    const [listed, host] = await Promise.all([backend.list(), hostCapacity(storage)]);
+    const [listed, host] = await Promise.all([backend.list(), hostCapacity(storage, watched)]);
     // A running pylon's disk has moved on from the checkpoint it booted from, so only stopped disks count.
     const artifacts = [...await backend.artifacts.list(), ...listed.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : [])];
     const present = new Set(listed.map((p) => p.pylonId));
@@ -306,7 +309,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       capacity: {
         cpus: host.cpus, committedCpus: sum(listed, "cpus"),
         memoryGiB: host.memoryGiB, committedMemoryGiB: sum(listed, "memoryGiB"),
-        diskFreeGiB: host.disk.freeGiB, committedDiskGiB: sum(listed, "diskGiB"),
+        diskFreeGiB: host.disk.freeGiB, committedDiskGiB: sum(listed, "diskGiB"), disks: host.disks,
       },
       artifacts,
       jobs,
@@ -561,7 +564,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }, {
     path: /^\/v1\/node-health$/, notAllowed: ": node health is read-only",
     async GET(_req, res) {
-      const health = await readNodeHealth(node, { root: "/", storage, pylons: await backend.processes?.() ?? null, sampleMs: healthSampleMs });
+      const health = await readNodeHealth(node, { root: "/", storage, watched, pylons: await backend.processes?.() ?? null, sampleMs: healthSampleMs });
       return send(res, 200, JSON.stringify(health), "application/json");
     },
   }];
