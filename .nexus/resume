@@ -1,0 +1,12 @@
+#!/bin/sh
+# Installs the npm packages on boot when package-lock.json changed since the last install.
+cd "$(dirname "$0")/.." || exit 1
+stamp=node_modules/.nexus-lockfile-sha256
+sum=$(sha256sum package-lock.json | cut -d " " -f 1)
+[ "$(cat "$stamp" 2>/dev/null)" = "$sum" ] && exit 0
+if npm ci --no-audit --no-fund; then
+  echo "$sum" > "$stamp"
+else
+  # Deliberately not a failure, so a registry blip never fails a boot and the next wake tries again.
+  echo "The npm packages are not installed: run npm ci." >&2
+fi
