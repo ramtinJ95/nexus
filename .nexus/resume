@@ -1,23 +1,44 @@
 #!/bin/sh
-# Installs the npm packages on boot when package-lock.json changed since the last install.
+# Installs the npm packages on boot when node_modules records no install of this package-lock.json.
 cd "$(dirname "$0")/.." || exit 1
 staging=.nexus-install
 stamp=node_modules/.nexus-lockfile-sha256
-# A swap that was cut off between its two renames left the packages in use here.
-[ -e node_modules ] || [ ! -d "$staging/old" ] || mv "$staging/old" node_modules
+attempts=1
+[ "${1:-}" != --setup ] || attempts=3
+
+# Deliberately not a failure on a wake, so a registry blip never fails one and the next wake tries again. Setup fails, so no template is published without packages.
+fail() {
+  echo "$1" >&2
+  [ "$attempts" -eq 1 ] && exit 0
+  exit 1
+}
+
+# Puts the packages in use back from $staging/old, or stops with them still there, before anything removes it.
+restore() {
+  [ -e node_modules ] || [ ! -d "$staging/old" ] || mv "$staging/old" node_modules ||
+    fail "The packages in use could not be put back from $staging/old: move it to node_modules."
+}
+
+# The packages install beside the ones in use, from a copy of the two manifests, which is enough only while package.json has no workspaces, no file: or link: dependencies and no root install scripts.
+attempt() {
+  if mkdir "$staging" && cp package.json package-lock.json "$staging" && (cd "$staging" && npm ci --no-audit --no-fund) &&
+    echo "$sum" > "$staging/$stamp" && { [ ! -e node_modules ] || mv node_modules "$staging/old"; }; then
+    # rename(2), unlike mv, fails rather than nest when an npm ci of the agent's own has made node_modules meanwhile.
+    node -e 'process.getBuiltinModule("node:fs").renameSync(process.argv[1], process.argv[2])' "$staging/node_modules" node_modules 2>/dev/null &&
+      { rm -rf "$staging"; return 0; }
+  fi
+  restore
+  rm -rf "$staging"
+  return 1
+}
+
+restore
 rm -rf "$staging"
 sum=$(sha256sum package-lock.json | cut -d " " -f 1)
 [ "$(cat "$stamp" 2>/dev/null)" = "$sum" ] && exit 0
-# The packages install beside the ones in use, from a copy of the two manifests, which is enough only while package.json has no workspaces, no file: or link: dependencies and no root install scripts.
-install() {
-  mkdir "$staging" && cp package.json package-lock.json "$staging" && (cd "$staging" && npm ci --no-audit --no-fund) && echo "$sum" > "$staging/$stamp" || return 1
-  [ ! -e node_modules ] || mv node_modules "$staging/old" || return 1
-  mv "$staging/node_modules" node_modules && return 0
-  [ ! -d "$staging/old" ] || mv "$staging/old" node_modules
-  return 1
-}
-install
-installed=$?
-rm -rf "$staging"
-# Deliberately not a failure, so a registry blip never fails a boot and the next wake tries again.
-[ "$installed" -eq 0 ] || echo "The npm packages are not installed: run npm ci." >&2
+i=0
+while [ "$i" -lt "$attempts" ]; do
+  attempt && exit 0
+  i=$((i + 1))
+done
+fail "The npm packages are not installed: run npm ci."
