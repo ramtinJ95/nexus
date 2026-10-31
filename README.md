@@ -71,7 +71,7 @@ npm run typecheck
 npm test
 ```
 
-A pylon of this project runs `npm ci` itself on boot. `.nexus/setup` and `.nexus/resume` install the packages whenever `package-lock.json` differs from the one recorded in `node_modules/` at the last install, so an agent finds them there. A failed install does not fail the boot. It prints `The npm packages are not installed: run npm ci.` to the pylon's boot log, the typecheck fails with `tsc: not found` until someone runs `npm ci`, and the next wake tries again.
+A pylon of this project runs `npm ci` itself on boot. `.nexus/setup` and `.nexus/resume` install the packages whenever `package-lock.json` differs from the one recorded in `node_modules/` at the last install. A fresh boot finishes setup before the pylon runs. A wake or a template boot waits at most 10 s for resume, so an install that takes longer can still run when the agent's first command does. A failed install does not fail the boot. It prints `The npm packages are not installed: run npm ci.` to the pylon's boot log, the typecheck fails with `tsc: not found` until someone runs `npm ci`, and the next wake tries again.
 
 The control plane serves the dashboard's client from `dist/dashboard`, bundled from `src/control/dashboard/client.js` by `build.ts`, and does not start without it. `npm test` builds it first. To run the control plane from a checkout, run `npm run build` after `npm ci` and after each change to the client.
 
