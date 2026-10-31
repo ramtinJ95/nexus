@@ -55,6 +55,9 @@ const tag = `nexus-verify-pylon:${run}`;
 const imageId = "img-0000000000aa" as ImageId;
 const api = `http://127.0.0.1:${ports.api}`;
 const log = (message: string) => console.error(`${new Date().toISOString()} ${message}`);
+// An image that already holds the packages, herdr and user, which .nexus/verify makes from the verify pylon's own root,
+// because that pylon's allowlist reaches neither Docker Hub, Debian nor herdr.dev.
+const base = process.env.NEXUS_VERIFY_BASE;
 
 async function buildImage() {
   const arch = await docker("info", "--format", "{{.Architecture}}");
@@ -68,15 +71,20 @@ async function buildImage() {
   // The slice test's image, plus the harness's daemon, the in-pylon CLI and git, so `git status` outputs read a checkout,
   // and procps, whose pgrep counts the terminals attached to Herdr.
   await writeFile(join(dir, "Dockerfile"), [
-    "FROM node:24-bookworm-slim",
-    "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl tini python3 git procps && rm -rf /var/lib/apt/lists/*",
-    `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${checkoutDir}`,
+    ...base === undefined ? [
+      "FROM node:24-bookworm-slim",
+      "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl tini python3 git procps && rm -rf /var/lib/apt/lists/*",
+      "RUN useradd --create-home --shell /bin/bash user",
+    ] : [`FROM ${base}`],
+    `RUN install -d -o user -g user /home/user /home/user/workspace ${checkoutDir}`,
     // Docker execs run as root, unlike a pylon's, so git must accept the checkout that `user` owns.
     "RUN git config --system --add safe.directory '*'",
     // refs/nexus/base is what a pylon booted at, which a pylon-vm records on its first boot and the Docker backend never does.
     `RUN git init --quiet --initial-branch=main ${checkoutDir} && printf '# verify-nexus\\n' > ${checkoutDir}/README.md && git -C ${checkoutDir} -c user.name=verify -c user.email=verify@invalid add README.md && git -C ${checkoutDir} -c user.name=verify -c user.email=verify@invalid commit --quiet -m init && git -C ${checkoutDir} update-ref refs/nexus/base HEAD`,
-    "ARG HERDR_VERSION",
-    'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
+    ...base === undefined ? [
+      "ARG HERDR_VERSION",
+      'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
+    ] : [],
     "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
     "COPY pi-env /usr/local/libexec/nexus/pi-env",
     "COPY nexus /usr/local/bin/nexus",

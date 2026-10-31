@@ -96,7 +96,11 @@ doctor() {
   local pid api tag revision label
   pid=$(state "$run" pid); api=$(state "$run" api); tag=$(state "$run" dockerTag); revision=$(state "$run" revision); label=$(state "$run" label)
   check "pid $pid is this run's stack.ts" "ours $pid '$dir'"
-  for p in "${ports[@]}"; do check "port $p is held by pid $pid" "[ \"\$(listener $p)\" = $pid ]"; done
+  if command -v lsof > /dev/null; then
+    for p in "${ports[@]}"; do check "port $p is held by pid $pid" "[ \"\$(listener $p)\" = $pid ]"; done
+  else
+    echo "note  the holders of ports ${ports[*]} are not checked, as this machine has no lsof"
+  fi
   local head; head=$(git -C "$repo" rev-parse --short HEAD)
   check "stack revision $revision is the checkout's HEAD $head" "[ '${revision%-dirty}' = '$head' ]"
   check "Docker answers and holds $tag" "[ -n \"\$(docker images -q $tag)\" ]"
