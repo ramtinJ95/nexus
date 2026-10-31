@@ -3,7 +3,9 @@
  * `previews`, `outputs` and `jobs`, the event log, in `events` and `event_receipts`, each session's turn and order, in
  * `session_activity`, `session_order` and `session_order_floor`, its Claude worker, in `claude_workers`,
  * `claude_transcripts`, `claude_entries`, `claude_messages` and `claude_senders`, its attention, in `thread_attention`,
- * each start's request ID, in `start_requests`, and the harness conversations aborted, in `aborted_conversations`. The
+ * each start's request ID, in `start_requests`, the harness conversations aborted, in `aborted_conversations`, and when
+ * each archived thread was archived, in `thread_archives`, and the pylons whose disk that cleanup deletes, in
+ * `disk_cleanups`. The
  * features with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention } from "./attention.ts";
@@ -256,6 +258,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const waiting = new Map(sql(`SELECT thread, message FROM (SELECT thread, message, row_number() OVER (PARTITION BY thread ORDER BY updated_at DESC, rowid DESC) AS n
       FROM session_activity WHERE thread IN (SELECT value FROM json_each(?)) AND state = 'session.waiting') WHERE n = 1`).all(ids).map((r) => [r.thread as ThreadId, r]));
     const reading = readingUsage();
+    const archived = new Map(sql("SELECT thread, archived_at FROM thread_archives WHERE thread IN (SELECT value FROM json_each(?))").all(ids)
+      .map((r) => [r.thread as ThreadId, r.archived_at as number]));
     const limits = usageLimits(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)));
     return rows.map((row): Thread => {
       const thread = threadRow(row);
@@ -263,12 +267,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const wait = waiting.get(thread.id);
       const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.get(thread.id)?.since].filter((at): at is number => typeof at === "number");
       const usageLimit = limits.get(thread.id);
+      const archivedAt = archived.get(thread.id);
       return {
         ...thread, working: thread.agentTurnRunning || working !== null,
         ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(wait === undefined ? {} : { sessionWaiting: true }),
         ...(typeof wait?.message === "string" ? { sessionWaitingMessage: wait.message } : {}),
         ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === undefined ? {} : { usageLimit }),
-        ...(reading === thread.id ? { readingUsage: true } : {}),
+        ...(reading === thread.id ? { readingUsage: true } : {}), ...(archivedAt === undefined ? {} : { archivedAt }),
       };
     });
   }
@@ -320,6 +325,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   function setThreadStatus(id: ThreadId, status: ThreadStatus) {
     transaction(() => {
       sql("UPDATE threads SET status = ? WHERE id = ?").run(status, id);
+      if (status === "archived") sql("INSERT INTO thread_archives (thread, archived_at) VALUES (?, ?) ON CONFLICT(thread) DO NOTHING").run(id, clock());
+      else sql("DELETE FROM thread_archives WHERE thread = ?").run(id);
       if (status === "archived" || status === "deleted") {
         // The thread's pylon pauses, so no turn of it runs and no dialog waits.
         sql("DELETE FROM session_activity WHERE thread = ?").run(id);
@@ -328,7 +335,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       if (status === "deleted") {
         // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
         sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
-        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
+        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders", "disk_cleanups"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
       }
       reconcile(id);
       updateAttention(id);
@@ -464,6 +471,29 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         return true;
       });
     },
+    /** Records, before the archived-disk cleanup sends its delete, that the pylon's disk is going. */
+    requestCleanup(pylonId: PylonId, thread: ThreadId) {
+      sql("INSERT OR IGNORE INTO disk_cleanups (pylon, thread, requested_at) VALUES (?, ?, ?)").run(pylonId, thread, clock());
+    },
+    cleanupRequestedAt: (pylonId: PylonId): number | undefined => sql("SELECT requested_at FROM disk_cleanups WHERE pylon = ?").get(pylonId)?.requested_at as number | undefined,
+    /**
+     * Once the node no longer has the pylon, the disk took the Claude transcript and whatever failed on it. The thread's
+     * transcript is read from the start again, keeping the stored entries, so the session's new file appends after them
+     * rather than reading as a replaced one, and the pylon's failure and failed attempts are cleared, so an unarchive boots
+     * it fresh.
+     */
+    finishCleanup(pylonId: PylonId) {
+      transaction(() => {
+        const thread = sql("DELETE FROM disk_cleanups WHERE pylon = ? RETURNING thread").get(pylonId)?.thread as ThreadId | undefined;
+        if (thread === undefined) return;
+        sql("UPDATE claude_transcripts SET byte_offset = ?, skipping = ?, before_hash = ? WHERE thread = ?")
+          .run(transcriptStart.offset, transcriptStart.skipping ? 1 : 0, transcriptStart.before, thread);
+        sql(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 0 WHERE id = ?`).run(pylonId);
+        updateAttention(thread);
+      });
+    },
+    /** An unarchive came before the delete ran, and the old disk booted since, so nothing of it is forgotten. */
+    dropCleanup(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
     claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
       const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
       return row === undefined ? undefined : row.state === "sent" ? { state: "sent", result: json<ClaudeSent>(row.result) } : { state: "sending" };

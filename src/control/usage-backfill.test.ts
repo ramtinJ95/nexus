@@ -7,7 +7,7 @@ import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
-import { desiredPhase, envelope } from "../reconcile.ts";
+import { archivedDiskMs, desiredPhase, envelope } from "../reconcile.ts";
 import type { ImageId, JobId, NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity } from "../test-kit.ts";
@@ -244,6 +244,25 @@ test("a thread whose pylon's image no online node holds is skipped, and woken on
   observe(registry, n2, []);
   job.start();
   await held(registry, a, "reading");
+});
+
+test("a thread archived for a day is skipped, as its disk is deleted, though the node still holds it", async (t) => {
+  let now = Date.now() - archivedDiskMs;
+  const registry = seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`), () => now), { nodes: [n1, n2] });
+  const expired = addThread(registry, n1, "expired");
+  now = Date.now();
+  const kept = addThread(registry, n1, "kept");
+  observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "stopped"]]);
+  const { job, counter } = backfill(t, registry);
+  job.start();
+  await held(registry, kept, "reading");
+  observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "running"]]);
+  await until("kept is read", () => counter.reads, (r) => r.includes(kept.id));
+  observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "stopped"]]);
+  await until("the run is done", () => registry.usageBackfill().state, (s) => s === "done");
+  assert.deepEqual([row(registry, expired)!.state, row(registry, expired)!.reason], ["skipped", "its disk was deleted 24 hours after it was archived"]);
+  assert.deepEqual(counter.reads, [kept.id]);
+  assert.equal(desired(registry, expired), "deleted");
 });
 
 test("a read that fails skips the thread with its error, and one a stop cut short leaves it for the next run", async (t) => {

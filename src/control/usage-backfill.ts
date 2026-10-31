@@ -5,6 +5,7 @@
  * it, so a control plane that restarts or deploys mid-run goes on where it stopped.
  */
 import type { NodeName, ThreadId } from "../ids.ts";
+import { archivedDiskMs } from "../reconcile.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { observedPylon } from "./observed.ts";
@@ -56,6 +57,7 @@ export function usageBackfill(options: {
   function unreadable(t: Thread): string | null {
     if (t.status === "deleted") return "it was deleted, and its pylon with it";
     if (t.status !== "archived") return "it is not archived any more, so live counting reads it";
+    if (t.archivedAt !== undefined && Date.now() - t.archivedAt >= archivedDiskMs) return "its disk was deleted 24 hours after it was archived";
     const p = registry.pylon(t.pylonId);
     if (p === undefined) return "its pylon has no record";
     if (p.failed !== null) return `its pylon failed: ${p.failed}`;

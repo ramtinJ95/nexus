@@ -31,7 +31,7 @@ import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "reportSession" | "savePylon" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
+type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "cleanupRequestedAt" | "dropCleanup" | "finishCleanup" | "reportSession" | "requestCleanup" | "savePylon" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -180,15 +180,36 @@ export function startLoop(options: LoopOptions): Loop {
       // A failed pylon a judgment moved meanwhile is its new node's to tick.
       if (found.node !== node) continue;
       const thread = registry.thread(found.thread)!;
-      const stored = withLive(found, thread, link);
-      const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
+      let stored = withLive(found, thread, link);
       const nodeObservation = observation(node);
+      const seen = nodeObservation?.pylons.find((p) => p.pylonId === pylonId);
+      const present = seen !== undefined;
+      const cleanupAt = registry.cleanupRequestedAt(pylonId);
+      if (nodeObservation !== null && cleanupAt !== undefined) {
+        if (seen === undefined) {
+          registry.finishCleanup(pylonId);
+          stored = withLive(registry.pylon(pylonId)!, thread, link);
+        }
+        // A listing may predate a delete the probe has since forgotten, so only a boot after the request proves the disk stayed.
+        else if (seen.phase === "running" && Date.parse(seen.bootedAt) > cleanupAt && stored.submitted?.job.kind !== "delete" && desiredPhase(thread, Date.now()) !== "deleted") {
+          registry.dropCleanup(pylonId);
+        }
+      }
+      const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
       const ctx: TickContext = {
         probe: link.probe,
         observation: nodeObservation,
         holders: holders(node),
         artifactSha256,
-        save: (p) => registry.savePylon(p),
+        save: (p) => {
+          // Only the archived-disk cleanup deletes the pylon of a thread that is not deleted. Recorded before its delete goes
+          // out, so the cleanup ends on the node's report of the disk, whatever the probe forgets of the job.
+          if (p.submitted?.job.kind === "delete" && p.desired === "deleted" && present && registry.threadStatus(thread.id) !== "deleted") {
+            registry.requestCleanup(pylonId, thread.id);
+          }
+          registry.savePylon(p);
+        },
+        desired: () => desiredPhase(registry.thread(found.thread)!, Date.now()),
       };
       try {
         const launch = launches.step(thread, pylonId, nodeObservation, link);
