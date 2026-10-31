@@ -213,8 +213,8 @@ test("a node_modules made between the two moves is neither nested into nor repla
 });
 
 /**
- * A checkout with this repository's .nexus/verify, a live check that logs and exits $LIVE_EXIT, and stubs on PATH:
- * `docker` exits $DOCKER_EXIT, and `npm` logs each call. `path` is all of PATH when given, else the stubs come first.
+ * A checkout with this repository's .nexus/verify, a live check that logs the base it was given and exits $LIVE_EXIT, and stubs on PATH:
+ * `docker image` exits $DOCKER_IMAGE_EXIT and every other `docker` call $DOCKER_EXIT, and `npm` logs each call. `path` is all of PATH when given, else the stubs come first.
  */
 async function verifyCheckout(t: { after(fn: () => Promise<void>): void }) {
   const dir = await tempDir("nexus-verify-", t);
@@ -226,14 +226,14 @@ async function verifyCheckout(t: { after(fn: () => Promise<void>): void }) {
   await mkdir(bin);
   await copyFile(join(repo, ".nexus", "verify"), join(root, ".nexus", "verify"));
   const calls = join(dir, "calls");
-  await writeFile(join(scripts, "live-check"), `#!/bin/sh\necho live-check >> ${calls}\nexit "$LIVE_EXIT"\n`, { mode: 0o755 });
-  await writeFile(join(bin, "docker"), `#!/bin/sh\nexit "$DOCKER_EXIT"\n`, { mode: 0o755 });
+  await writeFile(join(scripts, "live-check"), `#!/bin/sh\necho "live-check \${NEXUS_VERIFY_BASE:-}" >> ${calls}\nexit "$LIVE_EXIT"\n`, { mode: 0o755 });
+  await writeFile(join(bin, "docker"), `#!/bin/sh\n[ "$1" != image ] || exit "$DOCKER_IMAGE_EXIT"\nexit "$DOCKER_EXIT"\n`, { mode: 0o755 });
   await writeFile(join(bin, "npm"), `#!/bin/sh\necho "npm $*" >> ${calls}\n`, { mode: 0o755 });
-  const run = async (env: { docker: number; live?: number; path?: string }) => {
+  const run = async (env: { docker: number; base?: boolean; live?: number; path?: string }) => {
     try {
       const { stderr } = await promisify(execFile)(join(root, ".nexus", "verify"), [], {
         cwd: tmpdir(),
-        env: { ...process.env, PATH: env.path ?? `${bin}:${process.env.PATH}`, DOCKER_EXIT: String(env.docker), LIVE_EXIT: String(env.live ?? 0) },
+        env: { ...process.env, PATH: env.path ?? `${bin}:${process.env.PATH}`, DOCKER_EXIT: String(env.docker), DOCKER_IMAGE_EXIT: env.base ? "0" : "1", LIVE_EXIT: String(env.live ?? 0) },
       });
       return { code: 0, stderr };
     } catch (error) {
@@ -256,7 +256,13 @@ test("verify exits 127 and names docker.io when no Docker answers and the image 
 test("verify builds the dashboard where Docker answers, then hands back the live check's exit status", async (t) => {
   const v = await verifyCheckout(t);
   assert.equal((await v.run({ docker: 0, live: 0 })).code, 0);
-  assert.deepEqual(await v.calls(), ["npm run build", "live-check"]);
+  assert.deepEqual(await v.calls(), ["npm run build", "live-check "]);
   assert.equal((await v.run({ docker: 0, live: 3 })).code, 3, "a failed live check fails verify with its code");
-  assert.deepEqual((await v.calls()).slice(2), ["npm run build", "live-check"]);
+  assert.deepEqual((await v.calls()).slice(2), ["npm run build", "live-check "]);
+});
+
+test("verify gives the live check the imported base whenever the pylon holds it, as on a second run", async (t) => {
+  const v = await verifyCheckout(t);
+  assert.equal((await v.run({ docker: 0, base: true })).code, 0);
+  assert.deepEqual(await v.calls(), ["npm run build", "live-check nexus-verify-base:pylon"]);
 });

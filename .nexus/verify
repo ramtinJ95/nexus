@@ -35,11 +35,12 @@ if ! docker info >/dev/null 2>&1; then
   # Docker Hub, Debian nor herdr.dev.
   # tar exits 1 for a file that changed while it read, as the mount point /data does, and its archive is still whole.
   root=.verify/nexus/root.tar
-  sudo tar -C / --one-file-system -c -f "$root" --exclude=./home --exclude=./tmp --exclude=./var/lib/docker \
+  sudo tar -C / --one-file-system -c -f "$root" --exclude='./home/*' --exclude='./tmp/*' --exclude=./var/lib/docker \
     --exclude=./usr/local/lib/node_modules/@anthropic-ai --exclude=./usr/local/lib/node_modules/@earendil-works . || [ $? -eq 1 ]
   docker import "$root" nexus-verify-base:pylon >/dev/null
   rm -f "$root"
-  export NEXUS_VERIFY_BASE=nexus-verify-base:pylon
 fi
+# Also on a second run in the same pylon, whose Docker already answers.
+if docker image inspect nexus-verify-base:pylon >/dev/null 2>&1; then export NEXUS_VERIFY_BASE=nexus-verify-base:pylon; fi
 npm run build
 exec .claude/skills/verify-nexus/scripts/live-check
