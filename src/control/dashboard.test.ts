@@ -46,7 +46,9 @@ async function setup(t: TestContext, options: TestApiOptions = {}) {
   function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Reply> {
     return new Promise((resolve, reject) => {
       const req = request({
-        host: "127.0.0.1", port: api.port, method, path,
+        // The API runs on this event loop, so a pooled socket idle past its keep-alive timeout can be reused before
+        // either side's timer runs, and the server then resets it. A connection per call has nothing to reuse.
+        host: "127.0.0.1", port: api.port, method, path, agent: false,
         headers: { host: `127.0.0.1:${api.port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }), ...headers },
       }, (res) => {
         let text = "";
