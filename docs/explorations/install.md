@@ -1,6 +1,6 @@
 # Installing Nexus
 
-This page explores [the roadmap's install wave](../roadmap.md#the-install-wave): how another person, or a company, installs Nexus on their own machines and starts running remote threads fast, with the agents' credentials easy to set up. It walks through what a new person does today, from a bare Linux machine and a Mac to a first thread that answers, describes the target, weighs how a first device is admitted, how agent credentials are shared or kept per person, and how an admin adds machines, and proposes an order to build it.
+This page explores the install wave ([decisions](../design.md#decisions), 2026-10-28 and 2026-10-31): how another person, or a company, installs Nexus on their own machines and starts running remote threads fast, with the agents' credentials easy to set up. It walks through what a new person does today, from a bare Linux machine and a Mac to a first thread that answers, describes the target, weighs how a first device is admitted, how agent credentials are shared or kept per person, and how an admin adds machines, and proposes an order to build it.
 
 The person decided on 2026-10-28 that this is Nexus's next focus. The install wave is for alternate setups on other people's machines. The person's own install on `rj-firebat` and `infra-testbench` keeps working as it does and needs no migration to anything here. SSH into a machine during setup is fine and expected, so nothing here tries to avoid it.
 
