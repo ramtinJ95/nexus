@@ -51,7 +51,7 @@ A conversation shows each tool call as one line: a mark for whether it succeeded
 
 ### Needs you
 
-The home page starts with Needs you: a card for each thing that waits on the person, so one with many threads running finds every Land button and question in one place. The sidebar's Needs you link, on every page, counts the cards, and on a phone each page's bar has the link, as the sidebar is a drawer there. The list is server-rendered from the registry's attention and each thread's detail, as the thread page is, and polled with the page, so acting on a card takes it off within a poll. In the open threads, a card is:
+The home page starts with Needs you: a card for each thing that waits on the person, so one with many threads running finds every Land button and question in one place. The sidebar's Needs you link, on every page, counts the cards, and on a phone each page's bar has the link, as the sidebar is a drawer there. No tab's title or icon counts anything. The list is server-rendered from the registry's attention and each thread's detail, as the thread page is, and polled with the page, so acting on a card takes it off within a poll. In the open threads, a card is:
 
 - a review held for the person, `needs-person` or `approved` with holds, that its thread page would offer for landing: the PR's link, the opening of its description, the reviewer's quote of what was not checked live, and the thread page's own landing card, with its holds, whether each is waivable, the findings and the Land button that waives what the person may;
 - any other `needs-person` review, as its thread page's card, described below;
