@@ -5,7 +5,7 @@ description: Drive a local Nexus stack (control plane, probe, Docker pylons) thr
 
 # Verify Nexus
 
-Nexus runs coding agents in microVMs called pylons. A thread is one pi-durable conversation plus one pylon. People use it through the Mac `nexus` CLI (`src/cli/nexus.ts`, contract in `docs/cli.md`) and the dashboard that the control plane serves at `/`. Both sit on the JSON API in `src/control/api.ts`. The other surfaces are not mapped here: the in-pylon `nexus` CLI (`images/pylon/nexus`), the probe's HTTP API, and `POST /v1/images`, which records an image built elsewhere. `nexus image build`, `rollout` and `rollback` need a caller in `deployers`, and the stack lists none, so `stack.ts` seeds its Docker image as current in the registry before the control plane starts.
+Nexus runs coding agents in microVMs called pylons. A thread is one pi-durable conversation plus one pylon. People use it through the Mac `nexus` CLI (`src/cli/nexus.ts`, contract in `docs/cli.md`) and the dashboard that the control plane serves at `/`. Both sit on the JSON API, whose core is `src/control/api.ts`, with one route module per feature under `src/control/api/`. The other surfaces are not mapped here: the in-pylon `nexus` CLI (`images/pylon/nexus`), the probe's HTTP API, and `POST /v1/images`, which records an image built elsewhere. `nexus image build`, `rollout` and `rollback` need a caller in `deployers`, and the stack lists none, so `stack.ts` seeds its Docker image as current in the registry before the control plane starts.
 
 This skill never drives the home-lab deployment on `rj-firebat` and `infra-testbench`. That deployment is the user's real instance. It also sits on the home tailnet, which this machine reaches only through ts-home. Every recipe here runs against a local stack that the skill starts and stops itself.
 
@@ -57,7 +57,7 @@ It also lists the run's pylon containers. Run it before driving, and again whene
 
 Every driver records evidence. Each call writes `NN-<step>.cmd`, `.stdout`, `.stderr` and `.exit` into the run's evidence directory. Then it echoes stdout and stderr and exits with the command's own exit code. The one exception is `$V browser`: playwright-cli exits 0 when an action fails, so a step whose output reports `### Error` exits 1 and records 1. Give each step a short, unique name.
 
-- **Mac CLI**, which is the primary surface. `$V cli <step> -- <nexus args>` runs `node src/cli/nexus.ts` with `NEXUS_URL=http://127.0.0.1:7470` and `NEXUS_SOCKS=none`, which is the documented direct mode. Add `--json` for assertions. Stdout is then one JSON value, and on failure stderr is `{"error","kind","status"}`. Exit codes follow `docs/cli.md`: 0 for ok, 1 failed, 2 unreachable, 3 refused, 4 not-found, 5 conflict, 64 invalid.
+- **Mac CLI**, which is the primary surface. `$V cli <step> -- <nexus args>` runs `node src/cli/nexus.ts` with `NEXUS_URL=http://127.0.0.1:7470` and `NEXUS_SOCKS=none`, which is the documented direct mode. Add `--json` for assertions. Stdout is then one JSON value, and on failure stderr is `{"error","kind","status","code"}`. Exit codes follow `docs/cli.md`: 0 for ok, 1 failed, 2 unreachable, 3 refused, 4 not-found, 5 conflict, 64 invalid.
 
   ```sh
   $V cli start -- start --project spoon --title "Proof thread" --json
