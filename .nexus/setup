@@ -1,0 +1,3 @@
+#!/bin/sh
+# The same install as every later boot, which here tries three times and fails the setup when it cannot install.
+exec "$(dirname "$0")/resume" --setup

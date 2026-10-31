@@ -1,4 +1,5 @@
 node_modules/
+/.nexus-install/
 .arena/
 .claude/*
 !.claude/skills/
