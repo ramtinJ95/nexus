@@ -16,7 +16,6 @@ The current wave. The person decided on 2026-10-28 that Nexus's next focus is to
 ## Next
 
 - **Nexus's own live check on the person's nodes.** Nexus's `.nexus/verify` drives the verify-nexus skill's stack in a verify pylon with the image's Docker ([decisions](design.md#decisions), 2026-10-31), so it runs once the person rebuilds the pylon image with `docker.io`. Until then it exits 127 and each Nexus review goes to the person. Check the first verify pylon on `rj-firebat` after the rebuild: that its probe reports nested virtualization, that the boot gets `/dev/kvm`, that `dockerd` starts, and that the live check passes well inside its hour.
-- **The clients use the attention status, the seen marker and the latest-turn base.** The mod and pi-nexus drop their own seen stores (the mod's store and `pi-nexus/viewed.json`) and read the control plane's fields instead.
 
 ## The orchestration wave
 
