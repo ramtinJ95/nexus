@@ -25,10 +25,10 @@ test("the guide's reviewer spawn names every field shepherdr requires for it", (
   assert.match(review, /`base`/);
 });
 
-test("the guide's Shell section warns that pkill -f matches its own command and shows a pattern that cannot", () => {
+test("the guide's Shell section warns that pkill -f matches its own command and says when a bracket pattern avoids it", () => {
   const shell = section("Shell");
   assert.match(shell, /`pkill -f`.*match the shell that runs them/);
-  assert.match(shell, /`pkill -f '\[s\]tack\.ts'`/);
+  assert.match(shell, /`pkill -f '\[s\]tack\.ts'`, which cannot match its own text, in a command that names `stack\.ts` nowhere else/);
   assert.match(shell, /Claude Code alone refuses a command that starts with a long `sleep`/);
   assert.ok(guide.indexOf("\n## Shell\n") < guide.indexOf("\n## Services\n"));
 });

@@ -138,7 +138,7 @@ ${reviewLogin}
 
 ## Shell
 
-\`pkill -f\` and \`pgrep -f\` also match the shell that runs them, so they kill the command they are in. Stop a process by a PID you saved, or with a pattern the shell's own command line cannot match, such as \`pkill -f '[s]tack.ts'\`. Claude Code alone refuses a command that starts with a long \`sleep\`, so to wait there, loop on the condition (\`until <check>; do sleep 2; done\`) or run the command in the background.
+\`pkill -f\` and \`pgrep -f\` also match the shell that runs them, so \`pkill -f\` kills the command it is in. Stop a process by a PID you saved, or with a bracket pattern such as \`pkill -f '[s]tack.ts'\`, which cannot match its own text, in a command that names \`stack.ts\` nowhere else. Claude Code alone refuses a command that starts with a long \`sleep\`, so to wait there, loop on the condition (\`until <check>; do sleep 2; done\`) or run the command in the background.
 
 ## Services
 
