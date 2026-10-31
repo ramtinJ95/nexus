@@ -1,12 +1,23 @@
 #!/bin/sh
 # Installs the npm packages on boot when package-lock.json changed since the last install.
 cd "$(dirname "$0")/.." || exit 1
+staging=.nexus-install
 stamp=node_modules/.nexus-lockfile-sha256
+# A swap that was cut off between its two renames left the packages in use here.
+[ -e node_modules ] || [ ! -d "$staging/old" ] || mv "$staging/old" node_modules
+rm -rf "$staging"
 sum=$(sha256sum package-lock.json | cut -d " " -f 1)
 [ "$(cat "$stamp" 2>/dev/null)" = "$sum" ] && exit 0
-if npm ci --no-audit --no-fund; then
-  echo "$sum" > "$stamp"
-else
-  # Deliberately not a failure, so a registry blip never fails a boot and the next wake tries again.
-  echo "The npm packages are not installed: run npm ci." >&2
-fi
+# The packages install beside the ones in use, from a copy of the two manifests, which is enough only while package.json has no workspaces, no file: or link: dependencies and no root install scripts.
+install() {
+  mkdir "$staging" && cp package.json package-lock.json "$staging" && (cd "$staging" && npm ci --no-audit --no-fund) && echo "$sum" > "$staging/$stamp" || return 1
+  [ ! -e node_modules ] || mv node_modules "$staging/old" || return 1
+  mv "$staging/node_modules" node_modules && return 0
+  [ ! -d "$staging/old" ] || mv "$staging/old" node_modules
+  return 1
+}
+install
+installed=$?
+rm -rf "$staging"
+# Deliberately not a failure, so a registry blip never fails a boot and the next wake tries again.
+[ "$installed" -eq 0 ] || echo "The npm packages are not installed: run npm ci." >&2
