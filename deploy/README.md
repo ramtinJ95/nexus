@@ -387,7 +387,7 @@ What each place holds:
 
 ### Daily backup
 
-The control role installs `nexus-backup.timer`, which runs `nexus-backup.service` as root once a day, at a random time in the hour after midnight, and on the next boot after a missed day. The control plane's unit wants the timer, so the start that follows a deploy starts it too. Each run writes one directory, `/var/backups/nexus/<UTC time>`, such as `2026-10-31T00-23-41Z`, on the control plane's machine only. It holds credentials, so `/var/backups/nexus` and each backup are `root:root`, mode 0700, and every file in them is mode 0600. A backup holds:
+The control role installs `nexus-backup.timer`, which runs `nexus-backup.service` as root once a day, at a random time in the hour after midnight, and on the next boot after a missed day. The control plane's unit wants the timer, so the start that follows a deploy starts it too. Each run writes one directory, `/var/backups/nexus/<UTC time>`, such as `2026-10-31T00-23-41Z`, on the control plane's machine only. It holds credentials, so `/var/backups/nexus` and each backup are `root:root`, mode 0700, and every file in them is mode 0600. A `/var/backups/nexus` that is a link or not root's is refused. A backup holds:
 
 | File in the backup | Copied from | How |
 | --- | --- | --- |
@@ -409,14 +409,14 @@ To run a backup now, `sudo systemctl start nexus-backup`.
 
 ### Restore a backup
 
-A restore puts every file of a chosen backup back where the manifest says it came from, with its recorded mode and owner, and replaces each database whole, removing its stale `-wal` and `-shm` first. Files that are not in the backup stay as they are. It refuses to run while the control plane, the deployer's timer or the deployer's service is active, because the deployer can restart the control plane, and it refuses a backup that does not verify:
+A restore puts every file of a chosen backup back where the manifest says it came from, with its recorded mode and owner, and replaces each database whole, removing its stale `-wal` and `-shm` first. It writes every file beside its target before it replaces any, so a restore that fails there changes nothing. Files that are not in the backup stay as they are. It refuses a backup that does not verify, and refuses to run while the control plane, the deployer or the backup runs, in their services or their timers, because the deployer can restart the control plane and a backup can prune the one being restored:
 
 ```sh
-sudo systemctl stop nexus-deployer.timer nexus-deployer.service nexus-control.service
-ls /var/backups/nexus
+sudo systemctl stop nexus-deployer.timer nexus-deployer.service nexus-backup.timer nexus-backup.service nexus-control.service
+sudo ls /var/backups/nexus
 sudo node /opt/nexus/control-current/src/control/backup.ts restore 2026-10-31T00-23-41Z
 sudo systemctl start nexus-control.service
-sudo systemctl start nexus-deployer.timer
+sudo systemctl start nexus-deployer.timer nexus-backup.timer
 ```
 
 The registry and the conversations come back as they were at the backup, so what the control plane recorded after it is lost. A restored `/etc/nexus/probe.json` or `secrets.env` takes effect once the probe restarts. Owners are numeric, so a restore suits the machine the backup was taken on.
