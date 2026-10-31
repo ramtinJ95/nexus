@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PylonId } from "../ids.ts";
-import { readShutdownRecord, saveShutdownRecord, systemState, type ShutdownRecord } from "./shutdown.ts";
+import { closeProbe, readShutdownRecord, saveShutdownRecord, shutdownPauseMs, systemState, type DrainOutcome, type ShutdownRecord } from "./shutdown.ts";
 
 /** systemctl as execFile runs it: a nonzero exit rejects, with the stdout on the error. */
 const exits = (code: number, stdout: string) => async () => {
@@ -52,4 +52,42 @@ test("a shutdown record that is not one is refused, naming the file and what is 
     await writeFile(path, text);
     await assert.rejects(readShutdownRecord(path), (err: Error) => err.message.startsWith(`${path}: `) && reason.test(err.message), text);
   }
+});
+
+/** A probe that records what its stop asked of it. */
+function probeThat(drain: () => Promise<readonly DrainOutcome[]>) {
+  const calls: string[] = [];
+  const probe = {
+    async drain(withinMs: number) { calls.push(`drain ${withinMs}`); return drain(); },
+    async close() { calls.push("close"); },
+  };
+  return { probe, calls };
+}
+
+test("a stop while the system runs, as a deploy's restart, only closes the probe and pauses nothing", async () => {
+  for (const state of ["running", "degraded", "unknown, as systemctl failed: spawn systemctl ENOENT"]) {
+    const { probe, calls } = probeThat(async () => []);
+    const lines: string[] = [];
+    await closeProbe(probe, "SIGTERM", (line) => lines.push(line), async () => state);
+    assert.deepEqual(calls, ["close"], state);
+    assert.deepEqual(lines, [`SIGTERM: the system is ${state}, so closing the probe. Pylon VMs keep running`]);
+  }
+});
+
+test("a stop while the system is stopping drains within the shutdown's time, logs each pylon, then closes", async () => {
+  const { probe, calls } = probeThat(async () => [{ pylonId: "pylon-a" as PylonId, pausedInMs: 412 }, { pylonId: "pylon-b" as PylonId, failed: "it did not pause within the shutdown's 150 s" }]);
+  const lines: string[] = [];
+  await closeProbe(probe, "SIGTERM", (line) => lines.push(line), async () => "stopping");
+  assert.deepEqual(calls, [`drain ${shutdownPauseMs}`, "close"]);
+  assert.deepEqual(lines, [
+    "SIGTERM: the system is stopping, so pausing every running pylon before closing the probe",
+    "pylon-a: paused in 412 ms",
+    "pylon-b: not paused: it did not pause within the shutdown's 150 s",
+  ]);
+});
+
+test("a drain that throws still closes the probe", async () => {
+  const { probe, calls } = probeThat(async () => { throw new Error("list failed"); });
+  await assert.rejects(closeProbe(probe, "SIGTERM", () => {}, async () => "stopping"), /list failed/);
+  assert.deepEqual(calls, [`drain ${shutdownPauseMs}`, "close"]);
 });

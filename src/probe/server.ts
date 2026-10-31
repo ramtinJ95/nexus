@@ -35,7 +35,7 @@ import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type
 import { serialQueue, singleFlight } from "../single-flight.ts";
 import type { NodeSecrets } from "./config.ts";
 import { createFactReader, notRunning, type PylonState } from "./pylon-facts.ts";
-import { afterShutdown, readShutdownRecord, saveShutdownRecord, type ShutdownRecord } from "./shutdown.ts";
+import { afterShutdown, readShutdownRecord, saveShutdownRecord, type DrainOutcome, type ShutdownRecord } from "./shutdown.ts";
 
 export interface ProbeOptions {
   node: NodeName;
@@ -80,9 +80,6 @@ export interface Probe {
   /** Aborts running jobs, as a crash would, and closes every connection. */
   close(): Promise<void>;
 }
-
-/** What the shutdown's pause did with each pylon it found running. */
-export type DrainOutcome = { pylonId: PylonId } & ({ pausedInMs: number } | { failed: string });
 
 const jobRetentionMs = 10 * 60_000;
 const snapshotIntervalMs = 60_000;

@@ -37,6 +37,32 @@ export async function systemState(run: Systemctl = isSystemRunning): Promise<str
   }
 }
 
+/** What the shutdown's pause did with each pylon it found running. */
+export type DrainOutcome = { pylonId: PylonId } & ({ pausedInMs: number } | { failed: string });
+
+/**
+ * The probe's stop on SIGTERM or SIGINT. Only `stopping` drains, so a restart of the unit alone, as every deploy makes,
+ * leaves every pylon running. A drain that throws still closes the probe.
+ */
+export async function closeProbe(
+  probe: { drain(withinMs: number): Promise<readonly DrainOutcome[]>; close(): Promise<void> },
+  signal: string, log: (line: string) => void = console.log, state: () => Promise<string> = systemState,
+): Promise<void> {
+  const system = await state();
+  if (system !== "stopping") {
+    log(`${signal}: the system is ${system}, so closing the probe. Pylon VMs keep running`);
+    return probe.close();
+  }
+  log(`${signal}: the system is stopping, so pausing every running pylon before closing the probe`);
+  try {
+    for (const outcome of await probe.drain(shutdownPauseMs)) {
+      log("failed" in outcome ? `${outcome.pylonId}: not paused: ${outcome.failed}` : `${outcome.pylonId}: paused in ${outcome.pausedInMs} ms`);
+    }
+  } finally {
+    await probe.close();
+  }
+}
+
 /** `failed`: why the shutdown's pause of the pylon did not finish. */
 export interface ShutdownEntry { failed?: string }
 export type ShutdownRecord = Map<PylonId, ShutdownEntry>;

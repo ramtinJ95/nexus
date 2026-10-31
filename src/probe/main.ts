@@ -16,7 +16,7 @@ import { localApiWhois } from "../tailscale.ts";
 import { nodeSecrets, parseSelfDnsName, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
 import { tailscaleCli } from "./serve.ts";
 import { startProbe } from "./server.ts";
-import { shutdownPauseMs, systemState } from "./shutdown.ts";
+import { closeProbe } from "./shutdown.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
 // One source, so the probe's pre-boot check, the VMs and the control plane's handoffs see the same values.
@@ -44,28 +44,11 @@ const probe = await startProbe({
 });
 console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend`);
 
-/** Only `stopping` drains, so a restart of the unit alone, as every deploy makes, leaves every pylon running. */
-async function stop(signal: string) {
-  const state = await systemState();
-  if (state !== "stopping") {
-    console.log(`${signal}: the system is ${state}, so closing the probe. Pylon VMs keep running`);
-    return probe.close();
-  }
-  console.log(`${signal}: the system is stopping, so pausing every running pylon before closing the probe`);
-  try {
-    for (const outcome of await probe.drain(shutdownPauseMs)) {
-      console.log("failed" in outcome ? `${outcome.pylonId}: not paused: ${outcome.failed}` : `${outcome.pylonId}: paused in ${outcome.pausedInMs} ms`);
-    }
-  } finally {
-    await probe.close();
-  }
-}
-
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     // Exits once closed rather than when the event loop drains: an aborted job can leave a backend CLI
     // call or poll running, and the next start converges from wherever it got to.
-    stop(signal).then(() => process.exit(0), (err: unknown) => {
+    closeProbe(probe, signal).then(() => process.exit(0), (err: unknown) => {
       console.error(err);
       process.exit(1);
     });
