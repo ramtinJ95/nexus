@@ -121,3 +121,17 @@ test("a file's diff tab wraps its rows of controls, so a narrow panel never scro
   // The note kinds reuse .fv-layout, whose flex: none would keep them on one line wider than the panel.
   assert.equal(top(".note-head .note-kinds").get("flex"), "0 1 auto");
 });
+
+test("a dialog ends inside the window at every width, and scrolls with its header and footer held in view", () => {
+  const declarations = (selector: string, at: string) => new Map(styleRules().filter((r) => r.selector === selector && (r.at === "" || r.at === at))
+    .flatMap(({ body }) => [...body.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [name!, value!.trim()] as const)));
+  for (const at of ["", "@media (max-width: 760px)"]) {
+    const modal = declarations(".modal", at);
+    const top = parseFloat(modal.get("margin-top") ?? modal.get("margin")!);
+    const room = /^calc\(100% - (\d+)px\)$/.exec(modal.get("max-height") ?? "");
+    assert.ok(room !== null && Number(room[1]) > top, `${at || "wide"}: a ${top}px top margin with max-height ${modal.get("max-height")}`);
+    assert.equal(modal.get("overflow"), "auto", at);
+    assert.deepEqual([declarations(".modal header", at).get("position"), declarations(".modal header", at).get("top")], ["sticky", "0"], at);
+    assert.deepEqual([declarations(".modal footer", at).get("position"), declarations(".modal footer", at).get("bottom")], ["sticky", "0"], at);
+  }
+});
