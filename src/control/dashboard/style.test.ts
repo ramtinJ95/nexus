@@ -122,6 +122,18 @@ test("a file's diff tab wraps its rows of controls, so a narrow panel never scro
   assert.equal(top(".note-head .note-kinds").get("flex"), "0 1 auto");
 });
 
+test("the Changes pane's nested grids shrink below a deep tree's min-content width", () => {
+  // CSS regression assertion, not a browser layout test. In Chromium at fullscreen laptop/monitor sizes,
+  // a real Nexus tree widened these implicit auto tracks, scrolling the whole inspector and its controls.
+  for (const selector of ["#pane-changes", "#changes-body"]) {
+    const rule = styleRules().find((r) => r.at === "" && r.selector === selector);
+    assert.match(rule?.body ?? "", /grid-template-columns:\s*minmax\(0, 1fr\);/, selector);
+  }
+  // The existing label ellipsis can now take effect; don't hide overflow on the inspector to mask the bug.
+  assert.match(styleRules().find((r) => r.selector === ".tree-name")!.body, /text-overflow:\s*ellipsis;/);
+  assert.match(styleRules().find((r) => r.selector === ".inspect")!.body, /overflow:\s*auto;/);
+});
+
 test("a dialog ends inside the window at every width, and scrolls with its header and footer held in view", () => {
   const declarations = (selector: string, at: string) => new Map(styleRules().filter((r) => r.selector === selector && (r.at === "" || r.at === at))
     .flatMap(({ body }) => [...body.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [name!, value!.trim()] as const)));
