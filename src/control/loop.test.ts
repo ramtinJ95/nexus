@@ -568,6 +568,85 @@ test("an unarchive before the cleanup's delete ran keeps the old disk and leaves
   assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, cursor);
 });
 
+test("a stale listing of a pylon whose delete the probe forgot keeps the cleanup after an unarchive, and the absence that follows finishes it", async (t) => {
+  const path = tempDb();
+  const { registry, shift } = shiftedRegistry(path);
+  const thread = seed(registry);
+  const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
+  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
+  const fake = fakeNode({ autoFinish: false });
+  const first = startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await archivedAgo(registry, shift, thread, archivedDiskMs);
+  await until("the delete runs", () => fake.running().length === 1);
+  await first.close();
+  registry.close();
+
+  fake.finish(fake.running()[0]!);
+  fake.forgetJobs();
+  // As the reviewer synthesized: the node still lists the pylon whose delete it ran and forgot.
+  fake.pylons.set(thread.pylonId, stoppedPylon(thread.pylonId, { checkpoint: `ckpt-${thread.id}-1` }));
+  const after = openRegistry(path);
+  const stale = after.pylon(thread.pylonId)!;
+  after.savePylon({ ...stale, submitted: { ...stale.submitted!, notAfter: new Date(Date.now() - 600_000).toISOString() } });
+  after.setThreadStatus(thread.id, "active");
+  after.recordActivity(thread.id, { human: Date.now() });
+  const loop = run(t, after, fake.probe);
+  await until("the resume is sent", () => fake.running().length === 1);
+  for (let i = 0; i < 3; i++) await settled(fake, loop);
+  assert.equal(after.cleanupRequested(thread.pylonId), true, "a listing alone keeps the cleanup");
+  assert.deepEqual(after.claudeTranscript(thread.id)?.cursor, { ...transcriptStart, offset: 9 });
+
+  fake.pylons.delete(thread.pylonId);
+  fake.announce();
+  await until("the cleanup is finished", () => !after.cleanupRequested(thread.pylonId));
+  assert.deepEqual(after.claudeTranscript(thread.id)?.cursor, transcriptStart);
+  assert.deepEqual(after.claudeEntries(thread.id), entries);
+});
+
+test("an old disk resumed after an unarchive before the cleanup's delete ran drops the cleanup only once it runs", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const cursor = { ...transcriptStart, offset: 9 };
+  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
+  const fake = fakeNode({ autoFinish: false });
+  let refused = 0;
+  const probe: ProbeClient = {
+    ...fake.probe,
+    async submit(env) {
+      if (env.job.kind !== "delete") return fake.probe.submit(env);
+      refused++;
+      return { rejected: "busy", inFlight: "job-elsewhere" as JobId };
+    },
+  };
+  const loop = run(t, registry, probe);
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await archivedAgo(registry, shift, thread, archivedDiskMs - 60_000);
+  await until("the pause runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+
+  registry.setThreadStatus(thread.id, "active");
+  await archivedAgo(registry, shift, thread, archivedDiskMs);
+  await until("the delete is refused", () => refused > 0 && registry.pylon(thread.pylonId)?.submitted === null);
+  assert.equal(registry.cleanupRequested(thread.pylonId), true);
+  registry.setThreadStatus(thread.id, "active");
+  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the resume runs", () => fake.running().length === 1);
+  for (let i = 0; i < 3; i++) await settled(fake, loop);
+  assert.equal(registry.cleanupRequested(thread.pylonId), true, "a stopped listing keeps the cleanup");
+
+  fake.finish(fake.running()[0]!);
+  await until("the cleanup is dropped", () => !registry.cleanupRequested(thread.pylonId));
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);
+  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, cursor);
+});
+
 test("each pass sends the template builds recorded for its node, before its pylons", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

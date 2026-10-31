@@ -492,7 +492,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         updateAttention(thread);
       });
     },
-    /** An unarchive came before the delete ran, so the disk stays and nothing of it is forgotten. */
+    /** An unarchive came before the delete ran, and the old disk booted, so nothing of it is forgotten. */
     dropCleanup(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
     claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
       const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);

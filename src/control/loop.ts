@@ -182,12 +182,15 @@ export function startLoop(options: LoopOptions): Loop {
       const thread = registry.thread(found.thread)!;
       let stored = withLive(found, thread, link);
       const nodeObservation = observation(node);
-      const present = nodeObservation?.pylons.some((p) => p.pylonId === pylonId) === true;
+      const seen = nodeObservation?.pylons.find((p) => p.pylonId === pylonId);
+      const present = seen !== undefined;
       if (nodeObservation !== null && registry.cleanupRequested(pylonId)) {
-        if (!present) {
+        if (seen === undefined) {
           registry.finishCleanup(pylonId);
           stored = withLive(registry.pylon(pylonId)!, thread, link);
-        } else if (stored.submitted?.job.kind !== "delete" && desiredPhase(thread, Date.now()) !== "deleted") registry.dropCleanup(pylonId);
+        }
+        // A listing alone may predate a delete the probe has since forgotten, so only a boot proves the disk stayed.
+        else if (seen.phase === "running" && stored.submitted?.job.kind !== "delete" && desiredPhase(thread, Date.now()) !== "deleted") registry.dropCleanup(pylonId);
       }
       const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
       const ctx: TickContext = {
