@@ -118,7 +118,7 @@ test("a new backup that verifies leaves the newest 7 and no leftover, and a fail
 test("restore refuses while the control plane or the deployer runs, and refuses a backup that does not verify", async (t) => {
   const m = await controlPlane(t);
   const dir = await m.run(m.day(1));
-  for (const unit of ["nexus-control.service", "nexus-deployer.service", "nexus-deployer.timer"]) {
+  for (const unit of ["nexus-control.service", "nexus-deployer.service", "nexus-deployer.timer", "nexus-backup.service", "nexus-backup.timer"]) {
     const unitState = async (u: string) => u === unit ? "active" : "inactive";
     await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState }), new RegExp(`${unit} is active`));
   }
@@ -126,6 +126,33 @@ test("restore refuses while the control plane or the deployer runs, and refuses 
   await rm(join(dir, "manifest.json"));
   await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped }), /does not verify/);
   assert.ok(m.registry.project("before" as ProjectId), "nothing was restored");
+});
+
+test("a restore that cannot put back every file changes none of them", async (t) => {
+  const m = await controlPlane(t);
+  await m.run(m.day(1));
+  await m.stop();
+  await writeFile(m.paths.credentials, "later\n");
+  await rm(join(m.etc, "secrets.env"));
+  await mkdir(join(m.etc, "secrets.env"));
+  await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped }), /secrets\.env is a directory/);
+  assert.equal(await readFile(m.paths.credentials, "utf8"), "later\n");
+  await rm(join(m.etc, "secrets.env"), { recursive: true });
+  await chmod(join(m.etc, "keys"), 0o500);
+  await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped }), /EACCES/);
+  await chmod(join(m.etc, "keys"), 0o700);
+  assert.equal(await readFile(m.paths.credentials, "utf8"), "later\n");
+  assert.deepEqual((await readdir(join(m.dir, "var-lib-nexus-control"))).filter((f) => f.includes(".restore-")), []);
+});
+
+test("a backup root that is a link is neither written to nor restored from", async (t) => {
+  const m = await controlPlane(t);
+  const elsewhere = join(m.dir, "elsewhere");
+  await mkdir(elsewhere);
+  await symlink(elsewhere, m.root);
+  await assert.rejects(m.run(m.day(1)), /is a link/);
+  assert.deepEqual(await readdir(elsewhere), []);
+  await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped }), /is a link/);
 });
 
 test("restore on a stopped control plane puts back the backed-up state with its modes, over later changes and a stale WAL", async (t) => {

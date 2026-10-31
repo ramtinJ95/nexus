@@ -23,8 +23,8 @@ export const etcDir = "/etc/nexus";
 export const kept = 7;
 const manifestFile = "manifest.json";
 const backupName = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/;
-/** Restore refuses while any of these runs. The deployer can restart the control plane. */
-const stoppedUnits = ["nexus-control.service", "nexus-deployer.service", "nexus-deployer.timer"] as const;
+/** Restore refuses while any of these runs. The deployer can restart the control plane, and a backup can prune the one restored. */
+const stoppedUnits = ["nexus-control.service", "nexus-deployer.service", "nexus-deployer.timer", "nexus-backup.service", "nexus-backup.timer"] as const;
 
 type Kind = "sqlite" | "file";
 /** One thing a backup copies: `name` is its path inside the backup, `path` where it lives. */
@@ -85,6 +85,7 @@ export const nameOf = (time: Date) => time.toISOString().replace(/\.\d+Z$/, "Z")
 export async function backup(options: { config: ControlPlaneConfig; root: string; etc: string; now: Date; keep: number }): Promise<string> {
   const { root, keep } = options;
   await mkdir(root, { recursive: true, mode: 0o700 });
+  await ownRoot(root);
   await chmod(root, 0o700);
   const dir = join(root, nameOf(options.now));
   await mkdir(dir, { mode: 0o700 });
@@ -123,6 +124,12 @@ export async function backup(options: { config: ControlPlaneConfig; root: string
     if (!keeping.has(name)) await rm(join(root, name), { recursive: true, force: true });
   }
   return dir;
+}
+
+/** Refuses a root that is a link or another user's, who could swap a backup's directory while credentials are written to it. */
+async function ownRoot(root: string) {
+  const facts = await lstat(root);
+  if (!facts.isDirectory() || facts.uid !== process.getuid!()) throw new Error(`${root} is a link, not a directory, or not this user's, so nothing is written to or read from it`);
 }
 
 /** Every directory under `root` named as a backup, newest first. */
@@ -190,28 +197,37 @@ export async function restore(options: { root: string; name: string; unitState: 
     if (state !== "inactive" && state !== "failed") throw new Error(`${unit} is ${state}. Stop ${stoppedUnits.join(", ")} before a restore`);
   }
   if (!backupName.test(options.name)) throw new Error(`${options.name} is not a backup's name, such as 2026-10-31T03-00-00Z`);
+  await ownRoot(options.root);
   const dir = join(options.root, options.name);
   const verdict = await verify(dir);
   if (!verdict.ok) throw new Error(`${dir} does not verify, so it is not restored: ${verdict.reason}`);
   for (const entry of verdict.manifest.entries) {
     const parent = await stat(dirname(entry.path)).catch(() => undefined);
     if (!parent?.isDirectory()) throw new Error(`${dirname(entry.path)} is missing. Install the control role first`);
+    if ((await lstat(entry.path).catch(() => undefined))?.isDirectory()) throw new Error(`${entry.path} is a directory, so it is not replaced`);
   }
-  for (const entry of verdict.manifest.entries) {
-    // Opened with wx beside the target and renamed over it, so a link left at the target is replaced, never followed.
-    const partial = join(dirname(entry.path), `.${basename(entry.path)}.restore-${randomUUID()}`);
-    const file = await open(partial, "wx", 0o600);
-    try {
-      await file.writeFile(await readFile(join(dir, entry.name)));
-      await file.chown(entry.uid, entry.gid);
-      await file.chmod(entry.mode);
-      await file.sync();
-    } catch (err) {
-      await file.close();
-      await rm(partial, { force: true });
-      throw err;
+  // Every file is staged before any target changes, so a failure here leaves the control plane's state as it was.
+  const staged: { entry: Manifest["entries"][number]; partial: string }[] = [];
+  try {
+    for (const entry of verdict.manifest.entries) {
+      // Opened with wx beside the target and renamed over it, so a link left at the target is replaced, never followed.
+      const partial = join(dirname(entry.path), `.${basename(entry.path)}.restore-${randomUUID()}`);
+      const file = await open(partial, "wx", 0o600);
+      staged.push({ entry, partial });
+      try {
+        await file.writeFile(await readFile(join(dir, entry.name)));
+        await file.chown(entry.uid, entry.gid);
+        await file.chmod(entry.mode);
+        await file.sync();
+      } finally {
+        await file.close();
+      }
     }
-    await file.close();
+  } catch (err) {
+    for (const { partial } of staged) await rm(partial, { force: true });
+    throw err;
+  }
+  for (const { entry, partial } of staged) {
     // SQLite would replay a stale WAL over the restored database.
     if (entry.kind === "sqlite") for (const suffix of ["-wal", "-shm", "-journal"]) await rm(`${entry.path}${suffix}`, { force: true });
     await rename(partial, entry.path);
@@ -247,7 +263,7 @@ async function host(args: string[]) {
     } else {
       const manifest = await restore({ root: backupRoot, name: argument!, unitState: systemctlState });
       for (const entry of manifest.entries) console.log(`restored ${entry.path}`);
-      console.log("Start the control plane with sudo systemctl start nexus-control.service, then the deployer with sudo systemctl start nexus-deployer.timer");
+      console.log("Start the control plane with sudo systemctl start nexus-control.service, then sudo systemctl start nexus-deployer.timer nexus-backup.timer");
     }
   } catch (err) {
     console.error(`backup: ${(err as Error).message}`);
