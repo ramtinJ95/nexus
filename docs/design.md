@@ -197,6 +197,7 @@ A persistent drain lease blocks API and background PR-watch turn entry, and coun
 
 | Date | Decision |
 |---|---|
+| 2026-10-31 | The person dropped moving `nexus review`'s rounds into a Claude worker's own thread. A builder already has a shepherdr reviewer check its diff in its own pylon before it opens a pull request, and an approval given inside the builder's pylon can be forged by the builder or by the code it runs, so landing would still need a round from a reviewer outside the pylon. That is the loop as it runs now, so the change would add verification code to `review.ts` and save only the boots of reviewer pylons. |
 | 2026-10-30 | An archived pylon's disk is deleted automatically once its thread has been archived 24 hours, with no card, replacing the 7 days and the person's yes decided on 2026-10-28. The thread record and its conversation stay, and unarchiving the thread boots a fresh pylon. Pylons of threads that are not archived are never deleted this way. |
 | 2026-10-30 | A review's reviewer and check threads leave their builder's node once it has no room, rather than overcommitting it. Pinned, they put about ten pylons and 90 GiB on `rj-firebat`'s 22.8 GiB while `infra-testbench` sat idle |
 | 2026-10-29 | The dashboard opens, closes and shows the pylon's sessions, so it does what `nexus attach` and `nexus session` do without Herdr's prefix keys. Its terminal stays the whole Herdr session, not one pane, and Show in terminal moves Herdr's focus, which every attached terminal shares, rather than attaching a terminal to the pane alone |
@@ -326,25 +327,6 @@ With `--land`, or `nexus land <thread>` after an approval, or a project that lan
 A review that ends `landed` leaves its builder and its reviewer nothing to do, so the pass archives both, as `nexus archive` would, in the transaction that saves the landing, then tells the planner, which pauses their pylons. A landing that fails to save archives nothing, and the next pass decides it again from what the release says then. A thread in a turn at that moment, such as a builder the person is talking to, stays open for the person to archive, and the loop never archives a thread later, so a builder the person unarchives after its landing stays theirs. A review the person cancels archives its reviewer the same way, and never its builder. A review held for the person, rolled back, stopped at approval, or ended `merged` or `closed`, or `cancelled` because the person archived or deleted one of its threads, archives nothing. Only the review's own reviewer is archived: a reviewer of an earlier review of the same builder is not linked to it, and stays as it was.
 
 Merging needs the control plane's GitHub token (`github.tokenFile`) to have write access to the repository's contents and pull requests. A read-only token, enough for the PR watch, makes a landing hold with GitHub's answer, and granting the wider token is the person's decision, as [deployment](../deploy/README.md) says.
-
-### Proposal: the review inside the builder's thread
-
-This is a proposal. It is not built, and it changes `src/control/review.ts`, which other open work is changing now.
-
-Today `nexus review` starts a separate reviewer thread. With the shepherdr mod and pi-shepherdr in the image, a Claude worker builder can run the reviewer itself: pi on the person's `reviewer` profile, in a Herdr tab of the builder's own pylon. That is how the person works on the Mac. The build and its review are then one thread and one pylon. No second pylon boots, and the reviewer reads the builder's working tree, uncommitted changes included.
-
-The control plane keeps what needs a party the builder cannot reach. It still runs `.nexus/check` in a bare check thread and reads the verdict from the exit status. It still caps the rounds and holds a review that runs out for the person. It still re-checks the merge policy before every merge, lands and deploys.
-
-What changes:
-
-1. For a Claude worker builder whose pylon has the ChatGPT grant, `nexus review` sends no reviewer thread. It sends the builder a round request through the inbox, with a fresh token as today. The builder spawns its shepherdr `reviewer` with the pull request's base, or reuses the one from an earlier round, on the pull request's head. A builder without the tool or the login gets today's reviewer thread.
-2. The builder fixes or rejects each finding, pushes, and ends its turn with a `nexus-review` block that carries the reviewer's verdict and findings, a `nexus-review-answers` block, and the path of the reviewer's pi session file.
-3. The control plane learns the verdict from the builder's Claude transcript, as it reads a Claude reviewer's verdict now, and checks it against the reviewer's own session file, which it reads over the probe's raw pipe. The reviewer's last reply in that file must hold the round's token and the same verdict.
-4. Each round counts toward the same cap. A clean approval runs `.nexus/check` as today.
-
-The weakness is that everything in the builder's pylon is the builder's to write. The builder, or the pull request's code that it runs, can edit the reviewer's session file, write a fake one, change the reviewer's profile or prompt, steer the reviewer's input, or skip the review and claim an approval. The token stops a stale answer, not a forged one, because the builder relays it. A Claude reviewer's verdict has the same weakness today, which is why the policy never lands its approval. So an in-thread approval would not land on its own either. Before landing, the control plane would run one confirming round with a reviewer outside the pylon, the harness thread, or hold for the person. Even a reviewer whose model traffic the control plane could read would not be independent, because the builder writes the reviewer's input.
-
-The in-thread review is cheaper and closer to the work, and it catches most findings before the out-of-pylon round sees them. The out-of-pylon verdict stays the only one that lands a pull request.
 
 ## Nudging a builder that stopped short
 
