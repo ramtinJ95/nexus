@@ -111,3 +111,17 @@ test("no selector list has two rules at one level, where the later would silentl
 test("only [hidden] uses !important, as it must beat every display rule", () => {
   assert.deepEqual(styleRules().filter(({ body }) => body.includes("!important")).map(({ selector }) => selector), ["[hidden]"]);
 });
+
+test("a dialog ends inside the window at every width, and scrolls with its header and footer held in view", () => {
+  const declarations = (selector: string, at: string) => new Map(styleRules().filter((r) => r.selector === selector && (r.at === "" || r.at === at))
+    .flatMap(({ body }) => [...body.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [name!, value!.trim()] as const)));
+  for (const at of ["", "@media (max-width: 760px)"]) {
+    const modal = declarations(".modal", at);
+    const top = parseFloat(modal.get("margin-top") ?? modal.get("margin")!);
+    const room = /^calc\(100% - (\d+)px\)$/.exec(modal.get("max-height") ?? "");
+    assert.ok(room !== null && Number(room[1]) > top, `${at || "wide"}: a ${top}px top margin with max-height ${modal.get("max-height")}`);
+    assert.equal(modal.get("overflow"), "auto", at);
+    assert.deepEqual([declarations(".modal header", at).get("position"), declarations(".modal header", at).get("top")], ["sticky", "0"], at);
+    assert.deepEqual([declarations(".modal footer", at).get("position"), declarations(".modal footer", at).get("bottom")], ["sticky", "0"], at);
+  }
+});
