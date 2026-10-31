@@ -461,6 +461,27 @@ test("ingest: a stopped pylon that says nothing of its sessions pauses every ses
   assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint) }, node, knows(stopped(lastCheckpoint)), now), []);
 });
 
+test("ingest: a stopped pylon newly marked for a wake after its node's boot is agent activity now, and the mark seen again is not", () => {
+  const woken: PylonObservation = { ...stoppedPylon(pylonId, { checkpoint: lastCheckpoint, sessions: null }), wakeAfterBoot: true };
+  assert.deepEqual(ingest({ type: "pylon", pylon: woken }, node, knows(runningWith({ sessions: [] })), now), [
+    { record: "sessions-paused", pylonId },
+    { record: "activity", pylonId, human: null, agent: now },
+  ] satisfies RegistryWrite[]);
+  for (const previous of [stopped(lastCheckpoint), "absent" as const]) {
+    assert.deepEqual(ingest({ type: "pylon", pylon: woken }, node, knows(previous), now).filter((w) => w.record === "activity"), [{ record: "activity", pylonId, human: null, agent: now }], JSON.stringify(previous));
+  }
+  assert.deepEqual(ingest({ type: "pylon", pylon: woken }, node, knows(woken), now), [], "the same mark seen again");
+  assert.deepEqual(ingest({ type: "snapshot", observation: testObservation(node, { pylons: [woken] }) }, node, knows(woken), now).filter((w) => w.record === "activity"), []);
+});
+
+test("ingest: a broken pylon newly marked for a wake is agent activity too, and a pylon without the mark is none", () => {
+  const woken: PylonObservation = { ...broken, wakeAfterBoot: true };
+  assert.deepEqual(ingest({ type: "pylon", pylon: woken }, node, knows(runningWith({ sessions: [] })), now), [{ record: "activity", pylonId, human: null, agent: now }]);
+  assert.deepEqual(ingest({ type: "pylon", pylon: woken }, node, knows(woken), now), []);
+  assert.deepEqual(ingest({ type: "pylon", pylon: broken }, node, knows(runningWith({ sessions: [] })), now), []);
+  assert.deepEqual(ingest({ type: "pylon", pylon: stopped(lastCheckpoint) }, node, knows(runningWith({ sessions: [] })), now), [{ record: "sessions-paused", pylonId }]);
+});
+
 test("ingest: an unlisted pylon's list is written though the previous observation has the same one, and only a list is", () => {
   const paused = stopped(lastCheckpoint, [pausedReview]);
   assert.deepEqual(ingest({ type: "pylon", pylon: paused }, node, knows(paused), now), []);

@@ -298,6 +298,10 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  * - A working session is agent activity, unless its harness's hooks report its activity, as Claude Code's do. One of a
  *   harness this build does not know counts. An attached client is human activity. Both are at `now`, the time the
  *   control plane received the event. A preview hit is human activity at its own time.
+ * - A stopped or broken pylon newly marked wakeAfterBoot is agent activity at `now`: the node's shutdown paused it while
+ *   it ran, so it runs again for agentIdleMs, resumed from that checkpoint, and then sleeps under the idle policy. An
+ *   archived thread ignores activity, so its pylon stays paused. Agent, not human, because a boot is not a person, and
+ *   human activity says someone works on the thread.
  */
 export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set()): readonly RegistryWrite[] {
   const observed = (pylon: PylonObservation): RegistryWrite[] => {
@@ -365,11 +369,14 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   for (const [key, p] of isReady) if (!wasReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: true });
   for (const [key, p] of wasReady) if (!isReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: false });
 
-  const agent = after.sessions?.some((s) => harnessNamed(s.harness)?.activity !== "hooks" && s.state === "running" && s.status === "working") ? now : null;
+  const woke = markedForWake(current) && !markedForWake(previous);
+  const agent = woke || after.sessions?.some((s) => harnessNamed(s.harness)?.activity !== "hooks" && s.state === "running" && s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
   return writes;
 }
+
+const markedForWake = (o: PylonObservation | "absent") => o !== "absent" && (o.phase === "stopped" || o.phase === "broken") && o.wakeAfterBoot === true;
 
 const readyPreviews = (f: Facts) => new Map(f.previews.map(({ service, httpsPort }) => [`${service} ${httpsPort}`, { service, httpsPort }]));
 

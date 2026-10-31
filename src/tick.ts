@@ -134,14 +134,18 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
 
 /**
  * Sends the job in a new envelope, which `record` saves first, so a send that throws leaves it recorded and the next
- * pass asks the probe about it. "retry" is a busy or expired refusal, which a later pass sends again.
+ * pass asks the probe about it. "retry" is a refusal that says nothing against the job, busy, expired or draining,
+ * which a later pass sends again without counting an attempt.
  */
 export async function submitJob(probe: Pick<ProbeClient, "submit">, job: Job, node: NodeName, record: (env: JobEnvelope) => void): Promise<"accepted" | { invalid: string } | "retry"> {
   const env = envelope(job, node, Date.now());
   record(env);
   const reply = await probe.submit(env);
   if ("accepted" in reply) return "accepted";
-  return reply.rejected === "invalid" ? { invalid: reply.message } : "retry";
+  switch (reply.rejected) {
+    case "invalid": return { invalid: reply.message };
+    case "busy": case "expired": case "draining": return "retry";
+  }
 }
 
 /**
