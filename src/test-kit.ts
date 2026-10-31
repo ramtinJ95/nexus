@@ -110,7 +110,8 @@ export function callText({ host, port, method, path, body, headers = {} }: CallO
   const payload = body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const req = request({
-      host, port, method, path,
+      // The servers under test share this event loop, so a pooled socket could be reused after its keep-alive expired.
+      host, port, method, path, agent: false,
       // As fetch and the CLI do. Node frames a DELETE's body only with an explicit length.
       headers: { host: `${host}:${port}`, ...(method === "GET" ? {} : { "content-type": "application/json" }), ...(payload === undefined ? {} : { "content-length": String(Buffer.byteLength(payload)) }), ...headers },
     }, (res) => {
