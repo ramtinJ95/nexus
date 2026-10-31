@@ -1,0 +1,45 @@
+#!/bin/sh
+# Nexus's live check, which the review loop runs in a verify pylon: the verify-nexus stack up on Docker, driven by
+# .claude/skills/verify-nexus/scripts/live-check. Where no Docker answers, the pylon image's dockerd is started.
+set -eu
+cd "$(dirname "$0")/.."
+if ! docker info >/dev/null 2>&1; then
+  if ! command -v dockerd >/dev/null; then
+    echo "No Docker answers and this pylon's image has no dockerd, so the live check needs a pylon image built with docker.io (images/pylon/Dockerfile)." >&2
+    exit 127
+  fi
+  # As images/pylon/nexus-kvm loads them: Debian's kmod reads no gzip and the Alpine kernel's modules are .ko.gz.
+  scratch=$(mktemp -d)
+  for module in overlay bridge veth; do
+    for path in $(modprobe --show-depends "$module" | awk '$1 == "insmod" { print $2 }'); do
+      name=$(basename "$path" .ko.gz | tr - _)
+      if [ -d "/sys/module/$name" ]; then continue; fi
+      zcat "$path" > "$scratch/$name.ko"
+      sudo insmod "$scratch/$name.ko"
+    done
+  done
+  rm -rf "$scratch"
+  [ -e /sys/fs/cgroup/cgroup.controllers ] || sudo mount -t cgroup2 none /sys/fs/cgroup
+  # In .verify, which git ignores, so the log stays with the evidence in the archived pylon.
+  log=.verify/nexus/dockerd.log
+  mkdir -p .verify/nexus
+  # The stack's pylons need no egress, so dockerd leaves the firewall alone and docker-proxy publishes their ports.
+  sudo dockerd --group "$(id -gn)" --iptables=false --init-path /usr/bin/tini-static > "$log" 2>&1 &
+  i=0
+  until docker info >/dev/null 2>&1; do
+    [ "$i" -lt 30 ] || { tail -20 "$log" >&2; echo "dockerd did not answer within 60 s. Its log is $log." >&2; exit 1; }
+    sleep 2
+    i=$((i + 1))
+  done
+  # The stack's pylon image is built on this pylon's own root, because the verify pylon's allowlist reaches neither
+  # Docker Hub, Debian nor herdr.dev.
+  # tar exits 1 for a file that changed while it read, as the mount point /data does, and its archive is still whole.
+  root=.verify/nexus/root.tar
+  sudo tar -C / --one-file-system -c -f "$root" --exclude=./home --exclude=./tmp --exclude=./var/lib/docker \
+    --exclude=./usr/local/lib/node_modules/@anthropic-ai --exclude=./usr/local/lib/node_modules/@earendil-works . || [ $? -eq 1 ]
+  docker import "$root" nexus-verify-base:pylon >/dev/null
+  rm -f "$root"
+  export NEXUS_VERIFY_BASE=nexus-verify-base:pylon
+fi
+npm run build
+exec .claude/skills/verify-nexus/scripts/live-check

@@ -1,14 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
-import { access, copyFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { tempDir } from "./test-kit.ts";
 
 const repo = new URL("..", import.meta.url).pathname;
-const mv = execFileSync("sh", ["-c", "command -v mv"], { encoding: "utf8" }).trim();
+const which = (name: string) => execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
+const mv = which("mv");
 const changedLock = '{"lockfileVersion":3,"packages":{}}\n';
 
 interface Faults { fail?: boolean; block?: boolean; restoreFails?: boolean; publishFails?: boolean; race?: boolean }
@@ -209,4 +210,53 @@ test("a node_modules made between the two moves is neither nested into nor repla
   assert.match(await c.run("resume", { race: true }), notInstalled);
   assert.deepEqual(await c.modules(), ["agent"], "the agent's own install, with no staged tree inside it");
   assert.equal(await c.staged(), false);
+});
+
+/**
+ * A checkout with this repository's .nexus/verify, a live check that logs and exits $LIVE_EXIT, and stubs on PATH:
+ * `docker` exits $DOCKER_EXIT, and `npm` logs each call. `path` is all of PATH when given, else the stubs come first.
+ */
+async function verifyCheckout(t: { after(fn: () => Promise<void>): void }) {
+  const dir = await tempDir("nexus-verify-", t);
+  const root = join(dir, "repo");
+  const bin = join(dir, "bin");
+  const scripts = join(root, ".claude", "skills", "verify-nexus", "scripts");
+  await mkdir(join(root, ".nexus"), { recursive: true });
+  await mkdir(scripts, { recursive: true });
+  await mkdir(bin);
+  await copyFile(join(repo, ".nexus", "verify"), join(root, ".nexus", "verify"));
+  const calls = join(dir, "calls");
+  await writeFile(join(scripts, "live-check"), `#!/bin/sh\necho live-check >> ${calls}\nexit "$LIVE_EXIT"\n`, { mode: 0o755 });
+  await writeFile(join(bin, "docker"), `#!/bin/sh\nexit "$DOCKER_EXIT"\n`, { mode: 0o755 });
+  await writeFile(join(bin, "npm"), `#!/bin/sh\necho "npm $*" >> ${calls}\n`, { mode: 0o755 });
+  const run = async (env: { docker: number; live?: number; path?: string }) => {
+    try {
+      const { stderr } = await promisify(execFile)(join(root, ".nexus", "verify"), [], {
+        cwd: tmpdir(),
+        env: { ...process.env, PATH: env.path ?? `${bin}:${process.env.PATH}`, DOCKER_EXIT: String(env.docker), LIVE_EXIT: String(env.live ?? 0) },
+      });
+      return { code: 0, stderr };
+    } catch (error) {
+      const { code, stderr } = error as { code: number; stderr: string };
+      return { code, stderr };
+    }
+  };
+  return { bin, run, calls: async () => (await readFile(calls, "utf8").catch(() => "")).split("\n").filter(Boolean) };
+}
+
+test("verify exits 127 and names docker.io when no Docker answers and the image has no dockerd", async (t) => {
+  const v = await verifyCheckout(t);
+  await symlink(which("dirname"), join(v.bin, "dirname"));
+  const { code, stderr } = await v.run({ docker: 1, path: v.bin });
+  assert.equal(code, 127, "the gate's cannot-run code, which goes to the person");
+  assert.match(stderr, /no dockerd.*docker\.io/);
+  assert.deepEqual(await v.calls(), [], "neither the build nor the live check ran");
+});
+
+test("verify builds the dashboard where Docker answers, then hands back the live check's exit status", async (t) => {
+  const v = await verifyCheckout(t);
+  assert.equal((await v.run({ docker: 0, live: 0 })).code, 0);
+  assert.deepEqual(await v.calls(), ["npm run build", "live-check"]);
+  assert.equal((await v.run({ docker: 0, live: 3 })).code, 3, "a failed live check fails verify with its code");
+  assert.deepEqual((await v.calls()).slice(2), ["npm run build", "live-check"]);
 });
