@@ -162,12 +162,13 @@ function repositorySection(o: PylonOverlay): string {
     ? `Nexus sets git's global identity for user to ${o.gitIdentity.name} <${o.gitIdentity.email}> on every boot. Commit as this person; there is no separate agent account.`
     : "Nexus has no git identity configured. Git is left unchanged. If a commit needs an identity, ask the human; do not invent an identity or infer one from a token.";
   const token = "`gh` reads GH_TOKEN, and git over HTTPS asks `gh` for it on each push, so never store the token: no `gh auth login`, no credential store. Use HTTPS remotes, because git over SSH reaches only the remotes this pylon booted with.";
+  const push = "Nexus finds a pushed branch from the record git writes once the remote accepts the push, so push through a named remote such as `origin` and let the push finish. A push piped into `head` can die after GitHub takes it and before git writes the record, and then Nexus misses the branch and its pull request, so shorten the output with `tail` instead. If a push was cut short, push the same branch through `origin` again before any fetch, which records it; after a fetch, only a push that moves the branch records it.";
   let origin: string;
   let publish: string[];
   switch (o.repo.kind) {
     case "clone":
       origin = `/home/user/workspace/repo is a clone of ${o.repo.url}, on branch ${o.repo.checkout.branch} from ${o.repo.checkout.commit}.`;
-      publish = github ? [token] : [];
+      publish = github ? [token, push] : [];
       break;
     case "empty":
       origin = `/home/user/workspace/repo is a new repository on branch ${o.repo.branch} with no commits and no remote. Nothing in this pylon is kept when the thread is deleted, so publish anything worth keeping.`;
@@ -177,7 +178,7 @@ function repositorySection(o: PylonOverlay): string {
 git add -A && git commit -m "feat: first version"
 gh repo create <owner>/<name> --private --source . --remote origin --push
 git push                                   # every later push
-\`\`\``]
+\`\`\``, push]
         : [`This project has no GitHub token, and this pylon's secrets are fixed at thread creation. To publish from a pylon, ask the human for a project with GitHub access: \`nexus project add <id> --scratch --secret ${githubTokenGrant.name}:${githubTokenGrant.hosts.join(",")}\`.`];
       break;
   }
