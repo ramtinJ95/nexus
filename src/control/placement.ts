@@ -68,11 +68,14 @@ function diskShort(c: NodeCapacity, left: Room, need: Room): string | null {
   return left.diskGiB < 0 ? `has ${gib(left.diskGiB + need.diskGiB)} GiB of disk free, and the pylon needs ${need.diskGiB}` : null;
 }
 
-/** Why a start on a node it names cannot boot the pylon there for want of disk, or null, also for a node it cannot weigh. */
+/**
+ * Why a start on a node it names cannot boot the pylon there for want of disk, or null. Also null for a node it cannot
+ * weigh, and for one that reports no pylons' filesystem, such as a Docker node or one with an older probe.
+ */
 export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need: Room): string | null {
   const node = registry.nodes().find((n) => n.name === name);
   const o = node?.state === "online" ? node.observation : null;
-  if (o == null || o.capacity === null) return null;
+  if (o == null || o.capacity === null || !o.capacity.disks?.some((d) => d.pylons === true)) return null;
   return diskShort(o.capacity, roomLeft(registry, name, o, o.capacity, need).left, need);
 }
 

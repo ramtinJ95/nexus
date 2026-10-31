@@ -48,6 +48,8 @@ test("a start on a node it or its project names fails with the filesystem and it
 
   observeDisks(s, "short", [pylonsAt(100, 20)]);
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Fits", node: "short" })).status, 201, "10 GiB left is the 10 GiB kept");
-  observeNode(s, "old", { total: 64, committed: 0 }, { capacity: testCapacity({ diskFreeGiB: 15 }) });
-  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Old probe", node: "old" })).status, 201, "a probe that reports no filesystems keeps no space back");
+  observeNode(s, "old", { total: 64, committed: 0 }, { capacity: testCapacity({ diskFreeGiB: 5 }) });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Old probe", node: "old" })).status, 201, "a probe that reports no filesystems is not checked, as before");
+  observeNode(s, "docker", { total: 64, committed: 0 }, { capacity: testCapacity({ diskFreeGiB: 5, disks: [{ paths: ["/"], totalGiB: 100, freeGiB: 5 }] }) });
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Docker", node: "docker" })).status, 201, "a Docker probe marks no pylons' filesystem, since it keeps no pylon disks");
 });
