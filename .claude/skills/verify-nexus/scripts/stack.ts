@@ -23,11 +23,11 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../../../../src/docker-backend.ts";
-import { dockerHostBridge } from "../../../../src/docker-host-bridge.ts";
 import { scriptedModel, scriptedModels } from "../../../../src/harness/test-fixture.ts";
-import { pylonRepoPath } from "../../../../src/harness/host.ts";
+import { checkoutDir } from "../../../../src/session-harness.ts";
 import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
+import { nodeSecrets } from "../../../../src/probe/config.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
@@ -70,11 +70,11 @@ async function buildImage() {
   await writeFile(join(dir, "Dockerfile"), [
     "FROM node:24-bookworm-slim",
     "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl tini python3 git procps && rm -rf /var/lib/apt/lists/*",
-    `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${pylonRepoPath}`,
+    `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${checkoutDir}`,
     // Docker execs run as root, unlike a pylon's, so git must accept the checkout that `user` owns.
     "RUN git config --system --add safe.directory '*'",
     // refs/nexus/base is what a pylon booted at, which a pylon-vm records on its first boot and the Docker backend never does.
-    `RUN git init --quiet --initial-branch=main ${pylonRepoPath} && printf '# verify-nexus\\n' > ${pylonRepoPath}/README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid add README.md && git -C ${pylonRepoPath} -c user.name=verify -c user.email=verify@invalid commit --quiet -m init && git -C ${pylonRepoPath} update-ref refs/nexus/base HEAD`,
+    `RUN git init --quiet --initial-branch=main ${checkoutDir} && printf '# verify-nexus\\n' > ${checkoutDir}/README.md && git -C ${checkoutDir} -c user.name=verify -c user.email=verify@invalid add README.md && git -C ${checkoutDir} -c user.name=verify -c user.email=verify@invalid commit --quiet -m init && git -C ${checkoutDir} update-ref refs/nexus/base HEAD`,
     "ARG HERDR_VERSION",
     'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
     "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
@@ -134,10 +134,9 @@ const probe = await startProbe({
   auth: { controlPlane: controlPlaneId, peers: [] },
   whois: async () => controlPlaneId,
   backend: createDockerBackend({ images: { [imageId]: tag }, labels, hostBridgePort: ports.bridge, previewHost: nodeHost, artifacts: join(runDir, "artifacts") }),
-  secrets: { value: () => undefined, names: () => [] },
+  secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
   log: (message) => log(`probe: ${message}`),
   previews: { gatewayPort: ports.gateway, routesFile: join(runDir, "preview-routes.json"), tailscale: serve.cli, get: viaGateway(() => `http://127.0.0.1:${ports.gateway}`).get },
-  hostBridge: dockerHostBridge(ports.bridge, labels),
 });
 closers.push(() => probe.close());
 log(`probe ${node} on 127.0.0.1:${probe.port}, boot ${probe.bootId}`);
