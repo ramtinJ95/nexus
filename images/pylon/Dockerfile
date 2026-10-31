@@ -13,10 +13,12 @@ FROM debian:bookworm-slim@${DEBIAN_DIGEST}
 # --json output. xz-utils unpacks Node, and Node 26's binary links libatomic. tini is PID 1
 # (rootfs-init-extra.sh), because sandboxd, which Gondolin's /init would exec there, does not reap the orphans it
 # adopts. kmod is for nexus-kvm, which loads the KVM modules only in a pylon that asks for nested virtualization.
+# docker.io is for Nexus's own .nexus/verify, whose local stack runs its pylons as containers in a verify pylon.
+# Nothing starts its daemon in any other pylon.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       bash coreutils util-linux ca-certificates git python3 openssh-server openssh-client sudo curl \
-      procps e2fsprogs ripgrep fd-find xz-utils libatomic1 tini kmod jq \
+      procps e2fsprogs ripgrep fd-find xz-utils libatomic1 tini kmod jq docker.io \
  && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
  && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
