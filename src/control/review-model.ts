@@ -50,9 +50,10 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string } }
+export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string } }
 /**
- * `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
+ * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
+ * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
  * change at both is the same, so no reviewer round ran for it and it counts against no limit. Its checks run as any
  * round's do, since the base under the change moved.
  */
@@ -120,18 +121,18 @@ export type Label = { state: "adding" } | { state: "added" } | { state: "failed"
 export type PhaseKind = Phase["kind"];
 
 /**
- * A pull request's change at a head, as `git patch-id --stable` identifies it: one identity per changed file, of its
- * path, its path before a rename and its patch against the base without the hunk headers, so a rebase that only moves
- * hunks keeps it, and any changed line, context lines included, does not. `unknown` when GitHub does not show the
- * whole change, such as a binary file's, so nothing can say it is the same.
+ * A pull request's change at a head against branch `base`, as `git patch-id --stable` identifies it: one identity per
+ * changed file, of its path, its path before a rename, its mode and its patch without the hunk headers, so a rebase
+ * that only moves hunks keeps it, and any changed line, context lines included, does not. `unknown` when GitHub does
+ * not show the whole change, such as a binary file's, so nothing can say it is the same.
  */
-export type Change = { kind: "known"; files: { path: string; id: string }[] } | { kind: "unknown"; why: string };
-export function changeOf(files: readonly ChangedFile[] | null): Change {
+export type Change = { kind: "known"; base: string; files: { path: string; id: string }[] } | { kind: "unknown"; why: string };
+export function changeOf(base: string, files: readonly ChangedFile[] | null): Change {
   if (files === null) return { kind: "unknown", why: "GitHub did not show the whole change" };
   const unshown = files.find((f) => f.patch === "");
   if (unshown !== undefined) return { kind: "unknown", why: `GitHub shows no patch for ${unshown.path}` };
-  const id = (f: ChangedFile) => createHash("sha256").update(JSON.stringify([f.previous, f.path, f.patch.split("\n").filter((line) => !line.startsWith("@@"))])).digest("hex");
-  return { kind: "known", files: files.map((f) => ({ path: f.path, id: id(f) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) };
+  const id = (f: ChangedFile) => createHash("sha256").update(JSON.stringify([f.previous, f.path, f.mode ?? null, f.patch.split("\n").filter((line) => !line.startsWith("@@"))])).digest("hex");
+  return { kind: "known", base, files: files.map((f) => ({ path: f.path, id: id(f) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) };
 }
 /** The paths whose patches differ between two changes, an empty list for the same change. */
 export function changedPaths(a: Extract<Change, { kind: "known" }>, b: Extract<Change, { kind: "known" }>): string[] {

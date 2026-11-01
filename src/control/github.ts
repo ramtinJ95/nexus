@@ -25,8 +25,11 @@ export interface PrSnapshot {
    */
   checksUnread?: true;
 }
-/** `previous` is the path a renamed file had, so a rename cannot carry a file past a check on its path. */
-export interface ChangedFile { path: string; previous: string | null; patch: string }
+/**
+ * `previous` is the path a renamed file had, so a rename cannot carry a file past a check on its path. `mode` is the
+ * file's mode at the head, null for a removed file, which only `change` reads, since a patch does not show it.
+ */
+export interface ChangedFile { path: string; previous: string | null; patch: string; mode?: string | null }
 /** What a merge GitHub refused says: `denied` when the token may not merge, `refused` when the PR cannot be. */
 export type MergeResult = { kind: "merged"; commit: string } | { kind: "denied" | "refused"; message: string };
 /** `denied` when GitHub refused for good, such as a token that may not write issues or pull requests. */
@@ -39,7 +42,8 @@ export interface GitHub {
   files(repo: string, number: number): Promise<ChangedFile[]>;
   /**
    * The change at commit `head` against its merge base with branch `base`, each file with its patch as `files` gives
-   * it, or null when GitHub cannot show all of it: it lists at most 300 files, and none for a commit it no longer has.
+   * it and its mode, or null when GitHub cannot show all of it: it lists at most 300 changed files, a truncated tree
+   * leaves modes out, and it has none for a commit it no longer has.
    */
   change(repo: string, base: string, head: string): Promise<ChangedFile[] | null>;
   /** Squash-merges only while the PR's head is still `head`, so it never merges a commit nobody reviewed. */
@@ -183,7 +187,11 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
         throw new Error(`GitHub compare: HTTP ${response.status}`);
       }
       const { files = [] } = await response.json() as { files?: { filename: string; previous_filename?: string; patch?: string }[] };
-      return files.length >= 300 ? null : files.map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" }));
+      if (files.length >= 300) return null;
+      const { value: tree } = await get<{ tree: { path: string; mode: string }[]; truncated: boolean }>(`/repos/${repo}/git/trees/${head}?recursive=1`);
+      if (tree.truncated) return null;
+      const modes = new Map(tree.tree.map((entry) => [entry.path, entry.mode]));
+      return files.map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "", mode: modes.get(f.filename) ?? null }));
     },
     async merge(repo, number, head) {
       const { response, reply, message } = await write("PUT", `/repos/${repo}/pulls/${number}/merge`, { sha: head, merge_method: "squash" }, "merge");

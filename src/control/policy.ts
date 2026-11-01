@@ -131,6 +131,7 @@ export function carryWaiver(review: Review, change: Change, holds: readonly Hold
   if (waiver.change === null) return unknown("Nexus never read the change the waiver was for");
   if (waiver.change.kind === "unknown") return unknown(waiver.change.why);
   if (change.kind === "unknown") return unknown(change.why);
+  if (change.base !== waiver.change.base) return unknown(`the pull request's base moved from ${waiver.change.base} to ${change.base}`);
   const paths = changedPaths(waiver.change, change);
   if (paths.length) return { review, why: hold("waiver-not-carried", `The change at ${to} differs from the one ${waiver.by} pressed Land for at ${at}, in ${paths.join(", ")}, so that waiver does not carry over. Look at ${paths.length === 1 ? "that file" : "those files"} again, and press Land to waive the holds at ${to}.`) };
   const carried: Review = { ...review, waiver: { ...waiver, head, from: waiver.from ?? waiver.head } };

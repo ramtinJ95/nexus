@@ -229,7 +229,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const resend = (r: Review, to: "builder" | "reviewer"): Review => ({ ...r, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: r.asked, attempted: null } });
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
   /** The PR's change at commit `head`, as GitHub shows it against `base`. */
-  const changeAt = async (r: Review, base: string, head: string) => changeOf(await github.change(r.pr.repo, base, head));
+  const changeAt = async (r: Review, base: string, head: string) => changeOf(base, await github.change(r.pr.repo, base, head));
   /**
    * The reviewer's approval of the latest round carried to `head`, pushed after it, when the change at both is the
    * same, so the checks run at `head` with no reviewer round. Null when the reviewer did not approve it, or the change
@@ -237,10 +237,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   const carryApproval = async (r: Review, head: string, base: string): Promise<Review | null> => {
     const round = r.rounds.at(-1)!;
-    if (!reviewerApproved(round)) return null;
+    if (!reviewerApproved(round) || round.base !== base) return null;
     const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
     if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
-    return { ...r, rounds: [...r.rounds, { head, verdict: round.verdict, check: null, answers: null, carried: { from: round.head } }], phase: checking(), outbox: null, nudges: 0 };
+    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head } }], phase: checking(), outbox: null, nudges: 0 };
   };
   /**
    * The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. The
@@ -251,7 +251,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (carried !== null) return carried;
     const n = roundsSpent(r);
     if (n >= r.maxRounds) return end(r, { ...personPhase("rounds", `${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`), label: { state: "adding" }, unreviewed: head });
-    const next: Review = { ...r, rounds: [...r.rounds, { head, verdict: null, check: null, answers: null }] };
+    const next: Review = { ...r, rounds: [...r.rounds, { head, base, verdict: null, check: null, answers: null }] };
     return send(next, "reviewer", (token) => nextRound(next, r.rounds.at(-1)!, token, base), { kind: "reviewing" });
   };
   /**
@@ -345,7 +345,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (carried !== null) return carried;
       }
       if (n >= r.maxRounds) return ranOut(withAnswers, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
-      const next: Review = { ...withAnswers, rounds: [...withAnswers.rounds, { head: snapshot.detail.head, verdict: null, check: null, answers: null }] };
+      const next: Review = { ...withAnswers, rounds: [...withAnswers.rounds, { head: snapshot.detail.head, base: snapshot.detail.base, verdict: null, check: null, answers: null }] };
       return send(next, "reviewer", (token) => nextRound(next, withAnswers.rounds.at(-1)!, token, snapshot.detail.base), { kind: "reviewing" });
     },
     async checking(r, phase, builder) {
@@ -421,12 +421,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         return { all, left: unwaived(review, all), review, why: why === null ? [] : [why] };
       };
       let commit: string;
+      let landing = r;
       if (snapshot.detail.mergeCommit !== null) {
         if (snapshot.detail.head !== head) return toPerson(r, "outside", { code: "not-approved-head", text: `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.` });
         // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
         if (phase.authorized !== head) {
-          const { all, left, why } = await holds();
+          const { all, left, review, why } = await holds();
           if (left.length) return toPerson(r, "outside", `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...why, ...all);
+          landing = review;
         }
         commit = snapshot.detail.mergeCommit;
       } else {
@@ -449,8 +451,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         }
         commit = merged.commit;
       }
-      if (!deploys(r)) return { ...r, merged: commit, phase: { kind: "landed", commit } };
-      return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployMs } };
+      if (!deploys(r)) return { ...landing, merged: commit, phase: { kind: "landed", commit } };
+      return { ...landing, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployMs } };
     },
     async deploying(r, phase) {
       if (!phase.requested) return requestRelease(r, phase, phase.commit, `nexus review ${r.id}`);
@@ -624,7 +626,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const draft: Review = {
       id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
       maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto,
-      rounds: [{ head: snapshot.detail.head, verdict: null, check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
+      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, verdict: null, check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
       since: now(), nudges: 0, startedAt: now(), asked: "",
     };
     const prompt = reviewerRequest(draft, snapshot.detail, draft.expect);

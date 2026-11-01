@@ -1613,7 +1613,7 @@ test("show says when a review's approval and the person's waiver carried to a re
     builder: thread.id, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" },
     rounds: [{ head: a, verdict, check: { passed: true, output: "ok" }, answers: null }, { head: b, verdict, check: null, answers: null, carried: { from: a } }],
     phase: { kind: "checking", startedAt: 0, thread: null },
-    waiver: { head: b, from: a, holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 10, 1, 9), change: { kind: "known", files: [] } },
+    waiver: { head: b, from: a, holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 10, 1, 9), change: { kind: "known", base: "main", files: [] } },
   });
   s.registry.saveReview(review);
   const shown = (await s.nexus(["show", thread.id])).stdout;

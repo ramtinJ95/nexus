@@ -2771,7 +2771,7 @@ const migration = (line: number, table = "x"): ChangedFile[] => [{ path: "src/co
 const carriedEvents = (f: ReturnType<typeof fixture>) => f.registry.events("0", { kinds: ["review.approval-carried", "review.waiver-carried", "review.waived"], thread: f.builder }).map((e) => [e.kind, e.payload.from, e.payload.to]);
 
 /** A landing the person waived at head1, whose branch then conflicts, so the builder rebases it to head2 with `change`. */
-async function waivedThenRebased(t: import("node:test").TestContext, change: ChangedFile[] | null, rounds?: number) {
+async function waivedThenRebased(t: import("node:test").TestContext, change: ChangedFile[] | null, rounds?: number, check?: CheckState) {
   const f = fixture(t);
   f.files = migration(240);
   f.changes.set(head1, migration(240));
@@ -2788,6 +2788,7 @@ async function waivedThenRebased(t: import("node:test").TestContext, change: Cha
   assert.equal(f.review().phase.kind, "fixing");
   const reviewerRequests = f.sent.filter((s) => s.to === f.review().reviewer).length;
   rebased(f);
+  if (check !== undefined) f.check = check;
   f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
   await loop.poll();
   return { f, loop, reviewerRequests };
@@ -2827,6 +2828,18 @@ test("a landing the person waived, rebased with a changed line, gets a counted r
   assert.deepEqual(f.merges, [head2], "one look and one Land lands it");
 });
 
+test("a rebased head with the same change merged outside the review during its checks deploys on the carried waiver, and records it", async (t) => {
+  const { f, loop } = await waivedThenRebased(t, migration(250), undefined, { kind: "running" });
+  assert.equal(f.review().phase.kind, "checking");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, [], "someone else merged it");
+  assert.equal(f.review().phase.kind, "deploying", "the policy, with the person's waiver carried, would have let it merge");
+  assert.equal(f.review().waiver!.head, head2);
+  assert.deepEqual(carriedEvents(f).at(-1), ["review.waiver-carried", head1, head2]);
+});
+
 test("a rebase GitHub cannot show in full keeps neither the approval nor the waiver", async (t) => {
   const { f, loop } = await waivedThenRebased(t, null);
   assert.equal(f.review().phase.kind, "reviewing");
@@ -2838,16 +2851,18 @@ test("a rebase GitHub cannot show in full keeps neither the approval nor the wai
 
 test("an approval carried to the same change never carries past a hold the person did not waive", () => {
   const review = testReview({ rounds: [{ head: head1, verdict: null, check: null, answers: null }, { head: head2, verdict: null, check: null, answers: null, carried: { from: head1 } }] });
-  const waiver: Waiver = { head: head1, holds: reservedHolds, codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1, change: changeOf(migration(240)) };
+  const waiver: Waiver = { head: head1, holds: reservedHolds, codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1, change: changeOf("main", migration(240)) };
   const irreversible = { code: "reserved-path:irreversible" as const, text: reservedHolds[0]! };
   const image = { code: "reserved-path:image-rebuild" as const, text: "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile." };
-  const same = changeOf(migration(270));
+  const same = changeOf("main", migration(270));
   assert.deepEqual(carryWaiver({ ...review, waiver }, same, [irreversible]).review.waiver, { ...waiver, head: head2, from: head1 }, "the same change, hunks moved, carries the waiver");
   assert.deepEqual(carryWaiver({ ...review, waiver }, same, [irreversible, image]), { review: { ...review, waiver }, why: null }, "a new hold holds, and the waiver stays where it was");
   const { change: _, ...legacy } = waiver;
   assert.match(carryWaiver({ ...review, waiver: legacy }, same, [irreversible]).why!.text, /the waiver was saved before Nexus recorded the change it waives/, "a waiver saved before changes holds at its own head alone");
-  assert.deepEqual(changeOf([{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf([{ path: "a.ts", previous: null, patch: "@@ -9 +9 @@ function f() {\n-a\n+b" }]), "only hunk headers are ignored");
-  assert.notDeepEqual(changeOf([{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf([{ path: "a.ts", previous: "z.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]), "a rename's old path is part of the change");
+  assert.deepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -9 +9 @@ function f() {\n-a\n+b" }]), "only hunk headers are ignored");
+  assert.notDeepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: "z.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]), "a rename's old path is part of the change");
+  assert.notDeepEqual(changeOf("main", [{ path: "a.sh", previous: null, patch: "@@ -1 +1 @@\n-a\n+b", mode: "100644" }]), changeOf("main", [{ path: "a.sh", previous: null, patch: "@@ -1 +1 @@\n-a\n+b", mode: "100755" }]), "so is a file's mode, which its patch does not show");
+  assert.match(carryWaiver({ ...review, waiver }, changeOf("release/1", migration(270)), [irreversible]).why!.text, /as the pull request's base moved from main to release\/1/, "a waiver never carries to another base");
 });
 
 test("an approved review rebased with the same change runs its checks again without a reviewer round, and one with a changed line runs a counted round", async (t) => {
@@ -2864,6 +2879,22 @@ test("an approved review rebased with the same change runs its checks again with
     assert.equal(f.checkThreads.length, carried ? 2 : 1, "the check runs again at once at the same change");
     assert.equal(roundsSpent(f.review()), carried ? 1 : 2);
     assert.deepEqual(f.review().rounds[1]!.carried, carried ? { from: head1 } : undefined);
+  }
+});
+
+test("an approval never carries to a head on another base, nor from a round saved before rounds recorded their base", async (t) => {
+  for (const retarget of [true, false]) {
+    const f = fixture(t);
+    f.files = migration(240);
+    f.changes.set(head1, migration(240));
+    f.changes.set(head2, migration(250));
+    const loop = await approved(f, null);
+    if (retarget) f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release/1" } };
+    else f.registry.saveReview({ ...f.review(), rounds: f.review().rounds.map(({ base: _, ...round }) => round) });
+    pushed(f, head2);
+    await loop.poll();
+    assert.equal(f.review().phase.kind, "reviewing", retarget ? "a new base adds its own commits to the change" : "an old round's base is unknown");
+    assert.equal(roundsSpent(f.review()), 2);
   }
 });
 
