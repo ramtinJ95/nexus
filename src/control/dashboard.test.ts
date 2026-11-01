@@ -461,7 +461,7 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
   assert.match(button[0], new RegExp(`data-head="${head}"`));
   assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button[0])![1]!)), [reserved], "it waives only what the person may");
   assert.equal(textOf(/data-confirm="([^"]*)"/.exec(button[0])![1]!), `Land pull request #7, "Cache", at commit ${head.slice(0, 12)}, waiving the hold the merge policy reserves for you? Nexus checks everything else again, merges that commit and deploys the merge commit.`);
-  assert.match(region, /Land #7 Pressing Land waives what is marked "you may waive", for commit 9f9f9f9f9f9f only\. Landing checks everything else again\.$/);
+  assert.match(region, /Land #7 Pressing Land waives what is marked "you may waive", for commit 9f9f9f9f9f9f and any rebase of it that leaves the change as it is\. Landing checks everything else again\.$/);
   s.callAs(phone);
   const refused = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.ok(!refused.includes("data-action"), "a device that is not a deployer gets no working button");

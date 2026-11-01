@@ -518,8 +518,8 @@ interface Review {
   land: { requestedBy: string; fromProject?: true } | null;  // fromProject: the project's autoReview asked, and is read again at each landing
   auto: boolean;                      // started on its own when the PR watch first linked the PR
   merged: string | null;              // the merge commit once merged
-  waiver: { head: string; holds: string[]; codes?: HoldCode[]; by: string; at: number } | null;  // since 0.28.0, codes additive
-  rounds: { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: { kind: "absent" } | { kind: "ran"; thread: string; passed: boolean; output: string }; answers: Answer[] | null; conflict?: { base: string } }[];
+  waiver: { head: string; holds: string[]; codes?: HoldCode[]; by: string; at: number; change?: Change | null; from?: string } | null;  // since 0.28.0, codes, change and from additive
+  rounds: { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: { kind: "absent" } | { kind: "ran"; thread: string; passed: boolean; output: string }; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string } }[];  // base and carried additive
   phase: { kind: "reviewing" | "fixing"; failing?: ModelFailure }  // failing since 0.48.0
     | { kind: "approved" }
     | { kind: "merging"; authorized: string | null; waiting?: string }  // waiting since 0.47.0
@@ -560,7 +560,13 @@ interface Hold { code: HoldCode; text: string }
 type HoldCode = "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
   | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed" | "verify-changed"
   | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}`  // the reviewer's reading of a case, and a Nexus path that hits it
-  | "stale-head" | "loop";  // the line a held review gains when its head moves, and the review loop's own reasons
+  | "stale-head" | "waiver-not-carried" | "loop";  // the line a held review gains when its head moves, why a waiver did not carry, and the review loop's own reasons
+```
+
+A round's `base` is the branch its head was reviewed against. A round with `carried` is the reviewer's approval of head `from` carried to the round's head, whose change against the same base is the same, so no reviewer round ran and it counts against no limit. Its `check` and `live` are its own. A waiver's `change` is the change at the head the person pressed Land at, `null` until the landing reads it, and `from` is that head once the waiver carried to a later one with the same change, which `head` then names. A waiver from a control plane before them has neither, and holds at its own head alone. When it does not carry, the review's first hold, `waiver-not-carried`, says why: the files whose patches differ, or why the changes could not be compared. `show` prints `approval carried from <head> to <head>: same change after a rebase` under the review line while the carried round is the latest, and `(carried from <head>)` after a carried waiver's head. `events --kind review.approval-carried` and `--kind review.waiver-carried` follow each carry with both heads.
+
+```ts
+type Change = { kind: "known"; base: string; files: { path: string; id: string }[] } | { kind: "unknown"; why: string };  // id: sha256 of the file's paths, modes before and after, and patch against base, hunk headers dropped
 ```
 
 `waiting` is why a landing that deploys waits before it merges, since landings that deploy go one at a time: `<review> deploys`, `<review> rolls back` or `<review> merges` for another review's landing, `a deploy drains the control plane`, or `not every service reports <commit> healthy` for a desired release the fleet does not report healthy, such as one whose deploy failed with nothing to roll back to. `show` ends the review line with `, waiting while ` and that reason, such as `, waiting while rv-1a2b3c4d deploys`.

@@ -44,7 +44,7 @@ export function reviewText(r: Review): string {
     ...note === null ? [] : [note],
     ...live?.kind === "ran" && !live.passed ? live.output.split("\n").slice(-20).map((line) => `  ${line}`) : [],
     ...r.phase.kind === "needs-person" ? r.phase.reasons.map((reason) => `needs you: ${reason}`) : [],
-    ...r.waiver === null ? [] : [`waived by ${r.waiver.by} at ${r.waiver.head}, ${new Date(r.waiver.at).toISOString()}:`, ...r.waiver.holds.map((hold) => `  ${hold}`)],
+    ...r.waiver === null ? [] : [`waived by ${r.waiver.by} at ${r.waiver.head}${r.waiver.from === undefined ? "" : ` (carried from ${r.waiver.from})`}, ${new Date(r.waiver.at).toISOString()}:`, ...r.waiver.holds.map((hold) => `  ${hold}`)],
   ].join("\n");
 }
 

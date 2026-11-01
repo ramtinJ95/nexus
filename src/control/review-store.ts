@@ -8,7 +8,7 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "../agent-protocol.ts";
-import { needsPerson, storedReview, type Review } from "./review-model.ts";
+import { needsPerson, storedReview, type Review, type Waiver } from "./review-model.ts";
 
 export type ReviewStore = ReturnType<typeof reviewStore>;
 
@@ -34,9 +34,10 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
     prReviewed: (repo: string, number: number) => sql("SELECT 1 FROM reviewed_prs WHERE repo = ? AND number = ?").get(repo, number) !== undefined,
     /**
-     * Replaces the builder's review, and tells the event log when its phase, round or label changed, or the person waived
-     * holds. The threads in `archive` are archived in the same transaction. Given `previous`, the review as it was read,
-     * false, with nothing written, when the stored review is no longer that: another save came first.
+     * Replaces the builder's review, and tells the event log when its phase, round or label changed, the person waived
+     * holds, or the reviewer's approval or the person's waiver carried to a later head with the same change. The
+     * threads in `archive` are archived in the same transaction. Given `previous`, the review as it was read, false,
+     * with nothing written, when the stored review is no longer that: another save came first.
      */
     saveReview(review: Review, archive: readonly ThreadId[] = [], previous?: Review): boolean {
       return transaction(() => {
@@ -50,8 +51,18 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
         if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
           appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, phase: review.phase, round: review.rounds.length });
         }
-        if (review.waiver != null && JSON.stringify(before?.waiver ?? null) !== JSON.stringify(review.waiver)) {
-          appendEvent("review.waived", review.builder, { review: review.id, repo: review.pr.repo, pr: review.pr.number, ...review.waiver });
+        const pr = { review: review.id, repo: review.pr.repo, pr: review.pr.number };
+        const round = review.rounds.at(-1)!;
+        if (before?.id === review.id && before.rounds.length < review.rounds.length && round.carried !== undefined) {
+          appendEvent("review.approval-carried", review.builder, { ...pr, from: round.carried.from, to: round.head });
+        }
+        // Reading the change a waiver is for, or carrying it to a later head, is not the person waiving again.
+        const pressed = (w: Waiver | null | undefined) => w == null ? null : JSON.stringify({ ...w, head: w.from ?? w.head, change: undefined, from: undefined });
+        if (review.waiver != null && pressed(before?.waiver) !== pressed(review.waiver)) {
+          const { change: _, ...waiver } = review.waiver;
+          appendEvent("review.waived", review.builder, { ...pr, ...waiver });
+        } else if (review.waiver != null && before?.waiver != null && before.waiver.head !== review.waiver.head) {
+          appendEvent("review.waiver-carried", review.builder, { ...pr, from: before.waiver.head, to: review.waiver.head, by: review.waiver.by });
         }
         updateAttention(review.builder);
         return true;

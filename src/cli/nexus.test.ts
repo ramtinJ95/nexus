@@ -1603,6 +1603,28 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match(events.stdout, /review.waived/);
 });
 
+test("show says when a review's approval and the person's waiver carried to a rebased head, and why a waiver did not", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
+  const [a, b] = ["1".repeat(40), "2".repeat(40)];
+  const verdict = { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null };
+  const hold = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
+  const review = testReview({
+    builder: thread.id, pr: { repo: "octocat/Spoon-Knife", number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", title: "Cache", branch: "cache" },
+    rounds: [{ head: a, verdict, check: { passed: true, output: "ok" }, answers: null }, { head: b, verdict, check: null, answers: null, carried: { from: a } }],
+    phase: { kind: "checking", startedAt: 0, thread: null },
+    waiver: { head: b, from: a, holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 10, 1, 9), change: { kind: "known", base: "main", files: [] } },
+  });
+  s.registry.saveReview(review);
+  const shown = (await s.nexus(["show", thread.id])).stdout;
+  assert.match(shown, /^review rv-1 of PR #7: checking, round 1 of 5, .*\napproval carried from 111111111111 to 222222222222: same change after a rebase$/m, "a carried approval spends no round");
+  assert.match(shown, new RegExp(`^waived by nLAPTOP at ${b} \\(carried from ${a}\\), 2026-11-01T09:00:00.000Z:$`, "m"));
+
+  const differs = "The change at 222222222222 differs from the one nLAPTOP pressed Land for at 111111111111, in src/control/api.ts, so that waiver does not carry over. Look at that file again, and press Land to waive the holds at 222222222222.";
+  s.registry.saveReview({ ...review, phase: personPhase("policy", { code: "waiver-not-carried", text: differs }, { code: "reserved-path:auth", text: hold }) });
+  assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^needs you: ${differs.replace(/[.()]/g, "\\$&")}$`, "m"));
+});
+
 test("review --cancel ends the thread's running review through its route, and prints who cancelled it", async (t) => {
   const asked: unknown[][] = [];
   let review: Review | null = null;

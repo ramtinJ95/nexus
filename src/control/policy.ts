@@ -13,7 +13,7 @@
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, findingsOf, type Review } from "./review-model.ts";
+import { answered, blocks, changedPaths, findingsOf, type Change, type Review } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;
@@ -113,4 +113,27 @@ export function landingHolds(facts: LandingFacts): Hold[] {
 export function unwaived(review: Review, holds: readonly Hold[]): Hold[] {
   const { waiver } = review;
   return holds.filter((h) => !(waiver !== null && waiver.head === review.rounds.at(-1)!.head && waiver.codes.includes(h.code) && waivable(h.code)));
+}
+
+/**
+ * The person's waiver, made at an earlier head, carried to the latest round's head when `change`, the change there, is
+ * the one they waived and it then gets the landing past every hold in `holds`. Otherwise the review as it is and, when
+ * the change differs or cannot be compared, why the waiver stays at its head. A new hold the person never waived holds
+ * the landing whatever the change, and needs no why: it is one of the holds.
+ */
+export function carryWaiver(review: Review, change: Change, holds: readonly Hold[]): { review: Review; why: Hold | null } {
+  const { waiver } = review;
+  const head = review.rounds.at(-1)!.head;
+  if (waiver === null || waiver.head === head) return { review, why: null };
+  const [at, to] = [waiver.head.slice(0, 12), head.slice(0, 12)];
+  const unknown = (why: string) => ({ review, why: hold("waiver-not-carried", `Nexus cannot tell whether the change at ${to} is the one ${waiver.by} pressed Land for at ${at}, as ${why}, so that waiver does not carry over. Look at the change again, and press Land to waive the holds at ${to}.`) });
+  if (waiver.change === undefined) return unknown("the waiver was saved before Nexus recorded the change it waives");
+  if (waiver.change === null) return unknown("Nexus never read the change the waiver was for");
+  if (waiver.change.kind === "unknown") return unknown(waiver.change.why);
+  if (change.kind === "unknown") return unknown(change.why);
+  if (change.base !== waiver.change.base) return unknown(`the pull request's base moved from ${waiver.change.base} to ${change.base}`);
+  const paths = changedPaths(waiver.change, change);
+  if (paths.length) return { review, why: hold("waiver-not-carried", `The change at ${to} differs from the one ${waiver.by} pressed Land for at ${at}, in ${paths.join(", ")}, so that waiver does not carry over. Look at ${paths.length === 1 ? "that file" : "those files"} again, and press Land to waive the holds at ${to}.`) };
+  const carried: Review = { ...review, waiver: { ...waiver, head, from: waiver.from ?? waiver.head } };
+  return unwaived(carried, holds).length ? { review, why: null } : { review: carried, why: null };
 }

@@ -298,6 +298,8 @@ past matching records they have not consumed.
 | `pull-request.error-cleared` | The thread's PR watch read GitHub again after a failure, written when its `error` goes back to none |
 | `release.changed` | Desired release (`desired`) or changed component report |
 | `review.changed` | A review started or changed phase or round; `review`, `reviewer`, `phase` and `round` |
+| `review.approval-carried` | The reviewer's approval carried to a head with the same change, such as a clean rebase; `review`, `repo`, `pr`, `from` and `to`, the two heads |
+| `review.waiver-carried` | The person's waiver carried to a head with the same change, which it lets land; `review`, `repo`, `pr`, `from`, `to` and `by` |
 | `usage-limit.continued` | The control plane typed its continue into a Claude worker whose usage limit reset; `session`, `stoppedAt`, `resetsAt` and `requestId` |
 
 Only the five `session.*` kinds may come from a pylon. The strict boundary schema
