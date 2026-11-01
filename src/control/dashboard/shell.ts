@@ -30,7 +30,7 @@ export interface Shell {
   /** The thread the sidebar marks as open. */
   active?: ThreadId;
   /** The sidebar's link to mark as the open page. */
-  nav?: "usage" | "pipeline" | "health";
+  nav?: "inbox" | "usage" | "pipeline" | "health";
   main: Html;
   inspector?: Html;
   /** The thread whose visits count as human activity: an open thread's page. */
@@ -124,7 +124,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
+<nav class="side-nav" aria-label="Pages"><a class="side-link${nav === "inbox" && " active"}" href="/#needs-you"${nav === "inbox" && html` aria-current="page"`}>${icon("inbox")}Inbox<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);

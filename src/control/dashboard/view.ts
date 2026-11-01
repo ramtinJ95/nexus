@@ -85,7 +85,7 @@ export const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0
 /** The icons client.js clones from the page's `#icons`, for the folders of the changed files' tree. */
 export const clonedIcons = ["chevron", "folder"] as const satisfies readonly IconName[];
 /** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
-export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
+export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Inbox" title="Inbox">${icon("inbox")}</a>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 

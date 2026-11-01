@@ -486,12 +486,17 @@ function needsOf(page: string) {
     text: textOf(region.replace(/^[^>]*>/, "")),
   };
 }
+/** The inbox's cards by the heading of the group they are triaged into, in the page's order. */
+function groupsOf(page: string) {
+  const region = page.split('id="needs-you"')[1]!.split('<div class="page" id="overview"')[0]!;
+  return new Map(region.split('<h2 class="tri-h">').slice(1).map((chunk) => [textOf(chunk.split("<span")[0]!), needsOf(`id="needs-you"${chunk}<div class="page" id="overview"`).cards]));
+}
 const needsCount = (page: string) => /<span class="side-count" id="needs-count" data-live>([^<]*)<\/span>/.exec(page)![1];
 
 test("Needs you lists, oldest first, each held review, open question and ask, and each thread stopped where only the person moves it, with the action on its card", async (t) => {
   const s = await seeded(t, landingOptions());
   const empty = (await s.call("GET", "/")).text;
-  assert.equal(needsOf(empty).text, "Needs you Nothing waits on you.");
+  assert.equal(needsOf(empty).text, "Inbox Nothing waits on you.");
   assert.equal(needsCount(empty), "", "the sidebar counts nothing");
 
   const now = Date.now();
@@ -519,14 +524,21 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
 
   const page = (await s.call("GET", "/")).text;
   const { cards } = needsOf(page);
-  assert.deepEqual(cards.slice(0, 3).map((c) => [c.kind, c.thread, c.attention]), [["review", held.id, "decision"], ["question", asked.id, "decision"], ["question", claude.id, "decision"]], "the oldest waits first");
-  assert.deepEqual(new Set(cards.slice(3).map((c) => `${c.thread} ${c.attention}`)), new Set([`${dialog.id} waiting`, `${failed.id} failed`, `${limited.id} limited`]));
+  const groups = groupsOf(page);
+  assert.deepEqual([...groups.keys()], ["Decisions", "Held landings", "Failures and limits"], "the inbox triages what waits into decisions, held landings and failures");
+  const decisions = groups.get("Decisions")!;
+  assert.deepEqual(decisions.slice(0, 2).map((c) => [c.kind, c.thread, c.attention]), [["question", asked.id, "decision"], ["question", claude.id, "decision"]], "the oldest waits first in its group");
+  assert.deepEqual(decisions.slice(2).map((c) => `${c.thread} ${c.attention}`), [`${dialog.id} waiting`], "a dialog in the terminal is a decision");
+  assert.deepEqual(groups.get("Held landings")!.map((c) => [c.kind, c.thread, c.attention]), [["review", held.id, "decision"]]);
+  assert.deepEqual(new Set(groups.get("Failures and limits")!.map((c) => `${c.thread} ${c.attention}`)), new Set([`${failed.id} failed`, `${limited.id} limited`]));
+  assert.deepEqual(cards.map((c) => c.id), [...groups.values()].flat().map((c) => c.id), "every card is in one group");
+  assert.match(page.split('id="needs-you"')[1]!, new RegExp(`<li class="reply" id="reply-${replied.id}" data-thread="${replied.id}"[^>]*>.*?href="/threads/${replied.id}"`), "a new reply is listed below, as a line to its thread");
   assert.ok(!cards.some((c) => c.thread === replied.id), "a new reply waits on no one");
   assert.equal(needsCount(page), "6");
   assert.equal(new Set(cards.map((c) => c.id)).size, cards.length);
   for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}">`), "each card links its thread");
 
-  const land = cards[0]!;
+  const land = groups.get("Held landings")![0]!;
   assert.match(land.text, /^Held review acme \/ Cache the list just now Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Held for you #7 Cache ↗ /);
   assert.match(land.text, /pending\. not waivable .* src\/control\/api\.ts\. you may waive /);
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(land.html)![0];
@@ -534,9 +546,9 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button)![1]!)), [reserved], "it waives what the thread page's would");
   assert.ok(!/id="(land|landing-h|land-why)"/.test(page), "no card takes the thread page's IDs");
 
-  assert.match(cards[1]!.text, /^Question acme \/ Rebuild the image .* Needs your decision Rebuild the pylon image\? .* Rebuild Not now$/);
-  assert.match(cards[1]!.html, /data-action="answer" data-thread="[^"]+" data-question="qn-image" data-option="Rebuild"/);
-  assert.match(cards[2]!.html, new RegExp(`<form class="ask" data-thread="${claude.id}" data-question="ask-toolu_1">`), "an ask is the thread page's form");
+  assert.match(decisions[0]!.text, /^Question acme \/ Rebuild the image .* Needs your decision Rebuild the pylon image\? .* Rebuild Not now$/);
+  assert.match(decisions[0]!.html, /data-action="answer" data-thread="[^"]+" data-question="qn-image" data-option="Rebuild"/);
+  assert.match(decisions[1]!.html, new RegExp(`<form class="ask" data-thread="${claude.id}" data-question="ask-toolu_1">`), "an ask is the thread page's form");
   const by = (thread: ThreadId) => cards.find((c) => c.thread === thread)!;
   assert.match(by(dialog.id).text, /^Dialog in its terminal acme \/ Run the migration .* Claude needs your permission to use Bash, in the pylon's terminal\. Open terminal$/, "a dialog shows though a reply outranks it");
   assert.match(by(dialog.id).html, new RegExp(`href="/threads/${dialog.id}#terminal"`));
@@ -623,8 +635,9 @@ test("a held review waits from when it was held, not from when its review last m
   s.registry.saveReview(review);
   s.registry.saveReview({ ...review, phase: { ...review.phase, label: { state: "added" } } as Review["phase"] });
   const { cards } = needsOf((await s.call("GET", "/")).text);
-  assert.deepEqual(cards.map((c) => c.thread), [asked.id, held.id], "the label added after it was held does not date it again");
-  assert.match(cards[1]!.text, /^Held review acme \/ Cache the list just now /);
+  const since = (thread: ThreadId) => Date.parse(/<span class="need-at"><time datetime="([^"]+)"/.exec(cards.find((c) => c.thread === thread)!.html)![1]!);
+  assert.ok(since(asked.id) <= since(held.id), "the label added after it was held does not date it again");
+  assert.match(cards.find((c) => c.thread === held.id)!.text, /^Held review acme \/ Cache the list just now /);
 });
 
 test("acting on a card through the route its button calls takes the card off the list and the count down", async (t) => {
@@ -645,7 +658,7 @@ test("acting on a card through the route its button calls takes the card off the
   assert.deepEqual(landed, [held.id]);
   s.registry.saveReview(approvedReview(held.id, { kind: "checking", startedAt: Date.now(), thread: null }, { land: { requestedBy: laptop } }));
   const after = (await s.call("GET", "/")).text;
-  assert.equal(needsOf(after).text, "Needs you Nothing waits on you.", "a landing on its way and an archived thread wait on no one");
+  assert.equal(needsOf(after).text, "Inbox Nothing waits on you.", "a landing on its way and an archived thread wait on no one");
   assert.equal(needsCount(after), "");
 });
 
@@ -655,8 +668,8 @@ test("every page links Needs you with its count in the sidebar, and on a phone f
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
   for (const path of ["/", "/usage", "/pipeline", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
     const page = (await s.call("GET", path)).text;
-    assert.match(page, /<a class="side-link" href="\/#needs-you">[\s\S]*?Needs you<span class="side-count" id="needs-count" data-live>1<\/span><\/a>/, path);
-    assert.match(page, /<a class="icon-btn phone-only" href="\/#needs-you" aria-label="Needs you"/, path);
+    assert.match(page, new RegExp(`<a class="side-link${path === "/" ? ' active" href="/#needs-you" aria-current="page"' : '" href="/#needs-you"'}>[\\s\\S]*?Inbox<span class="side-count" id="needs-count" data-live>1</span></a>`), path);
+    assert.match(page, /<a class="icon-btn phone-only" href="\/#needs-you" aria-label="Inbox"/, path);
     assert.doesNotMatch(/<title>([^<]*)<\/title>/.exec(page)![1]!, /\d|Needs/, path);
   }
 });

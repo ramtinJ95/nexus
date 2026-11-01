@@ -34,10 +34,12 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): 
 </table>`;
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
+    nav: "inbox",
     ...dialogs,
-    main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
+    main: html`<header class="bar">${menu}<div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
+<div class="scroll"><div class="page page-needs"><p class="keys-hint" aria-hidden="true"><kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd> open <kbd>e</kbd> archive <kbd>o</kbd> details <kbd>?</kbd> all keys</p><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
 <div class="page" id="overview" data-live>
+${projects.length > 0 && html`<h2 class="all-h">All threads</h2>`}
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
@@ -102,16 +104,34 @@ function heldSince(registry: Registry, r: Review): number {
 
 const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}` : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
 
+/**
+ * The inbox's triage: what the person decides, the landings held for them, and the threads stopped on a failure or a
+ * limit, each oldest first, so a card keeps its place in its group while the person works down the list. A new reply
+ * waits on no one, so it has no card and no count, but it is listed last, as a line that opens its thread.
+ */
+const triage = [["decisions", "Decisions"], ["landings", "Held landings"], ["failures", "Failures and limits"]] as const;
+type Triage = typeof triage[number][0];
+const triageOf = (n: Need): Triage => n.kind === "review" ? "landings" : n.kind === "thread" && n.attention !== "waiting" ? "failures" : "decisions";
+
 /** The inbox's cards, each the card its thread's page shows where there is one, under a line that links the thread. */
 function needsList(c: Context): Html {
   const needs = c.needs();
-  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
-${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
+  const grouped = Map.groupBy(needs, triageOf);
+  const replies = c.threads().filter((t) => (t.status === "active" || t.status === "idle") && c.row(t).attention === "reply")
+    .toSorted((a, b) => (b.lastReplyAt ?? 0) - (a.lastReplyAt ?? 0));
+  return html`<div class="inbox-head"><h1 id="needs-h">Inbox</h1>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
+${needs.length === 0 ? html`<p class="empty inbox-zero">Nothing waits on you.</p>` : triage.map(([group, label]) => grouped.has(group) && html`<h2 class="tri-h">${label}<span class="count">${grouped.get(group)!.length}</span></h2>
+<div class="need-list">${grouped.get(group)!.map((n) => needView(c, n))}</div>`)}
+${replies.length > 0 && html`<h2 class="tri-h tri-quiet">New replies<span class="count">${replies.length}</span></h2>
+<ul class="reply-list">${replies.map((t) => html`<li class="reply" id="reply-${t.id}" data-thread="${t.id}" tabindex="-1"><span class="dot dot-reply" aria-hidden="true"></span><a class="reply-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${t.lastReplyAt !== null && ago(t.lastReplyAt, c.now)}</span></li>`)}</ul>`}`;
+}
+
+function needView(c: Context, n: Need): Html {
   if (n.kind === "cleanup") {
     const { node } = n.question;
     return html`<article class="need need-cleanup" id="${needId(n)}" data-node="${node}" tabindex="-1" aria-label="Cleanup: ${node}">
 <div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
-${cleanupCard(c, n.question)}
+${cleanupCard(c, n.question, true)}
 </article>`;
   }
   const t = n.d.thread;
@@ -120,7 +140,6 @@ ${cleanupCard(c, n.question)}
 <div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
 ${body}
 </article>`;
-})}</div>`}`;
 }
 
 /** What the card is, and what it shows: a review, question or nudge as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
@@ -128,10 +147,10 @@ function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
   const { d } = n;
   const t = d.thread;
   const button = (action: string, label: string) => html`<button type="button" class="btn btn-xs" data-action="${action}" data-thread="${t.id}">${label}</button>`;
-  const fix = (why: Part, act: Part) => html`<p class="land-note">${why}</p><div class="need-act">${act}</div>`;
+  const fix = (why: Part, act: Part) => html`<div class="need-fix"><p class="land-note">${why}</p><div class="need-act">${act}</div></div>`;
   switch (n.kind) {
     case "review": {
-      const card = landing(c, d, (name) => `${name}-${t.id}`);
+      const card = landing(c, d, (name) => `${name}-${t.id}`, true);
       const pr = prOf(d);
       if (cannotLand(d.review!, t, pr) !== null) return ["Review needs you", html`${card}`];
       const summary = pr?.summary;

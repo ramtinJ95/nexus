@@ -98,10 +98,11 @@ const outcomeText = (item: CleanupItem, outcome: DeleteOutcome | undefined): Htm
 
 /**
  * A node's question about what it could delete: each item and the space it takes, and the total, with Delete and
- * Keep. Once answered Delete, each item says what its delete did, deleted with the space freed, skipped with why, or
- * still waiting for the node, and the card sums what was freed.
+ * Keep, the items folded away where `fold` asks, as the inbox does. Once answered Delete, each item says what its
+ * delete did, deleted with the space freed, skipped with why, or still waiting for the node, and the card sums what
+ * was freed.
  */
-export function cleanupCard(c: Context, q: NodeQuestion): Html {
+export function cleanupCard(c: Context, q: NodeQuestion, fold = false): Html {
   const { items, outcomes } = q.cleanup;
   const total = items.reduce((sum, i) => sum + i.bytes, 0);
   const rows = items.map((i) => html`<tr data-item="${itemKey(i)}"><td class="wide">${itemText(i)}</td><td>${bytesText(i.bytes)}</td>${q.answer?.option === "Delete" && html`<td>${outcomeText(i, outcomes[itemKey(i)])}</td>`}</tr>`);
@@ -123,7 +124,7 @@ ${table}<p class="land-meta">${said}</p></section>`;
     : html`<button type="button" class="btn" disabled>Delete</button><button type="button" class="btn" disabled>Keep</button>`;
   return html`<section class="landing question cleanup" data-question="${q.id}" aria-label="Cleanup to confirm on ${q.node}">
 <div class="land-top"><h2>Delete what ${q.node} no longer needs?</h2><span class="land-meta">frees ${bytesText(total)}</span></div>
-${table}
+${fold ? html`<details class="land-fold" id="cleanup-items-${q.node}-${q.id}"><summary>The ${items.length} ${items.length === 1 ? "item" : "items"} it would delete</summary>${table}</details>` : table}
 <p class="land-meta">Asked ${ago(q.askedAt, c.now)}. ${answerers[q.answerer]} The node checks each item again before it deletes it and keeps any that came into use. Nexus asks again only once something new joins the list.</p>
 <div class="land-act"><div class="question-options">${buttons}</div>${refusal !== null && html`<p class="error">${answerRefusals[refusal](c.caller)}</p>`}</div>
 </section>`;
@@ -164,9 +165,9 @@ export const prOf = (d: ThreadDetail) => d.pullRequests?.find((p) => p.repo === 
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
  * Land button, and then the landing's steps until it lands or ends for them again. The land route decides who may
  * land, and the page says so up front rather than offer a button that fails. `id` names its elements, so the inbox
- * can show several.
+ * can show several, folding why it waits under its summary.
  */
-export function landing(c: Context, d: ThreadDetail, id = (name: string) => name): Html | null {
+export function landing(c: Context, d: ThreadDetail, id = (name: string) => name, fold = false): Html | null {
   const r = d.review;
   if (r == null) return null;
   const prLink = html`<a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a>`;
@@ -219,7 +220,7 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
 <div class="land-top"><h2 id="${id("landing-h")}">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
 ${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}
 <p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
-<details id="${id("land-why")}" open><summary>Why it waits for you</summary>
+<details id="${id("land-why")}"${!fold && " open"}><summary>Why it waits for you</summary>
 ${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
   : html`<ul class="land-reasons">${rules.map((h) => html`<li>${h.reason} ${h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`}<br><span class="dim">${h.why}</span></li>`)}</ul>`}
 <h3>The reviewer's findings</h3>

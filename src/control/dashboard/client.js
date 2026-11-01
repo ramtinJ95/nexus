@@ -29,6 +29,8 @@ const writeTo = () => { if (location.hash === "#write") document.getElementById(
 writeTo();
 addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
+// The keyboard comes after the page, so it adds nothing to what a page loads first.
+void import("./keys.js");
 // A node's graphs bring uPlot, which no other page needs.
 if (document.getElementById("node-graphs") !== null) void import("./node-graphs.js");
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
