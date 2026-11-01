@@ -178,12 +178,20 @@ test("a range keeps the pylons of the highest CPU peaks as their own lines, and 
   const few = Array.from({ length: maxPylons }, (_, i) => pylon(i, "pylonCpu", [[0, i]]));
   assert.deepEqual(foldPylons(few, minute), { series: few, otherPylons: [] }, "eight pylons keep their own lines");
   const many = Array.from({ length: 12 }, (_, i) => [pylon(i, "pylonCpu", [[0, i], [minute, i]]), pylon(i, "pylonResident", [[0, 1], [minute + 5_000, 2]])]).flat();
-  const { series, otherPylons } = foldPylons([{ key: "load1", series: { kind: "load1" }, t: [0], min: [1], avg: [1], max: [1], n: [1] }, ...many], minute);
+  const { series, otherPylons } = foldPylons([{ key: "cpus", series: { kind: "cpus" }, t: [0, minute], min: [8, 8], avg: [8, 8], max: [8, 8], n: [1, 1] }, ...many], minute);
   assert.deepEqual(otherPylons, ["pylon-th-0:th-0", "pylon-th-1:th-1", "pylon-th-2:th-2", "pylon-th-3:th-3"], "the four of the lowest peaks");
   assert.equal(series.filter((s) => s.series.kind === "pylonCpu").length, maxPylons);
   assert.equal(series.filter((s) => s.series.kind === "pylonResident").length, maxPylons, "a pylon kept for its CPU keeps its memory line too");
-  assert.ok(series.some((s) => s.key === "load1"));
+  assert.ok(series.some((s) => s.key === "cpus"));
   const other = (key: string) => series.find((s) => s.key === key)!;
-  assert.deepEqual([other("otherPylonsCpu").t, other("otherPylonsCpu").avg, other("otherPylonsCpu").max], [[0, minute], [6, 6], [10, 10]], "0 + 1 + 2 + 3, with each max");
+  assert.deepEqual([other("otherPylonsCpu").t, other("otherPylonsCpu").avg, other("otherPylonsCpu").max], [[0, minute], [6, 6], [6, 6]], "0 + 1 + 2 + 3, read together, and no band it cannot know");
   assert.deepEqual([other("otherPylonsResident").t, other("otherPylonsResident").avg], [[0, minute + 5_000], [4, 8]], "points in one bucket meet whatever their first sample's time");
+});
+
+test("pylons that ran one after the other in a bucket sum to their combined use over its reads, not to each one's average", () => {
+  const one = (key: string, t: number, v: number, n = 1) => ({ key, series: seriesOf(key)!, t: [t], min: [v], avg: [v], max: [v], n: [n] });
+  const busy = Array.from({ length: maxPylons }, (_, i) => one(`pylonCpu:pylon-th-${i}:th-${i}`, 0, 50, 2));
+  const { series } = foldPylons([one("cpus", 0, 8, 2), ...busy, one("pylonCpu:pylon-a:th-a", 0, 10), one("pylonCpu:pylon-b:th-b", 30 * minute, 10)], hour);
+  const other = series.find((s) => s.key === "otherPylonsCpu")!;
+  assert.deepEqual([other.t, other.min, other.avg, other.max, other.n], [[0], [10], [10], [10], [2]], "10% at each of the hour's two reads, not 20%");
 });

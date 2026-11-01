@@ -143,8 +143,10 @@ type Served = Omit<MetricSeries, "label">;
 
 /**
  * The series with only the `maxPylons` pylons of the highest CPU peak in the range kept as their own, and the rest
- * summed per bucket into `otherPylonsCpu` and `otherPylonsResident`, with the pylons summed. A bucket's sum takes each
- * pylon's min, average and max, so its band holds every pylon's together.
+ * summed into `otherPylonsCpu` and `otherPylonsResident`. A bucket's point is the pylons' combined use averaged over
+ * every read in it, a pylon that was not running counting 0, so pylons that ran one after the other are not added as
+ * if they ran together. Every read has `cpus`, so its count in a bucket is the bucket's reads. A combined min or max
+ * cannot be told from each pylon's, so the point claims none: its min and max are its average.
  */
 export function foldPylons(series: readonly Served[], bucketMs: number): { series: Served[]; otherPylons: string[] } {
   const peak = new Map<string, number>();
@@ -154,7 +156,9 @@ export function foldPylons(series: readonly Served[], bucketMs: number): { serie
   }
   if (peak.size <= maxPylons) return { series: [...series], otherPylons: [] };
   const kept = new Set([...peak].sort(([a, pa], [b, pb]) => pb - pa || (a < b ? -1 : 1)).slice(0, maxPylons).map(([id]) => id));
-  const sums = { pylonCpu: new Map<number, Bucket & { t: number }>(), pylonResident: new Map<number, Bucket & { t: number }>() };
+  const cpus = series.find((s) => s.key === "cpus");
+  const reads = new Map(cpus?.t.map((t, i) => [Math.floor(t / bucketMs), cpus.n[i]!]) ?? []);
+  const sums = { pylonCpu: new Map<number, { t: number; sum: number; n: number }>(), pylonResident: new Map<number, { t: number; sum: number; n: number }>() };
   const out: Served[] = [];
   for (const s of series) {
     const id = pylonOf(s.series);
@@ -163,13 +167,17 @@ export function foldPylons(series: readonly Served[], bucketMs: number): { serie
     s.t.forEach((t, i) => {
       const bucket = Math.floor(t / bucketMs);
       const was = sum.get(bucket);
-      sum.set(bucket, { t: Math.min(was?.t ?? t, t), min: (was?.min ?? 0) + s.min[i]!, sum: (was?.sum ?? 0) + s.avg[i]!, max: (was?.max ?? 0) + s.max[i]!, n: Math.max(was?.n ?? 0, s.n[i]!) });
+      sum.set(bucket, { t: Math.min(was?.t ?? t, t), sum: (was?.sum ?? 0) + s.avg[i]! * s.n[i]!, n: Math.max(was?.n ?? 0, s.n[i]!) });
     });
   }
   for (const [kind, sum] of [["otherPylonsCpu", sums.pylonCpu], ["otherPylonsResident", sums.pylonResident]] as const) {
     if (sum.size === 0) continue;
-    const points = [...sum.entries()].sort(([a], [b]) => a - b).map(([, p]) => p);
-    out.push({ key: kind, series: { kind }, t: points.map((p) => p.t), min: points.map((p) => p.min), avg: points.map((p) => p.sum), max: points.map((p) => p.max), n: points.map((p) => p.n) });
+    const points = [...sum.entries()].sort(([a], [b]) => a - b).map(([bucket, p]) => {
+      const n = Math.max(reads.get(bucket) ?? 0, p.n);
+      return { t: p.t, avg: p.sum / n, n };
+    });
+    const avg = points.map((p) => p.avg);
+    out.push({ key: kind, series: { kind }, t: points.map((p) => p.t), min: avg, avg, max: avg, n: points.map((p) => p.n) });
   }
   return { series: out.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0), otherPylons: [...peak.keys()].filter((id) => !kept.has(id)).sort() };
 }
