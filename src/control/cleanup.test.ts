@@ -163,7 +163,7 @@ test("an approved artifact the node no longer lists is not sent while a rule kee
   assert.deepEqual(asked(registry)[0]!.cleanup.outcomes[older], { state: "skipped", reason: "it is the current image" });
 });
 
-test("a set asked about before is asked again as a new open question once it recurs after another question", async (t) => {
+test("a kept set that recurs after another question is not asked again, the open question stays, and a new item asks under a new ID", async (t) => {
   const { registry, pass, observe } = setUp(t);
   observe([older, previous, current, newest.id]);
   await pass.poll();
@@ -176,11 +176,49 @@ test("a set asked about before is asked again as a new open question once it rec
   registry.setThreadStatus(thread.id, "deleted");
   addThread(registry, { firstBoot: { kind: "template", template: oldTemplate.id } });
   await pass.poll();
-  assert.deepEqual(keysOf(registry), [[older], [older]], "the open question about the template is withdrawn for a new one about the image");
+  assert.deepEqual(keysOf(registry), [[older], [oldTemplate.id]], "the image was kept, so nothing is asked and the open question stays");
+  pass.releases(testNode, inventory());
+  await pass.poll();
+  assert.deepEqual(keysOf(registry), [[older], [older, "1"]], "a new release joins, so the image is asked about with it, and the open question gives way");
   const [kept, again] = asked(registry);
   assert.notEqual(again!.id, kept!.id);
   assert.equal(kept!.answer!.option, "Keep", "the answered one keeps its answer");
   assert.deepEqual(registry.openNodeQuestions().map((q) => q.id), [again!.id]);
+});
+
+test("items the person kept are not asked again after a question about others came between, while the node was offline", async (t) => {
+  const { registry, pass, observe } = setUp(t);
   await pass.poll();
-  assert.equal(asked(registry).length, 2, "and it is not asked again");
+  assert.deepEqual(keysOf(registry), [[oldTemplate.id, older]]);
+  answer(registry, "Keep");
+  registry.apply({ record: "node", node: testNode, state: "offline", capacity: null });
+  pass.releases(testNode, inventory());
+  await pass.poll();
+  assert.equal(asked(registry).length, 1, "an offline node's images and templates are unknown, so nothing is asked");
+  observe([older, previous, current, oldTemplate.id, newest.id]);
+  await pass.poll();
+  assert.deepEqual(keysOf(registry), [[oldTemplate.id, older], [oldTemplate.id, older, "1"]], "the release joined, so the person is asked once");
+  answer(registry, "Keep");
+  pass.releases(testNode, inventory({}, ["0".repeat(40), r1, r2, r3]));
+  await pass.poll();
+  answer(registry, "Keep");
+  await pass.poll();
+  await pass.poll();
+  assert.equal(asked(registry).length, 3, "nothing kept is asked again on later passes");
+});
+
+test("once an item is deleted, a set equal to an older question's asks nothing on any later pass", async (t) => {
+  const { registry, pass, observe } = setUp(t);
+  observe([older, previous, current, newest.id]);
+  await pass.poll();
+  answer(registry, "Keep");
+  pass.releases(testNode, inventory());
+  await pass.poll();
+  assert.deepEqual(keysOf(registry), [[older], [older, "1"]]);
+  answer(registry, "Delete");
+  await pass.poll();
+  pass.releases(testNode, inventory({}, [r2, r3]), { [r1]: { state: "deleted", bytes: 1000 } });
+  for (let i = 0; i < 3; i++) await pass.poll();
+  assert.equal(asked(registry).length, 2, "the candidates are the first question's set again, which asks nothing");
+  assert.deepEqual(registry.openNodeQuestions(), []);
 });

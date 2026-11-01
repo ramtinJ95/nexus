@@ -87,9 +87,16 @@ export function artifactKept(node: NodeName, facts: NodeFacts, id: ImageId | Tem
   return isImageId(id) ? "a template or a template build on the node needs it" : "Nexus keeps it now";
 }
 
-/** Whether the candidates hold one the latest question did not ask about, which is when the person is asked again. */
-export const grew = (candidates: readonly Candidate[], latest: { cleanup: Cleanup } | undefined): boolean =>
-  candidates.some((c) => !latest?.cleanup.items.some((i) => itemKey(i) === itemKey(c)));
+/**
+ * Whether the candidates hold one no question of the node asked about, which is when the person is asked again. So a
+ * set the person kept is not asked again, even after a question about other items came between. An item a delete
+ * removed counts as asked too, since the pass after a delete may read the node before its observation does. One that
+ * comes back is in the next question something new opens.
+ */
+export function grew(candidates: readonly Candidate[], asked: readonly { cleanup: Cleanup }[]): boolean {
+  const known = new Set(asked.flatMap(({ cleanup }) => cleanup.items.map(itemKey)));
+  return candidates.some((c) => !known.has(itemKey(c)));
+}
 
 /** The items the person agreed to delete that no delete has reported on yet. */
 export const undeleted = (q: { cleanup: Cleanup; answer: { option: string } | null }): CleanupItem[] =>
