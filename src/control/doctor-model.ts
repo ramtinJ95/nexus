@@ -1,4 +1,4 @@
-/** What `nexus doctor` and the daily report say: one verdict per check, grouped by node and the control plane. */
+/** What `nexus doctor` and the health alerts say: one verdict per check, grouped by node and the control plane. */
 import type { NodeName } from "../ids.ts";
 
 export const statuses = ["ok", "warn", "fail"] as const;
@@ -18,15 +18,32 @@ export interface DoctorReport {
   status: Status;
   checks: readonly Check[];
 }
-/** A daily report as the registry keeps it. */
-export interface StoredReport extends DoctorReport { id: number }
-export interface ReportSummary { id: number; at: string; status: Status; counts: Readonly<Record<Status, number>> }
+/**
+ * A check's status changed, as two passes in a row confirmed it: `from` is what it was, and `text` what the pass that
+ * set `status` found. `seenAt` is when the person saw the problem on the Health page, null for one not seen yet.
+ */
+export type HealthChange = Check & { id: number; at: string; from: Status; seenAt: string | null };
+
+/** The health as `GET /v1/checks` serves it. */
+export interface HealthView {
+  /** When the latest pass ran, or null before this control plane's first. */
+  at: string | null;
+  /** That pass's checks, the control plane's first and then each node's. */
+  checks: readonly Check[];
+  /** For each check whose confirmed status is warn or fail, the change that made it so, oldest first. */
+  problems: readonly HealthChange[];
+  /** How many of those the person has not seen. */
+  unseen: number;
+}
 
 export const worst = (checks: readonly Pick<Check, "status">[]): Status =>
   statuses[Math.max(0, ...checks.map((c) => statuses.indexOf(c.status)))]!;
 
-export function summary(report: StoredReport): ReportSummary {
-  const counts = { ok: 0, warn: 0, fail: 0 };
-  for (const check of report.checks) counts[check.status]++;
-  return { id: report.id, at: report.at, status: report.status, counts };
+/** Which check a verdict is, across passes. */
+export const checkKey = (c: Pick<Check, "node" | "name">): string => JSON.stringify([c.node, c.name]);
+
+/** The health from the latest pass, or null before the first, and each check's latest change. */
+export function healthView(latest: DoctorReport | null, states: readonly HealthChange[]): HealthView {
+  const problems = states.filter((c) => c.status !== "ok");
+  return { at: latest?.at ?? null, checks: latest?.checks ?? [], problems, unseen: problems.filter((c) => c.seenAt === null).length };
 }

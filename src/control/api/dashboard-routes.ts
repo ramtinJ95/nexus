@@ -33,12 +33,13 @@ import { home, needsOf } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
 import { pipelinePage } from "../dashboard/pipeline-page.ts";
 import { nodePage } from "../dashboard/node-page.ts";
-import { reportPage } from "../dashboard/report-page.ts";
+import { healthPage } from "../dashboard/health-page.ts";
+import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
 
 /** The dashboard's pages, each a GET route. */
-export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; deployment?: DeploymentOptions | undefined }, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
+export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; deployment?: DeploymentOptions | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry, detail } = kit;
   const deploys = (r: Review) => options.reviews?.deploys(r) ?? false;
 
@@ -77,11 +78,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       return ok(usagePage(context(r.caller), Object.hasOwn(periods, period) ? period as Period : "7d", (r.query.get("project") || null) as ProjectId | null));
     }],
     ["GET", /^\/pipeline$/, (_, r) => ok(pipelinePage(context(r.caller)))],
-    ["GET", /^\/reports$/, (_, r) => ok(reportPage(context(r.caller), registry.latestReport()))],
-    ["GET", /^\/reports\/([^/]+)$/, (m, r) => {
-      const report = /^\d+$/.test(m[1]!) ? registry.report(Number(m[1])) : null;
-      return report === null ? { ...ok(notFound(context(r.caller), `No report ${m[1]!}. A report is kept 30 days.`)), status: 404 } : ok(reportPage(context(r.caller), report));
-    }],
+    ["GET", /^\/health$/, (_, r) => ok(healthPage(context(r.caller), options.health?.() ?? null))],
     ["GET", /^\/threads\/([^/]+)$/, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {

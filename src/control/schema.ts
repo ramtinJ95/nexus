@@ -267,4 +267,9 @@ export const migrations: readonly string[] = [
   // it. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS node_metrics (node TEXT NOT NULL, tier TEXT NOT NULL, at INTEGER NOT NULL, series TEXT NOT NULL,
      min REAL NOT NULL, sum REAL NOT NULL, max REAL NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (node, tier, at, series)) STRICT, WITHOUT ROWID;`,
+  // The daily reports become the changes of nexus doctor's checks: a row each time a check's status changes, whose
+  // record holds the change and when the person saw it. The daily reports, at most a day old and shown better by the
+  // node graphs, are dropped rather than converted, as no change can be read from one, and so is a record that does not
+  // parse. A change has no checks, so a registry rewound past this applies it again and keeps every change.
+  `DELETE FROM doctor_reports WHERE CASE WHEN json_valid(record) THEN json_extract(record, '$.checks') IS NOT NULL ELSE 1 END;`,
 ];

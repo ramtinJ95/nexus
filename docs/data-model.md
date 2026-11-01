@@ -297,6 +297,7 @@ past matching records they have not consumed.
 | `pull-request.error` | The thread's PR watch failed a read or a delivery, written when its `error` goes from none to set and not again while it stays set; `error`, the retry notice |
 | `pull-request.error-cleared` | The thread's PR watch read GitHub again after a failure, written when its `error` goes back to none |
 | `release.changed` | Desired release (`desired`) or changed component report |
+| `health.changed` | A change of a `nexus doctor` check's status that two passes in a row confirmed, with no thread; the `HealthChange`, as [the CLI's doctor](cli.md#doctor-0550) describes |
 | `review.changed` | A review started or changed phase or round; `review`, `reviewer`, `phase` and `round` |
 | `review.approval-carried` | The reviewer's approval carried to a head with the same change, such as a clean rebase; `review`, `repo`, `pr`, `from` and `to`, the two heads |
 | `review.waiver-carried` | The person's waiver carried to a head with the same change, which it lets land; `review`, `repo`, `pr`, `from`, `to` and `by` |

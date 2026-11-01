@@ -76,24 +76,15 @@ document.addEventListener("click", (event) => {
 
 const currentThread = () => /^\/threads\/([^/]+)$/.exec(location.pathname)?.[1] ?? null;
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
+// Loaded now, before the page's first poll, so it reads the newest change the page showed.
+const checks = import("./health.js");
 const notifications = coordinator((row) => {
-  const channel = notificationChannel(focused(), currentThread(), row.id, window.isSecureContext,
-    window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable");
-  const url = noticeUrl(row);
-  if (channel === "system") {
-    const notice = new Notification(row.title, { body: noticeText(row) });
-    notice.onclick = () => { window.focus(); location.assign(url); notice.close(); };
-  } else if (channel === "toast") {
-    const toast = el("div", { className: "attention-toast", role: "status" },
-      el("span", { textContent: `${row.title}: ${noticeText(row)}` }),
-      el("a", { href: url, textContent: "Open" }));
-    const dismiss = el("button", { textContent: "Dismiss", type: "button" });
-    dismiss.onclick = () => toast.remove();
-    toast.append(dismiss);
-    document.body.append(toast);
-    setTimeout(() => toast.remove(), 15000);
-  }
+  void checks.then((m) => m.notice(notificationChannel(focused(), currentThread(), row.id, window.isSecureContext,
+    window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable"), row.title, noticeText(row), noticeUrl(row)));
 });
+const health = (change) => void checks.then((m) => m.showHealth(change, notificationChannel));
+const caughtUp = (hand) => void checks.then((m) => m.caughtUp(hand));
+if (location.pathname === "/health") void checks.then((m) => m.markHealthSeen());
 const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
 if (window.isSecureContext && "Notification" in window) {
   permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };
@@ -104,5 +95,5 @@ if (window.isSecureContext && "Notification" in window) {
 document.querySelector("aside")?.append(permission);
 // After the button, which shortens the list it joins.
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-const { markSeen, askRows } = startRows({ api, notifications, currentThread, focused, activeTab: () => activeTab });
+const { markSeen, askRows } = startRows({ api, notifications, health, caughtUp, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);

@@ -113,6 +113,8 @@ export interface ApiOptions {
   usageBackfill?: UsageBackfillJob;
   /** Runs `nexus doctor`'s checks now. Without it, `GET /v1/doctor` answers 409. */
   doctor?: () => Promise<DoctorReport>;
+  /** The health passes' latest, null before the first. Without it, `GET /v1/checks` serves no checks. */
+  health?: () => DoctorReport | null;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
