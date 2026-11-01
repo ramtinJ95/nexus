@@ -43,8 +43,8 @@ export function html(strings: TemplateStringsArray, ...parts: Part[]): Html {
   return new Html(strings.reduce((out, s, i) => out + render(parts[i - 1]) + s));
 }
 
-/** The colour of a status dot. `work` is an agent mid-turn, `busy` a pylon changing phase. */
-export type Tone = "ok" | "work" | "busy" | "idle" | "bad" | "muted";
+/** The colour of a status dot. `work` is an agent mid-turn, `busy` a pylon changing phase, `reply` a reply the person has not read. */
+export type Tone = "ok" | "work" | "reply" | "busy" | "idle" | "bad" | "muted";
 export const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   running: ["running", "ok"], spawning: ["spawning", "busy"], pausing: ["pausing", "busy"], deleting: ["deleting", "busy"],
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],

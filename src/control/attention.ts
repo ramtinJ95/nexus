@@ -9,7 +9,7 @@ export const attentions = {
   decision: { label: "needs your decision", tone: "bad", needsPerson: true },
   parked: { label: "parked", tone: "bad", needsPerson: true },
   limited: { label: "stopped on its usage limit", tone: "bad", needsPerson: true },
-  reply: { label: "new reply", tone: "ok", needsPerson: true },
+  reply: { label: "new reply", tone: "reply", needsPerson: true },
   working: { label: "agent working", tone: "work", needsPerson: false },
   waiting: { label: "waiting for input", tone: "idle", needsPerson: true },
 } as const satisfies Record<NonNullable<Attention>, { label: string; tone: string; needsPerson: boolean }>;
