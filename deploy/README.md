@@ -328,7 +328,7 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 | Path | What it holds |
 | --- | --- |
 | `/etc/nexus/control.json` | The config. `src/control/main.ts` parses it. |
-| `/var/lib/nexus-control/registry.db` | The registry. |
+| `/var/lib/nexus-control/registry.db` | The registry. It also keeps each node's health samples for 31 days: about 6 MB per node read once a minute, and 9 MB for one whose page was open all month. |
 | `/var/lib/nexus-control/harness.sqlite` | The harness: every thread's conversation. |
 | `/var/lib/nexus-control/harness-credentials.json` | The harness's model login and installation ID. Mode 0600. |
 | `/opt/nexus/control-current` | The release the control plane runs, apart from the probe's link. |

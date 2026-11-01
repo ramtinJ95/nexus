@@ -17,6 +17,7 @@ import { usageStore } from "./usage-store.ts";
 import { releaseStore } from "./release-store.ts";
 import { reportStore } from "./report-store.ts";
 import { nodeStore } from "./node-store.ts";
+import { nodeMetricsStore } from "./node-metrics-store.ts";
 import { projectStore } from "./project-store.ts";
 import { imageStore } from "./image-store.ts";
 import { openDb } from "./db.ts";
@@ -54,6 +55,7 @@ export function openRegistry(path: string, clock = Date.now) {
     ...releaseStore(kernel, appendEvent),
     ...reportStore(kernel),
     ...nodes,
+    ...nodeMetricsStore(kernel),
     ...projectStore(kernel),
     ...pipelineStore(kernel),
     ...queue,

@@ -36,6 +36,15 @@ test("a language's grammar is a chunk of its own, which a page reaches only by i
   assert.ok(!reached(diff[0]!, ["import-statement"]).has(grammar[0]!), "opening a diff does not load the grammar for every file");
 });
 
+test("uPlot is in the node graphs' chunk, which a page reaches only by importing it when it has graphs", () => {
+  const holding = (suffix: string) => Object.keys(outputs).filter((path) => Object.keys(outputs[path]!.inputs).some((input) => input.endsWith(suffix)));
+  const [graphs, ...more] = holding("src/control/dashboard/node-graphs.js");
+  assert.deepEqual([graphs !== undefined, more], [true, []], "one chunk holds the graphs");
+  assert.ok(holding("uplot/dist/uPlot.esm.js").every((path) => reached(graphs!, ["import-statement"]).has(path)), "uPlot loads with the graphs");
+  assert.ok(!page.has(graphs!) && reached(entry, ["import-statement", "dynamic-import"]).has(graphs!), "a page loads the graphs only on demand");
+  assert.deepEqual([...page].filter((path) => holding("uplot/dist/uPlot.esm.js").includes(path)), []);
+});
+
 test("every package bundled into the client is named in THIRD_PARTY_NOTICES.md with its version", async () => {
   const notices = await readFile(join(root, "THIRD_PARTY_NOTICES.md"), "utf8");
   const packages = new Set(inputsOf(Object.keys(outputs)).flatMap((input) => {

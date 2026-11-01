@@ -47,6 +47,9 @@ import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";
 import { dailyReports, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { backupStatusFile, readBackupStatus } from "./backup-status.ts";
+import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
+import { drainNodeMetrics } from "./node-metrics-store.ts";
+import { healthSampling } from "./health-sampling.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
@@ -140,13 +143,15 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }
   // It grows when a node joins, and everything handed it reads it when it acts.
   const probeMap = new Map<NodeName, ProbeClient>();
+  const log = (message: string) => console.error(message);
+  /** Every health read, the node page's, the API's and a judgment's, goes through the client, so each is recorded here. */
   const connect = (node: NodeAddress) => {
-    const client = probe?.(node) ?? connectProbe(node.name, node.tailnetHost, node.tailnetNodeId, { whois });
+    const client = recordingHealth(probe?.(node) ?? connectProbe(node.name, node.tailnetHost, node.tailnetNodeId, { whois }),
+      (h) => registry.recordHealthSample(node.name, sampleOf(h, Date.now(), (p) => registry.pylon(p)?.thread ?? null)), log);
     probeMap.set(node.name, client);
     return client;
   };
   for (const node of [...config.nodes, ...registry.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
-  const log = (message: string) => console.error(message);
   const timers: NodeJS.Timeout[] = [];
   /** Runs the pass now and every `ms` after. The API's server keeps the process alive, so no timer does. */
   const every = (ms: number, pass: () => unknown) => {
@@ -246,6 +251,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   });
   const reports = dailyReports({ registry, run: doctor, startedAt });
   every(5 * 60_000, () => reports.poll());
+  const sampling = healthSampling({ registry, probes: probeMap, log });
+  every(backgroundReadMs, () => sampling.poll());
+  every(60_000, () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)));
   const api = await startApi({
     ...(config.https ? { https: { port: dashboardPort, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
@@ -279,7 +287,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       for (const timer of timers) clearInterval(timer);
-      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, reports, api, backfill, usage, harness, loop, images]) await service?.close();
+      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, reports, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };

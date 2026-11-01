@@ -262,4 +262,9 @@ export const migrations: readonly string[] = [
   // Each daily report of nexus doctor's checks, kept 30 days. It touches nothing an earlier migration made, so a registry
   // rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS doctor_reports (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, record TEXT NOT NULL) STRICT;`,
+  // Each node's health samples, kept whole in tier raw and as buckets in the coarser tiers, by the bucket's start. The
+  // key leads with the node, the tier and the time, so a node's range and pruning a node's tier are each one range of
+  // it. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS node_metrics (node TEXT NOT NULL, tier TEXT NOT NULL, at INTEGER NOT NULL, series TEXT NOT NULL,
+     min REAL NOT NULL, sum REAL NOT NULL, max REAL NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (node, tier, at, series)) STRICT, WITHOUT ROWID;`,
 ];
