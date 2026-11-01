@@ -5,7 +5,7 @@ import type { Attention } from "../attention.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import type { Review } from "../review-model.ts";
-import type { AnswerRefusal, Question } from "../questions.ts";
+import type { AnswerRefusal, NodeQuestion, Question } from "../questions.ts";
 import type { QueuedThread } from "../queue.ts";
 
 export type LandRefusal = "no review loop" | "not a deployer";
@@ -26,11 +26,12 @@ export interface Context {
 /**
  * One thing that waits on the person, for a card in the inbox: a review held for them or one they can land, a question
  * of the thread's, a builder its nudges did not move, or the thread itself, stopped where only they move it. The first
- * three are each a source of the `decision` attention, and the card is the thread page's own. `since` is when it began
- * to wait, so far as the records say.
+ * three are each a source of the `decision` attention, and the card is the thread page's own. A node's cleanup
+ * question waits on them too, with its node page's card. `since` is when it began to wait, so far as the records say.
  */
-export type Need =
+export type ThreadNeed =
   | { kind: "review"; d: ThreadDetail; since: number }
   | { kind: "question"; d: ThreadDetail; question: Question; since: number }
   | { kind: "nudge"; d: ThreadDetail; since: number }
   | { kind: "thread"; d: ThreadDetail; attention: Exclude<Attention, "reply" | "working" | "decision" | null>; since: number };
+export type Need = ThreadNeed | { kind: "cleanup"; question: NodeQuestion; since: number };

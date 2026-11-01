@@ -3,10 +3,11 @@
  */
 import { z } from "zod";
 import { HttpError } from "../http-error.ts";
-import { canDeploy, commitSchema, releaseView, reportSchema, resolveMain, type DeploymentOptions } from "../releases.ts";
+import { canDeploy, commitSchema, releaseView, releasesSchema, reportSchema, resolveMain, type DeploymentOptions } from "../releases.ts";
+import type { CleanupPass } from "../cleanup.ts";
 import { ok, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 
-export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined }): readonly RouteEntry[] {
+export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined; cleanup?: CleanupPass | undefined }): readonly RouteEntry[] {
   const { registry, agents, draining, gate } = kit;
 
   async function turnsRunning(): Promise<boolean> {
@@ -39,6 +40,12 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
       if (report.role === "control" && r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node reports control health");
       registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
       return ok({ ok: true });
+    }],
+    ["POST", /^\/v1\/deployer\/releases$/, { open: "admit lets only a reporter reach a deployer route" }, async (_, r) => {
+      const node = registry.nodeByTailnetId(r.caller)!;
+      const { inventory, outcomes } = parse(releasesSchema, await r.body());
+      if (options.cleanup === undefined) throw new HttpError(409, "this control plane runs no cleanup, so it records no releases");
+      return ok({ delete: options.cleanup.releases(node.name, inventory, outcomes) });
     }],
     ["POST", /^\/v1\/deployer\/drain$/, { open: "admit lets only a reporter reach a deployer route, and the route only the control node" }, async (_, r) => {
       if (r.caller !== options.deployment?.self) throw new HttpError(403, "only the control node drains");

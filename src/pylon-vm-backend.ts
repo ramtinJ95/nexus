@@ -36,6 +36,7 @@ import { bridgePylonHeader, hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { listenHostBridge, type HostBridge } from "./host-bridge.ts";
 import { asUser, controllerLog, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-vm/pylon-guest.ts";
 import { readJson, saveJson } from "./json-file.ts";
+import { diskBytes } from "./disk-space.ts";
 import { alive, readIdentity } from "./pylon-vm/identity.ts";
 import { directory, existsError, privateDirectory, readRecord } from "./pylon-vm/storage.ts";
 
@@ -503,6 +504,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         stream.destroy(); // a copy refused before it was read still holds its connection to the peer
       }
     },
+    bytes: async (id) => existsSync(store.path(id)) ? diskBytes(store.path(id)) : null,
     async drop(id) {
       if ((using.get(id) ?? 0) > 0) throw new JobFailure("invalid", `${id} is still needed by a pylon or template that is being created or copied in`);
       dropping.add(id);

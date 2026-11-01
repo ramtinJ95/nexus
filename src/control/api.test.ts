@@ -651,6 +651,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "PATCH ^\\/v1\\/projects\\/([^/]+)$ person: edit a project",
     "POST ^\\/v1\\/checks\\/seen$ open: what the person has seen changes no check",
     "POST ^\\/v1\\/deployer\\/drain$ open: admit lets only a reporter reach a deployer route, and the route only the control node",
+    "POST ^\\/v1\\/deployer\\/releases$ open: admit lets only a reporter reach a deployer route",
     "POST ^\\/v1\\/deployer\\/report$ open: admit lets only a reporter reach a deployer route",
     "POST ^\\/v1\\/images$ open: recording an image boots nothing until a deployer rolls it out",
     "POST ^\\/v1\\/images\\/build$ open: deployers only, which imageRollout checks",

@@ -3,8 +3,10 @@
 # which source it as root.
 #
 # Each distinct source tree becomes /opt/nexus/releases/<content hash>, root-owned. A release is never changed
-# or removed in place, because a pylon controller keeps running the release it started from after the probe
-# moves on. Each service has its own link to the release it runs, so installing one never moves the other.
+# in place, and nothing here removes one, because a pylon controller keeps running the release it started from
+# after the probe moves on. The deployer removes one only once the person agrees and nothing runs it
+# (src/deploy/release-cleanup.ts). Each service has its own link to the release it runs, so installing one never
+# moves the other.
 
 prefix=/opt/nexus
 etc=/etc/nexus

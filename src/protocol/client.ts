@@ -15,6 +15,7 @@ import { parseProbeEvent, type DiskFact, type ProbeEvent } from "./observations.
 import { parseCommandResult, type CommandResult, type PylonCommand } from "./commands.ts";
 import { clientByteStream, streamPath, streamProtocol, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
+import { artifactUsageSchema, dropReplySchema, type ArtifactUsage, type DropReply, type DropRequest } from "./cleanup.ts";
 import { probePort } from "./routes.ts";
 import { isProbeError, probeError, ProbeHttpError, text } from "./http.ts";
 
@@ -40,6 +41,10 @@ export interface ProbeClient {
   putPeers(peers: readonly TailnetNodeId[]): Promise<void>;
   /** GET /v1/node-health: the node's host as the probe reads it now. It answers after sampling its pylons' CPU for a second. */
   health(): Promise<NodeHealth>;
+  /** GET /v1/cleanup: the bytes each image and template in the node's artifact directory takes. */
+  artifactUsage?(): Promise<ArtifactUsage>;
+  /** POST /v1/cleanup: deletes each artifact in order, unless the node finds it in use, and answers what each delete did. */
+  dropArtifacts?(ids: readonly PortableArtifactId[]): Promise<DropReply>;
 }
 
 /**
@@ -66,6 +71,8 @@ const nodeHealthSchema = z.looseObject({
 }) satisfies z.ZodType<NodeHealth>;
 
 const requestTimeoutMs = 10_000;
+/** Each artifact's drop is a rename and a removal, which a large one takes seconds for. */
+const dropTimeoutMs = 120_000;
 /** A command answers only when it is done: an exec of up to 60 s, or a session open that waits for its agent. */
 const commandTimeoutMs = 90_000;
 
@@ -168,6 +175,16 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const path = `/v1/secrets/${encodeURIComponent(name)}`;
       const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
       expectStatus("PUT", path, res, 204);
+    },
+    async artifactUsage() {
+      const res = await call("GET", "/v1/cleanup");
+      expectStatus("GET", "/v1/cleanup", res, 200);
+      return parseJson(artifactUsageSchema, res.body, "artifact usage");
+    },
+    async dropArtifacts(ids) {
+      const res = await call("POST", "/v1/cleanup", JSON.stringify({ drop: ids } satisfies DropRequest), dropTimeoutMs);
+      expectStatus("POST", "/v1/cleanup", res, 200);
+      return parseJson(dropReplySchema, res.body, "cleanup");
     },
     async putPeers(peers) {
       const res = await call("PUT", "/v1/peers", JSON.stringify(peers));

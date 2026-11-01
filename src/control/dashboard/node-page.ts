@@ -1,4 +1,7 @@
-/** Renders a node's page: what its probe reads of its host's health and its pylon processes, and graphs of its history. */
+/**
+ * Renders a node's page: the cleanup the person is asked to confirm, what its probe reads of its host's health and its
+ * pylon processes, and graphs of its history.
+ */
 import type { NodeName, ThreadId } from "../../ids.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { lowDisk } from "../../disk-space.ts";
@@ -8,6 +11,7 @@ import { seriesLabel, seriesOf } from "../node-metrics.ts";
 import { charts, ranges } from "./graph-data.ts";
 import { Html, html, menu } from "./view.ts";
 import type { Context } from "./context.ts";
+import { cleanupCard } from "./cards.ts";
 import { layout } from "./shell.ts";
 
 const unknown = html`<span class="dim">unknown</span>`;
@@ -37,7 +41,17 @@ const graphs = (name: NodeName) => html`<section id="node-graphs" class="graphs"
 <div class="graph-plot"><p class="empty graph-empty" hidden></p></div><div class="graph-legend"></div></figure>`)}</div>
 </section>`;
 
-/** What the node's probe reads of its host when the page loads. Nothing here acts on the node. */
+/** The open cleanup question, and the newest answered one with what its deletes did. */
+function cleanup(c: Context, name: NodeName): Html {
+  const asked = c.registry.nodeQuestions(name);
+  const shown = [asked.findLast((q) => q.answer === null), asked.findLast((q) => q.answer !== null)].filter((q) => q !== undefined);
+  return html`<section aria-labelledby="node-cleanup-h"><div class="ov-head"><h2 id="node-cleanup-h">Cleanup</h2></div>
+<p id="action-error" class="error" role="alert" hidden></p>
+${shown.length === 0 ? html`<p class="empty">Nothing on this node waits to be deleted.</p>` : html`<div class="cleanups">${shown.map((q) => cleanupCard(c, q))}</div>`}
+</section>`;
+}
+
+/** What the node's probe reads of its host when the page loads, and its cleanup, which acts on the node only once the person answers. */
 export function nodePage(c: Context, name: NodeName, health: NodeHealth | Error): Html {
   const pylonOf = new Map(c.registry.pylonsOn(name).map((p) => [p.pylonId, p.thread]));
   const reading = html`<section aria-labelledby="node-health-h"><div class="ov-head"><h2 id="node-health-h">Health</h2></div>
@@ -64,7 +78,7 @@ ${health.pylons === null ? html`<p class="empty">This node's backend does not sa
   return layout(c, {
     title: `Node ${name}`,
     main: html`<header class="bar">${menu}<div class="crumb"><h1>${name}</h1></div></header>
-<div class="scroll"><div class="page"><div class="node-live" id="node-health" data-live>
+<div class="scroll"><div class="page"><div class="node-live" id="node-cleanup" data-live>${cleanup(c, name)}</div><div class="node-live" id="node-health" data-live>
 ${reading}
 ${pylons}
 </div>

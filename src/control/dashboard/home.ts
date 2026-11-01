@@ -7,9 +7,9 @@ import type { Thread } from "../thread-store.ts";
 import { cannotLand, type Review } from "../review-model.ts";
 import { heldBy } from "../policy.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
-import type { Context, Need } from "./context.ts";
+import type { Context, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
-import { judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
+import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
 
 /** Every open thread with what its pylon is asked to be and is, for the desk and for the phone's thread list. */
@@ -64,20 +64,22 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
 }
 
 /**
- * What waits on the person in the open threads, oldest first, so each card keeps its place while the person works down
- * the list and the one that has waited longest is first. Each source of a thread's `decision` gets its card, and any
- * other attention that needs the person one for the thread. A new reply does not wait on the person, so it has none,
- * but it outranks a dialog in the terminal, which the session's own state says waits.
+ * What waits on the person in the open threads and on the nodes, oldest first, so each card keeps its place while the
+ * person works down the list and the one that has waited longest is first. Each source of a thread's `decision` gets
+ * its card, and any other attention that needs the person one for the thread. A new reply does not wait on the person,
+ * so it has none, but it outranks a dialog in the terminal, which the session's own state says waits. Each node's open
+ * cleanup question gets its card too.
  */
 export function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail: (thread: Thread) => ThreadDetail): Need[] {
-  return c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): Need[] => {
+  const cleanups = c.registry.openNodeQuestions().map((question): Need => ({ kind: "cleanup", question, since: question.askedAt }));
+  return [...cleanups, ...c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): ThreadNeed[] => {
     const { attention } = c.row(t);
     const review = c.registry.review(t.id);
     const holds = review !== null && review.phase.kind === "approved" && heldBy(review).length > 0;
     if (!holds && t.sessionWaiting !== true && (attention === "reply" || !needsPerson(attention))) return [];
     const d = detail(t);
     const nudged = c.registry.nudge(t.id);
-    const needs: Need[] = [
+    const needs: ThreadNeed[] = [
       ...d.review?.phase.kind === "needs-person" || (holds && cannotLand(d.review!, d.thread, prOf(d)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
       ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
       ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
@@ -85,7 +87,7 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail
     const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
     if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
     return needs;
-  }).sort((a, b) => a.since - b.since);
+  })].sort((a, b) => a.since - b.since);
 }
 
 /**
@@ -98,13 +100,20 @@ function heldSince(registry: Registry, r: Review): number {
   return changes[at + 1]?.time ?? r.since;
 }
 
-const needId = (n: Need) => `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
+const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}` : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
 
 /** The inbox's cards, each the card its thread's page shows where there is one, under a line that links the thread. */
 function needsList(c: Context): Html {
   const needs = c.needs();
   return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
 ${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
+  if (n.kind === "cleanup") {
+    const { node } = n.question;
+    return html`<article class="need need-cleanup" id="${needId(n)}" data-node="${node}" tabindex="-1" aria-label="Cleanup: ${node}">
+<div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
+${cleanupCard(c, n.question)}
+</article>`;
+  }
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
   return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
@@ -115,7 +124,7 @@ ${body}
 }
 
 /** What the card is, and what it shows: a review, question or nudge as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
-function needCard(c: Context, n: Need): [what: string, body: Html] {
+function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
   const { d } = n;
   const t = d.thread;
   const button = (action: string, label: string) => html`<button type="button" class="btn btn-xs" data-action="${action}" data-thread="${t.id}">${label}</button>`;

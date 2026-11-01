@@ -135,6 +135,8 @@ export interface ArtifactStore {
   import(manifest: ArtifactManifest, stream: Readable, signal: AbortSignal): Promise<void>;
   /** Refuses while a VM, template or checkpoint on this node still depends on it. Checkpoints are not droppable. */
   drop(id: PortableArtifactId): Promise<void>;
+  /** The bytes its files take on disk, or null for one this backend holds none of or never drops. Omitted: it sizes none. */
+  bytes?(id: PortableArtifactId): Promise<number | null>;
 }
 
 /** Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env. */

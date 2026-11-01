@@ -4,7 +4,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { planDeploy, quarantined, type Attempt, type ReleaseHealth } from "./plan.ts";
 import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "./model.ts";
-import { jsonRequest, urlHost } from "./http.ts";
+import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
+import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois } from "../tailscale.ts";
@@ -43,9 +44,23 @@ export async function runWorker(check = false): Promise<void> {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
   await reconcileRoles(roles, config, api);
+  if (roles.includes("probe")) await cleanReleases(prefix, api).catch((error: unknown) => {
+    if (!(error instanceof DeployHttpError && error.status === 404)) console.error(`release cleanup: ${String(error)}`);
+  });
 }
 
 class WaitingForControl extends Error {}
+
+/**
+ * Tells the control plane which releases the node holds, and deletes those the person agreed to delete, then reports
+ * what each delete did. A control plane from before cleanup has no such route, and its 404 asks nothing.
+ */
+export async function cleanReleases(prefix: string, api: Api, proc = "/proc"): Promise<void> {
+  const asked = await api("releases", { inventory: await readReleases(prefix, proc) }) as { delete: string[] };
+  // Run with nothing to delete too, so what a delete a crash cut short set aside goes on the next poll.
+  const outcomes = await deleteReleases(prefix, asked.delete, proc);
+  if (asked.delete.length > 0) await api("releases", { inventory: await readReleases(prefix, proc), outcomes });
+}
 
 type Api = (path: string, body?: unknown) => Promise<any>;
 const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged };

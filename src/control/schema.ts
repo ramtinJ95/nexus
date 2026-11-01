@@ -272,4 +272,17 @@ export const migrations: readonly string[] = [
   // node graphs, are dropped rather than converted, as no change can be read from one, and so is a record that does not
   // parse. A change has no checks, so a registry rewound past this applies it again and keeps every change.
   `DELETE FROM doctor_reports WHERE CASE WHEN json_valid(record) THEN json_extract(record, '$.checks') IS NOT NULL ELSE 1 END;`,
+  // A question's subject is a thread or a node, so its thread may be null. SQLite cannot drop NOT NULL from a column,
+  // so the table is made again and every row copied into it as it was, rowid included, which keeps the order of
+  // questions asked in one millisecond. Every row names a thread, which the old table's foreign key already checked.
+  `CREATE TABLE questions_by_subject (
+     id TEXT PRIMARY KEY,
+     thread TEXT REFERENCES threads (id),
+     node TEXT REFERENCES nodes (name),
+     record TEXT NOT NULL,
+     CHECK ((thread IS NULL) <> (node IS NULL))
+   ) STRICT;
+   INSERT INTO questions_by_subject (rowid, id, thread, record) SELECT rowid, id, thread, record FROM questions;
+   DROP TABLE questions;
+   ALTER TABLE questions_by_subject RENAME TO questions;`,
 ];

@@ -25,6 +25,7 @@ export const routeAuth = {
   "/v1/secrets": "control-plane",
   "/v1/peers": "control-plane",
   "/v1/node-health": "control-plane",
+  "/v1/cleanup": "control-plane",
   "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
 } as const satisfies Record<string, CallerRole>;
 

@@ -11,6 +11,7 @@
  * setup is the project's preSetup, run as root in the build container.
  */
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -26,6 +27,7 @@ import type { OverlayFile } from "./spawn.ts";
 import { type CheckpointId, type ImageId, isImageId, isTemplateId, type PortableArtifactId, type PylonId, type TemplateId } from "./ids.ts";
 import type { PausedSession } from "./protocol/observations.ts";
 import { publicUrls } from "./public-urls.ts";
+import { diskBytes } from "./disk-space.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "./session-wake.ts";
 import { pausedSessionsIn, sessionsFile } from "./sessions.ts";
 
@@ -242,6 +244,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       templateId(manifest.id);
       return templates().import(manifest, stream, signal);
     },
+    bytes: async (id) => store !== null && isTemplateId(id) && existsSync(store.path(id)) ? diskBytes(store.path(id)) : null,
     // Pylons booted from the template keep its layers, so nothing on the node depends on its tag.
     async drop(id) {
       const template = templateId(id);

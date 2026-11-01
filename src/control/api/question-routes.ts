@@ -1,9 +1,10 @@
 /**
- * Answering a thread's questions, a Claude worker's AskUserQuestion included.
+ * Answering the questions about a thread, a Claude worker's AskUserQuestion included, and those about a node.
  */
 import { z } from "zod";
 import type { Pipeline } from "../pipeline.ts";
 import type { Planning } from "../planning.ts";
+import type { CleanupPass } from "../cleanup.ts";
 import type { TailnetNodeId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
@@ -18,7 +19,7 @@ const answerRefusals: Record<AnswerRefusal, string> = {
   "not a deployer": "its answer may deploy, so only deployers may",
 };
 
-export function questionRoutes(kit: ApiKit, options: { planning?: Planning | null | undefined; pipeline?: Pipeline | null | undefined }): readonly RouteEntry[] {
+export function questionRoutes(kit: ApiKit, options: { planning?: Planning | null | undefined; pipeline?: Pipeline | null | undefined; cleanup?: CleanupPass | undefined }): readonly RouteEntry[] {
   const { refusalOf, execInPylon, registry, claude } = kit;
 
   /**
@@ -77,6 +78,8 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
       const answered = registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() }, options.planning?.answered);
       if (answered.answer!.option !== option) throw answeredConflict(answered);
       if (answered.proposal !== undefined) await options.pipeline?.poll();
+      // The deletes take as long as the node's disk does, so the answer does not wait for them.
+      if (answered.cleanup !== undefined) void options.cleanup?.poll();
       return ok(answered);
     }],
   ];
