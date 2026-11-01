@@ -23,7 +23,7 @@ test("a node's metrics are labelled for a person: a plain series by name, a sens
   const { status, body } = await s.call("GET", `/v1/nodes/${node}/metrics?from=${at - hour}&to=${at + 1}`);
   assert.equal(status, 200);
   const metrics = body as NodeMetrics;
-  assert.deepEqual([metrics.node, metrics.from, metrics.to, metrics.tier, metrics.bucketMs], [node, at - hour, at + 1, "raw", 4_000]);
+  assert.deepEqual([metrics.node, metrics.from, metrics.to, metrics.tier, metrics.bucketMs, metrics.sampledAt], [node, at - hour, at + 1, "raw", 4_000, at]);
   assert.deepEqual(Object.fromEntries(metrics.series.map((m) => [m.key, m.label])), {
     cpus: "CPUs", diskFree: "Disk free", diskTotal: "Disk total", load1: "1-minute load", load15: "15-minute load", load5: "5-minute load",
     memAvailable: "Memory available", memTotal: "Memory total", swapTotal: "Swap total", swapUsed: "Swap used",
@@ -50,7 +50,7 @@ test("only a deployer reads a node's metrics, of a node that exists, over a rang
   const to = Date.now();
   const path = (query: string, name: string = node) => `/v1/nodes/${name}/metrics?${query}`;
   const refused = (error: string) => ({ status: 400, body: { error } });
-  assert.deepEqual(await s.call("GET", path(`from=${to - hour}&to=${to}`)), { status: 200, body: { node, from: to - hour, to, tier: "raw", bucketMs: 4_000, series: [] } });
+  assert.deepEqual(await s.call("GET", path(`from=${to - hour}&to=${to}`)), { status: 200, body: { node, from: to - hour, to, tier: "raw", bucketMs: 4_000, sampledAt: null, series: [] } });
   assert.deepEqual(await s.call("GET", path("")), refused("from must be a whole number of milliseconds since the epoch"));
   for (const bad of ["from=1.5", "from=-1", "from=soon", `from=1&to=${to}x`]) assert.equal((await s.call("GET", path(bad))).status, 400, bad);
   assert.deepEqual(await s.call("GET", path(`from=${to}&to=${to}`)), refused("from must be before to"));
@@ -64,4 +64,17 @@ test("only a deployer reads a node's metrics, of a node that exists, over a rang
   assert.equal((await s.call("GET", path(`from=${to - hour}`))).status, 403, "the control node is never a deployer, though listed");
   const off = await testApi(t);
   assert.equal((await off.call("GET", path(`from=${to - hour}`))).status, 403, "with no deployers configured, nobody reads it");
+});
+
+test("a node's metrics name the newest sample their points hold, even from a bucketed tier, and none before the node was read", async (t) => {
+  const s = await testApi(t, { deployment });
+  const now = Date.now();
+  const empty = (await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now}`)).body as NodeMetrics;
+  assert.equal(empty.sampledAt, null);
+  const health: NodeHealth = { node, readAt: "2027-01-01T00:00:00.000Z", cpus: 4, load: null, memory: null, disk: { path: "/", totalGiB: 20, freeGiB: 10 }, temperatures: null, pylons: null };
+  for (const ago of [70_000, 40_000, 10_000]) s.registry.recordHealthSample(node, sampleOf(health, now - ago, () => null));
+  const served = (await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now}`)).body as NodeMetrics;
+  assert.equal(served.tier, "1m");
+  assert.equal(served.sampledAt, now - 10_000, "a bucket's time is its first sample, so the newest sample is named apart");
+  assert.equal(((await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now - 20_000}`)).body as NodeMetrics).sampledAt, now - 40_000, "only samples up to the range's end count");
 });

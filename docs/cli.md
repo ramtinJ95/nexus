@@ -1354,6 +1354,7 @@ interface NodeMetrics {
   to: number;
   tier: "raw" | "1m" | "5m" | "1h";  // the tier the range is served from
   bucketMs: number;                  // each point's width; a point starts at a multiple of it
+  sampledAt: number | null;          // the newest sample the points hold, null when none
   series: MetricSeries[];            // by key
 }
 interface MetricSeries {

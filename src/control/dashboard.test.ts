@@ -14,6 +14,7 @@ import type { AgentCall } from "../agent-usage.ts";
 import type { ImageId, JobId, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 import type { NodeHealth } from "../protocol/client.ts";
+import { recordingHealth, sampleOf } from "./node-metrics.ts";
 import { defaultProjectResources } from "./project.ts";
 import { githubTokenGrant } from "../secret-grants.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
@@ -2278,14 +2279,17 @@ test("a node's page shows its health as its probe reads it, unknown where the ho
   assert.equal((await s.call("GET", "/nodes/nowhere")).status, 404);
 });
 
-test("a node's page frames its graphs outside the live region, with a range picker, a figure per chart and the read as a sample, even when the read fails", async (t) => {
+test("a node's page frames its graphs outside the live region, with a range picker, a figure per chart and the sample the registry recorded of the read, even when the read fails", async (t) => {
   let health: NodeHealth | Error = {
     node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },
     memory: { totalGiB: 62.8, availableGiB: 40.25, swapTotalGiB: 8, swapFreeGiB: 6 }, disk: { path: "/var/lib/nexus", totalGiB: 457, freeGiB: 180.5 },
     temperatures: [{ sensor: "Composite", celsius: 41 }, { sensor: "Composite", celsius: 39.5 }], pylons: [],
   };
-  const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => { if (health instanceof Error) throw health; return health; } };
+  let record = (_: NodeHealth) => {};
+  // As main.ts wraps every probe client.
+  const probe = recordingHealth({ command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => { if (health instanceof Error) throw health; return health; } }, (h) => record(h), () => {});
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
+  record = (h) => s.registry.recordHealthSample(node, sampleOf(h, Date.now(), (p) => s.registry.pylon(p)?.thread ?? null));
   const started = await s.start("acme", "Busy thread");
   health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.5, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
   const before = Date.now();
@@ -2300,6 +2304,7 @@ test("a node's page frames its graphs outside the live region, with a range pick
     ["Load per CPU", "Load against CPUs", "Memory", "Swap", "Disk free", "Temperatures", "Pylon CPU", "Pylon memory"]);
   const sample = JSON.parse(textOf(/data-sample="([^"]*)"/.exec(region)![1]!)) as { at: number; values: Record<string, number>; labels: Record<string, string> };
   assert.ok(sample.at >= before && sample.at <= Date.now(), "the sample is timed by the control plane's clock");
+  assert.deepEqual({ at: sample.at, values: sample.values }, s.registry.latestHealthSample(node), "the page carries what the registry recorded");
   const busy = `${started.pylonId}:${started.id}`;
   assert.deepEqual(sample.values, {
     cpus: 16, diskTotal: 457, diskFree: 180.5, load1: 2.5, load5: 1.75, load15: 1, memTotal: 62.8, memAvailable: 40.25, swapTotal: 8, swapUsed: 2,
@@ -2307,6 +2312,8 @@ test("a node's page frames its graphs outside the live region, with a range pick
     [`pylonCpu:${busy}`]: 112.5, [`pylonResident:${busy}`]: 6.25, "pylonCpu:pylon-orphan:": 0, "pylonResident:pylon-orphan:": 0.1,
   });
   assert.deepEqual(sample.labels, { [`pylonCpu:${busy}`]: "Busy thread", [`pylonResident:${busy}`]: "Busy thread", "pylonCpu:pylon-orphan:": "pylon-orphan", "pylonResident:pylon-orphan:": "pylon-orphan" });
+  const soon = (await s.call("GET", `/nodes/${node}`)).text;
+  assert.equal(JSON.parse(textOf(/data-sample="([^"]*)"/.exec(soon)![1]!)).at, sample.at, "a read too soon after the last to be recorded carries the recorded one, which the graphs already hold");
   health = new Error("the probe did not answer");
   const failed = (await s.call("GET", `/nodes/${node}`)).text;
   assert.match(failed, /<section id="node-graphs"/, "history still shows when this read fails");

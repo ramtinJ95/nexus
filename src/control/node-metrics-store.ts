@@ -6,12 +6,14 @@ import type { Db } from "./db.ts";
 import { minSampleGapMs, seriesOf, servingOf, tiers, type HealthSample, type MetricSeries, type TierName } from "./node-metrics.ts";
 
 /** A node's series over a range, as the store serves them, before the API labels them. */
-export interface StoredMetrics { tier: TierName; bucketMs: number; series: Omit<MetricSeries, "label">[] }
+export interface StoredMetrics { tier: TierName; bucketMs: number; sampledAt: number | null; series: Omit<MetricSeries, "label">[] }
 
 export function nodeMetricsStore(db: Db) {
   const { transaction, sql } = db;
   /** Each node's newest recorded sample, read from the registry the first time the node records one. */
   const lastAt = new Map<string, number>();
+  /** Each node's newest sample this process recorded, which the node page carries so its graphs append what the registry holds. */
+  const latest = new Map<string, HealthSample>();
 
   return {
     /** Records the sample in every tier, or nothing when it is under `minSampleGapMs` after the node's last. True when it recorded. */
@@ -26,9 +28,11 @@ export function nodeMetricsStore(db: Db) {
           for (const [key, value] of Object.entries(sample.values)) add.run(tier.name, at, node, key, value, value, value);
         }
         lastAt.set(node, sample.at);
+        latest.set(node, sample);
         return true;
       });
     },
+    latestHealthSample: (node: string): HealthSample | null => latest.get(node) ?? null,
     /** The node's series from `from` to `to`, from the tier `servingOf` names, in buckets of its width. Keys this control plane does not know are left out. */
     nodeMetrics(node: string, from: number, to: number, now: number): StoredMetrics {
       const { tier, bucketMs } = servingOf(from, to, now);
@@ -50,7 +54,8 @@ export function nodeMetricsStore(db: Db) {
         s.max.push(row.max);
         s.n.push(row.n);
       }
-      return { tier: tier.name, bucketMs, series };
+      const sampledAt = sql("SELECT max(at) AS at FROM node_metrics WHERE tier = 'raw' AND at <= ? AND node = ?").get(to, node)!.at as number | null;
+      return { tier: tier.name, bucketMs, sampledAt, series };
     },
     /** Deletes up to `batch` rows of each tier older than the tier keeps, so one call stays short. The rows it deleted. */
     pruneNodeMetrics(now: number, batch: number): number {

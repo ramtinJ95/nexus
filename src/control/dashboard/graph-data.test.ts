@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { seriesOf, type MetricSeries, type NodeMetrics } from "../node-metrics.ts";
-import { appended, bucketed, charts, columns, gapMs, historyOf, niceCeil, reading, slotter, yRange, type History } from "./graph-data.ts";
+import { appended, bucketed, catchUpMs, charts, columns, gapMs, historyOf, missed, niceCeil, reading, slotter, yRange, type History } from "./graph-data.ts";
 
 const minute = 60_000;
 const hour = 60 * minute;
@@ -13,7 +13,7 @@ function served(key: string, label: string, points: [number, number, number, num
 /** Raw points of one sample each. */
 const raw = (key: string, label: string, points: [number, number][]) => served(key, label, points.map(([t, v]) => [t, v, v, v, 1]));
 const metrics = (series: MetricSeries[], over: Partial<NodeMetrics> = {}): NodeMetrics =>
-  ({ node: "rj-firebat", from: 0, to: hour, tier: "raw", bucketMs: 4_000, series, ...over });
+  ({ node: "rj-firebat", from: 0, to: hour, tier: "raw", bucketMs: 4_000, sampledAt: Math.max(-Infinity, ...series.flatMap((s) => s.t)), series, ...over });
 const chart = (id: string) => charts.find((c) => c.id === id)!;
 const linesOf = (id: string, h: History) => chart(id).lines(h, slotter());
 
@@ -130,4 +130,12 @@ test("temperatures and pylon charts say why they are empty when the node was rea
   for (const id of ["pylon-cpu", "pylon-memory"]) assert.match(chart(id).note!(read)!, /No pylon's processes were reported/);
   assert.equal(chart("temperatures").note!(historyOf(metrics([]), hour)), null, "a range with no reading at all keeps the general note");
   assert.equal(chart("temperatures").note!(historyOf(metrics([raw("temp:Tctl", "Tctl", [[0, 50]])]), hour)), null);
+});
+
+test("a sample the served points already hold is not counted again, and one long after them asks for the range again", () => {
+  const h = historyOf(metrics([served("load1", "1-minute load", [[3 * minute + 5_000, 2, 3, 4, 2]])], { from: 0, to: 4 * minute, tier: "1m", bucketMs: minute, sampledAt: 3 * minute + 40_000 }), 4 * minute);
+  assert.equal(appended(h, { at: 3 * minute + 40_000, values: { load1: 4 }, labels: {} }), false, "the bucket's newest sample, carried by a poll after the fetch");
+  assert.deepEqual(h.series.get("load1")!.n, [2]);
+  assert.equal(missed(h, { at: 3 * minute + 40_000 + catchUpMs, values: {}, labels: {} }), false);
+  assert.equal(missed(h, { at: 3 * minute + 40_001 + catchUpMs, values: {}, labels: {} }), true, "a hidden tab or failed polls may have missed samples another reader recorded");
 });

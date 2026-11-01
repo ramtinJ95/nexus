@@ -40,8 +40,8 @@ export function nodeRoutes(kit: ApiKit, options: { deployment?: DeploymentOption
     const to = whole(query, "to") ?? now;
     if (from >= to) throw new HttpError(400, "from must be before to");
     if (to - from > maxSpanMs) throw new HttpError(400, "the range must span at most 31 days, as long as the registry keeps a node's metrics");
-    const { tier, bucketMs, series } = registry.nodeMetrics(name, from, to, now);
-    return { node: name, from, to, tier, bucketMs, series: series.map((s): MetricSeries => ({ ...s, label: seriesLabel(s.series, (t) => registry.thread(t)?.title) })) };
+    const { tier, bucketMs, sampledAt, series } = registry.nodeMetrics(name, from, to, now);
+    return { node: name, from, to, tier, bucketMs, sampledAt, series: series.map((s): MetricSeries => ({ ...s, label: seriesLabel(s.series, (t) => registry.thread(t)?.title) })) };
   }
 
   return [

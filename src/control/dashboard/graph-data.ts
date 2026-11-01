@@ -22,18 +22,26 @@ export interface PageSample { at: number; values: Record<string, number>; labels
 export interface Points { t: number[]; min: number[]; avg: number[]; max: number[]; n: number[] }
 export interface Held extends Points { key: string; series: Series; label: string }
 
-/** What the page holds of one range: the points the API served for it and the samples polls appended since. */
-export interface History { rangeMs: number; from: number; to: number; bucketMs: number; series: Map<string, Held> }
+/**
+ * What the page holds of one range: the points the API served for it and the samples polls appended since. `seen`: the
+ * newest sample the points hold, so a sample is counted once however often a poll carries it.
+ */
+export interface History { rangeMs: number; from: number; to: number; bucketMs: number; seen: number; series: Map<string, Held> }
 
 export const historyOf = (m: NodeMetrics, rangeMs: number): History => ({
-  rangeMs, from: m.from, to: m.to, bucketMs: m.bucketMs,
+  rangeMs, from: m.from, to: m.to, bucketMs: m.bucketMs, seen: m.sampledAt ?? -Infinity,
   series: new Map(m.series.map((s) => [s.key, { key: s.key, series: s.series, label: s.label, t: [...s.t], min: [...s.min], avg: [...s.avg], max: [...s.max], n: [...s.n] }])),
 });
 
 /** Whether any point stands for more than one sample, so a line shows its average and a band its min and max. */
 export const bucketed = (h: History): boolean => [...h.series.values()].some((s) => s.n.some((n) => n > 1));
 
-const latest = (h: History) => Math.max(-Infinity, ...[...h.series.values()].map((s) => s.t.at(-1) ?? -Infinity));
+/**
+ * A sample this long after the newest the page holds means samples between them may be in the registry and not here,
+ * as when the tab was hidden or its polls failed while another reader recorded, so the page reads the range again.
+ */
+export const catchUpMs = 12_500;
+export const missed = (h: History, sample: PageSample): boolean => sample.at - h.seen > catchUpMs;
 
 /**
  * Adds a poll's sample to `h`, as the API would have served it: into a series' last point when the sample falls in
@@ -41,7 +49,8 @@ const latest = (h: History) => Math.max(-Infinity, ...[...h.series.values()].map
  * that started. Then the range ends at the sample, and the points before its start go. Says whether `h` changed.
  */
 export function appended(h: History, sample: PageSample): boolean {
-  if (sample.at <= latest(h)) return false;
+  if (sample.at <= h.seen) return false;
+  h.seen = sample.at;
   for (const [key, value] of Object.entries(sample.values)) {
     let held = h.series.get(key);
     const label = sample.labels[key];

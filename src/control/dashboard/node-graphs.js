@@ -6,7 +6,7 @@ import css from "uplot/dist/uPlot.min.css";
 import { afterSwap, el } from "./page.js";
 import { api } from "./request.js";
 import { onThemeChange, themeValue } from "./theme.js";
-import { appended, bucketed, charts, columns, gapMs, historyOf, rangeMs, rangeOf, reading, slotter, yRange } from "./graph-data.ts";
+import { appended, bucketed, charts, columns, gapMs, historyOf, missed, rangeMs, rangeOf, reading, slotter, yRange } from "./graph-data.ts";
 
 const sheet = new CSSStyleSheet();
 sheet.replaceSync(css);
@@ -23,7 +23,7 @@ const store = (key, value) => { try { localStorage.setItem(key, value); } catch 
 let range = rangeOf(stored(rangeKey));
 const hidden = new Set((() => { try { return JSON.parse(stored(hiddenKey) ?? "[]"); } catch { return []; } })());
 const slots = slotter();
-/** The range's history, null until the first fetch answers. */
+/** The range's history, null until a fetch answers and after one fails, so the next poll fetches again. */
 let history = null;
 const plotHeight = 188;
 const axisWidth = 46;
@@ -220,8 +220,10 @@ const views = [...grid.querySelectorAll("figure[data-chart]")].map((figure) => v
 const drawAll = () => { for (const v of views) v.draw(); };
 
 let asked = 0;
+let loading = false;
 async function load() {
   const ask = ++asked;
+  loading = true;
   section.classList.add("graphs-loading");
   const to = Date.now();
   try {
@@ -233,10 +235,14 @@ async function load() {
     errorNote.hidden = true;
   } catch (err) {
     if (ask !== asked) return;
+    history = null;
     errorNote.textContent = `The graphs could not load: ${err.message}`;
     errorNote.hidden = false;
   } finally {
-    if (ask === asked) section.classList.remove("graphs-loading");
+    if (ask === asked) {
+      section.classList.remove("graphs-loading");
+      loading = false;
+    }
   }
 }
 
@@ -256,8 +262,11 @@ void load();
 
 afterSwap(() => {
   const sample = document.querySelector("#node-health [data-sample]")?.dataset.sample;
-  if (history === null || sample === undefined) return;
-  if (appended(history, JSON.parse(sample))) drawAll();
+  if (loading || sample === undefined) return;
+  const read = JSON.parse(sample);
+  // A load that failed, or samples this page may have missed, read the range again rather than leave a hole.
+  if (history === null || missed(history, read)) void load();
+  else if (appended(history, read)) drawAll();
 });
 onThemeChange(() => {
   readInk();

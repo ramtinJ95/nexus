@@ -1,10 +1,10 @@
 /** Renders a node's page: what its probe reads of its host's health and its pylon processes, and graphs of its history. */
-import type { NodeName, PylonId, ThreadId } from "../../ids.ts";
+import type { NodeName, ThreadId } from "../../ids.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { lowDisk } from "../../disk-space.ts";
 import { gib } from "../placement.ts";
 import { utc } from "../usage.ts";
-import { sampleOf, seriesLabel, seriesOf } from "../node-metrics.ts";
+import { seriesLabel, seriesOf } from "../node-metrics.ts";
 import { charts, ranges } from "./graph-data.ts";
 import { Html, html, menu } from "./view.ts";
 import type { Context } from "./context.ts";
@@ -13,16 +13,17 @@ import { layout } from "./shell.ts";
 const unknown = html`<span class="dim">unknown</span>`;
 
 /**
- * The health read as the sample the control plane recorded of it, with the label the metrics API gives each pylon
- * series, so the graphs append it without asking the API again.
+ * The node's newest sample as the registry recorded it, with the label the metrics API gives each pylon series, so the
+ * graphs append what a reload would show, and nothing when this read was too soon after the last to be recorded.
  */
-function pageSample(c: Context, health: NodeHealth): string {
-  const sample = sampleOf(health, c.now, (p: PylonId) => c.registry.pylon(p)?.thread ?? null);
+function sampleAttribute(c: Context, name: NodeName): Html | false {
+  const sample = c.registry.latestHealthSample(name);
+  if (sample === null) return false;
   const labels = Object.keys(sample.values).flatMap((key) => {
     const s = seriesOf(key);
     return s?.kind === "pylonCpu" || s?.kind === "pylonResident" ? [[key, seriesLabel(s, (t) => c.registry.thread(t)?.title)] as const] : [];
   });
-  return JSON.stringify({ ...sample, labels: Object.fromEntries(labels) });
+  return html` data-sample="${JSON.stringify({ ...sample, labels: Object.fromEntries(labels) })}"`;
 }
 
 /**
@@ -40,7 +41,7 @@ const graphs = (name: NodeName) => html`<section id="node-graphs" class="graphs"
 export function nodePage(c: Context, name: NodeName, health: NodeHealth | Error): Html {
   const pylonOf = new Map(c.registry.pylonsOn(name).map((p) => [p.pylonId, p.thread]));
   const reading = html`<section aria-labelledby="node-health-h"><div class="ov-head"><h2 id="node-health-h">Health</h2></div>
-${health instanceof Error ? html`<p class="error" role="alert">${health.message}</p>` : html`<dl class="kv node-health" data-sample="${pageSample(c, health)}">
+${health instanceof Error ? html`<p class="error" role="alert">${health.message}</p>` : html`<dl class="kv node-health"${sampleAttribute(c, name)}>
 <dt>Read</dt><dd><time datetime="${health.readAt}">${utc(Date.parse(health.readAt))}</time></dd>
 <dt>Load</dt><dd>${health.load === null ? unknown : `${health.load.one.toFixed(2)} · ${health.load.five.toFixed(2)} · ${health.load.fifteen.toFixed(2)} over 1, 5 and 15 minutes, on ${health.cpus} CPUs`}</dd>
 <dt>Memory</dt><dd>${health.memory === null ? unknown : `${gib(health.memory.availableGiB)} of ${gib(health.memory.totalGiB)} GiB available`}</dd>

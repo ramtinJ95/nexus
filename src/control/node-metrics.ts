@@ -122,8 +122,11 @@ export const merged = (a: Bucket, b: Bucket): Bucket => ({ min: Math.min(a.min, 
 /** A series as the API serves it: its points in time order, each the time of its first sample and its bucket's min, average and max. */
 export interface MetricSeries { key: string; series: Series; label: string; t: number[]; min: number[]; avg: number[]; max: number[]; n: number[] }
 
-/** `GET /v1/nodes/<name>/metrics`: the node's series over `from` to `to`, in ms since the epoch. */
-export interface NodeMetrics { node: string; from: number; to: number; tier: TierName; bucketMs: number; series: MetricSeries[] }
+/**
+ * `GET /v1/nodes/<name>/metrics`: the node's series over `from` to `to`, in ms since the epoch. `sampledAt`: the newest
+ * sample the points hold, null when none, so a reader that appends later samples counts none twice.
+ */
+export interface NodeMetrics { node: string; from: number; to: number; tier: TierName; bucketMs: number; sampledAt: number | null; series: MetricSeries[] }
 
 /**
  * The probe client with each health read recorded. A read that fails records nothing, and a record that fails is
