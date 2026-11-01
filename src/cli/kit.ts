@@ -5,15 +5,15 @@ import type { ThreadDetail } from "../control/wire.ts";
 import type { Project } from "../control/project.ts";
 import { titleOf } from "../thread-title.ts";
 import type { WebSocket } from "ws";
-import { CliError } from "./transport.ts";
+import { CliError, type ErrorKind } from "./transport.ts";
 
 export type Values = Record<string, string | boolean | string[] | undefined>;
 /** `idleMs` is how long the reply may take, 30 s by default. */
 export type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
 /** Follows one of the API's event streams until it ends or `signal` aborts it. */
 export type Follow = (path: string, onEvent: (data: unknown) => void | Promise<void>, signal: AbortSignal, onCursor?: (id: string) => void) => Promise<void>;
-/** What a command prints: its JSON for --json, its text otherwise. */
-export interface Result { json: unknown; text: string }
+/** What a command prints: its JSON for --json, its text otherwise. With `exit`, it prints that and then exits as that kind of failure. */
+export interface Result { json: unknown; text: string; exit?: ErrorKind }
 /** What attach needs beyond the API. */
 interface Local {
   /** A WebSocket to the API, over the same connection as every call. */
