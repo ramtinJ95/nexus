@@ -972,14 +972,14 @@ a.need-thread:hover { color: var(--accent); }
 
 /* wide: the thread page is a workspace, the conversation beside the open diff or terminal, the split a drag handle */
 @media (min-width: 1200px) {
-  .main:has(> .tabs) { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .main:has(> .tabs) { overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
   .main:has(> .tabs) > * { grid-column: 1; }
   .main:has(> .tabs) > .bar { grid-row: 1; grid-column: 1 / -1; }
   .main:has(> .tabs) > .tabs { grid-row: 2; }
   .main:has(> .tabs) > .scroll { grid-row: 3; }
   .main:has(> .tabs) > .dock { grid-row: 4; }
   .main:has(> .tabs) > .ws-sep { display: none; }
-  .main:is([data-view="file"], [data-view="term"]) { grid-template-columns: minmax(340px, 1fr) 7px var(--work-w, 54%); }
+  .main:is([data-view="file"], [data-view="term"]) { grid-template-columns: minmax(340px, 1fr) 7px min(var(--work-w, 54%), calc(100% - 347px)); }
   .main:is([data-view="file"], [data-view="term"]) > .tabs { grid-column: 3; }
   .main:is([data-view="file"], [data-view="term"]) > .scroll { grid-row: 2 / 4; }
   .main:is([data-view="file"], [data-view="term"]) > :is(.file-view, .term-view) { grid-column: 3; grid-row: 3 / 5; }

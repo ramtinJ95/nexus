@@ -480,7 +480,7 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
 
 /** The home page's Needs you cards as a reader takes them in: what each is, its thread, and the card's text. */
 function needsOf(page: string) {
-  const region = page.split('id="needs-you"')[1]!.split('<div class="page" id="overview"')[0]!;
+  const region = page.split('id="needs-you"')[1]!.split('<div class="fleet" id="fleet"')[0]!;
   return {
     cards: [...region.matchAll(/<article class="need need-(\w+)" id="([^"]+)" data-thread="([^"]+)" data-attention="(\w+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(m[0]), html: m[0] })),
     text: textOf(region.replace(/^[^>]*>/, "")),

@@ -1,5 +1,6 @@
 // The console's resizable panes: the sidebar, the inspector and, on a thread page, the pane beside the conversation.
-// Each separator drags or steps with the arrow keys, and the widths the reader picked hold on every page.
+// Each separator drags or steps with the arrow keys, and the widths the reader picked hold on every page, as the
+// page's head script sets them before the first paint.
 const key = "nexus.panes";
 const limits = { side: [180, 420], inspect: [260, 560], work: [320, 1100] };
 const root = document.documentElement;
@@ -16,8 +17,6 @@ function set(pane, px, save = true) {
   widths[pane] = width;
   localStorage.setItem(key, JSON.stringify(widths));
 }
-for (const [pane, px] of Object.entries(widths)) if (Object.hasOwn(limits, pane) && Number.isFinite(px)) set(pane, px, false);
-
 /** The width a pane has now, read from the element it sizes. */
 const current = (pane) => {
   const el = pane === "side" ? document.querySelector(".side") : pane === "inspect" ? document.querySelector(".inspect") : document.querySelector(".main > :is(#file-view, #term-view):not([hidden])");
@@ -30,6 +29,7 @@ for (const sep of document.querySelectorAll("[data-resize]")) {
   const pane = sep.dataset.resize;
   sep.setAttribute("aria-valuemin", String(limits[pane][0]));
   sep.setAttribute("aria-valuemax", String(limits[pane][1]));
+  sep.setAttribute("aria-valuenow", String(Math.round(current(pane))));
   sep.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     event.preventDefault();

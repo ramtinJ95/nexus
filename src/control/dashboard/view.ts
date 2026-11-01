@@ -12,15 +12,16 @@ import { agoText, clock } from "./elapsed.ts";
 export interface Page { status: number; headers: Record<string, string>; body: string }
 
 /**
- * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
- * that refuses the page its storage throws on reading it, and the device's theme stands.
+ * Sets the stored theme, or the device's light or dark, and the pane widths the reader dragged, before the first
+ * paint, as theme.js and panes.js do after it. A browser that refuses the page its storage throws on reading it, and
+ * the device's theme and the default widths stand.
  */
-export const themeScript = `{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
+export const headScript = `{ const root = document.documentElement; let theme = null; try { theme = localStorage.getItem("nexus.theme"); const widths = JSON.parse(localStorage.getItem("nexus.panes") ?? "{}"); for (const pane of ["side", "inspect", "work"]) if (Number.isFinite(widths?.[pane])) root.style.setProperty("--" + pane + "-w", widths[pane] + "px"); } catch {} root.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
-  "content-security-policy": `default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(themeScript).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+  "content-security-policy": `default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(headScript).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
 };

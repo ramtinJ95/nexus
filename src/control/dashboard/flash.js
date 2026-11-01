@@ -1,14 +1,17 @@
 // Live change made visible: after a poll swaps a region, each row, tile or card in it whose text changed, or that is
-// new, glows once and fades. Ticking clocks are left out of the comparison, so time passing never flashes.
+// new, glows once and fades. Clocks and ages are left out of the comparison, so time passing never flashes.
 import { onSwap } from "./page.js";
 
 const units = ".row, .ov tbody tr, .kpi, .node-tile, .need, .pv, .side-link";
 
-/** A unit's text without its clocks, which change every second on their own. */
+/** What changes on its own as time passes: clocks, and a row's or card's age. */
+const ages = "time, .row-at, .need-at";
+
+/** A unit's text without its clocks and ages. */
 function textOf(el) {
   let text = "";
   const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => node.parentElement?.closest("time") !== null ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    acceptNode: (node) => node.parentElement?.closest(ages) !== null ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
   });
   while (walk.nextNode()) text += walk.currentNode.data;
   return text.replace(/\s+/g, " ").trim();

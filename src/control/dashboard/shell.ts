@@ -15,7 +15,7 @@ import type { QueuedThread } from "../queue.ts";
 import { releaseView } from "../releases.ts";
 import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
-import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
+import { headScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { assetUrl } from "./assets.ts";
 
@@ -49,7 +49,7 @@ export function layout(c: Context, page: Shell): Html {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>${page.title} · Nexus</title>
-<script>${new Html(themeScript)}</script>
+<script>${new Html(headScript)}</script>
 <link rel="icon" href="${assetUrl("favicon.svg")}" type="image/svg+xml">
 <link rel="stylesheet" href="${assetUrl("style.css")}">
 <script type="module" src="${assetUrl("client.js")}"></script>
