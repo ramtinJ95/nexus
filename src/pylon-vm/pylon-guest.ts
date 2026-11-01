@@ -124,8 +124,9 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		 * failures also exit 255, which the stream reports as that exit code. A pause closes the forwarder,
 		 * which ends every stream.
 		 */
-		async stream(argv, log) {
+		async stream(argv, log, signal) {
 			const shell = shellReplySchema.parse(await run({ action: "shell", name, user: "user" }));
+			signal?.throwIfAborted();
 			return processStream("ssh", [...guestSsh(shell), "--", remoteCommand(argv)], log);
 		},
 

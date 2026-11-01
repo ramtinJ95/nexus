@@ -20,7 +20,7 @@ import {
 } from "../protocol/jobs.ts";
 import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } from "../protocol/observations.ts";
 import { parsePylonCommand, type CommandResult, type PylonCommand } from "../protocol/commands.ts";
-import { parseStreamRequest, serveByteStream, streamUpgradeResponse } from "../protocol/streams.ts";
+import { parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { peersSchema, probePort, routeAuth, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
@@ -592,7 +592,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   }
 
   /** GET /v1/pylons/{id}/stream. The guest process starts before the 101, so a pylon that cannot run it gets an HTTP error instead. */
-  async function stream(req: IncomingMessage, socket: Duplex, head: Buffer) {
+  async function stream(req: IncomingMessage, socket: Duplex, head: Buffer, left: AbortSignal) {
     const url = new URL(req.url ?? "/", "http://probe");
     if (!url.pathname.startsWith("/v1/pylons/")) return refuse(socket, 404, `no upgrade route ${url.pathname}`);
     if (!await authorized(req, "/v1/pylons")) return refuse(socket, 403, "caller is not the tailnet node this route allows");
@@ -605,8 +605,21 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (parsed === null) return refuse(socket, 404, `no upgrade route ${url.pathname} for ${req.headers.upgrade}`);
     const { pylonId, argv } = parsed;
     if (await backend.state(pylonId) !== "running") return refuse(socket, 409, `${pylonId} is not running`);
-    if (socket.destroyed || shutdown.signal.aborted) return;
-    const guest = await backend.guest(pylonId).stream(argv, (text) => log(`${pylonId} stream ${argv[0]}: ${text.trimEnd()}`));
+    const gone = AbortSignal.any([left, shutdown.signal]);
+    if (gone.aborted) return;
+    let guest: ByteStream;
+    try {
+      guest = await backend.guest(pylonId).stream(argv, (text) => log(`${pylonId} stream ${argv[0]}: ${text.trimEnd()}`), gone);
+    } catch (err) {
+      if (gone.aborted) return;
+      throw err;
+    }
+    if (gone.aborted) {
+      // A slow guest can start the process after the caller gave up, and a relay whose stdin ends hangs up.
+      await guest.close();
+      for await (const _ of guest) { /* drained, so the process can exit */ }
+      return;
+    }
     socket.write(streamUpgradeResponse);
     await serveByteStream(socket, head, guest);
   }
@@ -621,8 +634,14 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     // Node hands over an upgraded socket without its error handler, and a reset during whois would crash the probe.
     socket.on("error", (err) => log(`stream ${req.url}: ${err.message}`));
     streamSockets.add(socket);
-    socket.on("close", () => streamSockets.delete(socket));
-    stream(req, socket, head).catch((err: unknown) => {
+    const left = new AbortController();
+    // The server keeps a socket half open, so a caller that gave up before the 101 only ends its side.
+    socket.once("end", () => left.abort());
+    socket.on("close", () => {
+      streamSockets.delete(socket);
+      left.abort();
+    });
+    stream(req, socket, head, left.signal).catch((err: unknown) => {
       log(`stream ${req.url}: ${(err as Error).message}`);
       refuse(socket, 502, (err as Error).message);
     });

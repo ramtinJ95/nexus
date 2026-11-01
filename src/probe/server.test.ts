@@ -16,7 +16,7 @@ import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, Port
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
 import type { DeclaredOutput, GitFacts, ProbeEvent, ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import type { ByteStream } from "../protocol/streams.ts";
+import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
 import { connectProbe } from "../protocol/client.ts";
 import { envelope, ingest } from "../reconcile.ts";
@@ -1231,6 +1231,28 @@ test("stdin reaches the guest process, and close ends it", async (t) => {
   await stream.close();
   assert.equal(await readAll(stream), "hello through the probe");
   assert.deepEqual(await stream.done, { kind: "exited", code: 0 });
+});
+
+test("a stream whose caller left while the guest started it is told so, and the process it got anyway has its stdin closed", async (t) => {
+  const fake = fakeBackend();
+  const logged: string[] = [];
+  const starts: { signal: AbortSignal; start(stream: ByteStream): void }[] = [];
+  const guest = {
+    stream: (_argv: readonly string[], _log: (text: string) => void, signal?: AbortSignal) => new Promise<ByteStream>((start) => starts.push({ signal: signal!, start })),
+  } as Partial<Guest> as Guest;
+  const { probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, log: (line) => logged.push(line) });
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  const req = request({ host: "127.0.0.1", port: probe.port, path: streamPath(pylonId, ["cat"]), headers: { connection: "upgrade", upgrade: streamProtocol } });
+  req.on("error", () => undefined);
+  req.end();
+  await until("the guest is asked to start the stream", () => starts.length === 1);
+  assert.equal(starts[0]!.signal.aborted, false);
+  req.destroy();
+  await until("the start is aborted", () => starts[0]!.signal.aborted);
+  const late = processStream("cat", [], () => undefined);
+  starts[0]!.start(late);
+  assert.deepEqual(await late.done, { kind: "exited", code: 0 }, "cat exits once its stdin ends");
+  assert.deepEqual(logged.filter((line) => /EPIPE|write after/.test(line)), []);
 });
 
 test("a checkout read fits the probe's stream request and comes back through it", async (t) => {

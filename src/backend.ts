@@ -93,8 +93,8 @@ export type BackendPylon = BackendPylonBase & BackendVm;
 /** Every call runs as `user`. */
 export interface Guest {
   exec(argv: readonly string[], opts: { cwd: string; timeoutMs: number }): Promise<{ exitCode: number | null; output: string; truncated: boolean }>;
-  /** Starts the process on a raw pipe. Its stream carries stdout only, and its stderr goes to `log`. */
-  stream(argv: readonly string[], log: (text: string) => void): Promise<ByteStream>;
+  /** Starts the process on a raw pipe. Its stream carries stdout only, and its stderr goes to `log`. `signal` aborts a start whose caller has gone. */
+  stream(argv: readonly string[], log: (text: string) => void, signal?: AbortSignal): Promise<ByteStream>;
   writeFiles(files: readonly OverlayFile[]): Promise<void>;
   /** `list` starts and stops nothing. */
   services(op: "ensure" | "list" | "restart" | "stop" | "logs", name?: string, lines?: number): Promise<{ services: readonly ServiceFact[]; logs?: string }>;
