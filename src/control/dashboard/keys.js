@@ -7,6 +7,7 @@ import { pickPane, setOpen } from "./nav.js";
 import { placeViews } from "./checkout.js";
 
 const root = document.documentElement;
+const main = document.querySelector("main");
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const $ = (selector, within = document) => within.querySelector(selector);
 const typing = (node) => node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement || node?.isContentEditable === true;
@@ -59,7 +60,6 @@ function split() {
   // A split shows nothing new until a second view opens, so it opens the newest one there is.
   if (on && (main.dataset.view ?? "convo") === "convo") ([...document.querySelectorAll(".tabs .tab-pick")].at(-1) ?? $('.tabs [data-tab="term"]:not([hidden])'))?.click();
 }
-const main = document.querySelector("main");
 function markSplit() {
   const button = $("#tab-split");
   button?.setAttribute("aria-pressed", String(panes().has("split")));
