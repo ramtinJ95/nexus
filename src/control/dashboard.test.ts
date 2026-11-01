@@ -2278,6 +2278,41 @@ test("a node's page shows its health as its probe reads it, unknown where the ho
   assert.equal((await s.call("GET", "/nodes/nowhere")).status, 404);
 });
 
+test("a node's page frames its graphs outside the live region, with a range picker, a figure per chart and the read as a sample, even when the read fails", async (t) => {
+  let health: NodeHealth | Error = {
+    node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },
+    memory: { totalGiB: 62.8, availableGiB: 40.25, swapTotalGiB: 8, swapFreeGiB: 6 }, disk: { path: "/var/lib/nexus", totalGiB: 457, freeGiB: 180.5 },
+    temperatures: [{ sensor: "Composite", celsius: 41 }, { sensor: "Composite", celsius: 39.5 }], pylons: [],
+  };
+  const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => { if (health instanceof Error) throw health; return health; } };
+  const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
+  const started = await s.start("acme", "Busy thread");
+  health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.5, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
+  const before = Date.now();
+  const html = (await s.call("GET", `/nodes/${node}`)).text;
+  const graphs = /<section id="node-graphs"[^>]*>/.exec(html)?.[0];
+  assert.ok(graphs !== undefined, "the page has a graphs section");
+  assert.match(graphs, new RegExp(`data-node="${node}"`));
+  const region = html.slice(html.indexOf('id="node-health"'), html.indexOf('<section id="node-graphs"'));
+  assert.ok(region.split("</div>").length > region.split("<div").length, "the live region closes before the graphs begin, so a poll's swap leaves them be");
+  assert.deepEqual([...html.matchAll(/<button type="button" data-range="([^"]+)" aria-pressed="false">/g)].map((m) => m[1]), ["15m", "1h", "6h", "24h", "7d", "30d"]);
+  assert.deepEqual([...html.matchAll(/<figure class="graph" data-chart="[^"]+"><figcaption><span class="graph-title">([^<]+)/g)].map((m) => m[1]),
+    ["Load per CPU", "Load against CPUs", "Memory", "Swap", "Disk free", "Temperatures", "Pylon CPU", "Pylon memory"]);
+  const sample = JSON.parse(textOf(/data-sample="([^"]*)"/.exec(region)![1]!)) as { at: number; values: Record<string, number>; labels: Record<string, string> };
+  assert.ok(sample.at >= before && sample.at <= Date.now(), "the sample is timed by the control plane's clock");
+  const busy = `${started.pylonId}:${started.id}`;
+  assert.deepEqual(sample.values, {
+    cpus: 16, diskTotal: 457, diskFree: 180.5, load1: 2.5, load5: 1.75, load15: 1, memTotal: 62.8, memAvailable: 40.25, swapTotal: 8, swapUsed: 2,
+    "temp:Composite": 41, "temp:Composite (2)": 39.5,
+    [`pylonCpu:${busy}`]: 112.5, [`pylonResident:${busy}`]: 6.25, "pylonCpu:pylon-orphan:": 0, "pylonResident:pylon-orphan:": 0.1,
+  });
+  assert.deepEqual(sample.labels, { [`pylonCpu:${busy}`]: "Busy thread", [`pylonResident:${busy}`]: "Busy thread", "pylonCpu:pylon-orphan:": "pylon-orphan", "pylonResident:pylon-orphan:": "pylon-orphan" });
+  health = new Error("the probe did not answer");
+  const failed = (await s.call("GET", `/nodes/${node}`)).text;
+  assert.match(failed, /<section id="node-graphs"/, "history still shows when this read fails");
+  assert.doesNotMatch(failed, /data-sample=/);
+});
+
 test("the pipeline page lists each project's items with the phase their records put them in, what each is after, its thread, and Approve and Cancel while it has none", async (t) => {
   const s = await seeded(t, { deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } });
   const empty = textOf((await s.call("GET", "/pipeline")).text);
