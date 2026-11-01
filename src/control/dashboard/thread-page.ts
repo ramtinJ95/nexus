@@ -64,13 +64,13 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
   const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
-  ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
+  ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`, panelButtons(d, open));
   return layout(c, {
     title: t.title,
     active: t.id,
     ...(open ? { activity: t.id } : {}),
     main: html`${bar}
-<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
+<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo"><span class="tab-x" title="Close the panel">${icon("cross")}<span class="vh">Close the panel and go back to </span></span>${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
@@ -103,14 +103,26 @@ function termView(t: Thread): Html {
 </section>`;
 }
 
-/** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */
-function threadBar(t: { project: string; title: string }, [label, tone]: readonly [string, Tone], actions: readonly Part[], tag: Part = null): Html {
+/**
+ * The buttons that slide a thread's panels over its conversation, as a chat app's header does: its changes, previews
+ * and pylon, and the terminal beside it while the thread is open.
+ */
+function panelButtons(d: ThreadDetail, open: boolean): Html {
+  const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
+  const pane = (name: string, label: string, glyph: Parameters<typeof icon>[0], count: Part = null) =>
+    html`<button type="button" class="bar-panel" data-open="inspect" data-pane="${name}" aria-controls="inspector" title="${label}">${icon(glyph)}<span class="bar-panel-label">${label}</span>${count}</button>`;
+  return html`<div class="bar-panels" role="group" aria-label="Panels">${pane("changes", "Changes", "changes")}${pane("previews", "Previews", "globe", listed > 0 && html`<span class="count">${listed}</span>`)}${pane("pylon", "Pylon", "server")}${open && d.thread.status !== "deleted" && html`<button type="button" class="bar-panel" data-terminal title="A terminal in the pylon, as nexus attach gives">${icon("terminal")}<span class="bar-panel-label">Terminal</span></button>`}</div>`;
+}
+
+/** The bar atop a thread's page or a queued thread's: where it is, its state, its panels, and its actions under ⋯. */
+function threadBar(t: { project: string; title: string }, [label, tone]: readonly [string, Tone], actions: readonly Part[], tag: Part = null, panels: Part = null): Html {
   const shown = actions.filter((a) => a !== false);
   return html`<header class="bar" id="bar" data-live>
 ${menu}
 <div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1>${tag}</div>
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
-${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
+${panels ?? html`<span class="bar-end"></span>`}
+${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">${icon("more")}</button>`}
 </header>`;
 }
 
@@ -194,8 +206,8 @@ const panes = [["changes", "Changes", "changes"], ["previews", "Previews", "glob
 function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
   // The Previews tab counts what its pane lists: the previews and the ports without one.
   const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
-  return html`<aside class="inspect" aria-label="Thread details">
-<button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
+  return html`<aside class="inspect" id="inspector" aria-label="Thread details">
+<button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">${icon("cross")}</button>
 <div class="seg-bar" role="radiogroup" aria-label="Inspector">${panes.map(([pane, label, glyph]) => html`<label class="seg-tab"><input type="radio" name="pane" value="${pane}"${pane === "changes" && " checked"}>${icon(glyph)}<span class="seg-label">${label}</span>${pane === "previews" && html`<span class="count" id="count-previews" data-live>${listed}</span>`}</label>`)}</div>
 <section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${d.thread.id}">
 <h2 id="changes-h" class="vh">Changes</h2>

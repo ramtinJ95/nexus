@@ -37,6 +37,8 @@ export interface Shell {
   activity?: ThreadId;
   /** Opens the start dialog on load, for /threads/new. */
   start?: { project: string | null } | undefined;
+  /** A page that is also a panel, which the sidebar's links open over any page. */
+  panel?: true;
   /** Opens the new-project dialog on load, for /projects/new. */
   addProject?: boolean | undefined;
 }
@@ -57,12 +59,13 @@ export function layout(c: Context, page: Shell): Html {
 <body>
 <div class="app${page.inspector !== undefined && " has-inspect"}">
 ${sidebar(c, page.active, page.nav)}
-<main class="main" data-poll-ms="${pollMs}"${page.activity !== undefined && html` data-activity="${page.activity}"`}>
+<main class="main${page.panel !== undefined && " panel-page"}" data-poll-ms="${pollMs}"${page.activity !== undefined && html` data-activity="${page.activity}"`}>
 ${page.main}
 </main>
 ${page.inspector}
 </div>
 <p id="refresh-state" class="refresh-state" role="status"></p>
+<aside class="sheet" id="sheet" aria-label="Panel"></aside>
 <div class="scrim" data-close aria-hidden="true"></div>
 <template id="icons">${clonedIcons.map(icon)}</template>
 ${startDialog(c, page.start)}
@@ -122,9 +125,9 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
     return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
-<div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
-<label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
+<div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
+<label class="filter">${icon("search")}<input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
+<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}" data-panel${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
@@ -139,9 +142,8 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}${lowDisks(n).length > 0 && html`<em title="${lowDisks(n).map(diskText).join("; ")}">disk low</em>`}</span>${memoryLine(c, n)}${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}`)}</div>
-<div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
-<a class="btn side-add" href="/projects/new" data-new-project>New project</a>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><details id="nodes-fold"><summary><h2>Nodes</h2><span class="nodes-sum">${c.registry.nodes().map((n) => dot(nodeTone(n), `${n.name} ${nodeNote(n)}`))}</span>${icon("chevron")}</summary><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}" data-panel>${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}${lowDisks(n).length > 0 && html`<em title="${lowDisks(n).map(diskText).join("; ")}">disk low</em>`}</span>${memoryLine(c, n)}${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}`)}</details></div>
+<div class="side-foot"><div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div><a class="btn btn-xs btn-ghost" href="/projects/new" data-new-project>${icon("plus")}New project</a></div>
 </aside>`;
 }
 
@@ -152,7 +154,7 @@ function healthLink(c: Context, open: boolean): Html {
   const problems = c.registry.healthStates().filter((s) => s.status !== "ok");
   const unseen = problems.filter((p) => p.seenAt === null).length;
   const title = problems.length === 0 ? "Every check is ok" : `${problems.length} open ${problems.length === 1 ? "problem" : "problems"}, ${unseen} not seen`;
-  return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}" data-change="${Math.max(0, ...c.registry.healthChanges().map((h) => h.id))}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
+  return html`<a class="side-link${open && " active"}" id="health-link" href="/health" data-panel title="${title}" data-change="${Math.max(0, ...c.registry.healthChanges().map((h) => h.id))}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
 }
 
 /**
@@ -165,6 +167,9 @@ function releaseLines(c: Context) {
   return releaseView(c.registry, c.registry.nodes().find((n) => n.name === control)?.tailnetNodeId, c.now).nodes;
 }
 
+/** A node's dot in the folded Nodes line: offline, needing a look for its memory or disk, or fine. */
+const nodeTone = (n: NodeRecord): Tone => n.state === "offline" ? "muted" : overcommitted(n.capacity) || lowDisks(n).length > 0 ? "busy" : "ok";
+const nodeNote = (n: NodeRecord) => n.state === "offline" ? "offline" : [overcommitted(n.capacity) && "overcommitted", lowDisks(n).length > 0 && "low on disk"].filter(Boolean).join(", ") || "online";
 const lowDisks = (n: NodeRecord) => countedCapacity(n.capacity)?.disks?.filter(lowDisk) ?? [];
 
 /** A node's committed and total memory, and what its paused pylons need to wake. */
@@ -186,7 +191,7 @@ function startDialog(c: Context, start: Shell["start"]): Html {
   const image = c.registry.currentImage();
   const chosen = projects.find((p) => p.id === start?.project) ?? projects[0];
   return html`<dialog id="start-dialog" class="modal" aria-labelledby="start-h"${start !== undefined && " data-autoopen"}>
-<header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+<header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">${icon("cross")}</button></header>
 <div id="start-body" data-live>
 ${chosen === undefined ? html`<div class="modal-empty"><p class="empty">No projects yet, so there is no repository to start a thread on.</p>${newProjectButton}</div>` : html`<form id="start" class="form">
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}
@@ -246,7 +251,7 @@ function projectDialog(c: Context, open: boolean): Html {
   const nodes = c.registry.nodes();
   const { cpus, memoryGiB, diskGiB } = defaultProjectResources;
   return html`<dialog id="project-dialog" class="modal" aria-labelledby="project-h"${open && " data-autoopen"}>
-<header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+<header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">${icon("cross")}</button></header>
 ${nodes.length === 0 ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(defaultProjectResources)}" data-github-grant="${JSON.stringify(githubTokenGrant)}">
 <label for="project-id">ID</label>
 <input id="project-id" name="id" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-app" autofocus>

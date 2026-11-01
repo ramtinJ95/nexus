@@ -9,7 +9,7 @@ import { gib } from "../placement.ts";
 import { utc } from "../usage.ts";
 import { seriesLabel, seriesOf } from "../node-metrics.ts";
 import { charts, ranges } from "./graph-data.ts";
-import { Html, html, menu } from "./view.ts";
+import { Html, html, panelBar } from "./view.ts";
 import type { Context } from "./context.ts";
 import { cleanupCard } from "./cards.ts";
 import { layout } from "./shell.ts";
@@ -76,8 +76,9 @@ ${health.pylons === null ? html`<p class="empty">This node's backend does not sa
 <p class="dim small">CPU is the percent of one CPU a pylon's processes used over the second the probe sampled, so four busy CPUs read 400%.</p>
 </section>`;
   return layout(c, {
+    panel: true,
     title: `Node ${name}`,
-    main: html`<header class="bar">${menu}<div class="crumb"><h1>${name}</h1></div></header>
+    main: html`${panelBar(name, "server", "node")}
 <div class="scroll"><div class="page"><div class="node-live" id="node-cleanup" data-live>${cleanup(c, name)}</div><div class="node-live" id="node-health" data-live>
 ${reading}
 ${pylons}

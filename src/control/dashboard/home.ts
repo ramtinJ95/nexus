@@ -36,7 +36,7 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): 
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
     main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
+<div class="scroll"><div class="page page-needs">${projects.length > 0 && html`<section class="hero" aria-labelledby="hero-h"><h2 id="hero-h"><span class="brand-mark" aria-hidden="true"></span>What should a new thread work on?</h2><a class="hero-start" href="/threads/new" data-start>Describe the task, and pick its project and worker<span class="send" aria-hidden="true">${icon("up")}Start</span></a></section>`}<p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
 <div class="page" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);

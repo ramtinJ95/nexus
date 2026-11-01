@@ -1,0 +1,88 @@
+// The panels: the pipeline, usage, health and a node's page, which a sidebar link opens over the page the reader is on,
+// so a thread's conversation stays where it was. The panel is the page's own main column, read again each poll while it
+// is open. Each of them is also a page at its own address, which a reader who opens it in a new tab gets.
+import { el, pollMs } from "./page.js";
+import { setOpen } from "./nav.js";
+
+const sheet = document.getElementById("sheet");
+const panelPath = /^\/(?:pipeline|usage|health|nodes\/[^/]+)$/;
+let shown = null;
+let opener = null;
+let healthSeen = false;
+
+const isOpen = () => document.body.dataset.open === "sheet";
+
+/** The fetched page's main column, made to sit inside this page without taking the ids or regions of the page's own. */
+function panelOf(doc, url) {
+  const main = doc.querySelector("main");
+  if (main === null) throw new Error("the control plane answered with no page");
+  for (const node of main.querySelectorAll("[id]")) {
+    const same = document.getElementById(node.id);
+    if (same !== null && !sheet.contains(same)) node.removeAttribute("id");
+  }
+  for (const node of main.querySelectorAll("[data-live]")) delete node.dataset.live;
+  for (const node of main.querySelectorAll(".bar .menu, .bar .phone-only")) node.remove();
+  // A node's graphs draw with uPlot on the node's own page, which a link opens.
+  main.querySelector("#node-graphs")?.replaceWith(el("p", { className: "sheet-more" }, "The 31-day graphs draw on ", el("a", { className: "link", href: url.pathname, textContent: "the node's own page" }), "."));
+  return main;
+}
+
+async function load(url) {
+  const res = await fetch(url, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+  if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
+  const main = panelOf(new DOMParser().parseFromString(await res.text(), "text/html"), url);
+  if (shown?.href !== url.href || !isOpen()) return;
+  const top = sheet.querySelector(".scroll")?.scrollTop ?? 0;
+  const focused = sheet.contains(document.activeElement) && document.activeElement.id !== "" ? document.activeElement.id : null;
+  sheet.replaceChildren(...main.childNodes);
+  const scroller = sheet.querySelector(".scroll");
+  if (scroller !== null) scroller.scrollTop = top;
+  if (focused !== null) document.getElementById(focused)?.focus({ preventScroll: true });
+  if (url.pathname === "/health" && !healthSeen) {
+    healthSeen = true;
+    void import("./health.js").then((m) => m.markHealthSeen());
+  }
+}
+
+async function open(url) {
+  opener = document.activeElement;
+  shown = url;
+  sheet.setAttribute("aria-label", url.pathname.slice(1).split("/")[0]);
+  sheet.replaceChildren(el("p", { className: "empty sheet-loading", textContent: "Loading…" }));
+  setOpen("sheet");
+  for (const link of document.querySelectorAll(".side-link[data-panel], .nodes a[data-panel]")) link.classList.toggle("active", link.pathname === url.pathname);
+  try {
+    await load(url);
+    sheet.querySelector(".bar-close, a, button")?.focus({ preventScroll: true });
+  } catch (err) {
+    sheet.replaceChildren(el("p", { className: "error sheet-loading", textContent: `The panel could not be read: ${err.message}` }));
+  }
+}
+
+if (sheet !== null) {
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (link === null || !(link.matches("[data-panel]") || sheet.contains(link))) return;
+    const url = new URL(link.href, location.href);
+    if (url.origin !== location.origin || !panelPath.test(url.pathname) || url.pathname === location.pathname) return;
+    event.preventDefault();
+    void open(url);
+  });
+  // The panel's own close link goes home on its own page, and here gives the page back.
+  sheet.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element) || event.target.closest(".bar-close") === null) return;
+    event.preventDefault();
+    setOpen(null);
+  });
+  new MutationObserver(() => {
+    if (isOpen() || shown === null) return;
+    shown = null;
+    sheet.replaceChildren();
+    for (const link of document.querySelectorAll(".side-link[data-panel], .nodes a[data-panel]")) link.classList.toggle("active", link.getAttribute("aria-current") === "page");
+    if (opener instanceof HTMLElement && document.contains(opener)) opener.focus({ preventScroll: true });
+  }).observe(document.body, { attributes: true, attributeFilter: ["data-open"] });
+  setInterval(() => {
+    if (shown !== null && isOpen() && document.visibilityState === "visible") void load(shown).catch(() => {});
+  }, pollMs);
+}

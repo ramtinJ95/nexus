@@ -11,6 +11,7 @@ import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { activeTab, canRead, changesPane, changesUnreadable, checkout, factsNow, readChanges, renderTabs, showTab, tabsBar, terminalTab } from "./checkout.js";
 import "./composer.js";
 import "./actions.js";
+import "./panel.js";
 import { startRows } from "./rows.js";
 
 for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
@@ -85,7 +86,7 @@ const notifications = coordinator((row) => {
 const health = (change) => void checks.then((m) => m.showHealth(change, notificationChannel));
 const caughtUp = (hand) => void checks.then((m) => m.caughtUp(hand));
 if (location.pathname === "/health") void checks.then((m) => m.markHealthSeen());
-const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
+const permission = el("button", { type: "button", className: "btn btn-xs btn-ghost side-add", textContent: "Enable system notifications" });
 if (window.isSecureContext && "Notification" in window) {
   permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };
 } else {

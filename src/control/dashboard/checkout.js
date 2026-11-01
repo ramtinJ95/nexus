@@ -2,7 +2,8 @@
 // terminal, and the review notes on a diff.
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 import { api } from "./request.js";
-import { afterSwap, el, end, main, present, retryShots, scroller, showError } from "./page.js";
+import { afterSwap, el, end, main, present, retryShots, showError } from "./page.js";
+import { setOpen } from "./nav.js";
 import { bases, checkoutText } from "./checkout-text.js";
 
 // A template's icons are in its content, outside the document.
@@ -262,7 +263,7 @@ export function renderTabs() {
 export function showTab(path) {
   activeTab = path;
   main.dataset.view = path === null ? "convo" : path === terminalTab ? "term" : "file";
-  scroller.hidden = path !== null;
+  // The conversation stays beside the stage, and a phone's stylesheet hides it there.
   fileView.hidden = typeof path !== "string";
   if (termView !== null) termView.hidden = path !== terminalTab;
   if (path === null) end.settle();
@@ -272,6 +273,7 @@ export function showTab(path) {
 }
 
 function openFile(file) {
+  setOpen(null);
   const at = openTabs.findIndex((f) => f.path === file.path);
   if (at === -1) openTabs = [...openTabs, file].slice(-maxTabs);
   else openTabs[at] = file;

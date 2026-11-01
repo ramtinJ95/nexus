@@ -1,7 +1,7 @@
 /** Renders the pipeline page: each project's items with the phase their records put them in. */
 import type { Project } from "../project.ts";
 import { itemView, type ItemPhase, type PipelineItem } from "../pipeline.ts";
-import { Html, html, dot, state, menu, type Tone } from "./view.ts";
+import { Html, html, dot, state, panelBar, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { layout, threadTitle } from "./shell.ts";
 
@@ -21,9 +21,10 @@ export function pipelinePage(c: Context): Html {
     html`<button type="button" class="btn btn-xs btn-ghost" data-action="cancel-item" data-item="${i.id}" data-confirm="Cancel ${i.title}? It never becomes a thread.">Cancel</button>`,
   ];
   return layout(c, {
+    panel: true,
     title: "Pipeline",
     nav: "pipeline",
-    main: html`<header class="bar">${menu}<div class="crumb"><h1>Pipeline</h1></div></header>
+    main: html`${panelBar("Pipeline", "list", "items on their way to threads")}
 <div class="scroll"><div class="page pipeline" id="pipeline" data-live>
 ${projects.length === 0 ? html`<p class="empty">No project runs the pipeline. <code>nexus project edit &lt;id&gt; --pipeline start</code> turns it on, and <code>nexus item add</code> lines up an item.</p>` : projects.map((p) => {
   const own = items.filter((i) => i.project === p.id);

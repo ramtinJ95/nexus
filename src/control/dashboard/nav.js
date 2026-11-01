@@ -1,5 +1,5 @@
 // The sidebar and the phone's panels: which panel is open, the thread filter, copy buttons and the inspector's tab.
-import { afterSwap } from "./page.js";
+import { afterSwap, toggled } from "./page.js";
 
 const filter = document.getElementById("filter");
 
@@ -14,8 +14,11 @@ document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   const opener = target?.closest("[data-open]");
   if (opener !== null && opener !== undefined) {
-    setOpen(document.body.dataset.open === opener.dataset.open ? null : opener.dataset.open);
-    if (opener.dataset.pane !== undefined) pickPane(opener.dataset.pane);
+    // A panel button for another pane switches the open panel to it rather than closing it.
+    const { pane } = opener.dataset;
+    const picked = document.querySelector(".seg-bar input:checked")?.value;
+    setOpen(document.body.dataset.open === opener.dataset.open && (pane === undefined || pane === picked) ? null : opener.dataset.open);
+    if (pane !== undefined) pickPane(pane);
     return;
   }
   const closer = target?.closest("[data-close]");
@@ -70,4 +73,16 @@ export function pickPane(pane) {
 }
 document.addEventListener("change", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.matches(".seg-bar input")) localStorage.setItem(paneKey, event.target.value);
+});
+
+// The sidebar's Nodes fold stays as the reader left it, on every page.
+const nodesKey = "nexus.nodes";
+const nodesFold = () => document.getElementById("nodes-fold");
+if (localStorage.getItem(nodesKey) === "open" && nodesFold() !== null) {
+  toggled.set("nodes-fold", true);
+  nodesFold().open = true;
+}
+document.addEventListener("click", (event) => {
+  const fold = event.target instanceof Element ? event.target.closest("summary")?.parentElement : null;
+  if (fold?.id === "nodes-fold") localStorage.setItem(nodesKey, fold.open ? "closed" : "open");
 });

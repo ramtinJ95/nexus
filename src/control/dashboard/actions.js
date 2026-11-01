@@ -46,7 +46,8 @@ document.addEventListener("click", async (event) => {
   const { action, thread } = button.dataset;
   if (button.dataset.confirm !== undefined && !confirm(button.dataset.confirm)) return;
   button.disabled = true;
-  setOpen(null);
+  // An action in a panel keeps the panel open, and one from a phone's menu closes the menu.
+  if (button.closest("#sheet") === null) setOpen(null);
   try {
     await actions[action](thread, button.dataset);
     showError("action-error", null);

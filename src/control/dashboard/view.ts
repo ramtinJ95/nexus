@@ -78,6 +78,9 @@ const iconPaths = {
   check: "M3.5 8.5l3 3 6-7",
   cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   dash: "M5 8h6",
+  menu: "M2.5 4.5h11M2.5 8h11M2.5 11.5h11",
+  more: "M3.5 8h.01M8 8h.01M12.5 8h.01",
+  search: "M7 2.75a4.25 4.25 0 1 0 0 8.5a4.25 4.25 0 1 0 0-8.5zM10.2 10.2l3.3 3.3",
   inbox: "M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z",
 } as const;
 type IconName = keyof typeof iconPaths;
@@ -85,7 +88,12 @@ export const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0
 /** The icons client.js clones from the page's `#icons`, for the folders of the changed files' tree. */
 export const clonedIcons = ["chevron", "folder"] as const satisfies readonly IconName[];
 /** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
-export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
+export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">${icon("menu")}</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
+/**
+ * The bar atop a page that is also a panel: what it is, and a close that gives back the page under it when it opens
+ * as a panel, or goes home at its own address.
+ */
+export const panelBar = (title: Part, glyph: IconName, sub: Part = null) => html`<header class="bar">${menu}<span class="panel-icon" aria-hidden="true">${icon(glyph)}</span><div class="crumb"><h1>${title}</h1>${sub !== null && html`<span class="panel-sub">${sub}</span>`}</div><a class="icon-btn bar-close" href="/" aria-label="Close" title="Close">${icon("cross")}</a></header>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 

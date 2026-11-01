@@ -1,7 +1,7 @@
 /** Renders the usage page: the tokens every agent spent in a period, in all and by each breakdown. */
 import type { ProjectId, ThreadId } from "../../ids.ts";
 import { breakdownLook, breakdowns, periods, periodStart, tokenColumns, tokenCount, utc, type Period, type UsageBackfill, type UsageTotals } from "../usage.ts";
-import { Html, html, menu, type Part } from "./view.ts";
+import { Html, html, panelBar, type Part } from "./view.ts";
 import type { Context } from "./context.ts";
 import { layout } from "./shell.ts";
 
@@ -43,9 +43,10 @@ export function usagePage(c: Context, period: Period, project: ProjectId | null)
   const href = (p: Period, of: string | null) => `/usage?period=${p}${of === null ? "" : `&project=${encodeURIComponent(of)}`}`;
   const seg = (label: string, to: string, current: boolean) => html`<a class="seg-tab" href="${to}"${current && html` aria-current="page"`}>${label}</a>`;
   return layout(c, {
+    panel: true,
     title: "Usage",
     nav: "usage",
-    main: html`<header class="bar">${menu}<div class="crumb"><h1>Usage</h1></div></header>
+    main: html`${panelBar("Usage", "chart", "tokens every agent spent")}
 <div class="scroll"><div class="page usage" id="usage" data-live>
 <div class="usage-filters">
 <nav class="seg-bar usage-seg" aria-label="Period">${(Object.keys(periods) as Period[]).map((p) => seg(periods[p], href(p, project), p === period))}</nav>
