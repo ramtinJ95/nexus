@@ -14,7 +14,7 @@ import { lastActive, queuedLook } from "./shell.ts";
 import { itemActions, phaseTone } from "./pipeline-page.ts";
 
 /** One card: what it is, where it links, its life, and its state as the sidebar's dot says it. */
-interface Card { key: string; title: string; project: string; href: string; life: Life; state: readonly [string, Tone]; when: Part; meta: Part[]; dim: boolean; actions: Part; order: number }
+export interface Card { title: string; project: string; href: string; life: Life; state: readonly [string, Tone]; when: Part; meta: Part[]; dim: boolean; actions: Part; order: number }
 
 /** The review's round and its pull request, or an open pull request before a review. */
 function threadMeta(c: Context, id: Thread["id"]): Part[] {
@@ -27,21 +27,21 @@ function threadMeta(c: Context, id: Thread["id"]): Part[] {
 const threadCard = (c: Context, t: Thread): Card => {
   const r = c.row(t);
   return {
-    key: t.id, title: t.title, project: t.project, href: `/threads/${t.id}`, life: lifeOfThread(c, t.id), state: threadState(r, c.now),
+    title: t.title, project: t.project, href: `/threads/${t.id}`, life: lifeOfThread(c, t.id), state: threadState(r, c.now),
     when: t.working && t.workingSince !== undefined ? html`<time data-since="${t.workingSince}">${clock(c.now - t.workingSince)}</time>` : span(lastActive(t), c.now) ?? "now",
     meta: threadMeta(c, t.id), dim: dims(r), actions: null, order: -lastActive(t),
   };
 };
 
 const queuedCard = (c: Context, q: QueuedThread): Card => ({
-  key: q.id, title: q.title, project: q.project, href: `/threads/${q.id}`, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued",
+  title: q.title, project: q.project, href: `/threads/${q.id}`, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued",
   meta: q.waits.length > 0 ? [html`<span>after ${q.waits.length} ${q.waits.length === 1 ? "thread" : "threads"}</span>`] : [], dim: false, actions: null, order: 0,
 });
 
 function itemCard(c: Context, i: PipelineItem, title: (id: string) => string): Card {
   const p = c.registry.project(i.project);
   return {
-    key: i.id, title: i.title, project: i.project, href: `/pipeline#item-${i.id}`, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], when: "item",
+    title: i.title, project: i.project, href: `/pipeline#item-${i.id}`, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], when: "item",
     meta: i.after.map((id) => html`<span title="Waits for ${title(id)}">after ${title(id)}</span>`), dim: false, actions: p === undefined ? null : itemActions(i, p), order: i.addedAt,
   };
 }

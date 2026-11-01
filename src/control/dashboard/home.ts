@@ -10,7 +10,7 @@ import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText
 import type { Context, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
-import { boardCards, boardNav, card, columnHead } from "./board.ts";
+import { boardCards, boardNav, card, columnHead, type Card } from "./board.ts";
 import { lifeOfThread, miniTrack, needWhy, type Stage } from "./lifecycle.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
 
@@ -53,7 +53,7 @@ ${cards.length === 0 ? html`<p class="col-empty">${emptyColumn[stage]}</p>` : ht
 <nav class="board-nav" id="board-nav" aria-label="Columns" data-live>${boardNav(placed, heldCount)}</nav>
 <div class="board" id="board">
 ${(["planned", "queued", "building", "review"] as const).map(column)}
-<section class="col col-held needs" id="needs-you" data-stage="held" aria-labelledby="needs-h" data-live>${needsList(c, held)}</section>
+<section class="col col-held" id="needs-you" data-stage="held" aria-labelledby="needs-h" data-live>${needsList(c, held)}</section>
 ${(["landing", "deployed"] as const).map(column)}
 </div>
 <div class="page" id="overview" data-live>
@@ -131,7 +131,7 @@ const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.
  * The column held for the person: the inbox's cards, oldest first, each folded to its head and the card its thread's
  * page shows where there is one, then the work held for them that no card acts on, such as an item to approve.
  */
-function needsList(c: Context, held: Parameters<typeof card>[0][]): Html {
+function needsList(c: Context, held: readonly Card[]): Html {
   const needs = c.needs();
   const fold = (n: Need, head: Html, body: Html, why: string) => html`<details class="need-fold" id="fold-${needId(n)}"><summary class="need-sum" data-why="${why}">${head}</summary>${body}</details>`;
   return html`${columnHead("held", needs.length + held.length, "needs-h")}

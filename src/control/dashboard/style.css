@@ -297,7 +297,6 @@ a.link { color: var(--accent); }
 .side { background: var(--side); display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line-soft); }
 .side-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 10px 16px; }
 .brand { font: 600 14px/1 var(--sans); display: flex; gap: 7px; align-items: center; }
-.brand-mark { color: var(--accent); font-size: 11px; }
 /* The brand's mark is the track itself: six steps, the last lit. */
 .brand-trk { display: inline-grid; grid-template-columns: repeat(6, 4px); gap: 2px; align-items: end; height: 12px; }
 .brand-trk i { display: block; height: 100%; border-radius: 1px; background: var(--accent); opacity: 0.35; }
@@ -785,7 +784,6 @@ h4.md-h { font-size: 1.07em; }
 .graph .u-cursor-x { border-right: 1px solid var(--text-3); opacity: 0.6; }
 
 /* the inbox at the top of the home page: a card for each thing that waits on the person, edged by what it is */
-.page-needs { padding-bottom: 0; }
 .side-count { margin-left: auto; }
 .side-count:not(:empty) { min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--bad); color: var(--bg); font: 600 11px/18px var(--sans); text-align: center; }
 .need-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
