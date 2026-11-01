@@ -5,8 +5,9 @@ import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInsta
 import { planDeploy, quarantined, type Attempt, type ReleaseHealth } from "./plan.ts";
 import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "./model.ts";
 import { jsonRequest, urlHost } from "./http.ts";
+import { controlPlanePath, readControlPlane, type ControlPlane } from "./control-plane.ts";
 import { readJson, saveJson } from "../json-file.ts";
-import { localApiWhois, tailnetNodeIdPattern } from "../tailscale.ts";
+import { localApiWhois } from "../tailscale.ts";
 
 export interface WorkerConfig {
   controlUrl: string;
@@ -15,15 +16,13 @@ export interface WorkerConfig {
   drainTimeoutMs: number;
   healthTimeoutMs: number;
 }
-export function parseWorkerConfig(value: unknown): WorkerConfig {
-  const v = value as WorkerConfig;
-  if (typeof v !== "object" || v === null || typeof v.controlUrl !== "string" ||
-      typeof v.controlNodeId !== "string" || !tailnetNodeIdPattern.test(v.controlNodeId) || !/^[0-9a-f]{64}$/.test(v.token) ||
+/** The control plane comes from control-plane.json. The controlUrl and controlNodeId an older deployer.json holds are left for older code. */
+export function parseWorkerConfig(deployer: unknown, control: ControlPlane): WorkerConfig {
+  const v = deployer as WorkerConfig;
+  if (typeof v !== "object" || v === null || typeof v.token !== "string" || !/^[0-9a-f]{64}$/.test(v.token) ||
       !Number.isInteger(v.drainTimeoutMs) || v.drainTimeoutMs < 0 || v.drainTimeoutMs > 600_000 ||
       !Number.isInteger(v.healthTimeoutMs) || v.healthTimeoutMs < 1000 || v.healthTimeoutMs > 60_000) throw new Error("invalid deployer.json");
-  const url = new URL(v.controlUrl);
-  if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("controlUrl must be a tailnet HTTP origin");
-  return v;
+  return { controlUrl: control.url, controlNodeId: control.tailnetNodeId, token: v.token, drainTimeoutMs: v.drainTimeoutMs, healthTimeoutMs: v.healthTimeoutMs };
 }
 
 const prefix = "/opt/nexus";
@@ -33,7 +32,10 @@ export async function runWorker(check = false): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("deployer must run as root");
   const mode = await stat(configPath);
   if (mode.uid !== 0 || (mode.mode & 0o077) !== 0) throw new Error("deployer.json must be root-owned mode 0600");
-  const config = parseWorkerConfig(await readJson(configPath, null));
+  // Whoever can write it picks the control plane this root process takes releases from.
+  const control = await stat(controlPlanePath);
+  if (control.uid !== 0 || (control.mode & 0o022) !== 0) throw new Error(`${controlPlanePath} must be root-owned and writable by root alone`);
+  const config = parseWorkerConfig(await readJson(configPath, null), await readControlPlane());
   const peer = { id: config.controlNodeId, whois: localApiWhois() };
   const api = (path: string, body?: unknown) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer);
   if (check) { await api("release"); return; }

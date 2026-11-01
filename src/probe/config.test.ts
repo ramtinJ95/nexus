@@ -42,7 +42,8 @@ test("the shutdown record defaults to the probe's state directory, so a probe.js
 test("a config parses into probe options, with the probe port as the default", () => {
   const config = parseProbeConfig(JSON.stringify(valid));
   assert.deepEqual(config.listen, { host: "100.64.0.7", port: 7480 });
-  assert.deepEqual(config.auth, valid.auth);
+  assert.deepEqual(config.auth, { peers: valid.auth.peers }, "the control plane comes from control-plane.json, not probe.json");
+  assert.equal(config.controlPlaneFile, "/etc/nexus/control-plane.json");
   assert.deepEqual(config.backend, valid.backend);
 });
 

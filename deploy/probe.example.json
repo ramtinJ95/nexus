@@ -1,7 +1,7 @@
 {
   "node": "infra-testbench",
   "listen": { "host": "100.64.0.1", "port": 7480 },
-  "auth": { "controlPlane": "nControlPlaneCNTRL", "peers": ["nPeerProbeCNTRL"] },
+  "auth": { "peers": ["nPeerProbeCNTRL"] },
   "backend": {
     "kind": "pylon-vm",
     "stateRoot": "/var/lib/nexus/pylons",

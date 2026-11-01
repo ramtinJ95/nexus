@@ -11,10 +11,11 @@ import { releaseOutcome } from "./model.ts";
 const commit = "a".repeat(40);
 const supervisorLacks = ["flock", "timeout", "node"].filter((tool) => !["/usr/local/bin", "/usr/bin", "/bin"].some((dir) => existsSync(join(dir, tool))));
 
-test("worker config bounds drain and health and rejects credential-bearing endpoints", () => {
-  const config = { controlUrl: "http://control:7470/", controlNodeId: "nControl", token: "a".repeat(64), drainTimeoutMs: 300000, healthTimeoutMs: 60000 };
-  assert.deepEqual(parseWorkerConfig(config), config);
-  for (const patch of [{ controlUrl: "http://user:pass@control/" }, { healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }, { controlNodeId: "control" }, { controlNodeId: ["nControl"] }]) assert.throws(() => parseWorkerConfig({ ...config, ...patch }));
+test("worker config bounds drain and health and takes the control plane from control-plane.json", () => {
+  const deployer = { token: "a".repeat(64), drainTimeoutMs: 300000, healthTimeoutMs: 60000 };
+  const control = { tailnetNodeId: "nControl", url: "http://control:7470/" };
+  assert.deepEqual(parseWorkerConfig(deployer, control), { controlUrl: "http://control:7470/", controlNodeId: "nControl", ...deployer });
+  for (const patch of [{ healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }]) assert.throws(() => parseWorkerConfig({ ...deployer, ...patch }, control));
 });
 
 test("wait outcome trusts the view's health from every role, whatever the caller's clock, and detects rollback and supersession", () => {

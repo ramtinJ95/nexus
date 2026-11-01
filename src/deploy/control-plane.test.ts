@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { adoptControlPlane, parseControlPlane, readControlPlane, setControlPlane } from "./control-plane.ts";
+import { parseWorkerConfig } from "./worker.ts";
 
 const exec = promisify(execFile);
 const firebat = "nFirebat1CNTRL";
@@ -101,4 +102,14 @@ test("the set command, run twice, writes the file and try-restarts the probe onc
   assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["try-restart nexus-probe.service"]);
   assert.deepEqual(await readControlPlane(join(dir, "control-plane.json")), moved);
   assert.match(outputs[1]!, /already names control plane nMoved1CNTRL at http:\/\/100\.64\.0\.9:7470\//);
+});
+
+test("a deployer takes its control plane from the file, not from deployer.json's old keys", async (t) => {
+  const dir = await etc(t);
+  const path = join(dir, "control-plane.json");
+  await writeFile(path, JSON.stringify(moved));
+  const config = parseWorkerConfig(deployerJson(firebat, "http://100.64.0.2:7470/"), await readControlPlane(path));
+  assert.equal(config.controlUrl, moved.url);
+  assert.equal(config.controlNodeId, moved.tailnetNodeId);
+  assert.equal(config.token, token);
 });

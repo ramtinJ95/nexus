@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { parseConfig } from "../control/main.ts";
 import { parseProbeConfig } from "../probe/config.ts";
+import { parseControlPlane } from "./control-plane.ts";
 import { formatLeft, left, paths, parseFlags, parseTailnet, report, setup, type Existing, type Facts, type FileWrite, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
@@ -42,7 +43,7 @@ function value(written: Map<string, FileWrite>, path: string): Record<string, an
   return f.value as Record<string, any>;
 }
 function onDisk(written: Map<string, FileWrite>): Existing {
-  return { gitKey: false, ...Object.fromEntries([...written.values()].map((f) => [{ [paths.control]: "control", [paths.probe]: "probe", [paths.deployer]: "deployer" }[f.path]!, f.value])) };
+  return { gitKey: false, ...Object.fromEntries([...written.values()].map((f) => [{ [paths.control]: "control", [paths.controlPlane]: "controlPlane", [paths.probe]: "probe", [paths.deployer]: "deployer" }[f.path]!, f.value])) };
 }
 
 test("the tailnet is read from tailscale status, with the first label, the host without its dot and the IPv4 address", () => {
@@ -53,8 +54,9 @@ test("the tailnet is read from tailscale status, with the first label, the host 
 test("a fresh control install writes configs the control plane and probe accept, all for this machine", () => {
   const written = files(run(["--admit", "Ramtins-MacBook-Pro", "--dotfiles", dotfiles]));
   assert.deepEqual([...written.values()].map((f) => [f.path, f.mode, f.state]), [
-    [paths.control, 0o644, "new"], [paths.probe, 0o644, "new"], [paths.deployer, 0o600, "new"],
+    [paths.control, 0o644, "new"], [paths.controlPlane, 0o644, "new"], [paths.probe, 0o644, "new"], [paths.deployer, 0o600, "new"],
   ]);
+  assert.deepEqual(parseControlPlane(value(written, paths.controlPlane)), { tailnetNodeId: "nSelf1CNTRL", url: "http://100.64.0.2:7470/" });
   const control = parseConfig(JSON.stringify(value(written, paths.control)));
   const probe = parseProbeConfig(JSON.stringify(value(written, paths.probe)));
   const deployer = value(written, paths.deployer);
@@ -68,19 +70,36 @@ test("a fresh control install writes configs the control plane and probe accept,
   assert.deepEqual(control.dotfiles, { repo: dotfiles, ref: "main" });
   assert.equal(probe.node, "rj-firebat");
   assert.deepEqual(probe.listen, { host: "100.64.0.2", port: 7480 });
-  assert.deepEqual(probe.auth, { controlPlane: "nSelf1CNTRL", peers: [] });
+  assert.deepEqual(probe.auth, { peers: [] });
   assert.equal("gitSsh" in probe.backend, false);
-  assert.deepEqual(deployer, { controlUrl: "http://100.64.0.2:7470/", controlNodeId: "nSelf1CNTRL", token, drainTimeoutMs: 300000, healthTimeoutMs: 60000 });
+  assert.deepEqual(deployer, { token, drainTimeoutMs: 300000, healthTimeoutMs: 60000 });
 });
 
 const nodeTailnet = parseTailnet(status.replaceAll("rj-firebat", "x-self").replaceAll("infra-testbench", "rj-firebat"));
 
 test("a node rerun keeps a control plane URL the person set, since the remote port is not this machine's to know", () => {
   const first = onDisk(files(run(["--node", "rj-firebat"], fresh, nodeTailnet)));
-  const deployer = { ...(first.deployer as Record<string, Json>), controlUrl: "http://rj-firebat.tail1234.ts.net:7471/" };
-  const written = files(run(["--node", "rj-firebat"], { ...first, deployer }, nodeTailnet));
+  const controlPlane = { ...(first.controlPlane as Record<string, Json>), url: "http://rj-firebat.tail1234.ts.net:7471/" };
+  const written = files(run(["--node", "rj-firebat"], { ...first, controlPlane }, nodeTailnet));
+  assert.equal(value(written, paths.controlPlane).url, "http://rj-firebat.tail1234.ts.net:7471/");
+  assert.equal(written.get(paths.controlPlane)!.state, "unchanged");
+});
+
+test("a rerun over an install from before control-plane.json writes it from probe.json and deployer.json, and leaves their old keys", () => {
+  const first = onDisk(files(run(["--node", "rj-firebat"], fresh, nodeTailnet)));
+  const { controlPlane: _, ...rest } = first;
+  const old: Existing = {
+    ...rest,
+    probe: { ...(first.probe as Record<string, any>), auth: { controlPlane: "nBench1CNTRL", peers: ["nBench1CNTRL"] } },
+    deployer: { ...(first.deployer as Record<string, Json>), controlUrl: "http://rj-firebat.tail1234.ts.net:7471/", controlNodeId: "nBench1CNTRL" },
+  };
+  const written = files(run(["--node", "rj-firebat"], old, nodeTailnet));
+  assert.equal(written.get(paths.controlPlane)!.state, "new");
+  assert.deepEqual(value(written, paths.controlPlane), { tailnetNodeId: "nBench1CNTRL", url: "http://rj-firebat.tail1234.ts.net:7471/" }, "the URL the person set carries over");
+  assert.equal(value(written, paths.probe).auth.controlPlane, "nBench1CNTRL", "a rollback still finds what it reads");
   assert.equal(value(written, paths.deployer).controlUrl, "http://rj-firebat.tail1234.ts.net:7471/");
-  assert.equal(written.get(paths.deployer)!.state, "unchanged");
+  assert.deepEqual([...written.keys()], [paths.controlPlane, paths.probe, paths.deployer]);
+  assert.equal(files(run(["--node", "rj-firebat"], onDisk(written), nodeTailnet)).get(paths.controlPlane)!.state, "unchanged");
 });
 
 test("a probe.json from before the artifact store keeps its images and gains no artifacts beside them", () => {
@@ -107,10 +126,9 @@ test("a fresh node install points its probe and deployer at the control machine 
   assert.equal(written.has(paths.control), false);
   const probe = parseProbeConfig(JSON.stringify(value(written, paths.probe)));
   assert.equal(probe.node, "x-self");
-  assert.deepEqual(probe.auth, { controlPlane: "nBench1CNTRL", peers: ["nBench1CNTRL"] });
-  assert.deepEqual(value(written, paths.deployer), {
-    controlUrl: "http://rj-firebat.tail1234.ts.net:7470/", controlNodeId: "nBench1CNTRL", token, drainTimeoutMs: 300000, healthTimeoutMs: 60000,
-  });
+  assert.deepEqual(probe.auth, { peers: ["nBench1CNTRL"] });
+  assert.deepEqual(value(written, paths.controlPlane), { tailnetNodeId: "nBench1CNTRL", url: "http://rj-firebat.tail1234.ts.net:7470/" });
+  assert.deepEqual(value(written, paths.deployer), { token, drainTimeoutMs: 300000, healthTimeoutMs: 60000 });
 });
 
 test("a rerun keeps the token and every value the person changed, adds what is new, refreshes what follows from the deployer, and says what it left alone", () => {
@@ -130,21 +148,21 @@ test("a rerun keeps the token and every value the person changed, adds what is n
   assert.deepEqual(merged.callers, ["nMac1CNTRL"]);
   assert.deepEqual(merged.deployers, ["nMac1CNTRL"]);
   assert.equal(value(written, paths.deployer).token, "d".repeat(64));
-  assert.equal(value(written, paths.deployer).controlUrl, "http://100.64.0.2:7471/", "the deployer follows the control plane's port");
+  assert.equal(value(written, paths.controlPlane).url, "http://100.64.0.2:7471/", "the node follows the control plane's port");
   assert.equal((merged.deployKeys as Record<string, string>).nSelf1CNTRL, sha256("d".repeat(64)), "the digest follows the token on disk");
-  assert.deepEqual([...written.values()].map((f) => f.state), ["updated", "unchanged", "updated"]);
+  assert.deepEqual([...written.values()].map((f) => f.state), ["updated", "updated", "unchanged", "unchanged"]);
   const text = report(result.ok ? result.files : []);
   assert.match(text, /^updated \/etc\/nexus\/control\.json$/m);
   assert.match(text, /added callers "nMac1CNTRL"/);
   assert.match(text, /left listen\.port alone: it is 7471, and this run would write 7470/);
   assert.match(text, /left dotfiles\.repo alone/);
-  assert.match(text, /replaced controlUrl "http:\/\/100\.64\.0\.2:7470\/" with "http:\/\/100\.64\.0\.2:7471\/"/);
+  assert.match(text, /replaced url "http:\/\/100\.64\.0\.2:7470\/" with "http:\/\/100\.64\.0\.2:7471\/"/);
   assert.match(text, /kept the existing deployer token/);
   assert.match(text, new RegExp(`replaced deployKeys\\.nSelf1CNTRL "${sha256(token)}" with "${sha256("d".repeat(64))}"`));
   assert.doesNotMatch(text, /d{64}|c{64}/, "the report never shows a token");
 
   const again = files(run([], onDisk(written)));
-  assert.deepEqual([...again.values()].map((f) => f.state), ["unchanged", "unchanged", "unchanged"]);
+  assert.deepEqual([...again.values()].map((f) => f.state), ["unchanged", "unchanged", "unchanged", "unchanged"]);
 });
 
 test("a rerun over a config without imageBuildNode leaves image builds on the default node", () => {
@@ -166,7 +184,7 @@ test("--add-node adds the node, its deploy key and the probe peer, once", () => 
   assert.deepEqual(parseProbeConfig(JSON.stringify(value(written, paths.probe))).auth.peers, ["nBench1CNTRL"]);
   const again = files(run(["--add-node", `infra-testbench=${digest}`], onDisk(written)));
   assert.deepEqual(value(again, paths.control).nodes, value(written, paths.control).nodes);
-  assert.deepEqual([...again.values()].map((f) => f.state), ["unchanged", "unchanged", "unchanged"]);
+  assert.deepEqual([...again.values()].map((f) => f.state), ["unchanged", "unchanged", "unchanged", "unchanged"]);
 });
 
 test("a git key on disk adds gitSsh to an existing probe.json", () => {
@@ -203,6 +221,8 @@ test("a first control install needs --dotfiles, and a node cannot become a contr
   assert.match(errors(run(["--join", "token", "--dotfiles", dotfiles])).join("\n"), /--join needs --node <the control plane's tailnet name>/);
   const nodeProbe: Existing = { gitKey: false, probe: { auth: { controlPlane: "nBench1CNTRL", peers: [] } } };
   assert.match(errors(run(["--dotfiles", dotfiles], nodeProbe)).join("\n"), /already a node of the control plane infra-testbench\. Pass --node infra-testbench/);
+  const nodeControlPlane: Existing = { gitKey: false, controlPlane: { tailnetNodeId: "nBench1CNTRL", url: "http://infra-testbench.tail1234.ts.net:7470/" } };
+  assert.match(errors(run(["--dotfiles", dotfiles], nodeControlPlane)).join("\n"), /already a node of the control plane infra-testbench/);
 });
 
 test("control-only flags and this machine as --node are refused for a node install", () => {

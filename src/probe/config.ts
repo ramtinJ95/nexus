@@ -9,7 +9,8 @@ import { basename, dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backend.ts";
 import { parseJson } from "../parse.ts";
-import { type ImageId, isImageId } from "../ids.ts";
+import { controlPlanePath, type ControlPlane } from "../deploy/control-plane.ts";
+import { type ImageId, isImageId, type TailnetNodeId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { heldSecrets } from "../protocol/observations.ts";
 import { probePort, type ProbeAuthConfig } from "../protocol/routes.ts";
@@ -43,7 +44,8 @@ const configSchema = z.strictObject({
     host: z.union([z.ipv4(), z.ipv6()]).refine((h) => tailnet.check(h, isIPv6(h) ? "ipv6" : "ipv4"), "must be this node's tailnet address, in 100.64.0.0/10 or fd7a:115c:a1e0::/48"),
     port: z.int().min(1).max(65535).default(probePort),
   }),
-  auth: z.strictObject({ controlPlane: tailnetNodeIdSchema, peers: z.array(tailnetNodeIdSchema) }) satisfies z.ZodType<ProbeAuthConfig>,
+  // A probe.json from before control-plane.json still names its control plane here, for a rollback to a release that reads it.
+  auth: z.strictObject({ controlPlane: tailnetNodeIdSchema.optional(), peers: z.array(tailnetNodeIdSchema) }).transform(({ peers }) => ({ peers })),
   backend: z.preprocess(imagesAsStore, z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("pylon-vm"),
@@ -57,6 +59,7 @@ const configSchema = z.strictObject({
     z.strictObject({ kind: z.literal("docker"), images: z.record(z.custom<ImageId>(isImageId, "must be an image ID, such as img-000000000000"), z.string()), labels: z.record(z.string(), z.string()).default({}), artifacts: absolutePath.optional() }),
   ])),
   secretsFile: absolutePath,
+  controlPlaneFile: absolutePath.default(controlPlanePath),
   /** In the probe's state directory, so the next boot's probe reads what the node's shutdown paused. */
   shutdownFile: absolutePath.default("/var/lib/nexus/shutdown.json"),
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
@@ -69,6 +72,11 @@ const configSchema = z.strictObject({
 });
 
 export type ProbeConfig = z.infer<typeof configSchema>;
+
+/** The callers the probe trusts: the control plane control-plane.json names, and probe.json's peers. */
+export function probeAuth(config: ProbeConfig, control: ControlPlane): ProbeAuthConfig {
+  return { controlPlane: control.tailnetNodeId as TailnetNodeId, peers: config.auth.peers };
+}
 
 export function parseProbeConfig(text: string): ProbeConfig {
   return parseJson(configSchema, text, "config");

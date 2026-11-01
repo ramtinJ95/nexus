@@ -28,7 +28,7 @@ export const routeAuth = {
   "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
 } as const satisfies Record<string, CallerRole>;
 
-/** Read from /etc/nexus/probe.json on each node. `peers` holds until the control plane puts the list of every other node. */
+/** `controlPlane` is read from /etc/nexus/control-plane.json on each node, and `peers` from /etc/nexus/probe.json until the control plane puts the list of every other node. */
 export interface ProbeAuthConfig {
   controlPlane: TailnetNodeId; // rj-firebat
   peers: readonly TailnetNodeId[]; // every other node

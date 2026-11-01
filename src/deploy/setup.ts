@@ -1,5 +1,5 @@
 /**
- * Writes /etc/nexus/{control,probe,deployer}.json for `deploy/install.sh`, joins a node to its control plane with a
+ * Writes /etc/nexus/{control,control-plane,probe,deployer}.json for `deploy/install.sh`, joins a node to its control plane with a
  * join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person:
  * `node src/deploy/setup.ts write|join|credentials|left [--node <control device>] [--join <token>] [--admit <device>]...
  * [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]`.
@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, gitKnownHosts, harnessSignedIn, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
+import { controlPlanePath, legacyControlPlane, readControlPlane } from "./control-plane.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { digestPattern, tokenDigest, tsNet } from "./model.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
@@ -21,6 +22,7 @@ const exec = promisify(execFile);
 
 export const paths = {
   control: "/etc/nexus/control.json",
+  controlPlane: controlPlanePath,
   probe: "/etc/nexus/probe.json",
   deployer: "/etc/nexus/deployer.json",
   secrets: stores.claude.file,
@@ -144,7 +146,7 @@ export function merge(existing: Json, generated: Json, changes: Change[], at = "
   return existing;
 }
 
-export interface Existing { control?: Json; probe?: Json; deployer?: Json; gitKey: boolean }
+export interface Existing { control?: Json; controlPlane?: Json; probe?: Json; deployer?: Json; gitKey: boolean }
 
 export interface FileWrite {
   path: string;
@@ -167,7 +169,7 @@ function file(path: string, mode: number, existing: Json | undefined, generated:
 export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newToken: string): Setup {
   const errors: string[] = [];
   const { self } = tailnet;
-  for (const [label, value] of [["control.json", existing.control], ["probe.json", existing.probe], ["deployer.json", existing.deployer]] as const) {
+  for (const [label, value] of [["control.json", existing.control], ["control-plane.json", existing.controlPlane], ["probe.json", existing.probe], ["deployer.json", existing.deployer]] as const) {
     if (value !== undefined && !isObject(value)) errors.push(`${label} on disk is not a JSON object. Fix or remove it`);
   }
   const deployerOnDisk = isObject(existing.deployer) ? existing.deployer : undefined;
@@ -205,7 +207,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   if (flags.node === undefined) {
     if (existing.control === undefined && flags.dotfiles === undefined) errors.push("--dotfiles <git url> is needed on the first control install: the dotfiles repository every new pylon pulls on boot");
     const probeOnDisk = isObject(existing.probe) ? existing.probe : undefined;
-    const servedControl = isObject(probeOnDisk?.auth) ? probeOnDisk.auth.controlPlane : undefined;
+    const servedControl = isObject(existing.controlPlane) ? existing.controlPlane.tailnetNodeId : isObject(probeOnDisk?.auth) ? probeOnDisk.auth.controlPlane : undefined;
     if (existing.control === undefined && typeof servedControl === "string" && servedControl !== self.id) {
       const known = tailnet.peers.find((p) => p.id === servedControl);
       errors.push(`this machine is already a node of the control plane ${known?.name ?? servedControl}. Pass --node ${known?.name ?? "<control device>"}`);
@@ -247,11 +249,18 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     controlUrl = `http://${urlHost(String(listen.host))}:${String(listen.port)}/`;
   }
 
+  // An install from before control-plane.json named the control plane in probe.json and deployer.json, which carry over.
+  const legacy = existing.controlPlane !== undefined ? undefined : (() => {
+    try { return { ...legacyControlPlane(existing.probe, existing.deployer) }; } catch { return undefined; }
+  })();
+  const trusted = file(paths.controlPlane, 0o644, existing.controlPlane ?? legacy, { tailnetNodeId: controlId, url: controlUrl }, control === undefined ? ["tailnetNodeId", "url"] : []);
+  files.push(existing.controlPlane === undefined ? { ...trusted, state: "new" } : trusted);
+
   const existingBackend = isObject(existing.probe) ? existing.probe.backend : undefined;
   files.push(file(paths.probe, 0o644, existing.probe, {
     node: self.name,
     listen: { host: self.ip, port: 7480 },
-    auth: { controlPlane: controlId, peers: [...control === undefined ? [] : [control.id], ...addNodes.map((a) => a.node.id), ...peers.map((d) => d.id)] },
+    auth: { peers: [...control === undefined ? [] : [control.id], ...addNodes.map((a) => a.node.id), ...peers.map((d) => d.id)] },
     backend: {
       kind: "pylon-vm",
       stateRoot: "/var/lib/nexus/pylons",
@@ -263,9 +272,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     previews: { gatewayPort: 7481 },
   }));
 
-  files.push(file(paths.deployer, 0o600, existing.deployer, {
-    controlUrl, controlNodeId: controlId, token, drainTimeoutMs: 300_000, healthTimeoutMs: 60_000,
-  }, control === undefined ? ["controlUrl", "controlNodeId"] : []));
+  files.push(file(paths.deployer, 0o600, existing.deployer, { token, drainTimeoutMs: 300_000, healthTimeoutMs: 60_000 }));
   return { ok: true, files };
 }
 
@@ -405,6 +412,7 @@ async function write(flags: Flags): Promise<number> {
   const existing: Existing = {
     gitKey: await system.exists(paths.gitKey),
     ...await readJsonFile(paths.control, errors).then((control) => control === undefined ? {} : { control }),
+    ...await readJsonFile(paths.controlPlane, errors).then((controlPlane) => controlPlane === undefined ? {} : { controlPlane }),
     ...await readJsonFile(paths.probe, errors).then((probe) => probe === undefined ? {} : { probe }),
     ...await readJsonFile(paths.deployer, errors).then((deployer) => deployer === undefined ? {} : { deployer }),
   };
@@ -452,7 +460,7 @@ async function gather(flags: Flags): Promise<Facts> {
 }
 
 /**
- * Sends the join token and this node's deploy key digest to the control plane deployer.json names, once tailscaled says
+ * Sends the join token and this node's deploy key digest to the control plane control-plane.json names, once tailscaled says
  * the endpoint is that tailnet node. The control plane records this node as its own whois of the caller says.
  */
 export async function joinControlPlane(deployer: Pick<WorkerConfig, "controlUrl" | "controlNodeId" | "token">, token: string, whois: Whois): Promise<string> {
@@ -490,7 +498,7 @@ async function main(args: readonly string[]): Promise<number> {
   const { command, flags } = parseFlags(args);
   if (command === "write") return await write(flags);
   if (command === "join" && flags.join !== undefined) {
-    const deployer = parseWorkerConfig(await readJson(paths.deployer));
+    const deployer = parseWorkerConfig(await readJson(paths.deployer), await readControlPlane(paths.controlPlane));
     console.log(`joined the control plane as node ${await joinControlPlane(deployer, flags.join, localApiWhois())}. It follows this node's probe from now on`);
     return 0;
   }
