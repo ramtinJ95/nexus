@@ -108,18 +108,26 @@ export async function setControlPlane(etc: string, value: ControlPlane, restart:
   const followed = await oldKeyWrites(etc, control);
   const before = await readJson(path).catch(() => undefined);
   const changed = !isDeepStrictEqual(before, control);
-  for (const write of followed) await saveJson(write.path, write.value, { mode: write.mode });
-  // Last, so a failure before it leaves the file as it was, and a retry still restarts the probe onto the new one.
-  if (changed) {
-    await saveJson(path, control, { mode: 0o644 });
-    try {
-      await restart();
-    } catch (err) {
-      // The running probe still trusts what the file said, so the file says it again until a restart succeeds.
-      if (before === undefined) await rm(path, { force: true });
-      else await saveJson(path, before, { mode: 0o644 });
-      throw err;
+  const written: { path: string; old: unknown; mode: number }[] = [];
+  try {
+    for (const write of followed) {
+      await saveJson(write.path, write.value, { mode: write.mode });
+      written.push(write);
     }
+    // Last, so a failure before it leaves the file as it was, and a retry still restarts the probe onto the new one.
+    if (changed) {
+      await saveJson(path, control, { mode: 0o644 });
+      written.push({ path, old: before, mode: 0o644 });
+      await restart();
+    }
+  } catch (err) {
+    // The running probe, a rollback's probe and the bootstrap worker still trust what the files said, so every file
+    // says it again, and a retry starts over.
+    for (const { path, old, mode } of written.reverse()) {
+      if (old === undefined) await rm(path, { force: true });
+      else await saveJson(path, old, { mode });
+    }
+    throw err;
   }
   return changed || followed.length > 0 ? "wrote" : "unchanged";
 }
@@ -136,8 +144,8 @@ const oldKeys: readonly [string, (old: Old, control: ControlPlane) => Old][] = [
 ];
 
 /** The rewrites of the old keys each file still has, keeping its mode. Every file is read before anything is written. */
-async function oldKeyWrites(etc: string, control: ControlPlane): Promise<{ path: string; value: Old; mode: number }[]> {
-  const writes: { path: string; value: Old; mode: number }[] = [];
+async function oldKeyWrites(etc: string, control: ControlPlane): Promise<{ path: string; old: Old; value: Old; mode: number }[]> {
+  const writes: { path: string; old: Old; value: Old; mode: number }[] = [];
   for (const [name, follow] of oldKeys) {
     const path = join(etc, name);
     let old: unknown;
@@ -148,22 +156,30 @@ async function oldKeyWrites(etc: string, control: ControlPlane): Promise<{ path:
     }
     if (typeof old !== "object" || old === null || Array.isArray(old)) continue;
     const value = follow(old as Old, control);
-    if (!isDeepStrictEqual(old, value)) writes.push({ path, value, mode: (await stat(path)).mode & 0o777 });
+    if (!isDeepStrictEqual(old, value)) writes.push({ path, old: old as Old, value, mode: (await stat(path)).mode & 0o777 });
   }
   return writes;
 }
 
-// restart, not try-restart: a restart that failed after its stop leaves the probe down, and the retry must start it. A
-// machine without the probe's unit has nothing to restart. The deployer needs none: its timer's worker reads the file each poll.
+// restart, not try-restart: a restart that failed after its stop leaves the probe down, and the retry must start it.
+// Whether to restart follows from the unit's existence, not its enablement, so a probe started by hand restarts too. The
+// deployer needs none: its timer's worker reads the file each poll.
 async function restartProbe(): Promise<void> {
-  const systemctl = (args: string[]) => promisify(execFile)("systemctl", args);
-  if (!await systemctl(["is-enabled", "--quiet", "nexus-probe.service"]).then(() => true, () => false)) return;
+  const systemctl = async (args: string[]) => (await promisify(execFile)("systemctl", args)).stdout.trim();
+  let loaded: string;
+  try {
+    loaded = await systemctl(["show", "nexus-probe.service", "--property=LoadState", "--value"]);
+  } catch (err) {
+    throw new Error(`could not tell whether this machine has a probe, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}`);
+  }
+  if (loaded === "not-found") return;
   try {
     await systemctl(["restart", "nexus-probe.service"]);
   } catch (err) {
-    throw new Error(`the probe did not restart, so ${fileName} names the control plane it trusted again: ${(err as Error).message}. Fix the restart and run this again, which restarts the probe whether it runs or not`);
+    throw new Error(`the probe did not restart, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}. Fix the restart and run this again, which restarts the probe whether it runs or not`);
   }
 }
+
 const describe = (control: ControlPlane) => `control plane ${control.tailnetNodeId} at ${control.url}`;
 
 async function main(args: readonly string[]): Promise<number> {

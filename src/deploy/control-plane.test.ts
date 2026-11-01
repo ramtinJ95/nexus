@@ -101,7 +101,7 @@ test("the set command restarts the probe once, and after a restart that stopped 
   await writeFile(join(bin, "systemctl"), `#!/bin/sh
 echo "$*" >>"${log}"
 case "$1" in
-  is-enabled) exit 0 ;;
+  show) echo loaded ;;
   restart) if [ -e "${bin}/fail-start" ]; then echo inactive >"${state}"; rm "${bin}/fail-start"; exit 1; fi; echo active >"${state}" ;;
 esac
 `, { mode: 0o755 });
@@ -110,7 +110,7 @@ esac
   const set = (control: typeof moved) => exec(process.execPath, [script, "set", dir, control.tailnetNodeId, control.url], { env });
   await set(moved);
   assert.match((await set(moved)).stdout, /already names control plane nMoved1CNTRL at http:\/\/100\.64\.0\.9:7470\//);
-  assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["is-enabled --quiet nexus-probe.service", "restart nexus-probe.service"]);
+  assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["show nexus-probe.service --property=LoadState --value", "restart nexus-probe.service"]);
 
   const other = { tailnetNodeId: firebat, url: "http://100.64.0.2:7470/" };
   await writeFile(join(bin, "fail-start"), "");
@@ -122,15 +122,39 @@ esac
   assert.deepEqual(await readControlPlane(join(dir, "control-plane.json")), other);
 });
 
-test("the set command restarts nothing on a machine without the probe's unit", async (t) => {
-  const dir = await etc(t);
+/** `node control-plane.ts set` with a stand-in systemctl whose body is `script`, logging every call. */
+async function setWith(t: TestContext, script: string, dir: string, control = moved) {
   const bin = await etc(t);
   const log = join(bin, "systemctl.log");
-  await writeFile(join(bin, "systemctl"), `#!/bin/sh\necho "$*" >>"${log}"\n[ "$1" != is-enabled ] || exit 1\n`, { mode: 0o755 });
-  const script = new URL("./control-plane.ts", import.meta.url).pathname;
-  await exec(process.execPath, [script, "set", dir, moved.tailnetNodeId, moved.url], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
-  assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["is-enabled --quiet nexus-probe.service"]);
+  await writeFile(join(bin, "systemctl"), `#!/bin/sh\necho "$*" >>"${log}"\n${script}\n`, { mode: 0o755 });
+  const cli = new URL("./control-plane.ts", import.meta.url).pathname;
+  const run = exec(process.execPath, [cli, "set", dir, control.tailnetNodeId, control.url], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  const result = await run.then(() => undefined, (err: Error) => err);
+  return { error: result, calls: (await readFile(log, "utf8")).trim().split("\n") };
+}
+
+test("the set command restarts nothing on a machine without the probe's unit", async (t) => {
+  const dir = await etc(t);
+  const { error, calls } = await setWith(t, `[ "$1" != show ] || echo not-found`, dir);
+  assert.equal(error, undefined);
+  assert.deepEqual(calls, ["show nexus-probe.service --property=LoadState --value"]);
   assert.deepEqual(await readControlPlane(join(dir, "control-plane.json")), moved);
+});
+
+test("the set command restarts a probe that runs though it is not enabled at boot", async (t) => {
+  const dir = await etc(t);
+  const { error, calls } = await setWith(t, `case "$1" in is-enabled) exit 1 ;; is-active) echo active ;; show) echo loaded ;; esac`, dir);
+  assert.equal(error, undefined);
+  assert.ok(calls.includes("restart nexus-probe.service"), calls.join("\n"));
+});
+
+test("the set command fails, and leaves the file as it was, when systemctl cannot say whether there is a probe", async (t) => {
+  const dir = await etc(t, probeJson(firebat), deployerJson(firebat, "http://100.64.0.2:7470/"));
+  assert.equal(await adoptControlPlane(dir), "wrote");
+  const { error, calls } = await setWith(t, `echo "Failed to connect to bus" >&2; exit 1`, dir);
+  assert.match(String(error), /could not tell whether this machine has a probe/);
+  assert.ok(!calls.includes("restart nexus-probe.service"), calls.join("\n"));
+  assert.equal((await readControlPlane(join(dir, "control-plane.json"))).tailnetNodeId, firebat);
 });
 
 test("a deployer takes its control plane from the file, not from deployer.json's old keys", async (t) => {
@@ -189,6 +213,9 @@ test("a set whose probe restart fails puts the file back, so its retry restarts 
   assert.equal(await adoptControlPlane(dir), "wrote");
   await assert.rejects(setControlPlane(dir, moved, async () => { throw new Error("systemd is busy"); }), /systemd is busy/);
   assert.equal((await readControlPlane(join(dir, "control-plane.json"))).tailnetNodeId, firebat, "the file names the control plane the running probe trusts");
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "probe.json"), "utf8")), probeJson(firebat), "a rollback's probe trusts the same one");
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "deployer.json"), "utf8")), deployerJson(firebat, "http://100.64.0.2:7470/"), "the bootstrap worker polls the same one");
+  assert.equal((await stat(join(dir, "deployer.json"))).mode & 0o777, 0o600);
   let restarts = 0;
   assert.equal(await setControlPlane(dir, moved, async () => { restarts++; }), "wrote");
   assert.equal(restarts, 1);
