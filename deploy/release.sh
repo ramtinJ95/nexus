@@ -83,6 +83,8 @@ prepare_control() {
   install -d -o root -g root -m 0755 "$etc"
   install_release "$1"
   install_unit "$1/deploy/nexus-control.service" nexus-control.service
+  install_unit "$1/deploy/nexus-backup.service" nexus-backup.service
+  install_unit "$1/deploy/nexus-backup.timer" nexus-backup.timer
 }
 
 # The probe's upgrade steps from the checkout at $1, which neither switch its link nor start it. The deployer runs them

@@ -1,0 +1,16 @@
+# The control plane's daily backup to /var/backups/nexus. deploy/install-control.sh installs this file as
+# /etc/systemd/system/nexus-backup.service, and nexus-backup.timer runs it.
+#
+# It runs as root, because a backup holds /etc/nexus and the control plane's credentials. A failed run fails the unit,
+# and journalctl -u nexus-backup says why.
+
+[Unit]
+Description=Back up the Nexus control plane to /var/backups/nexus
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=PATH=/usr/local/bin:/usr/bin
+ExecStart=/usr/bin/env node /opt/nexus/control-current/src/control/backup.ts backup /etc/nexus/control.json
+UMask=0077

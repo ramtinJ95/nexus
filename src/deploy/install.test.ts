@@ -231,6 +231,18 @@ test("the deployer's preparation runs both role installers without reading input
   assert.deepEqual(ran.filter((line) => credentials.test(line)), [], "a secrets.env of another mode keeps it");
 });
 
+test("the control role, prepared by the deployer or installed by hand, installs the daily backup's service and timer", async (t) => {
+  for (const prepare of [true, false]) {
+    const m = await roleInstallers(t);
+    const result = await m.run("control", prepare);
+    assert.equal(result.code, 0, result.stderr);
+    const ran = await m.ran();
+    assert.ok(ran.includes("install_unit nexus-backup.service") && ran.includes("install_unit nexus-backup.timer"), ran.join("\n"));
+  }
+  const control = await readFile(resolve(import.meta.dirname, "../../deploy/nexus-control.service"), "utf8");
+  assert.match(control, /^Wants=nexus-backup\.timer$/m, "starting the control plane starts the timer the preparation only enabled");
+});
+
 test("outside preparation the same stand-ins see the role installers switch and start their services", async (t) => {
   const m = await roleInstallers(t);
   const result = await m.run("probe", false);

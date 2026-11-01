@@ -12,6 +12,8 @@
 Description=Nexus control plane (registry, reconcile loop, agent harness and API)
 Wants=network-online.target
 After=network-online.target tailscaled.service
+# Preparing a release only enables the backup's timer, so the restart that follows starts it.
+Wants=nexus-backup.timer
 
 [Service]
 Type=simple
