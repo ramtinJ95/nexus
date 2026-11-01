@@ -13,6 +13,7 @@ import { Html, html, menu } from "./view.ts";
 import type { Context } from "./context.ts";
 import { cleanupCard } from "./cards.ts";
 import { layout } from "./shell.ts";
+import { lifeOfThread, miniTrack } from "./lifecycle.ts";
 
 const unknown = html`<span class="dim">unknown</span>`;
 
@@ -70,7 +71,7 @@ ${health.pylons === null ? html`<p class="empty">This node's backend does not sa
 <thead><tr><th class="wide">Pylon</th><th>Thread</th><th class="wide">Processes</th><th>CPU</th><th>Resident</th></tr></thead>
 <tbody>${health.pylons.map((p) => {
   const thread = pylonOf.get(p.pylonId);
-  return html`<tr><td class="wide"><code>${p.pylonId}</code></td><td>${thread === undefined ? html`<span class="dim">${p.pylonId}, not in the registry</span>` : html`<a class="link" href="/threads/${thread}" title="${p.pylonId}">${c.registry.thread(thread as ThreadId)?.title ?? thread}</a>`}</td><td class="wide">${p.processes}</td><td>${p.cpuPercent.toFixed(1)}%</td><td>${gib(p.residentGiB)} GiB</td></tr>`;
+  return html`<tr><td class="wide"><code>${p.pylonId}</code></td><td>${thread === undefined ? html`<span class="dim">${p.pylonId}, not in the registry</span>` : html`<a class="link" href="/threads/${thread}" title="${p.pylonId}">${c.registry.thread(thread as ThreadId)?.title ?? thread}</a>${miniTrack(lifeOfThread(c, thread as ThreadId))}`}</td><td class="wide">${p.processes}</td><td>${p.cpuPercent.toFixed(1)}%</td><td>${gib(p.residentGiB)} GiB</td></tr>`;
 })}</tbody>
 </table>`}
 <p class="dim small">CPU is the percent of one CPU a pylon's processes used over the second the probe sampled, so four busy CPUs read 400%.</p>

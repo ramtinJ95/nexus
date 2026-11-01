@@ -728,15 +728,18 @@ h4.md-h { font-size: 1.07em; }
 .tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 
 /* the thread overview */
-.page { max-width: 1040px; margin: 0 auto; padding: 18px 32px 32px; display: grid; gap: 26px; }
+.page { max-width: 1080px; margin: 0 auto; padding: 20px 28px 32px; display: grid; gap: 16px; }
+/* The pages that support the board set each part in a panel, as the board sets each step in a well. */
+:is(#overview, .report, .usage, .node-live) > section, .queued > section { padding: 14px 16px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); min-width: 0; }
+.ov tbody tr:last-child td { border-bottom: 0; }
 .first-project { display: grid; gap: 12px; justify-items: start; }
 .ov-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
-.ov-head h2 { margin: 0; font: 600 15px/1.4 var(--sans); color: var(--text); }
+.ov-head h2 { margin: 0; font: 650 14px/1.4 var(--sans); color: var(--text); }
 .ov-head code { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ov-head .btn { margin-left: auto; }
 .ov { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .ov th:first-child { width: 36%; }
-.ov th { text-align: left; font: 500 11.5px var(--sans); color: var(--text-3); padding: 4px 10px; border-bottom: 1px solid var(--line-soft); }
+.ov th { text-align: left; font: 600 10.5px var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); padding: 4px 10px 6px; border-bottom: 1px solid var(--line-soft); }
 .ov td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov tr:hover td { background: var(--hover); }
 .ov-title { display: flex; align-items: center; gap: 9px; color: var(--text); min-width: 0; }
@@ -744,11 +747,22 @@ h4.md-h { font-size: 1.07em; }
 .ov-title a:hover { color: var(--accent); }
 .ov-closed { margin-top: 8px; }
 .ov-closed > summary { cursor: pointer; font-size: 12px; color: var(--text-3); padding: 2px 10px; }
-.report-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.report-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; color: var(--text-2); }
+.report-list li { padding-left: 12px; border-left: 2px solid var(--line); }
+.report-list li[data-status="fail"] { border-left-color: var(--bad); }
+.report-list li[data-status="warn"] { border-left-color: var(--warn); }
+.report-list li[data-status="ok"] { border-left-color: var(--ok); }
+/* the health page opens on its verdict, a band in the colour of the worst check */
+.report > p:first-child { margin: 0; padding: 12px 16px; border-radius: 12px; font-size: 13.5px; color: var(--text-2); background: color-mix(in srgb, var(--ok) 9%, var(--bg)); box-shadow: inset 3px 0 0 var(--ok); }
+.report > p:first-child:has(.dot-bad) { background: color-mix(in srgb, var(--bad) 8%, var(--bg)); box-shadow: inset 3px 0 0 var(--bad); }
+.report > p:first-child:has(.dot-busy) { background: color-mix(in srgb, var(--warn) 9%, var(--bg)); box-shadow: inset 3px 0 0 var(--warn); }
+.report > p:first-child .state { font-weight: 650; color: var(--text); margin-right: 6px; }
 .report-list .state { margin-left: 8px; }
 
 /* a node's graphs: cloud-console panels of fixed height in two columns, one crosshair across them, their legends in text colours */
-.node-live { display: grid; gap: 26px; }
+.node-live { display: grid; gap: 16px; }
+/* each pylon's thread carries its track, so the node reads as where the board's work runs */
+#node-pylons .trk { width: 72px; margin-top: 4px; }
 .graph-ranges { margin-left: auto; }
 .graph-ranges button { font-variant-numeric: tabular-nums; min-width: 38px; }
 .graph-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -781,9 +795,9 @@ h4.md-h { font-size: 1.07em; }
 .need.picked, .need:focus-visible { outline: 2px solid var(--kind); outline-offset: 2px; }
 .need-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; min-width: 0; }
 .need-what { min-width: 0; font: 600 11.5px/1.4 var(--sans); color: var(--kind); }
-.need-thread { grid-column: 1 / -1; grid-row: 2; min-width: 0; font-weight: 500; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
-.need-thread .dim { font-weight: 400; }
-.need-thread:hover { color: var(--accent); }
+.need-head > .need-thread { grid-column: 1 / -1; grid-row: 2; min-width: 0; font-weight: 500; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+.need-head > .need-thread .dim { font-weight: 400; }
+.need-head > .need-thread:hover { color: var(--accent); }
 .need-at { grid-column: 2; grid-row: 1; font-size: 11px; color: var(--text-3); white-space: nowrap; }
 /* A held card folds to its head, its track and why it waits, and opens to the card that moves it on. */
 .need-fold > summary { list-style: none; display: grid; gap: 6px; padding: 9px 10px; cursor: pointer; border-radius: 8px; }
@@ -1048,7 +1062,7 @@ a.card-main:focus-visible { outline-offset: -2px; }
   body[data-open="actions"] .bar-actions { display: grid; position: absolute; right: 8px; top: 46px; z-index: 30; min-width: 160px; padding: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--pop); }
   body[data-open="actions"] .bar-actions .btn { justify-content: flex-start; padding: 10px 12px; font-size: 14px; border: 0; box-shadow: none; }
 
-  .tabs { margin: 0 10px 6px; }
+  .tabs { padding: 0 4px; }
   .strip { display: flex; gap: 6px; overflow-x: auto; padding: 4px 12px 8px; scrollbar-width: none; flex: none; }
   .mini { flex: none; display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px/1 var(--sans); padding: 7px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--text-2); cursor: pointer; white-space: nowrap; }
   .mini-ok { color: var(--ok); }
@@ -1075,7 +1089,8 @@ a.card-main:focus-visible { outline-offset: -2px; }
   .fv-head { padding: 10px 12px; }
   .fv-head .fv-layout { display: none; }
 
-  .page { padding: 14px 12px 24px; }
+  .page { padding: 12px 10px 24px; gap: 12px; }
+  .dock .landing { max-height: 32vh; }
   .ov .wide { display: none; }
   .ov th:first-child { width: 62%; }
   .ov-head code { display: none; }
@@ -1102,3 +1117,38 @@ a.card-main:focus-visible { outline-offset: -2px; }
   .ov-items .ov-act { width: 84px; }
 }
 .queued section h2 { margin: 0 0 10px; font: 600 13px/1.4 var(--sans); color: var(--text); }
+
+/* phone: the board's columns sit side by side a swipe apart, with a chip per column to jump to it */
+@media (max-width: 760px) {
+  .board-nav { display: flex; gap: 6px; flex: none; overflow-x: auto; padding: 8px 12px 2px; scrollbar-width: none; }
+  .bn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
+  .bn b { font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; }
+  .bn-empty { opacity: 0.6; }
+  .bn-held { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); color: var(--bad); }
+  .bn-held b { color: var(--bad); }
+  .board { flex: 1 1 0; height: auto; min-height: 0; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 84vw; gap: 10px; padding: 8px 12px 12px; scroll-snap-type: x mandatory; scroll-padding: 0 12px; }
+  .col { scroll-snap-align: start; }
+  .main:has(#view-table:checked) .board-nav { display: none; }
+  .main:has(#view-table:checked) .col-held .need-list { grid-template-columns: minmax(0, 1fr); }
+  .bar-end .btn-ghost { display: none; }
+  .views .seg-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .views .seg-tab { padding: 0 9px; }
+  .bar .views { margin-left: auto; }
+  .card-title { font-size: 14px; }
+  .card-why { font-size: 12.5px; }
+
+  .life-bar { padding: 8px 8px 6px; }
+  .life { grid-template-columns: repeat(6, minmax(56px, 1fr)); }
+  .life a { font-size: 10.5px; }
+  .life-name { white-space: normal; line-height: 1.2; }
+  .life-tag { display: none; }
+  .tl-wrap { padding: 14px 12px 24px; }
+  .tl-step { grid-template-columns: 24px minmax(0, 1fr); gap: 10px; }
+  .tl-step::before { left: 11px; }
+  .tl-mark { width: 24px; height: 24px; }
+  .tl-when { margin-left: 0; flex-basis: 100%; }
+  .tl-quote, .tl-reply { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+  .lane-board { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 78vw; scroll-snap-type: x mandatory; }
+  .lane-col { scroll-snap-align: start; }
+}
