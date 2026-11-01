@@ -79,8 +79,14 @@ const readyPollMs = 250;
  */
 export type StatusCache = Map<PylonId, { stamp: string; state: z.infer<typeof statusSchema>["state"]; previews: Record<string, string> }>;
 
+/**
+ * Each instance's `shell` action while it is in flight. The controller cannot cancel an action, so a stream that starts
+ * while one waits shares it rather than queueing another behind it on a pylon that is already slow.
+ */
+export type ShellFlights = Map<PylonId, Promise<z.infer<typeof shellReplySchema>>>;
+
 /** `run` sends an action to the instance's controller, and `dir` is the instance directory. */
-export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<string, unknown>) => Promise<unknown>, statuses: StatusCache): Guest {
+export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<string, unknown>) => Promise<unknown>, statuses: StatusCache, shells: ShellFlights = new Map()): Guest {
 	const name = pylonId;
 	/**
 	 * The controller only launches a service and watches its readiness itself, so that no health wait holds its
@@ -125,7 +131,19 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		 * which ends every stream.
 		 */
 		async stream(argv, log, signal) {
-			const shell = shellReplySchema.parse(await run({ action: "shell", name, user: "user" }));
+			signal?.throwIfAborted();
+			let asking = shells.get(pylonId);
+			if (asking === undefined) {
+				const flight = run({ action: "shell", name, user: "user" }).then((reply) => shellReplySchema.parse(reply)).finally(() => {
+					if (shells.get(pylonId) === flight) shells.delete(pylonId);
+				});
+				// Every caller may have given up by the time it settles.
+				flight.catch(() => undefined);
+				shells.set(pylonId, asking = flight);
+			}
+			const shell = signal === undefined ? await asking : await Promise.race([asking, new Promise<never>((_, reject) => {
+				signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+			})]);
 			signal?.throwIfAborted();
 			return processStream("ssh", [...guestSsh(shell), "--", remoteCommand(argv)], log);
 		},

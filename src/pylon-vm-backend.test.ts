@@ -551,6 +551,29 @@ test("service facts come from the controller's supervisor, a list starts nothing
   ]);
 });
 
+test("streams that start while the pylon's shell action waits share it, and one whose caller gave up stops waiting at once", async () => {
+  let asked = 0;
+  let answer!: (reply: unknown) => void;
+  const guest = pylonGuest("pylon-slow" as PylonId, scratch, async (action) => {
+    assert.equal(action.action, "shell");
+    asked++;
+    return new Promise((resolve) => { answer = resolve; });
+  }, new Map(), new Map());
+  const callers = [new AbortController(), new AbortController(), new AbortController()];
+  const starts = callers.map((c) => guest.stream(["herdr"], () => undefined, c.signal));
+  for (const c of callers) c.abort(new Error("the caller left"));
+  for (const start of starts) await assert.rejects(start, /the caller left/);
+  await assert.rejects(guest.stream(["herdr"], () => undefined, AbortSignal.abort(new Error("gone before"))), /gone before/);
+  assert.equal(asked, 1, "one shell action for every start while it waits, and none for a caller already gone");
+  answer({ access: { user: "user", port: 1, identityFile: "/nonexistent" } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const later = new AbortController();
+  const next = guest.stream(["herdr"], () => undefined, later.signal);
+  later.abort(new Error("left again"));
+  await assert.rejects(next, /left again/);
+  assert.equal(asked, 2, "a start after the action settled asks again, since a reply holds for one boot");
+});
+
 test("ensure, restart and service-start answer once each service they were answered about is ready or failed, from status reads, and a list does not wait", async () => {
   const fact = (name: string, state: string) => ({ name, state, port: name === "api" ? 8001 : 8000, declared: true, wantsPreview: true });
   const actions: Record<string, unknown>[] = [];
