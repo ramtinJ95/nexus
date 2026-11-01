@@ -199,6 +199,25 @@ export async function failedRun(root: string, ranAt: Date): Promise<BackupStatus
 }
 
 /**
+ * One run of the backup unit: the backup, then its status for `nexus doctor`. The backup alone decides whether the run
+ * fails, so a status that is not written is logged, and leaves the last one, whose backup ages until doctor fails it.
+ */
+export async function runBackup(options: { configPath: string; root: string; etc: string; statusFile: string; now: Date; keep: number; log?: (message: string) => void }): Promise<string> {
+  const { root, now, statusFile, log = (message: string) => console.error(message) } = options;
+  const record = (status: () => Promise<BackupStatus>) => status().then((s) => writeBackupStatus(statusFile, s))
+    .catch((err: unknown) => log(`backup: the status for nexus doctor was not written to ${statusFile}: ${(err as Error).message}`));
+  let dir: string;
+  try {
+    dir = await backup({ config: await readConfig(options.configPath), root, etc: options.etc, now, keep: options.keep });
+  } catch (err) {
+    await record(() => failedRun(root, now));
+    throw err;
+  }
+  await record(async () => ({ ranAt: now.toISOString(), succeeded: true, newest: { name: basename(dir), verified: true, createdAt: now.toISOString() } }));
+  return dir;
+}
+
+/**
  * Puts every file of the backup `name` back where it was copied from, with its mode and owner, on a stopped control
  * plane. `unitState` answers as `systemctl is-active` prints.
  */
@@ -265,14 +284,7 @@ async function host(args: string[]) {
   }
   try {
     if (command === "backup") {
-      const now = new Date();
-      const dir = await readConfig(argument ?? join(etcDir, "control.json"))
-        .then((config) => backup({ config, root: backupRoot, etc: etcDir, now, keep: kept }))
-        .catch(async (err: unknown) => {
-          await writeBackupStatus(backupStatusFile, await failedRun(backupRoot, now)).catch((failed: unknown) => console.error(`backup: the status was not written: ${(failed as Error).message}`));
-          throw err;
-        });
-      await writeBackupStatus(backupStatusFile, { ranAt: now.toISOString(), succeeded: true, newest: { name: basename(dir), verified: true, createdAt: now.toISOString() } });
+      const dir = await runBackup({ configPath: argument ?? join(etcDir, "control.json"), root: backupRoot, etc: etcDir, statusFile: backupStatusFile, now: new Date(), keep: kept });
       console.log(`backed up the control plane to ${dir}`);
     } else if (command === "check") {
       const result = await check({ root: backupRoot, now: new Date() });

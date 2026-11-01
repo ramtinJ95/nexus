@@ -8,7 +8,8 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { tempDir } from "../test-kit.ts";
-import { backup, check, failedRun, nameOf, restore, verify } from "./backup.ts";
+import { backup, check, failedRun, nameOf, restore, runBackup, verify } from "./backup.ts";
+import { readBackupStatus } from "./backup-status.ts";
 import { parseConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";
 
@@ -107,6 +108,24 @@ test("a failed run's status names the newest backup that remains and whether it 
   assert.deepEqual(await failedRun(m.root, m.day(2)), { ranAt: m.day(2).toISOString(), succeeded: false, newest: { name: nameOf(m.day(1)), verified: true, createdAt: m.day(1).toISOString() } });
   await writeFile(join(kept, "harness-credentials.json"), '{"deviceId":"e","credentials":{"openai":{}}}\n');
   assert.deepEqual(await failedRun(m.root, m.day(2)), { ranAt: m.day(2).toISOString(), succeeded: false, newest: { name: nameOf(m.day(1)), verified: false, createdAt: null } });
+});
+
+test("a backup run's own result decides the unit's: a status not written is logged after a good backup, and a config that does not read is recorded as a failed run", async (t) => {
+  const m = await controlPlane(t);
+  const configPath = join(m.dir, "control.json");
+  await writeFile(configPath, JSON.stringify(m.config));
+  await mkdir(join(m.dir, "elsewhere"));
+  await symlink(join(m.dir, "elsewhere"), join(m.dir, "linked"));
+  const logged: string[] = [];
+  const run = (over: { configPath?: string; statusFile?: string; now: Date }) => runBackup({ configPath, root: m.root, etc: m.etc, statusFile: join(m.dir, "status", "status.json"), keep: 7, log: (line) => logged.push(line), ...over });
+  const dir = await run({ statusFile: join(m.dir, "linked", "status.json"), now: m.day(1) });
+  assert.equal(dir, join(m.root, nameOf(m.day(1))), "the backup succeeded though its status could not be written");
+  assert.match(logged.join("\n"), /the status for nexus doctor was not written to .*linked\/status\.json: .*is a link/);
+  const statusFile = join(m.dir, "status", "status.json");
+  await run({ now: m.day(2) });
+  assert.deepEqual(await readBackupStatus(statusFile), { ranAt: m.day(2).toISOString(), succeeded: true, newest: { name: nameOf(m.day(2)), verified: true, createdAt: m.day(2).toISOString() } });
+  await assert.rejects(run({ configPath: join(m.dir, "missing.json"), now: m.day(3) }), /missing\.json/);
+  assert.deepEqual(await readBackupStatus(statusFile), { ranAt: m.day(3).toISOString(), succeeded: false, newest: { name: nameOf(m.day(2)), verified: true, createdAt: m.day(2).toISOString() } });
 });
 
 test("a new backup that verifies leaves the newest 7 and no leftover, and a failed one leaves the earlier ones and nothing of its own", async (t) => {
