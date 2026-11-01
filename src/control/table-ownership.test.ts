@@ -12,6 +12,7 @@ const owners: Record<string, string[]> = {
     "thread_attention", "start_requests", "aborted_conversations", "thread_archives", "disk_cleanups",
   ],
   "node-store.ts": ["nodes", "join_tokens", "joined_nodes"],
+  "node-metrics-store.ts": ["node_metrics"],
   "project-store.ts": ["projects"],
   "image-store.ts": ["images", "templates"],
   "release-store.ts": ["release_reports"],
