@@ -259,4 +259,7 @@ export const migrations: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS thread_archives (thread TEXT PRIMARY KEY REFERENCES threads (id), archived_at INTEGER NOT NULL) STRICT;
    CREATE TABLE IF NOT EXISTS disk_cleanups (pylon TEXT PRIMARY KEY REFERENCES pylons (id), thread TEXT NOT NULL REFERENCES threads (id), requested_at INTEGER NOT NULL) STRICT;
    INSERT OR IGNORE INTO thread_archives SELECT id, CAST(strftime('%s', 'now') AS INTEGER) * 1000 FROM threads WHERE status = 'archived';`,
+  // Each daily report of nexus doctor's checks, kept 30 days. It touches nothing an earlier migration made, so a registry
+  // rewound past it applies it again unchanged.
+  `CREATE TABLE IF NOT EXISTS doctor_reports (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, record TEXT NOT NULL) STRICT;`,
 ];

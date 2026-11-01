@@ -62,6 +62,27 @@ export async function requireModel(models: Models, model: ModelRef): Promise<voi
 }
 
 /**
+ * The harness's login as `nexus doctor` checks it. `offered` is null when the harness has no such provider. `refresh`
+ * resolves the login as a turn would, which refreshes an expired OAuth token, and holds why that failed. No model is called.
+ */
+export interface LoginState {
+  provider: string;
+  modelId: string;
+  credential: "oauth" | "api_key" | null;
+  offered: readonly string[] | null;
+  refresh: { ok: true } | { ok: false; error: string };
+}
+
+export async function loginState(models: Models, model: ModelRef): Promise<LoginState> {
+  const { provider, modelId } = model;
+  if (models.getProvider(provider) === undefined) return { provider, modelId, credential: null, offered: null, refresh: { ok: true } };
+  const credential = (await models.checkAuth(provider))?.type ?? null;
+  const offered = (await models.getAvailable(provider)).map((m) => m.id);
+  const refresh = credential === null ? { ok: true as const } : await models.getAuth(provider).then(() => ({ ok: true as const }), (err: unknown) => ({ ok: false as const, error: (err as Error).message }));
+  return { provider, modelId, credential, offered, refresh };
+}
+
+/**
  * The access token of the harness's Sign in with ChatGPT, which every probe is handed for the chatgpt login, or
  * undefined for an API key, which never leaves the control plane. It is refreshed with ten minutes left, so every probe
  * has the new token several handoffs before the old one expires.
