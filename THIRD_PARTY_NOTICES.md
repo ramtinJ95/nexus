@@ -73,6 +73,7 @@ SOFTWARE.
 | `shiki` | 4.5.0 | MIT |
 | `space-separated-tokens` | 2.0.2 | MIT |
 | `stringify-entities` | 4.0.4 | MIT |
+| `uplot` | 1.6.32 | MIT |
 | `zwitch` | 2.0.4 | MIT |
 
 ### Apache-2.0
@@ -471,6 +472,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - Copyright (c) 2025 Steven Levithan (`regex`, `regex-recursion`)
 - Copyright (c) 2024 Steven Levithan (`regex-utilities`)
 - Copyright (c) 2015 Titus Wormer <mailto:tituswormer@gmail.com> (`stringify-entities`)
+- Copyright (c) 2022 Leon Sorokin (`uplot`)
 
 The licence text, as `shiki` words it. The others give the same terms in slightly different words.
 
