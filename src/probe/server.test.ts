@@ -16,7 +16,7 @@ import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, Port
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
 import type { DeclaredOutput, GitFacts, ProbeEvent, ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import type { ByteStream } from "../protocol/streams.ts";
+import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
 import { connectProbe } from "../protocol/client.ts";
 import { envelope, ingest } from "../reconcile.ts";
@@ -1231,6 +1231,87 @@ test("stdin reaches the guest process, and close ends it", async (t) => {
   await stream.close();
   assert.equal(await readAll(stream), "hello through the probe");
   assert.deepEqual(await stream.done, { kind: "exited", code: 0 });
+});
+
+test("a stream whose caller left while the guest started it is told so, and the process it got anyway has its stdin closed", async (t) => {
+  const fake = fakeBackend();
+  const logged: string[] = [];
+  const starts: { signal: AbortSignal; start(stream: ByteStream): void }[] = [];
+  const guest = {
+    stream: (_argv: readonly string[], _log: (text: string) => void, signal?: AbortSignal) => new Promise<ByteStream>((start) => starts.push({ signal: signal!, start })),
+  } as Partial<Guest> as Guest;
+  const { probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, log: (line) => logged.push(line) });
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  const caller = connect({ host: "127.0.0.1", port: probe.port, allowHalfOpen: true });
+  t.after(() => caller.destroy());
+  let answered = "";
+  caller.on("data", (chunk: Buffer) => { answered += chunk.toString(); });
+  caller.write(`GET ${streamPath(pylonId, ["cat"])} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`);
+  await until("the guest is asked to start the stream", () => starts.length === 1);
+  assert.equal(starts[0]!.signal.aborted, false);
+  caller.end();
+  await until("the start is aborted", () => starts[0]!.signal.aborted);
+  const late = processStream("cat", [], () => undefined);
+  starts[0]!.start(late);
+  assert.deepEqual(await late.done, { kind: "exited", code: 0 }, "cat exits once its stdin ends");
+  await until("the probe closes the connection of a caller that gave up", () => caller.readableEnded);
+  assert.equal(answered, "", "no 101");
+  assert.deepEqual(logged.filter((line) => /EPIPE|write after/.test(line)), []);
+});
+
+/** A guest whose stream starts when the test says, with the signal the probe passed. */
+async function slowStarts(t: import("node:test").TestContext, streamTiming: { startMs: number; hangUpMs: number }) {
+  const fake = fakeBackend();
+  const starts: { signal: AbortSignal; start(stream: ByteStream): void }[] = [];
+  const guest = {
+    stream: (_argv: readonly string[], _log: (text: string) => void, signal?: AbortSignal) => new Promise<ByteStream>((start) => starts.push({ signal: signal!, start })),
+  } as Partial<Guest> as Guest;
+  const ctx = await setup(t, { backend: { ...fake.backend, guest: () => guest }, streamTiming });
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  return { ...ctx, starts };
+}
+
+/** A process that takes its stdin's end and never exits until it is dropped, writing until then unless `closesOutput`. */
+function hangingStream(closesOutput = false) {
+  let dropped = false;
+  let drop!: () => void;
+  const gone = new Promise<void>((resolve) => { drop = resolve; });
+  const stream: ByteStream = {
+    async write() {},
+    async close() {},
+    abort() { dropped = true; drop(); },
+    done: gone.then(() => ({ kind: "lost" as const })),
+    async *[Symbol.asyncIterator]() { if (!closesOutput) await gone; },
+  };
+  return { stream, dropped: () => dropped };
+}
+
+test("a guest that does not start the stream in time gets a 504 that says its pylon is not answering, and its start is aborted", async (t) => {
+  const { client, starts } = await slowStarts(t, { startMs: 50, hangUpMs: 50 });
+  await assert.rejects(client.stream(pylonId, ["herdr"]), (err: Error & { code?: string }) => {
+    assert.equal(err.code, "unreachable");
+    assert.equal(err.message, `${node}: pylon ${pylonId} is not answering: it did not start a process within 0.05 s. It may be out of memory or busy. Pausing and waking it, as archiving and unarchiving its thread does, gives it a fresh VM`);
+    return true;
+  });
+  assert.equal(starts[0]!.signal.aborted, true);
+  const late = hangingStream();
+  starts[0]!.start(late.stream);
+  await until("the late process is dropped", late.dropped);
+});
+
+test("a process nobody reads that does not exit once its stdin closes is dropped after the hang-up time, even once its output ends", async (t) => {
+  const { probe, starts } = await slowStarts(t, { startMs: 60_000, hangUpMs: 50 });
+  for (const closesOutput of [false, true]) {
+    const caller = connect({ host: "127.0.0.1", port: probe.port, allowHalfOpen: true });
+    t.after(() => caller.destroy());
+    caller.write(`GET ${streamPath(pylonId, ["cat"])} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`);
+    await until("the guest is asked to start the stream", () => starts.length === 1);
+    caller.end();
+    await until("the start is aborted", () => starts[0]!.signal.aborted);
+    const late = hangingStream(closesOutput);
+    starts.shift()!.start(late.stream);
+    await until(`the late process is dropped, closing its output: ${closesOutput}`, late.dropped, 5000);
+  }
 });
 
 test("a checkout read fits the probe's stream request and comes back through it", async (t) => {

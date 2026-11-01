@@ -9,7 +9,7 @@ import {
   closeSessionOutcomes, interruptClaudeOutcomes, parsePylonCommand, sendClaudeOutcomes, type CloseSessionOutcome, type InterruptClaudeOutcome,
   type PylonCommand, type SendClaudeOutcome,
 } from "./protocol/commands.ts";
-import { parseStreamRequest } from "./protocol/streams.ts";
+import { notAnswering, parseStreamRequest } from "./protocol/streams.ts";
 import { probeErrorCodes, ProbeHttpError, type ProbeError } from "./protocol/http.ts";
 import { parseArtifactManifest } from "./protocol/artifacts.ts";
 import { connectProbe } from "./protocol/client.ts";
@@ -360,6 +360,24 @@ test("a status a method gives no meaning rejects with its status, and with a Pro
     assert.equal(refused.code, code, `stream ${status}`);
     assert.equal("code" in refused, code !== undefined, `stream ${status}`);
   }
+});
+
+test("a stream the probe took but did not answer in time blames the probe, and the probe's 504 for a slow guest reads as unreachable with its words", async (t) => {
+  let answer: ((socket: import("node:stream").Duplex) => void) | null = null;
+  const server = createServer().listen(0, "127.0.0.1");
+  server.on("upgrade", (_req, socket) => answer?.(socket));
+  await new Promise((ready) => server.once("listening", ready));
+  t.after(() => server.close());
+  const client = connectProbe(node as NodeName, "127.0.0.1", "nPROBE" as TailnetNodeId, { port: (server.address() as { port: number }).port, whois: async () => "nPROBE" as TailnetNodeId, streamTimeoutMs: 50 });
+  const failsWith = (message: string) => (err: Error & Partial<ProbeError>) => {
+    assert.equal(err.code, "unreachable");
+    assert.equal(err.message, message);
+    return true;
+  };
+  await assert.rejects(client.stream(pylonId as PylonId, ["herdr"]), failsWith(`${node}: its probe took a stream request for pylon ${pylonId} and did not answer within 0.05 s, so the probe itself may be stuck`));
+  const body = notAnswering(pylonId as PylonId, 8000);
+  answer = (socket) => socket.end(`HTTP/1.1 504 Gateway Timeout\r\ncontent-type: text/plain\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+  await assert.rejects(client.stream(pylonId as PylonId, ["herdr"]), failsWith(`${node}: pylon ${pylonId} is not answering: it did not start a process within 8 s. It may be out of memory or busy. Pausing and waking it, as archiving and unarchiving its thread does, gives it a fresh VM`));
 });
 
 test("each union's list holds exactly its type's members, and the parser that reads it takes those and no other", async (t) => {

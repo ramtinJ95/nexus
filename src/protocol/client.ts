@@ -73,11 +73,12 @@ const commandTimeoutMs = 90_000;
  * `whois` defaults to the local tailscaled. Tests pass a fake one, and `port` exists so they can run
  * a probe on a free loopback port.
  */
-export function connectProbe(node: NodeName, tailnetHost: string, expected: TailnetNodeId, options: { port?: number; whois?: Whois } = {}): ProbeClient {
+export function connectProbe(node: NodeName, tailnetHost: string, expected: TailnetNodeId, options: { port?: number; whois?: Whois; streamTimeoutMs?: number } = {}): ProbeClient {
   // Plain HTTP, because WireGuard already encrypts the link. The identity check is whois on the socket we got.
   const port = options.port ?? probePort;
   const whois = options.whois ?? localApiWhois();
   const agent = new Agent({ keepAlive: false });
+  const streamTimeoutMs = options.streamTimeoutMs ?? requestTimeoutMs;
 
   /** A silent socket for `requestTimeoutMs` fails the call as unreachable. Observe lifts the limit once its stream starts. */
   function open(method: "GET" | "PUT" | "POST", path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {
@@ -175,7 +176,9 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     stream(pylonId, argv) {
       const path = streamPath(pylonId, argv);
       return new Promise((resolve, reject) => {
-        const req = request({ host: tailnetHost, port, method: "GET", path, agent, timeout: requestTimeoutMs, headers: { connection: "upgrade", upgrade: streamProtocol } });
+        const req = request({ host: tailnetHost, port, method: "GET", path, agent, timeout: streamTimeoutMs, headers: { connection: "upgrade", upgrade: streamProtocol } });
+        let sent = false;
+        req.once("finish", () => { sent = true; });
         req.on("upgrade", (_res, socket, head) => {
           // Node hands over an upgraded socket without its error handler. A reset ends the stream as lost.
           socket.on("error", () => undefined);
@@ -186,10 +189,13 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
           }, (err: Error) => { socket.destroy(); reject(refusal(err, "stream")); });
         });
         req.on("response", (res) => {
-          text(res).then((body) => reject(statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
+          text(res).then((body) => reject(res.statusCode === 504 ? probeError("unreachable", `${node}: ${body}`) : statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
         });
-        req.on("timeout", () => req.destroy(new Error(`no answer within ${requestTimeoutMs} ms`)));
-        req.on("error", (err) => reject(probeError("unreachable", `${node}: ${err.message}`)));
+        // The probe answers a slow guest itself before this runs out, so a probe that took the request and is silent is stuck.
+        req.on("timeout", () => req.destroy(sent
+          ? probeError("unreachable", `${node}: its probe took a stream request for pylon ${pylonId} and did not answer within ${streamTimeoutMs / 1000} s, so the probe itself may be stuck`)
+          : new Error(`no answer within ${streamTimeoutMs} ms`)));
+        req.on("error", (err) => reject(isProbeError(err) ? err : probeError("unreachable", `${node}: ${err.message}`)));
         req.end();
       });
     },

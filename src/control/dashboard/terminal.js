@@ -31,12 +31,13 @@ const dropped = { text: "The connection dropped. Herdr keeps the session, so att
 const detached = { text: "Detached. Herdr keeps its sessions running.", over: true, why: "detached" };
 
 /**
- * Joins `term` to the attach route over `socket`: keys go as binary messages, each resize as a resize message, and
- * the pylon's output is written to `term`. `status` hears each change, and once with `over` and `why` it ended:
- * `exit`, `error` with the error's `kind`, `refused`, `dropped` or `detached`. Returns its detach.
+ * Joins `term` to the attach route over `socket`: keys go as binary messages once it is attached, each resize as a
+ * resize message, and the pylon's output is written to `term`. `status` hears each change, and once with `over` and
+ * `why` it ended: `exit`, `error` with the error's `kind`, `refused`, `dropped` or `detached`. Returns its detach.
  */
 export function joinTerminal(term, socket, status) {
   let heard = false;
+  let attached = false;
   let over = false;
   const end = (s) => {
     if (over) return;
@@ -45,6 +46,8 @@ export function joinTerminal(term, socket, status) {
   };
   const encoder = new TextEncoder();
   const send = (data) => { if (!over && socket.readyState === 1) socket.send(data); };
+  // Keys typed while a reattach waits would land in the session it reaches, unseen.
+  const sendKeys = (data) => { if (attached) send(data); };
   socket.binaryType = "arraybuffer";
   // The terminal may be resized while the socket connects, and a resize before `attached` replaces the size it opens with.
   socket.addEventListener("open", () => send(encodeMessage({ type: "resize", size: { cols: term.cols, rows: term.rows } })));
@@ -61,11 +64,13 @@ export function joinTerminal(term, socket, status) {
     if (s === undefined) return;
     if (s.over) return end(s);
     status(s);
-    if (message.type === "attached") term.focus();
+    if (message.type !== "attached") return;
+    attached = true;
+    term.focus();
   });
   socket.addEventListener("close", () => end(heard ? dropped : refused));
-  const typed = term.onData((data) => send(encoder.encode(data)));
-  const binary = term.onBinary((data) => send(Uint8Array.from(data, (c) => c.charCodeAt(0))));
+  const typed = term.onData((data) => sendKeys(encoder.encode(data)));
+  const binary = term.onBinary((data) => sendKeys(Uint8Array.from(data, (c) => c.charCodeAt(0))));
   const resized = term.onResize(({ cols, rows }) => send(encodeMessage({ type: "resize", size: { cols, rows } })));
   return () => {
     for (const listener of [typed, binary, resized]) listener.dispose();
@@ -100,6 +105,11 @@ export function clipboardOf(clipboard) {
 /** How long a page stays attached while hidden, short of the 20 minutes without a human that pause a pylon. */
 export const hiddenDetachMs = 10 * 60_000;
 const maxTries = 8;
+/**
+ * How long a join stays attached before the tries start over. `attached` comes before Herdr's client runs, so a pylon
+ * whose sshd takes the link and drops it at once would otherwise be tried again every second for good.
+ */
+export const steadyMs = 10_000;
 
 /** Whether a join that ended so may be tried again. A control plane that is restarting refuses a retry's upgrade. */
 const transient = (s, retry) => s.why === "dropped" || (s.why === "error" && s.kind === "unreachable") || (s.why === "refused" && retry);
@@ -118,6 +128,7 @@ export function keepAttached(term, open, status, page = document) {
     state = next;
     if (was.kind === "joined") {
       clearTimeout(was.hiding);
+      clearTimeout(was.steady);
       was.detach();
     }
     if (was.kind === "retrying") clearTimeout(was.timer);
@@ -133,7 +144,7 @@ export function keepAttached(term, open, status, page = document) {
   };
   const untilShown = "The connection dropped. It attaches again when the page shows.";
   const join = (retry) => {
-    const joined = { kind: "joined", retry, hiding: undefined, detach: () => {} };
+    const joined = { kind: "joined", retry, hiding: undefined, steady: undefined, detach: () => {} };
     enter(joined);
     joined.detach = joinTerminal(term, open(), (s) => { if (state === joined) heard(joined, s); });
   };
@@ -141,17 +152,19 @@ export function keepAttached(term, open, status, page = document) {
     if (!s.over) {
       // `attached`: Herdr redraws the screen, and a reattach must not keep the modes the dropped client set.
       if (s.text === null) {
-        tries = 0;
+        joined.steady = setTimeout(() => { tries = 0; }, steadyMs);
         term.reset();
       }
       return status(s);
     }
     if (!transient(s, joined.retry)) return end(s);
-    if (tries === maxTries) return end({ text: `The connection dropped, and attaching again failed ${maxTries} times. Herdr keeps the session, so attach again.`, over: true });
+    // An unreachable error says why, such as a pylon that is not answering, and what to try.
+    const why = s.why === "error" ? `${s.text[0].toUpperCase()}${s.text.slice(1).replace(/\.?$/, ".")}` : "The connection dropped.";
+    if (tries === maxTries) return end({ text: `${why} Attaching again failed ${maxTries} times. Herdr keeps the session, so attach again.`, over: true });
     if (page.visibilityState === "hidden") return sleep(true, untilShown);
     const delay = Math.min(30_000, 1000 * 2 ** tries++);
     enter({ kind: "retrying", timer: setTimeout(() => (page.visibilityState === "hidden" ? sleep(true, untilShown) : join(true)), delay) });
-    status({ text: `The connection dropped. Attaching again in ${delay / 1000} s.`, over: false });
+    status({ text: `${why} Attaching again in ${delay / 1000} s.`, over: false });
   };
   const visibility = () => {
     if (page.visibilityState === "hidden") {

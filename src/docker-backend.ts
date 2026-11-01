@@ -163,9 +163,10 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
         return { ...await dockerExec(pylonId, argv, { cwd, timeoutMs }), truncated: false };
       },
-      async stream(argv, log) {
-        const existing = await container(pylonId, AbortSignal.timeout(30_000));
+      async stream(argv, log, signal) {
+        const existing = await container(pylonId, AbortSignal.any([AbortSignal.timeout(30_000), ...signal === undefined ? [] : [signal]]));
         if (existing?.State.Status !== "running") throw new Error(`${pylonId} is not running`);
+        signal?.throwIfAborted();
         return processStream("docker", ["exec", "--interactive", pylonId, ...argv], log);
       },
       /** Each file through stdin. Missing parents are made as the file's owner, as in a pylon. */

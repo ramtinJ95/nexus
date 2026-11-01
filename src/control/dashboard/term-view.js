@@ -30,7 +30,7 @@ const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
 
 /**
  * A terminal in `host` attached to the thread's pylon, landing in `pane` when it is not null, and fitted to `host`
- * whenever it shows at a new size. An attach again after a drop lands where any attach does. `landed()` waits for the
+ * whenever it shows at a new size. An attach again after a drop lands as the first one did. `landed()` waits for the
  * current connection to land, as landing says.
  */
 export function openTerminal(host, thread, status, pane) {
@@ -59,12 +59,7 @@ export function openTerminal(host, thread, status, pane) {
   const unstyle = adoptStyles(host.querySelector(".xterm-screen"));
   fit.fit();
   const lands = landing(term);
-  let first = pane;
-  const detach = keepAttached(term, () => {
-    const socket = new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, first));
-    first = null;
-    return socket;
-  }, (s) => {
+  const detach = keepAttached(term, () => new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, pane)), (s) => {
     lands.heard(s);
     status(s);
   });

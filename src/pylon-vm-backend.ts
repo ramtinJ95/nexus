@@ -34,7 +34,7 @@ import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { listenHostBridge, type HostBridge } from "./host-bridge.ts";
-import { asUser, controllerLog, pylonGuest, type StatusCache } from "./pylon-vm/pylon-guest.ts";
+import { asUser, controllerLog, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-vm/pylon-guest.ts";
 import { readJson, saveJson } from "./json-file.ts";
 import { alive, readIdentity } from "./pylon-vm/identity.ts";
 import { directory, existsError, privateDirectory, readRecord } from "./pylon-vm/storage.ts";
@@ -277,6 +277,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   const sandbox = (action: Record<string, unknown>, signal?: AbortSignal) => run(stateRoot, action, signal);
   const store = artifactDirectory(options.artifacts, tarCodec);
   const statuses: StatusCache = new Map();
+  const shells: ShellFlights = new Map();
   // A create, a template build or a template import depends on its image, and a create on its template, before
   // its instance, build or manifest is there for drop to see. Jobs on different subjects run at once, so the two sides shut each other out here.
   const using = new Map<PortableArtifactId, number>();
@@ -563,7 +564,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             // again in case they changed, and a changed URL restarts the services it reaches.
             await sandbox({ action: "write-files", name, files: live.overlay }, signal);
             await sandbox({ action: "public-urls", name, urls: publicUrls(pylonId, live.previews, options.previewHost) }, signal);
-            await finishRelaunch(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, await readSidecar(pylonId)), relaunch);
+            await finishRelaunch(pylonId, pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, await readSidecar(pylonId)), relaunch);
             return;
           }
           // The instance holds the pylon's newest disk whatever the boot source says, so it is started as it is.
@@ -605,7 +606,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
         const sessions = instance.status.state === "running"
-          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
+          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
         await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
@@ -652,7 +653,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     guest(pylonId): Guest {
       instanceName(pylonId);
-      return pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses);
+      return pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses, shells);
     },
 
     async updateSecret(secret, value, signal) {

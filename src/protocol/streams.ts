@@ -36,7 +36,8 @@ export interface ByteStream extends AsyncIterable<Uint8Array> {
  * GET /v1/pylons/{id}/stream?request={"argv": [...]} upgrades the connection to `nexus-stream`, a sequence of
  * frames: a type byte, a 4-byte big-endian length, then the payload. The control plane sends stdin and end of
  * stdin. The probe sends output, then the exit code as its last frame. A connection that closes without an exit
- * frame is a lost stream. The probe answers 409 instead of upgrading when the pylon is not running.
+ * frame is a lost stream. The probe answers 409 instead of upgrading when the pylon is not running, and 504 when its
+ * guest does not start the process in time.
  */
 export const streamProtocol = "nexus-stream";
 // 2 was a resize, which nothing sends since streams lost their pty, so the other numbers stay as older peers know them.
@@ -58,6 +59,11 @@ export function parseStreamRequest(upgrade: string | undefined, url: URL): { pyl
   if (match === null || upgrade?.toLowerCase() !== streamProtocol) return null;
   const { argv } = parseJson(streamRequestSchema, url.searchParams.get("request") ?? "null", "request");
   return { pylonId: decodeURIComponent(match[1]!) as PylonId, argv };
+}
+
+/** The probe's 504 for a stream whose guest did not start the process within `ms`, and what the person can do about it. */
+export function notAnswering(pylonId: PylonId, ms: number): string {
+  return `pylon ${pylonId} is not answering: it did not start a process within ${ms / 1000} s. It may be out of memory or busy. Pausing and waking it, as archiving and unarchiving its thread does, gives it a fresh VM`;
 }
 
 export const streamUpgradeResponse = `HTTP/1.1 101 Switching Protocols\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`;
