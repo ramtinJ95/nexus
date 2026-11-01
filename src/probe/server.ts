@@ -606,15 +606,16 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     const { pylonId, argv } = parsed;
     if (await backend.state(pylonId) !== "running") return refuse(socket, 409, `${pylonId} is not running`);
     const gone = AbortSignal.any([left, shutdown.signal]);
-    if (gone.aborted) return;
+    if (gone.aborted) return void socket.destroy();
     let guest: ByteStream;
     try {
       guest = await backend.guest(pylonId).stream(argv, (text) => log(`${pylonId} stream ${argv[0]}: ${text.trimEnd()}`), gone);
     } catch (err) {
-      if (gone.aborted) return;
+      if (gone.aborted) return void socket.destroy();
       throw err;
     }
     if (gone.aborted) {
+      socket.destroy();
       // A slow guest can start the process after the caller gave up, and a relay whose stdin ends hangs up.
       await guest.close();
       for await (const _ of guest) { /* drained, so the process can exit */ }

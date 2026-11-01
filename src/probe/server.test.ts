@@ -1242,16 +1242,20 @@ test("a stream whose caller left while the guest started it is told so, and the 
   } as Partial<Guest> as Guest;
   const { probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, log: (line) => logged.push(line) });
   await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
-  const req = request({ host: "127.0.0.1", port: probe.port, path: streamPath(pylonId, ["cat"]), headers: { connection: "upgrade", upgrade: streamProtocol } });
-  req.on("error", () => undefined);
-  req.end();
+  const caller = connect({ host: "127.0.0.1", port: probe.port, allowHalfOpen: true });
+  t.after(() => caller.destroy());
+  let answered = "";
+  caller.on("data", (chunk: Buffer) => { answered += chunk.toString(); });
+  caller.write(`GET ${streamPath(pylonId, ["cat"])} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`);
   await until("the guest is asked to start the stream", () => starts.length === 1);
   assert.equal(starts[0]!.signal.aborted, false);
-  req.destroy();
+  caller.end();
   await until("the start is aborted", () => starts[0]!.signal.aborted);
   const late = processStream("cat", [], () => undefined);
   starts[0]!.start(late);
   assert.deepEqual(await late.done, { kind: "exited", code: 0 }, "cat exits once its stdin ends");
+  await until("the probe closes the connection of a caller that gave up", () => caller.readableEnded);
+  assert.equal(answered, "", "no 101");
   assert.deepEqual(logged.filter((line) => /EPIPE|write after/.test(line)), []);
 });
 
