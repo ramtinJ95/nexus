@@ -117,8 +117,9 @@ async function main(args: readonly string[]): Promise<number> {
   if (command === "set" && etc !== undefined && rest.length === 2) {
     const [tailnetNodeId, url] = rest as [string, string];
     const path = join(etc, fileName);
-    const result = await setControlPlane(etc, { tailnetNodeId, url }, restartProbe);
-    console.log(result === "wrote" ? `wrote ${path}: ${describe({ tailnetNodeId, url })}, and restarted the probe if it was running` : `${path} already names ${describe({ tailnetNodeId, url })}`);
+    const control = parseControlPlane({ tailnetNodeId, url });
+    const result = await setControlPlane(etc, control, restartProbe);
+    console.log(result === "wrote" ? `wrote ${path}: ${describe(control)}, and restarted the probe if it was running` : `${path} already names ${describe(control)}`);
     return 0;
   }
   console.error("usage: node src/deploy/control-plane.ts adopt <etc dir> | set <etc dir> <tailnet node ID> <url>");
