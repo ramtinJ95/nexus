@@ -6,7 +6,7 @@ import css from "uplot/dist/uPlot.min.css";
 import { afterSwap, el } from "./page.js";
 import { api } from "./request.js";
 import { onThemeChange, themeValue } from "./theme.js";
-import { appended, bucketed, charts, columns, gapMs, historyOf, missed, rangeMs, rangeOf, reading, slotter, yRange } from "./graph-data.ts";
+import { appended, bucketed, charts, columns, gapMs, historyOf, missed, rangeMs, rangeOf, reading, regroupMs, regroups, slotter, yRange } from "./graph-data.ts";
 
 const sheet = new CSSStyleSheet();
 sheet.replaceSync(css);
@@ -221,9 +221,11 @@ const drawAll = () => { for (const v of views) v.draw(); };
 
 let asked = 0;
 let loading = false;
+let loadedAt = 0;
 async function load() {
   const ask = ++asked;
   loading = true;
+  loadedAt = Date.now();
   section.classList.add("graphs-loading");
   const to = Date.now();
   try {
@@ -264,8 +266,10 @@ afterSwap(() => {
   const sample = document.querySelector("#node-health [data-sample]")?.dataset.sample;
   if (loading || sample === undefined) return;
   const read = JSON.parse(sample);
-  // A load that failed, or samples this page may have missed, read the range again rather than leave a hole.
-  if (history === null || missed(history, read)) void load();
+  // A load that failed, or samples this page may have missed, read the range again rather than leave a hole. While
+  // pylons are summed, who is summed changes as pylons start, stop and leave the range, which only the API tells.
+  const stale = () => (regroups(history, read) || history.otherPylons.size > 0) && Date.now() - loadedAt >= regroupMs;
+  if (history === null || missed(history, read) || stale()) void load();
   else if (appended(history, read)) drawAll();
 });
 onThemeChange(() => {

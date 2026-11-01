@@ -103,6 +103,8 @@ export type TierName = Tier["name"];
  * judgment as the page polls, add no more rows than one page every 5 s. A raw bucket of this width holds one sample.
  */
 export const minSampleGapMs = 4_000;
+/** How often the control plane reads each online node's health whether or not anyone watches it. */
+export const backgroundReadMs = 60_000;
 export const maxPoints = 1_000;
 
 /**

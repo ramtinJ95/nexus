@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { seriesOf, type MetricSeries, type NodeMetrics } from "../node-metrics.ts";
-import { appended, bucketed, catchUpMs, charts, columns, gapMs, historyOf, missed, niceCeil, reading, slotter, yRange, type History } from "./graph-data.ts";
+import { appended, bucketed, catchUpMs, charts, columns, gapMs, historyOf, missed, niceCeil, regroups, reading, slotter, yRange, type History } from "./graph-data.ts";
 
 const minute = 60_000;
 const hour = 60 * minute;
@@ -20,14 +20,14 @@ const linesOf = (id: string, h: History) => chart(id).lines(h, slotter());
 test("lines that miss each other's times share one x array, breaking with a null where the node went unread", () => {
   const a = { t: [0, 5_000, 10_000, 60_000], min: [1, 2, 3, 4], avg: [1, 2, 3, 4], max: [1, 2, 3, 4], n: [1, 1, 1, 1] };
   const b = { t: [5_000, 60_000], min: [7, 8], avg: [7, 8], max: [7, 8], n: [1, 1] };
-  const { x, lines } = columns([a, b], gapMs(1_000));
+  const { x, lines } = columns([a, b], 12_500);
   assert.deepEqual(x, [0, 5_000, 5_001, 10_000, 10_001, 60_000]);
   assert.deepEqual(lines[0]!.avg, [1, 2, undefined, 3, null, 4], "a reading 50 s after the last is past the gap of 12.5 s");
   assert.deepEqual(lines[1]!.avg, [undefined, 7, null, undefined, undefined, 8], "b runs on across a's times and breaks after its own 55 s gap");
 });
 
-test("a bucket's gap is two and a half buckets, and a raw range's two and a half polls", () => {
-  assert.equal(gapMs(1_000), 12_500);
+test("a bucket's gap is two and a half buckets, and a raw range's two and a half of the background reads, so only a node or control plane that was down breaks a line", () => {
+  assert.equal(gapMs(1_000), 150_000, "two and a half of the minute's background reads");
   assert.equal(gapMs(hour), 2.5 * hour);
 });
 
@@ -152,14 +152,21 @@ test("load per CPU meets the CPUs by bucket, so a bucket whose first read had no
   assert.deepEqual(linesOf("load-per-cpu", h).find((l) => l.id === "load1")!.points.avg, [0.5, 0.25], "live, the load arrives within a bucket the CPUs began");
 });
 
-test("a live sample sums the pylons the range summed, and a pylon that starts past eight lines, into the other pylons' line", () => {
-  const own = Array.from({ length: 8 }, (_, i) => raw(`pylonCpu:pylon-th-${i}:th-${i}`, `T${i}`, [[0, 10]]));
-  const h = historyOf(metrics([...own, raw("otherPylonsCpu", "2 other pylons, summed", [[0, 5]])], { otherPylons: ["pylon-th-8:th-8", "pylon-th-9:th-9"] }), hour);
-  assert.deepEqual(linesOf("pylon-cpu", h).map((l) => [l.label, "ref" in l.look]).at(-1), ["2 other pylons, summed", true], "a muted line, apart from the pylons' colours");
-  appended(h, { at: 5_000, values: { "pylonCpu:pylon-th-0:th-0": 11, "pylonCpu:pylon-th-8:th-8": 2, "pylonCpu:pylon-th-9:th-9": 3, "pylonCpu:pylon-th-10:th-10": 4 }, labels: {} });
-  const lines = linesOf("pylon-cpu", h);
-  assert.equal(lines.length, 9, "eight pylons and the other pylons");
-  assert.equal(h.series.has("pylonCpu:pylon-th-10:th-10"), false, "a ninth pylon that starts is summed");
-  assert.deepEqual([lines.at(-1)!.label, lines.at(-1)!.points.avg], ["3 other pylons, summed", [5, 9]]);
-  assert.deepEqual(h.series.get("pylonCpu:pylon-th-0:th-0")!.avg, [10, 11]);
+test("a live sample adds a new pylon's line while eight fit, and leaves the picking and summing of pylons to the API", () => {
+  const pylons = (count: number) => Array.from({ length: count }, (_, i) => raw(`pylonCpu:pylon-th-${i}:th-${i}`, `T${i}`, [[0, 10]]));
+  const sample = (at: number, ids: number[]) => ({ at, values: Object.fromEntries(ids.map((i) => [`pylonCpu:pylon-th-${i}:th-${i}`, i])), labels: {} });
+  const roomy = historyOf(metrics(pylons(7)), hour);
+  assert.equal(regroups(roomy, sample(5_000, [0, 7])), false, "a node with room for an eighth line");
+  appended(roomy, sample(5_000, [0, 7]));
+  assert.equal(roomy.series.has("pylonCpu:pylon-th-7:th-7"), true);
+  assert.equal(regroups(roomy, sample(10_000, [8])), true, "a ninth may outrank one of the eight, which only the API can tell");
+  appended(roomy, sample(10_000, [0, 8]));
+  assert.equal(roomy.series.has("pylonCpu:pylon-th-8:th-8"), false, "and it adds no line of its own until the API serves one");
+  assert.deepEqual(roomy.series.get("pylonCpu:pylon-th-0:th-0")!.avg, [10, 0, 0]);
+
+  const summed = historyOf(metrics([...pylons(8), raw("otherPylonsCpu", "2 other pylons, summed", [[0, 5]])], { otherPylons: ["pylon-th-8:th-8", "pylon-th-9:th-9"] }), hour);
+  assert.deepEqual(linesOf("pylon-cpu", summed).map((l) => [l.label, "ref" in l.look]).at(-1), ["2 other pylons, summed", true], "a muted line, apart from the pylons' colours");
+  assert.equal(regroups(summed, sample(5_000, [0, 1])), false, "pylons with lines of their own append");
+  assert.equal(regroups(summed, sample(5_000, [9])), true, "a summed pylon's reading moves the sum, which the API sums");
+  assert.equal(chart("pylon-cpu").note!(historyOf(metrics([raw("cpus", "CPUs", [[0, 4]]), raw("otherPylonsCpu", "9 other pylons, summed", [[0, 5]])]), hour)), null, "a chart with only the sum is not empty");
 });

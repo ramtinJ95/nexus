@@ -47,7 +47,7 @@ import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";
 import { dailyReports, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { backupStatusFile, readBackupStatus } from "./backup-status.ts";
-import { recordingHealth, sampleOf } from "./node-metrics.ts";
+import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";
 
@@ -252,7 +252,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const reports = dailyReports({ registry, run: doctor, startedAt });
   every(5 * 60_000, () => reports.poll());
   const sampling = healthSampling({ registry, probes: probeMap, log });
-  every(60_000, () => sampling.poll());
+  every(backgroundReadMs, () => sampling.poll());
   every(60_000, () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)));
   const api = await startApi({
     ...(config.https ? { https: { port: dashboardPort, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),

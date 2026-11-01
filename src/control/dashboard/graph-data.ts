@@ -3,7 +3,7 @@
  * draws from a node's series, the history the page holds of a range with each poll's sample appended, and the
  * columns uPlot draws. Pure, so node-page.ts renders the charts' figures from it and a test reads it without a browser.
  */
-import { maxPylons, pylonOf, seriesOf, type NodeMetrics, type Series } from "../node-metrics.ts";
+import { backgroundReadMs, maxPylons, pylonOf, seriesOf, type NodeMetrics, type Series } from "../node-metrics.ts";
 
 const minute = 60_000;
 const hour = 60 * minute;
@@ -51,12 +51,18 @@ export const missed = (h: History, sample: PageSample): boolean => sample.at - h
 export function appended(h: History, sample: PageSample): boolean {
   if (sample.at <= h.seen) return false;
   h.seen = sample.at;
-  for (const [key, value] of Object.entries(folded(h, sample.values))) {
+  const own = ownPylons(h);
+  for (const [key, value] of Object.entries(sample.values)) {
     let held = h.series.get(key);
     const label = sample.labels[key];
     if (held === undefined) {
       const series = seriesOf(key);
       if (series === null) continue;
+      const id = pylonOf(series);
+      if (id !== null && !own.has(id)) {
+        if (h.otherPylons.size > 0 || own.size >= maxPylons) continue;
+        own.add(id);
+      }
       held = { key, series, label: label ?? labelOf(series), t: [], min: [], avg: [], max: [], n: [] };
       h.series.set(key, held);
     } else if (label !== undefined) held.label = label;
@@ -85,36 +91,25 @@ export function appended(h: History, sample: PageSample): boolean {
   return true;
 }
 
-const otherKeys = { pylonCpu: "otherPylonsCpu", pylonResident: "otherPylonsResident" } as const;
+/** The pylons with lines of their own. */
+const ownPylons = (h: History) => new Set([...h.series.values()].flatMap((s) => pylonOf(s.series) ?? []));
+
+/** How often at most the page reads the range again for a pylon that `regroups`, as often as the background read. */
+export const regroupMs = backgroundReadMs;
 
 /**
- * The sample's values with the pylons the range sums summed as the API sums them: those it named, and a pylon that
- * starts once `maxPylons` pylons have lines of their own. The other pylons' labels follow their count.
+ * Whether the sample holds a pylon the history cannot add a line for as the API would serve it: one the range sums
+ * into the other pylons, or any new one once eight have lines or some are summed. Only the API picks and sums pylons,
+ * so the page reads the range again, and until then the sample adds nothing of such a pylon.
  */
-function folded(h: History, values: Record<string, number>): Record<string, number> {
-  const own = new Set([...h.series.values()].flatMap((s) => pylonOf(s.series) ?? []));
-  const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(values)) {
+export function regroups(h: History, sample: PageSample): boolean {
+  const own = ownPylons(h);
+  const full = h.otherPylons.size > 0 || own.size >= maxPylons;
+  return Object.keys(sample.values).some((key) => {
     const series = seriesOf(key);
     const id = series === null ? null : pylonOf(series);
-    if (id === null || own.has(id) || (!h.otherPylons.has(id) && own.size < maxPylons)) {
-      out[key] = value;
-      if (id !== null) own.add(id);
-      continue;
-    }
-    h.otherPylons.add(id);
-    const other = otherKeys[series!.kind as keyof typeof otherKeys];
-    out[other] = (out[other] ?? 0) + value;
-  }
-  for (const other of Object.values(otherKeys)) {
-    const held = h.series.get(other);
-    if (held !== undefined || other in out) {
-      const label = `${h.otherPylons.size} other pylons, summed`;
-      if (held !== undefined) held.label = label;
-      else h.series.set(other, { key: other, series: { kind: other }, label, t: [], min: [], avg: [], max: [], n: [] });
-    }
-  }
-  return out;
+    return id !== null && !own.has(id) && (full || h.otherPylons.has(id));
+  });
 }
 
 const labelOf = (s: Series): string => s.kind === "temp" ? s.sensor : s.kind === "pylonCpu" || s.kind === "pylonResident" ? s.pylon : s.kind;
@@ -184,7 +179,7 @@ const line = (h: History, key: string, label: string, look: Look, extra: Partial
   h.series.has(key) ? [{ id: key, label, points: held(h, key), look, ...extra }] : [];
 const lastOf = (h: History, key: string) => h.series.get(key)?.avg.at(-1);
 /** The node was read in the range, but no read held a series of the kind, so the chart says why it is empty. */
-const noneOf = (h: History, kind: string, why: string) => h.series.size > 0 && ![...h.series.keys()].some((key) => key.startsWith(`${kind}:`)) ? why : null;
+const noneOf = (h: History, kind: string, why: string, also?: string) => h.series.size > 0 && ![...h.series.keys()].some((key) => key.startsWith(`${kind}:`) || key === also) ? why : null;
 /** A line for each series of a kind, ordered by label, coloured by the identity `id` names. */
 const each = (h: History, slots: Slots, family: string, kind: Series["kind"], id: (s: Series) => string): Line[] =>
   [...h.series.values()].filter((s) => s.series.kind === kind).sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key))
@@ -231,12 +226,12 @@ export const charts: readonly Chart[] = [
   {
     id: "pylon-cpu", title: "Pylon CPU", unit: "% of one CPU", zero: true, digits: 1, suffix: "%", tick: (v) => `${short(v)}%`,
     lines: (h, slots) => [...each(h, slots, "pylon", "pylonCpu", pylonId), ...line(h, "otherPylonsCpu", h.series.get("otherPylonsCpu")?.label ?? "", { ref: true })],
-    note: (h) => noneOf(h, "pylonCpu", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'."),
+    note: (h) => noneOf(h, "pylonCpu", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'.", "otherPylonsCpu"),
   },
   {
     id: "pylon-memory", title: "Pylon memory", unit: "GiB resident", zero: true, ...gibs, tick: short,
     lines: (h, slots) => [...each(h, slots, "pylon", "pylonResident", pylonId), ...line(h, "otherPylonsResident", h.series.get("otherPylonsResident")?.label ?? "", { ref: true })],
-    note: (h) => noneOf(h, "pylonResident", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'."),
+    note: (h) => noneOf(h, "pylonResident", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'.", "otherPylonsResident"),
   },
 ];
 
@@ -246,8 +241,11 @@ export function reading(chart: Chart, avg: number, min = avg, max = avg): string
   return lo === hi ? `${a}${chart.suffix}` : `${a}${chart.suffix} (${lo}–${hi})`;
 }
 
-/** Points further apart than this have no reading between them, so the line breaks. The page polls every 5 s. */
-export const gapMs = (bucketMs: number): number => 2.5 * Math.max(bucketMs, 5_000);
+/**
+ * Points further apart than this have no reading between them, so the line breaks. The control plane reads every
+ * online node once a minute, so a break means the node or the control plane was down.
+ */
+export const gapMs = (bucketMs: number): number => 2.5 * Math.max(bucketMs, backgroundReadMs);
 
 /**
  * A value of a line at an x of the columns: a number, null where its line breaks, and undefined where it has no point
