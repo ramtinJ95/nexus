@@ -615,6 +615,8 @@ test("the route table holds the routes it always has, and each path matches one 
     "GET ^\\/nodes\\/([^/]+)$",
     "GET ^\\/pipeline$",
     "GET ^\\/projects\\/new$",
+    "GET ^\\/reports$",
+    "GET ^\\/reports\\/([^/]+)$",
     "GET ^\\/threads\\/([^/]+)$",
     "GET ^\\/threads\\/([^/]+)\\/stream$",
     "GET ^\\/threads\\/new$",
