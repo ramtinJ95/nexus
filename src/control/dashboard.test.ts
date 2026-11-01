@@ -891,7 +891,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
 
   const res = await s.call("GET", `/threads/${fix.id}`);
   assert.equal(res.status, 200);
-  assert.equal(textOf(res.text.split('id="bar"')[1]!.split("</header>")[0]!.replace(/^[^>]*>/, "")), "☰ acme / Fix checkout running Archive Delete ⋯");
+  assert.equal(textOf(res.text.split('id="bar"')[1]!.split("</header>")[0]!.replace(/^[^>]*>/, "")), "acme / Fix checkout running Changes Previews 2 Pylon Terminal Archive Delete");
   assert.match(conversationOf(res.text).text, new RegExp(`^${fix.id} · started just now`));
   assert.equal(textOf(sectionOf(res.text, "pylon-h")), `Pylon Desired running Observed running Node rj-firebat Last seen just now Human just now Agent never Tokens none counted ${fix.pylonId}`);
 
@@ -1607,7 +1607,7 @@ test("an unknown thread page is a 404 page", async (t) => {
 
 test("every page carries the start dialog, which offers every project and node and warns when no image is current", async (t) => {
   const s = await setup(t);
-  assert.match(textOf((await s.call("GET", "/threads/new")).text), /Start a thread ✕ No projects yet/);
+  assert.match(textOf((await s.call("GET", "/threads/new")).text), /Start a thread No projects yet/);
   for (const id of ["acme", "beta"]) await s.call("POST", "/v1/projects", project(id));
 
   const page = (await s.call("GET", "/threads/new?project=beta")).text;
@@ -1627,7 +1627,7 @@ test("every page carries the start dialog, which offers every project and node a
   s.registry.setCurrentImage(image.id as ImageId);
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
-  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), /^Start a thread ✕ Worker Claude Code .* Title \(optional\) Project acme /);
+  assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), /^Start a thread Worker Claude Code .* Title \(optional\) Project acme /);
   assert.match(home, new RegExp(`<p class="hint" id="start-hint" data-image="${image.id}"></p>`), "client.js writes the hint with the current image");
 });
 

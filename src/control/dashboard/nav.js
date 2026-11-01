@@ -1,5 +1,5 @@
 // The sidebar and the phone's panels: which panel is open, the thread filter, copy buttons and the inspector's tab.
-import { afterSwap, toggled } from "./page.js";
+import { afterSwap } from "./page.js";
 
 const filter = document.getElementById("filter");
 
@@ -15,11 +15,16 @@ document.addEventListener("click", (event) => {
   const opener = target?.closest("[data-open]");
   if (opener !== null && opener !== undefined) {
     // A panel button for another pane switches the open panel to it rather than closing it.
-    const { pane } = opener.dataset;
-    const picked = document.querySelector(".seg-bar input:checked")?.value;
-    setOpen(document.body.dataset.open === opener.dataset.open && (pane === undefined || pane === picked) ? null : opener.dataset.open);
+    const { open, pane } = opener.dataset;
+    setOpen(document.body.dataset.open === open && (!pane || pane === document.querySelector(".seg-bar :checked")?.value) ? null : open);
     if (pane !== undefined) pickPane(pane);
     return;
+  }
+  // A panel's link opens it over the page, and loads the panels' code the first time.
+  const panel = target?.closest("a[data-panel], [data-panel] a");
+  if (panel && !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || panel.hash) && panel.pathname !== location.pathname) {
+    event.preventDefault();
+    return void import("./panel.js").then((m) => m.open(new URL(panel.href)));
   }
   const closer = target?.closest("[data-close]");
   if (closer === null || closer === undefined) return;
@@ -75,14 +80,3 @@ document.addEventListener("change", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.matches(".seg-bar input")) localStorage.setItem(paneKey, event.target.value);
 });
 
-// The sidebar's Nodes fold stays as the reader left it, on every page.
-const nodesKey = "nexus.nodes";
-const nodesFold = () => document.getElementById("nodes-fold");
-if (localStorage.getItem(nodesKey) === "open" && nodesFold() !== null) {
-  toggled.set("nodes-fold", true);
-  nodesFold().open = true;
-}
-document.addEventListener("click", (event) => {
-  const fold = event.target instanceof Element ? event.target.closest("summary")?.parentElement : null;
-  if (fold?.id === "nodes-fold") localStorage.setItem(nodesKey, fold.open ? "closed" : "open");
-});

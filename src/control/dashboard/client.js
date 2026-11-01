@@ -11,7 +11,6 @@ import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { activeTab, canRead, changesPane, changesUnreadable, checkout, factsNow, readChanges, renderTabs, showTab, tabsBar, terminalTab } from "./checkout.js";
 import "./composer.js";
 import "./actions.js";
-import "./panel.js";
 import { startRows } from "./rows.js";
 
 for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
@@ -98,3 +97,4 @@ document.querySelector("aside")?.append(permission);
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 const { markSeen, askRows } = startRows({ api, notifications, health, caughtUp, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);
+

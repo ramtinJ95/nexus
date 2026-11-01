@@ -372,12 +372,14 @@ ul.error { padding-left: 28px; display: grid; gap: 2px; }
 .nodes { margin: 0 8px 4px; font-size: 12.5px; color: var(--text-2); border-top: 1px solid var(--line-soft); }
 .nodes details { display: grid; gap: 4px; padding: 4px 4px 8px; }
 .nodes details[open] { display: grid; }
-.nodes summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 6px 6px; margin: 0 -4px; border-radius: 8px; cursor: pointer; }
+.nodes summary { list-style: none; display: flex; flex-wrap: wrap; row-gap: 6px; align-items: center; gap: 8px; padding: 6px 6px; margin: 0 -4px; border-radius: 8px; cursor: pointer; }
 .nodes summary::-webkit-details-marker { display: none; }
 .nodes summary:hover { background: var(--hover); }
-.nodes summary .i-chevron { width: 11px; height: 11px; margin-left: auto; color: var(--text-3); transition: transform 0.15s var(--ease); }
+.nodes summary .i-chevron { width: 11px; height: 11px; color: var(--text-3); transition: transform 0.15s var(--ease); order: -1; }
+.node-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--hover); font-size: 12px; font-weight: 500; color: var(--text-2); }
+.nodes .node-chip:hover { background: var(--selected); text-decoration: none; color: var(--text); }
 .nodes details[open] > summary .i-chevron { transform: rotate(90deg); }
-.nodes-sum { display: inline-flex; gap: 5px; }
+.nodes-sum { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
 .nodes h2 { margin: 0; font: 650 11px/1.4 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 .nodes small { font-size: 11px; color: var(--text-3); padding-left: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nodes summary + small { padding-left: 0; }
@@ -387,6 +389,7 @@ ul.error { padding-left: 28px; display: grid; gap: 2px; }
 .nodes a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .nodes em { font-style: normal; margin-left: auto; font-size: 11px; color: var(--warn); }
 .side-foot { display: flex; align-items: center; gap: 4px; margin: 0 8px; padding: 6px 0 2px; border-top: 1px solid var(--line-soft); }
+.side-project::before { content: "+"; font: 400 16px/10px var(--sans); }
 .side-add { margin: 0 8px 10px; justify-content: flex-start; color: var(--text-3); }
 /* the theme needs the page's script, which names one on <html> before the first paint */
 .side-theme { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; }
@@ -594,7 +597,8 @@ h4.md-h { font-size: 1.06em; }
 
 /* Nexus's posts in the conversation: each card says who it is from, and its edge says what it is */
 #landing:empty { display: none; }
-.landing { --kind: var(--text-3); position: relative; display: grid; gap: 10px; padding: 14px 16px 14px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); max-height: 46vh; overflow: auto; font-size: 13.5px; }
+.landing { --kind: var(--text-3); position: relative; display: grid; gap: 10px; padding: 14px 16px 14px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); overflow: auto; font-size: 13.5px; }
+.dock .landing { max-height: 46vh; }
 .landing::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--kind); }
 .dock .landing > .land-top::before, .dock .ask-card .ask-head::before { content: "◆ Nexus"; flex-basis: 100%; font: 650 10.5px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 2px; }
 .landing.question { --kind: var(--warn); }
@@ -819,7 +823,7 @@ body[data-open="inspect"] .inspect { transform: none; visibility: visible; trans
 .ov-head h2 { margin: 0; font: 650 15px/1.4 var(--sans); color: var(--text); }
 .ov-head code { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ov-head .btn { margin-left: auto; }
-.ov-head .count:not(:empty) { font-size: 12px; min-width: 20px; padding: 0 7px; border-radius: 999px; background: var(--bad); color: #fff; font-weight: 650; line-height: 19px; text-align: center; }
+.needs .ov-head .count:not(:empty) { font-size: 12px; min-width: 20px; padding: 0 7px; border-radius: 999px; background: var(--bad); color: #fff; font-weight: 650; line-height: 19px; text-align: center; }
 .ov { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; table-layout: fixed; background: var(--card); border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; }
 .ov th:first-child { width: 38%; }
 .ov th { text-align: left; font: 600 11px var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); padding: 10px 12px 8px; border-bottom: 1px solid var(--line-soft); }
@@ -848,7 +852,7 @@ body[data-open="inspect"] .inspect { transform: none; visibility: visible; trans
 
 /* a node's graphs: panels of fixed height in two columns, one crosshair across them, their legends in text colours */
 .node-live { display: grid; gap: 28px; }
-.node-live section > .kv, .node-live section > .cleanups { padding: 16px; background: var(--card); border: 1px solid var(--line-soft); border-radius: 14px; }
+.node-live section > .kv { padding: 16px; background: var(--card); border: 1px solid var(--line-soft); border-radius: 14px; }
 .cleanups { display: grid; gap: 12px; }
 .graph-ranges { margin-left: auto; }
 .graph-ranges button { font-variant-numeric: tabular-nums; min-width: 38px; }
@@ -874,7 +878,7 @@ body[data-open="inspect"] .inspect { transform: none; visibility: visible; trans
 /* the inbox: each thing that waits on the person is a post from Nexus in a feed, under the chat it came from */
 .page-needs { padding-bottom: 0; }
 .need-list { display: grid; gap: 20px; }
-.need { --kind: var(--work); position: relative; display: grid; gap: 8px; min-width: 0; padding-left: 44px; font-size: 13.5px; scroll-margin-top: 16px; border-radius: 14px; }
+.need { --kind: var(--work); position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; padding-left: 44px; font-size: 13.5px; scroll-margin-top: 16px; border-radius: 14px; }
 .need::before { content: ""; position: absolute; left: 0; top: 0; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--kind) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--kind) 28%, transparent); }
 .need::after { content: ""; position: absolute; left: 12px; top: 12px; width: 9px; height: 9px; border-radius: 2px; background: var(--kind); transform: rotate(45deg); }
 .need[data-attention="failed"], .need[data-attention="parked"], .need[data-attention="limited"] { --kind: var(--bad); }
@@ -909,7 +913,7 @@ body[data-open="inspect"] .inspect { transform: none; visibility: visible; trans
 .usage-seg .seg-tab[aria-current="page"] { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
 .ov.usage-t th:first-child { width: 30%; }
 .usage-t :is(th, td):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
-#usage-totals td:nth-child(2) { font: 600 20px/1.2 var(--sans); color: var(--text); }
+#usage-totals td:nth-child(6) { font: 600 20px/1.2 var(--sans); color: var(--text); }
 .usage-notes { margin-top: 12px; display: grid; gap: 6px; font-size: 12.5px; color: var(--text-3); }
 .usage-notes p { margin: 0; }
 .usage-notes .ov { margin-top: 6px; font-size: 12px; }
@@ -958,6 +962,7 @@ body[data-open="actions"] .scrim { background: transparent; animation: none; }
  * leaves it there. At its own address it is the same sheet over the main column.
  */
 .sheet { display: none; }
+.sheet:focus { outline: none; }
 body[data-open="sheet"] .sheet { position: fixed; top: 0; right: 0; bottom: 0; z-index: 26; width: min(880px, calc(100vw - var(--side-w) - 48px)); display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--line); box-shadow: var(--pop); animation: slide 0.24s var(--ease); }
 @keyframes slide { from { transform: translateX(40px); opacity: 0; } }
 .sheet > .bar { background: var(--bg); }
@@ -1048,7 +1053,8 @@ body[data-open="sheet"] .sheet { position: fixed; top: 0; right: 0; bottom: 0; z
   .comp-box textarea { font-size: 16px; min-height: 40px; }
   .comp-foot kbd, .comp-hint { display: none; }
   .attach-line { display: none; }
-  .landing { padding: 12px 14px 12px 16px; max-height: 40vh; }
+  .landing { padding: 12px 14px 12px 16px; }
+  .dock .landing { max-height: 40vh; }
   .term-view { margin: 0 0 6px; border-radius: 0; }
   .fv-head { padding: 10px 12px; }
   .fv-head .fv-layout { display: none; }
@@ -1075,10 +1081,12 @@ body[data-open="sheet"] .sheet { position: fixed; top: 0; right: 0; bottom: 0; z
 .attention-toast button { font: 500 12.5px var(--sans); color: var(--text-2); background: none; border: 0; cursor: pointer; }
 .ov-sub { margin: 16px 0 8px; font: 650 11px var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
 .ov-wait { display: block; overflow: hidden; text-overflow: ellipsis; }
-.ov-items th:first-child { width: 28%; }
-.ov-items th:nth-child(2) { width: 34%; }
-.ov-items .ov-act { width: 160px; }
-.ov-items td:last-child { text-align: right; }
+.ov-items { table-layout: auto; }
+.ov-items th:first-child { width: 30%; }
+.ov-items th:nth-child(2) { width: 32%; }
+.ov-items .ov-act { width: 1%; }
+.ov-items td:nth-child(4) { min-width: 150px; }
+.ov-items td:last-child { text-align: right; white-space: nowrap; }
 .ov-items td:first-child code { display: block; font-size: 10.5px; margin-top: 2px; padding-left: 18px; }
 .ov-why { display: block; color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; margin-top: 2px; }
 .ov-items td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
