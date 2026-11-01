@@ -102,6 +102,28 @@ test("a rerun over an install from before control-plane.json writes it from prob
   assert.equal(files(run(["--node", "rj-firebat"], onDisk(written), nodeTailnet)).get(paths.controlPlane)!.state, "unchanged");
 });
 
+test("a rerun over an install whose probe.json and deployer.json name different control planes refuses and writes nothing", () => {
+  for (const args of [["--node", "rj-firebat"], ["--dotfiles", dotfiles]]) {
+    const net = args[0] === "--node" ? nodeTailnet : tailnet;
+    const { controlPlane: _, ...first } = onDisk(files(run(args, fresh, net)));
+    const self = args[0] === "--node" ? "nBench1CNTRL" : "nSelf1CNTRL";
+    const old: Existing = {
+      ...first,
+      probe: { ...(first.probe as Record<string, any>), auth: { controlPlane: self, peers: [] } },
+      deployer: { ...(first.deployer as Record<string, Json>), controlUrl: "http://100.64.0.9:7470/", controlNodeId: "nOther1CNTRL" },
+    };
+    const result = run(args, old, net);
+    assert.equal(result.ok, false, "no file is written");
+    assert.match(result.ok ? "" : result.errors.join("\n"), /auth\.controlPlane "n\w+" and deployer\.json's controlNodeId "nOther1CNTRL" name different control planes/);
+  }
+});
+
+test("a rerun over an install whose probe.json alone names the control plane carries it over", () => {
+  const { controlPlane: _, deployer: __, ...first } = onDisk(files(run(["--node", "rj-firebat"], fresh, nodeTailnet)));
+  const old: Existing = { ...first, probe: { ...(first.probe as Record<string, any>), auth: { controlPlane: "nBench1CNTRL", peers: [] } } };
+  assert.deepEqual(value(files(run(["--node", "rj-firebat"], old, nodeTailnet)), paths.controlPlane), { tailnetNodeId: "nBench1CNTRL", url: "http://rj-firebat.tail1234.ts.net:7470/" });
+});
+
 test("a probe.json from before the artifact store keeps its images and gains no artifacts beside them", () => {
   const first = onDisk(files(run(["--dotfiles", dotfiles])));
   const { artifacts: _, ...backend } = (first.probe as Record<string, any>).backend;

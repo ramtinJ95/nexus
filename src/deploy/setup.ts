@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, gitKnownHosts, harnessSignedIn, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
-import { controlPlanePath, legacyControlPlane, readControlPlane } from "./control-plane.ts";
+import { controlPlanePath, readControlPlane } from "./control-plane.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { digestPattern, tokenDigest, tsNet } from "./model.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
@@ -215,6 +215,18 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   }
   if (flags.dotfiles?.startsWith("https://") && !URL.canParse(flags.dotfiles)) errors.push(`--dotfiles ${flags.dotfiles}: not a valid https:// URL`);
 
+  // An install from before control-plane.json named the control plane in probe.json and deployer.json. What they name
+  // carries over, and two different names are refused rather than one picked, as the deployer's upgrade refuses them.
+  const probeTrusted = isObject(existing.probe) && isObject(existing.probe.auth) ? existing.probe.auth.controlPlane : undefined;
+  const legacy: JsonObject | undefined = existing.controlPlane !== undefined ? undefined : {
+    ...probeTrusted === undefined ? {} : { tailnetNodeId: probeTrusted },
+    ...deployerOnDisk?.controlNodeId === undefined ? {} : { tailnetNodeId: deployerOnDisk.controlNodeId },
+    ...deployerOnDisk?.controlUrl === undefined ? {} : { url: deployerOnDisk.controlUrl },
+  };
+  if (legacy !== undefined && probeTrusted !== undefined && deployerOnDisk?.controlNodeId !== undefined && !isDeepStrictEqual(probeTrusted, deployerOnDisk.controlNodeId)) {
+    errors.push(`probe.json's auth.controlPlane ${JSON.stringify(probeTrusted)} and deployer.json's controlNodeId ${JSON.stringify(deployerOnDisk.controlNodeId)} name different control planes. Name the one to trust with sudo deploy/set-control-plane.sh <tailnet node ID> <url>, then rerun`);
+  }
+
   if (errors.length > 0) return { ok: false, errors };
 
   const token = typeof deployerOnDisk?.token === "string" ? deployerOnDisk.token : newToken;
@@ -249,11 +261,8 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     controlUrl = `http://${urlHost(String(listen.host))}:${String(listen.port)}/`;
   }
 
-  // An install from before control-plane.json named the control plane in probe.json and deployer.json, which carry over.
-  const legacy = existing.controlPlane !== undefined ? undefined : (() => {
-    try { return { ...legacyControlPlane(existing.probe, existing.deployer) }; } catch { return undefined; }
-  })();
-  const trusted = file(paths.controlPlane, 0o644, existing.controlPlane ?? legacy, { tailnetNodeId: controlId, url: controlUrl }, control === undefined ? ["tailnetNodeId", "url"] : []);
+  const carried = legacy === undefined || Object.keys(legacy).length === 0 ? undefined : legacy;
+  const trusted = file(paths.controlPlane, 0o644, existing.controlPlane ?? carried, { tailnetNodeId: controlId, url: controlUrl }, control === undefined ? ["tailnetNodeId", "url"] : []);
   files.push(existing.controlPlane === undefined ? { ...trusted, state: "new" } : trusted);
 
   const existingBackend = isObject(existing.probe) ? existing.probe.backend : undefined;
