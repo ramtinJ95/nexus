@@ -1271,8 +1271,8 @@ async function slowStarts(t: import("node:test").TestContext, streamTiming: { st
   return { ...ctx, starts };
 }
 
-/** A process that takes its stdin's end and never exits until it is dropped. */
-function hangingStream() {
+/** A process that takes its stdin's end and never exits until it is dropped, writing until then unless `closesOutput`. */
+function hangingStream(closesOutput = false) {
   let dropped = false;
   let drop!: () => void;
   const gone = new Promise<void>((resolve) => { drop = resolve; });
@@ -1281,7 +1281,7 @@ function hangingStream() {
     async close() {},
     abort() { dropped = true; drop(); },
     done: gone.then(() => ({ kind: "lost" as const })),
-    async *[Symbol.asyncIterator]() { await gone; },
+    async *[Symbol.asyncIterator]() { if (!closesOutput) await gone; },
   };
   return { stream, dropped: () => dropped };
 }
@@ -1299,17 +1299,19 @@ test("a guest that does not start the stream in time gets a 504 that says its py
   await until("the late process is dropped", late.dropped);
 });
 
-test("a process nobody reads that does not end once its stdin closes is dropped after the hang-up time", async (t) => {
+test("a process nobody reads that does not exit once its stdin closes is dropped after the hang-up time, even once its output ends", async (t) => {
   const { probe, starts } = await slowStarts(t, { startMs: 60_000, hangUpMs: 50 });
-  const caller = connect({ host: "127.0.0.1", port: probe.port, allowHalfOpen: true });
-  t.after(() => caller.destroy());
-  caller.write(`GET ${streamPath(pylonId, ["cat"])} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`);
-  await until("the guest is asked to start the stream", () => starts.length === 1);
-  caller.end();
-  await until("the start is aborted", () => starts[0]!.signal.aborted);
-  const late = hangingStream();
-  starts[0]!.start(late.stream);
-  await until("the late process is dropped", late.dropped, 5000);
+  for (const closesOutput of [false, true]) {
+    const caller = connect({ host: "127.0.0.1", port: probe.port, allowHalfOpen: true });
+    t.after(() => caller.destroy());
+    caller.write(`GET ${streamPath(pylonId, ["cat"])} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`);
+    await until("the guest is asked to start the stream", () => starts.length === 1);
+    caller.end();
+    await until("the start is aborted", () => starts[0]!.signal.aborted);
+    const late = hangingStream(closesOutput);
+    starts.shift()!.start(late.stream);
+    await until(`the late process is dropped, closing its output: ${closesOutput}`, late.dropped, 5000);
+  }
 });
 
 test("a checkout read fits the probe's stream request and comes back through it", async (t) => {

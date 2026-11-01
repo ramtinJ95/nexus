@@ -626,10 +626,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     throw (started as { err: unknown }).err;
   }
 
-  /** Closes the stdin of a process nobody reads, which a relay takes as a hang-up, and drops it past hangUpMs. */
+  /** Closes the stdin of a process nobody reads, which a relay takes as a hang-up, and drops it unless it exits within hangUpMs. */
   async function letGo(guest: ByteStream) {
     const drained = (async () => { for await (const _ of guest) { /* drained, so the process can exit */ } })().catch(() => undefined);
-    const ended = await Promise.race([guest.close().catch(() => undefined).then(() => drained).then(() => true), delay(streamTiming.hangUpMs, false, { ref: false })]);
+    const ended = await Promise.race([guest.close().catch(() => undefined).then(() => drained).then(() => guest.done).then(() => true), delay(streamTiming.hangUpMs, false, { ref: false })]);
     if (!ended) guest.abort();
     await drained;
   }
