@@ -95,9 +95,10 @@ export function chooseTemplate(project: RemoteProject, key: TemplateKey, checkou
 }
 
 /**
- * Garbage, computed by the control plane per node and sent as drop-artifact jobs: templates past
- * templateMaxAgeMs that are not their project's newest ready one, and images that are not current and back
- * no held template or checkpoint. The type cannot name a checkpoint. A wiped registry knows no templates,
+ * Garbage, computed by the control plane per node, which the person's yes deletes (cleanup.ts): templates past
+ * templateMaxAgeMs that are not their project's newest ready one, and images that are neither current nor the
+ * previous one, which `nexus image rollback` rolls out again, and back no held template or checkpoint. The type
+ * cannot name a checkpoint. A wiped registry knows no templates,
  * so it may drop templates and images it does not know. ArtifactStore.drop refuses any image a local
  * checkpoint still needs, and the rest can be rebuilt.
  *
@@ -106,7 +107,7 @@ export function chooseTemplate(project: RemoteProject, key: TemplateKey, checkou
  * on a later pass, after its templates. A checkpoint ID does not name its image, so this function cannot
  * see that dependency, and ArtifactStore.drop's refusal enforces it.
  */
-export function garbage(held: readonly ArtifactId[], templates: readonly TemplateRecord[], images: ImageSettings, now: number): readonly PortableArtifactId[] {
+export function garbage(held: readonly ArtifactId[], templates: readonly TemplateRecord[], images: ImageSettings & { previous?: ImageId | null }, now: number): readonly PortableArtifactId[] {
   const newestReady = new Map<ProjectId, ReadyTemplate>();
   for (const t of templates) {
     if (t.state !== "ready") continue;
@@ -121,5 +122,5 @@ export function garbage(held: readonly ArtifactId[], templates: readonly Templat
   const backsTemplate = (id: ImageId): boolean => templates.some((t) => t.key.image === id && (t.state === "building" || heldTemplates.includes(t.id)));
   return held.filter((id): id is PortableArtifactId => isTemplateId(id)
     ? !keepTemplate(id)
-    : isImageId(id) && id !== images.current && !backsTemplate(id));
+    : isImageId(id) && id !== images.current && id !== images.previous && !backsTemplate(id));
 }
