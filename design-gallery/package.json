@@ -1,0 +1,10 @@
+{
+  "name": "nexus-design-gallery",
+  "private": true,
+  "type": "module",
+  "description": "The gallery's screenshot tool, kept apart from the dashboard's own dependencies.",
+  "dependencies": {
+    "@sparticuz/chromium": "153.0.0",
+    "puppeteer-core": "25.16.0"
+  }
+}

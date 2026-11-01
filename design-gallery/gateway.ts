@@ -15,7 +15,7 @@ import { connect } from "node:net";
 import { join } from "node:path";
 
 const port = Number(process.env.PORT ?? 8080);
-const shooter = process.env.SHOOTER ?? "/tmp/claude-1000/shot/run.sh";
+const shooter = process.env.SHOOTER ?? new URL("./shoot.sh", import.meta.url).pathname;
 const shots = process.env.SHOTS ?? "/home/user/.cache/nexus-gallery";
 
 export const designs = [
