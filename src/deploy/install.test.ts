@@ -231,6 +231,21 @@ test("the deployer's preparation runs both role installers without reading input
   assert.deepEqual(ran.filter((line) => credentials.test(line)), [], "a secrets.env of another mode keeps it");
 });
 
+test("the probe role's preparation writes control-plane.json from today's probe.json and deployer.json, then leaves it alone", async (t) => {
+  const m = await roleInstallers(t);
+  await writeFile(join(m.etc, "probe.json"), JSON.stringify({ node: "infra-testbench", auth: { controlPlane: "nFirebat1CNTRL", peers: ["nFirebat1CNTRL"] } }));
+  await writeFile(join(m.etc, "deployer.json"), JSON.stringify({ controlUrl: "http://rj-firebat.tail1234.ts.net:7470/", controlNodeId: "nFirebat1CNTRL", token: "a".repeat(64) }), { mode: 0o600 });
+  const file = join(m.etc, "control-plane.json");
+  const first = await m.run("probe", true);
+  assert.equal(first.code, 0, first.stderr);
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { tailnetNodeId: "nFirebat1CNTRL", url: "http://rj-firebat.tail1234.ts.net:7470/" });
+  const [bytes, { mtimeMs }] = [await readFile(file), await stat(file)];
+  const second = await m.run("probe", true);
+  assert.equal(second.code, 0, second.stderr);
+  assert.deepEqual(await readFile(file), bytes);
+  assert.equal((await stat(file)).mtimeMs, mtimeMs);
+});
+
 test("the control role, prepared by the deployer or installed by hand, installs the daily backup's service and timer", async (t) => {
   for (const prepare of [true, false]) {
     const m = await roleInstallers(t);
