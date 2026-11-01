@@ -89,6 +89,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let heldPoll: { skip: number; entered: () => void; released: Promise<void> } | null = null;
   let polls = 0;
   let onFiles = () => {};
+  let onStart = async () => {};
   const deployers = new Set(["nLAPTOP"]);
   const woken: ThreadId[] = [];
   const loop = () => reviewLoop({
@@ -135,7 +136,12 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     wake: (target) => { woken.push(target.id); },
     log: () => {},
     now: () => clock,
-    async startThread(request, caller) { started.push(request); return registry.thread(add(`th-reviewer-${started.length}`, request.claude !== undefined, caller))!; },
+    async startThread(request, caller) {
+      started.push(request);
+      const id = add(`th-reviewer-${started.length}`, request.claude !== undefined, caller);
+      await onStart();
+      return registry.thread(id)!;
+    },
   });
   const reply = (id: ThreadId, text: string) => {
     failures.delete(id);
@@ -160,6 +166,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     changes,
     /** Runs while the loop reads the PR's changed files. */
     set onFiles(hook: () => void) { onFiles = hook; },
+    /** Runs once a reviewer thread exists, before startThread returns it. */
+    set onStart(hook: () => Promise<void>) { onStart = hook; },
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
     labels, labelCalls, set labelAnswer(a: (name: string) => LabelResult) { labelAnswer = a; },
     set check(c: CheckState) { check = c; },
@@ -869,6 +877,104 @@ test("a thread in a turn as its review lands stays open, and the other is archiv
   f.registry.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
   await loop.poll();
   assert.deepEqual(f.statuses(), ["active", "archived"], "the person archives a builder that was busy as it landed");
+});
+
+test("a review that ends merged, closed, cancelled by its builder's archive, or out of rounds archives its reviewer in the pass that ends it", async (t) => {
+  const ends: [Review["phase"]["kind"], (f: ReturnType<typeof fixture>) => void][] = [
+    ["merged", (f) => f.watched("merged")],
+    ["closed", (f) => f.watched("closed")],
+    ["cancelled", (f) => archive(f.registry, f.builder)],
+    ["needs-person", (f) => f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }))],
+  ];
+  for (const [kind, end] of ends) {
+    const f = fixture(t);
+    const loop = f.loop();
+    await loop.start(f.builder, { land: null, rounds: 1 });
+    await loop.poll();
+    const reviewer = f.review().reviewer;
+    end(f);
+    await loop.poll();
+    assert.equal(f.review().phase.kind, kind);
+    assert.equal(f.registry.thread(reviewer)!.status, "archived", `${kind}: no round can go to the reviewer`);
+    assert.deepEqual(f.woken, [reviewer], `${kind}: the planner hears of the archive, so its pylon pauses`);
+  }
+});
+
+test("a review a new review replaces leaves its reviewer archived, and the new reviewer open", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  const first = f.review().reviewer;
+  await loop.poll();
+  assert.equal(f.registry.thread(first)!.status, "active", "a review at approval may still land, which needs its reviewer");
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(f.registry.thread(first)!.status, "archived");
+  assert.equal(f.registry.thread(f.review().reviewer)!.status, "active");
+});
+
+test("a reviewer in a turn as its review lands is archived on a later pass, once the turn ends", async (t) => {
+  const f = fixture(t, { repo: "acme/shop" });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.registry.recordActivity(reviewer, { agent: 1, agentTurnRunning: true });
+  f.reply(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.statuses(), ["archived", "active"]);
+  await loop.poll();
+  assert.equal(f.registry.thread(reviewer)!.status, "active", "a turn keeps it open");
+  f.registry.recordActivity(reviewer, { agent: 2, agentTurnRunning: false });
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["archived", "archived"]);
+});
+
+test("a review held for the person keeps its reviewer across passes, for the rounds a land or a new head can start", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "needs-person");
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "active"]);
+});
+
+test("a reviewer the person has been to since it started stays open after its review ends", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.registry.recordActivity(reviewer, { human: 2 });
+  f.watched("closed");
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "closed");
+  assert.equal(f.registry.thread(reviewer)!.status, "active");
+});
+
+test("reviewers left behind before the loop archived them, by a replaced review or a crash before its review saved, are archived on the first pass", async (t) => {
+  const f = fixture(t);
+  const earlier = f.add("th-reviewer-earlier", false, reviewerCaller);
+  const crashed = f.add("th-reviewer-crashed", false, reviewerCaller);
+  const later = f.add("th-reviewer-later", false, reviewerCaller);
+  archive(f.registry, later);
+  archive(f.registry, f.builder);
+  f.registry.saveReview(testReview({ builder: f.builder, reviewer: later, merged, phase: { kind: "landed", commit: merged } }));
+  await f.loop().poll();
+  assert.deepEqual([earlier, crashed].map((id) => f.registry.thread(id)!.status), ["archived", "archived"]);
+  assert.deepEqual(f.woken.toSorted(), [crashed, earlier]);
+});
+
+test("a reviewer whose review is still starting is not taken for a leftover by a pass that runs meanwhile", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  f.onStart = () => loop.poll();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.statuses(), ["active", "active"]);
 });
 
 test("a token that cannot merge holds the landing for the person, and a later land tries again", async (t) => {
