@@ -1259,6 +1259,59 @@ test("a stream whose caller left while the guest started it is told so, and the 
   assert.deepEqual(logged.filter((line) => /EPIPE|write after/.test(line)), []);
 });
 
+/** A guest whose stream starts when the test says, with the signal the probe passed. */
+async function slowStarts(t: import("node:test").TestContext, streamTiming: { startMs: number; hangUpMs: number }) {
+  const fake = fakeBackend();
+  const starts: { signal: AbortSignal; start(stream: ByteStream): void }[] = [];
+  const guest = {
+    stream: (_argv: readonly string[], _log: (text: string) => void, signal?: AbortSignal) => new Promise<ByteStream>((start) => starts.push({ signal: signal!, start })),
+  } as Partial<Guest> as Guest;
+  const ctx = await setup(t, { backend: { ...fake.backend, guest: () => guest }, streamTiming });
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  return { ...ctx, starts };
+}
+
+/** A process that takes its stdin's end and never exits until it is dropped. */
+function hangingStream() {
+  let dropped = false;
+  let drop!: () => void;
+  const gone = new Promise<void>((resolve) => { drop = resolve; });
+  const stream: ByteStream = {
+    async write() {},
+    async close() {},
+    abort() { dropped = true; drop(); },
+    done: gone.then(() => ({ kind: "lost" as const })),
+    async *[Symbol.asyncIterator]() { await gone; },
+  };
+  return { stream, dropped: () => dropped };
+}
+
+test("a guest that does not start the stream in time gets a 504 that says its pylon is not answering, and its start is aborted", async (t) => {
+  const { client, starts } = await slowStarts(t, { startMs: 50, hangUpMs: 50 });
+  await assert.rejects(client.stream(pylonId, ["herdr"]), (err: Error & { code?: string }) => {
+    assert.equal(err.code, "unreachable");
+    assert.equal(err.message, `${node}: pylon ${pylonId} is not answering: it did not start a process within 0.05 s. It may be out of memory or busy. Pausing and waking it, as archiving and unarchiving its thread does, gives it a fresh VM`);
+    return true;
+  });
+  assert.equal(starts[0]!.signal.aborted, true);
+  const late = hangingStream();
+  starts[0]!.start(late.stream);
+  await until("the late process is dropped", late.dropped);
+});
+
+test("a process nobody reads that does not end once its stdin closes is dropped after the hang-up time", async (t) => {
+  const { probe, starts } = await slowStarts(t, { startMs: 60_000, hangUpMs: 50 });
+  const caller = connect({ host: "127.0.0.1", port: probe.port, allowHalfOpen: true });
+  t.after(() => caller.destroy());
+  caller.write(`GET ${streamPath(pylonId, ["cat"])} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`);
+  await until("the guest is asked to start the stream", () => starts.length === 1);
+  caller.end();
+  await until("the start is aborted", () => starts[0]!.signal.aborted);
+  const late = hangingStream();
+  starts[0]!.start(late.stream);
+  await until("the late process is dropped", late.dropped, 5000);
+});
+
 test("a checkout read fits the probe's stream request and comes back through it", async (t) => {
   const { client } = await streaming(t);
   const repo = await mkdtemp(join(tmpdir(), "nexus-probe-checkout-"));

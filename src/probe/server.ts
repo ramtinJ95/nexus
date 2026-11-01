@@ -20,7 +20,7 @@ import {
 } from "../protocol/jobs.ts";
 import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } from "../protocol/observations.ts";
 import { parsePylonCommand, type CommandResult, type PylonCommand } from "../protocol/commands.ts";
-import { parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
+import { notAnswering, parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { peersSchema, probePort, routeAuth, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
@@ -47,6 +47,8 @@ export interface ProbeOptions {
   backend: VmBackend;
   secrets: NodeSecrets;
   jobDeadlineMs?: { readonly [K in Job["kind"]]: number };
+  /** Tests only. How long a stream's guest has to start its process, and a process nobody reads to end once its stdin closes. */
+  streamTiming?: { startMs: number; hangUpMs: number };
   /** The probe's log, which also receives the stderr of raw pipes. Default console.error. */
   log?: (message: string) => void;
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
@@ -108,6 +110,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   /** probe.json's peers until the control plane puts its list, which a restart forgets until the next put. */
   let peers = auth.peers;
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
+  // Under the control plane's 10 s, so a slow guest gets an answer that names it, not the control plane's timeout.
+  const streamTiming = options.streamTiming ?? { startMs: 8_000, hangUpMs: 10_000 };
   const peerAddress = options.peerAddress ?? ((peer: NodeName) => ({ host: peer, port: probePort }));
   const bootId = randomUUID();
   /**
@@ -607,22 +611,27 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (await backend.state(pylonId) !== "running") return refuse(socket, 409, `${pylonId} is not running`);
     const gone = AbortSignal.any([left, shutdown.signal]);
     if (gone.aborted) return void socket.destroy();
-    let guest: ByteStream;
-    try {
-      guest = await backend.guest(pylonId).stream(argv, (text) => log(`${pylonId} stream ${argv[0]}: ${text.trimEnd()}`), gone);
-    } catch (err) {
-      if (gone.aborted) return void socket.destroy();
-      throw err;
+    const slow = AbortSignal.timeout(streamTiming.startMs);
+    const given = AbortSignal.any([gone, slow]);
+    const starting = backend.guest(pylonId).stream(argv, (text) => log(`${pylonId} stream ${argv[0]}: ${text.trimEnd()}`), given);
+    const started = await Promise.race([starting.then((guest) => ({ guest }), (err: unknown) => ({ err })), abortedSignal(given)]);
+    if (started !== null && "guest" in started && !given.aborted) {
+      socket.write(streamUpgradeResponse);
+      return await serveByteStream(socket, head, started.guest);
     }
-    if (gone.aborted) {
-      socket.destroy();
-      // A slow guest can start the process after the caller gave up, and a relay whose stdin ends hangs up.
-      await guest.close();
-      for await (const _ of guest) { /* drained, so the process can exit */ }
-      return;
-    }
-    socket.write(streamUpgradeResponse);
-    await serveByteStream(socket, head, guest);
+    // A guest that ignores the signal can still start the process, and nobody will read it.
+    void starting.then(letGo, () => undefined);
+    if (gone.aborted) return void socket.destroy();
+    if (slow.aborted) return refuse(socket, 504, notAnswering(pylonId, streamTiming.startMs));
+    throw (started as { err: unknown }).err;
+  }
+
+  /** Closes the stdin of a process nobody reads, which a relay takes as a hang-up, and drops it past hangUpMs. */
+  async function letGo(guest: ByteStream) {
+    const drained = (async () => { for await (const _ of guest) { /* drained, so the process can exit */ } })().catch(() => undefined);
+    const ended = await Promise.race([guest.close().catch(() => undefined).then(() => drained).then(() => true), delay(streamTiming.hangUpMs, false, { ref: false })]);
+    if (!ended) guest.abort();
+    await drained;
   }
 
   const server = createServer((req, res) => {
@@ -696,3 +705,8 @@ interface ProbeRoute { path: RegExp; GET?: RouteHandler; PUT?: RouteHandler; POS
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, { "content-type": contentType }).end(body);
 }
+
+const abortedSignal = (signal: AbortSignal) => new Promise<null>((resolve) => {
+  if (signal.aborted) return resolve(null);
+  signal.addEventListener("abort", () => resolve(null), { once: true });
+});

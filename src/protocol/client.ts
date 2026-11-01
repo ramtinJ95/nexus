@@ -16,7 +16,7 @@ import { parseCommandResult, type CommandResult, type PylonCommand } from "./com
 import { clientByteStream, streamPath, streamProtocol, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { probePort } from "./routes.ts";
-import { isProbeError, probeError, ProbeHttpError, text, type ProbeError } from "./http.ts";
+import { isProbeError, probeError, ProbeHttpError, text } from "./http.ts";
 
 /**
  * The control plane's handle on one probe. Methods reject with ProbeError when the probe cannot be reached or is not
@@ -189,10 +189,12 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
           }, (err: Error) => { socket.destroy(); reject(refusal(err, "stream")); });
         });
         req.on("response", (res) => {
-          text(res).then((body) => reject(statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
+          text(res).then((body) => reject(res.statusCode === 504 ? probeError("unreachable", `${node}: ${body}`) : statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
         });
-        // The probe answers a stream once the guest has started its process, so a probe that took the request and is silent waits on the guest.
-        req.on("timeout", () => req.destroy(sent ? notAnswering(node, pylonId, streamTimeoutMs) : new Error(`no answer within ${streamTimeoutMs} ms`)));
+        // The probe answers a slow guest itself before this runs out, so a probe that took the request and is silent is stuck.
+        req.on("timeout", () => req.destroy(sent
+          ? probeError("unreachable", `${node}: its probe took a stream request for pylon ${pylonId} and did not answer within ${streamTimeoutMs / 1000} s, so the probe itself may be stuck`)
+          : new Error(`no answer within ${streamTimeoutMs} ms`)));
         req.on("error", (err) => reject(isProbeError(err) ? err : probeError("unreachable", `${node}: ${err.message}`)));
         req.end();
       });
@@ -205,11 +207,6 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       return parseArtifactManifest(JSON.parse(res.body));
     },
   };
-}
-
-/** Why a stream failed whose pylon's guest did not start the process within `ms`, and what the person can do about it. */
-export function notAnswering(node: NodeName, pylonId: PylonId, ms: number): Error & ProbeError {
-  return probeError("unreachable", `${node}: pylon ${pylonId} is not answering: it did not start a process within ${ms / 1000} s. It may be out of memory or busy. Pausing and waking it, as archiving and unarchiving its thread does, gives it a fresh VM`);
 }
 
 /** Ends quietly when the link drops or the caller aborts: that is how observe reports a lost link. */
