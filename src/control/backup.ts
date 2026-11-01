@@ -15,6 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { readConfig, type ControlPlaneConfig } from "./main.ts";
+import { backupStatusFile, writeBackupStatus, type BackupStatus } from "./backup-status.ts";
 
 const exec = promisify(execFile);
 
@@ -178,7 +179,10 @@ export async function verify(dir: string): Promise<Verdict> {
   return { ok: true, manifest };
 }
 
-/** The newest complete backup under `root`, its age at `now`, and whether it verifies. What `nexus doctor` is to call. */
+/**
+ * The newest complete backup under `root`, its age at `now`, and whether it verifies. The control plane may not read the
+ * backups, so `nexus doctor` reads what each run wrote to backupStatusFile instead.
+ */
 export async function check(options: { root: string; now: Date }): Promise<BackupCheck> {
   const [name] = await completeBackups(options.root);
   if (name === undefined) return { verified: false, reason: `no complete backup in ${options.root}` };
@@ -186,6 +190,31 @@ export async function check(options: { root: string; now: Date }): Promise<Backu
   if (!verdict.ok) return { verified: false, name, reason: verdict.reason };
   const { createdAt } = verdict.manifest;
   return { verified: true, name, createdAt, ageMs: options.now.getTime() - Date.parse(createdAt) };
+}
+
+/** The status after a run that failed: the newest complete backup that remains, and whether it still verifies. */
+export async function failedRun(root: string, ranAt: Date): Promise<BackupStatus> {
+  const newest = await check({ root, now: ranAt });
+  return { ranAt: ranAt.toISOString(), succeeded: false, newest: newest.name === undefined ? null : { name: newest.name, verified: newest.verified, createdAt: newest.createdAt ?? null } };
+}
+
+/**
+ * One run of the backup unit: the backup, then its status for `nexus doctor`. The backup alone decides whether the run
+ * fails, so a status that is not written is logged, and leaves the last one, whose backup ages until doctor fails it.
+ */
+export async function runBackup(options: { configPath: string; root: string; etc: string; statusFile: string; now: Date; keep: number; log?: (message: string) => void }): Promise<string> {
+  const { root, now, statusFile, log = (message: string) => console.error(message) } = options;
+  const record = (status: () => Promise<BackupStatus>) => status().then((s) => writeBackupStatus(statusFile, s))
+    .catch((err: unknown) => log(`backup: the status for nexus doctor was not written to ${statusFile}: ${(err as Error).message}`));
+  let dir: string;
+  try {
+    dir = await backup({ config: await readConfig(options.configPath), root, etc: options.etc, now, keep: options.keep });
+  } catch (err) {
+    await record(() => failedRun(root, now));
+    throw err;
+  }
+  await record(async () => ({ ranAt: now.toISOString(), succeeded: true, newest: { name: basename(dir), verified: true, createdAt: now.toISOString() } }));
+  return dir;
 }
 
 /**
@@ -255,7 +284,8 @@ async function host(args: string[]) {
   }
   try {
     if (command === "backup") {
-      console.log(`backed up the control plane to ${await backup({ config: await readConfig(argument ?? join(etcDir, "control.json")), root: backupRoot, etc: etcDir, now: new Date(), keep: kept })}`);
+      const dir = await runBackup({ configPath: argument ?? join(etcDir, "control.json"), root: backupRoot, etc: etcDir, statusFile: backupStatusFile, now: new Date(), keep: kept });
+      console.log(`backed up the control plane to ${dir}`);
     } else if (command === "check") {
       const result = await check({ root: backupRoot, now: new Date() });
       const { ageMs, ...facts } = result;

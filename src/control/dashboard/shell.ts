@@ -13,6 +13,8 @@ import type { ThreadId } from "../../ids.ts";
 import { gib, nodePylons, overcommitted } from "../placement.ts";
 import type { QueuedThread } from "../queue.ts";
 import { releaseView } from "../releases.ts";
+import { summary, type Status } from "../doctor-model.ts";
+import { utc } from "../usage.ts";
 import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
@@ -29,7 +31,7 @@ export interface Shell {
   /** The thread the sidebar marks as open. */
   active?: ThreadId;
   /** The sidebar's link to mark as the open page. */
-  nav?: "usage" | "pipeline";
+  nav?: "usage" | "pipeline" | "reports";
   main: Html;
   inspector?: Html;
   /** The thread whose visits count as human activity: an open thread's page. */
@@ -123,7 +125,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}</nav>
+<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-report" data-live>${reportBadge(c, nav === "reports")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
@@ -142,6 +144,17 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 <div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
+}
+
+export const reportTone: Record<Status, Tone> = { ok: "ok", warn: "busy", fail: "bad" };
+
+/** A link to the latest report while it holds a warn or a fail, and nothing otherwise. */
+function reportBadge(c: Context, open: boolean): Html {
+  const latest = c.registry.latestReport();
+  if (latest === null || latest.status === "ok") return html``;
+  const { counts } = summary(latest);
+  const found = [counts.fail > 0 && `${counts.fail} failed`, counts.warn > 0 && `${counts.warn} warned`].filter(Boolean).join(" and ");
+  return html`<a class="side-link${open && " active"}" id="report-badge" href="/reports/${latest.id}" title="The daily report of ${utc(Date.parse(latest.at))}: ${found}">${icon("cross")}Daily report<span class="side-count">${counts.fail + counts.warn}</span></a>`;
 }
 
 /**

@@ -61,6 +61,7 @@ export const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus image current                          the current image and the one before it
   nexus nodes
   nexus node <name>                            a node's load, memory, disk, temperatures and pylon processes, read now; deployers only
+  nexus doctor                                 check each node and the control plane now: release, disk, pylons, backup, login, certificate
   nexus usage [--since today|7d|30d|all|DATE] [--project P] [--by model|project|kind|role|day]
     the tokens the agents spent, in all and by model, project, agent, role and day, or only --by's; --since is 7d by default
   nexus usage backfill [--dry-run | --stop]

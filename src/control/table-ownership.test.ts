@@ -15,6 +15,7 @@ const owners: Record<string, string[]> = {
   "project-store.ts": ["projects"],
   "image-store.ts": ["images", "templates"],
   "release-store.ts": ["release_reports"],
+  "report-store.ts": ["doctor_reports"],
   "review-store.ts": ["reviews", "reviewed_prs"],
   "question-store.ts": ["questions", "waiting_asks"],
   "nudge-store.ts": ["nudges"],

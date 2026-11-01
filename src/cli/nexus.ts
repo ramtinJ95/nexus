@@ -15,7 +15,8 @@ const globalOptions: ParseArgsOptionsConfig = {
   json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, help: { type: "boolean", short: "h" },
 };
 
-async function run(argv: readonly string[]): Promise<void> {
+/** The exit code a command that printed its result asks for, 0 for most. */
+async function run(argv: readonly string[]): Promise<number> {
   // `project add` and `session open` and `close` are the commands of two words.
   const twoWords = Object.hasOwn(commands, `${argv[0]} ${argv[1]}`);
   const name = twoWords ? `${argv[0]} ${argv[1]}` : argv[0];
@@ -31,7 +32,7 @@ async function run(argv: readonly string[]): Promise<void> {
   const { values, positionals } = parsed;
   if (values.help === true) {
     process.stdout.write(usageOf(name!));
-    return;
+    return 0;
   }
   const [min, max] = command.args;
   if (positionals.length < min || positionals.length > max) {
@@ -43,7 +44,9 @@ async function run(argv: readonly string[]): Promise<void> {
   const endpoint = () => target ??= settings(values).then(checked).catch((err: unknown) => { target = undefined; throw err; });
   const result = await command.run(async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs), positionals, values,
     async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path) });
-  if (result !== undefined) process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
+  if (result === undefined) return 0;
+  process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
+  return result.exit === undefined ? 0 : exitCodes[result.exit];
 }
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -56,8 +59,7 @@ async function main(argv: readonly string[]): Promise<number> {
     return 0;
   }
   try {
-    await run(argv);
-    return 0;
+    return await run(argv);
   } catch (err) {
     if (!(err instanceof CliError)) throw err;
     const json = argv.includes("--json");

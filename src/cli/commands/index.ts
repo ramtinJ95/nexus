@@ -9,7 +9,8 @@ import { itemsCommands } from "./items.ts";
 import { projectsCommands } from "./projects.ts";
 import { usageCommands } from "./usage.ts";
 import { nodesCommands } from "./nodes.ts";
+import { doctorCommands } from "./doctor.ts";
 import type { Command } from "../kit.ts";
 
-export const commandGroups: readonly Readonly<Record<string, Command>>[] = [connectCommands, eventsCommands, releaseCommands, threadsCommands, watchCommands, itemsCommands, projectsCommands, usageCommands, nodesCommands];
+export const commandGroups: readonly Readonly<Record<string, Command>>[] = [connectCommands, eventsCommands, releaseCommands, threadsCommands, watchCommands, itemsCommands, projectsCommands, usageCommands, nodesCommands, doctorCommands];
 export const commands: Readonly<Record<string, Command>> = Object.assign({}, ...commandGroups);

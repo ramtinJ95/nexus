@@ -15,6 +15,7 @@ import { reviewStore } from "./review-store.ts";
 import { questionStore } from "./question-store.ts";
 import { usageStore } from "./usage-store.ts";
 import { releaseStore } from "./release-store.ts";
+import { reportStore } from "./report-store.ts";
 import { nodeStore } from "./node-store.ts";
 import { projectStore } from "./project-store.ts";
 import { imageStore } from "./image-store.ts";
@@ -51,6 +52,7 @@ export function openRegistry(path: string, clock = Date.now) {
     ...judgmentStore(kernel),
     ...nudges,
     ...releaseStore(kernel, appendEvent),
+    ...reportStore(kernel),
     ...nodes,
     ...projectStore(kernel),
     ...pipelineStore(kernel),
