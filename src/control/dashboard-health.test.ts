@@ -36,6 +36,7 @@ test("the sidebar counts the problems the person has not seen, which opening the
 
   const [backup] = s.registry.recordHealthChanges([{ at: "2026-11-02T00:25:00.000Z", node: null, name: "backup", from: "ok", status: "fail", text: "the newest backup is 27 h old" }], 0);
   assert.equal(await count(), "1");
+  assert.match((await page("/")).text, new RegExp(`id="health-link"[^>]*data-change="${backup!.id}"`), "the newest change the page shows, which no notice repeats");
   pass = latest;
   const shown = (await page("/health")).text;
   assert.match(shown, /aria-current="page"/);

@@ -152,7 +152,7 @@ function healthLink(c: Context, open: boolean): Html {
   const problems = c.registry.healthStates().filter((s) => s.status !== "ok");
   const unseen = problems.filter((p) => p.seenAt === null).length;
   const title = problems.length === 0 ? "Every check is ok" : `${problems.length} open ${problems.length === 1 ? "problem" : "problems"}, ${unseen} not seen`;
-  return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
+  return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}" data-change="${Math.max(0, ...c.registry.healthChanges().map((h) => h.id))}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
 }
 
 /**

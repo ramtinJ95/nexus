@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { healthNotice, owedHealthSeen } from "./health.js";
+import { caughtUp, healthNotice, newChanges, owedHealthSeen } from "./health.js";
 
 const change = (from, status, node = "rj-firebat") => ({ id: 3, node, name: "disk", from, status, text: "12.4 of 98.0 GiB free", at: "2026-11-02T00:30:00.000Z", seenAt: null });
 
@@ -19,4 +19,21 @@ test("a Health page owes a seen mark for the newest problem it shows, once", () 
   assert.deepEqual(owedHealthSeen(page(9), 7), { through: 9 });
   assert.equal(owedHealthSeen(page(0), null), null, "no problem shown");
   assert.equal(owedHealthSeen(null, null), null, "not the Health page");
+});
+
+test("a tab takes only changes newer than its page showed, each once, though a catch-up and the stream both hand one on", () => {
+  const fresh = newChanges(4);
+  assert.deepEqual([3, 4, 5, 6, 5].map((id) => fresh({ id })), [false, false, true, true, false]);
+});
+
+test("a stream that opened again hands on every change kept, oldest first", async (t) => {
+  const real = globalThis.fetch;
+  t.after(() => { globalThis.fetch = real; });
+  const asked = [];
+  globalThis.fetch = async (path) => { asked.push(path); return { ok: true, text: async () => JSON.stringify([change("warn", "ok"), change("ok", "warn")].map((c, i) => ({ ...c, id: 9 - i }))) }; };
+  const handed = [];
+  await caughtUp((c) => handed.push([c.id, c.status]));
+  assert.deepEqual([asked, handed], [["/v1/checks/changes"], [[8, "warn"], [9, "ok"]]]);
+  globalThis.fetch = async () => { throw new Error("offline"); };
+  await assert.doesNotReject(caughtUp(() => {}), "a failed read waits for the next reconnect");
 });

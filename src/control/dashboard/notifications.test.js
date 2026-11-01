@@ -132,7 +132,7 @@ test("a page owes a seen mark once for each reply it shows, so one marked unseen
  * One dashboard tab's attention code from rows.js, run on fakes of the browser. Tabs given the same `browser` share its
  * BroadcastChannel and its one Web Lock, which the first tab to ask holds.
  */
-function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
+function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => {}, caughtUp = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
   const timers = [];
   const intervals = [];
   const favicon = { href: "/assets/favicon.svg?v=0123456789ab" };
@@ -158,7 +158,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => 
     navigator: locks ? { locks: { request: (_, hold) => { if (!browser.locked) { browser.locked = true; hold(); } return new Promise(() => {}); } } } : {},
     document: doc, fetch, Date: { now },
     AbortSignal: { timeout }, setTimeout: (f, ms) => timers.push({ f, at: now() + ms }), clearTimeout: () => timers.splice(0),
-    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), health, owedSeen,
+    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), health, caughtUp, owedSeen,
     currentThread: () => "t1", focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
   };
   const code = startRows(context, context);
@@ -361,4 +361,23 @@ test("a check's change reaches every tab from the one that follows the events, a
   shared.streams[0].onmessage({ data: JSON.stringify({ id: "10", time: 0, thread: "t1", project: "p", kind: "attention.changed", payload: { attention: "waiting" } }) });
   await settle();
   assert.equal(reads, before + 1, "a row's event still reads the rows");
+});
+
+test("a follower whose stream opens again hands every tab the changes it missed while it was down, and its first open hands none", async () => {
+  const shared = browser();
+  const heard = { leader: [], hidden: [] };
+  const catchUps = [];
+  const page = (name) => tab(shared, { health: (change) => heard[name].push(change.id), caughtUp: (hand) => catchUps.push(hand), fetch: async () => json([]) });
+  const leader = page("leader");
+  page("hidden");
+  await settle();
+  shared.streams[0].onopen();
+  assert.equal(catchUps.length, 0, "the page it loaded shows every change before its first stream");
+  shared.streams[0].onerror();
+  for (const timer of leader.timers.splice(0)) timer.f();
+  assert.equal(shared.streams.length, 2);
+  shared.streams[1].onopen();
+  assert.equal(catchUps.length, 1);
+  catchUps[0]({ id: 7, node: null, name: "backup", from: "ok", status: "warn", text: "the run failed" });
+  assert.deepEqual(heard, { leader: [7], hidden: [7] });
 });

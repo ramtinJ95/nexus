@@ -1,5 +1,5 @@
-// A check's alerts and the Health page's seen mark, loaded once a check changes or the Health page opens. It reads
-// the page's pieces when it runs, and the client passes its notices, so a test reads what a change says without a page.
+// The dashboard's notices, a check's alerts and the Health page's seen mark, loaded as the page starts but outside its
+// first script. It reads the page's pieces when it runs, so a test reads what a change says without a page.
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 const refresh = async () => (await import("./page.js")).refreshNow();
 
@@ -21,11 +21,50 @@ export function owedHealthSeen(page, marked) {
   return through > (marked ?? 0) ? { through } : null;
 }
 
+/**
+ * Whether a change is news to a tab whose page showed every change up to `baseline`: newer than that, and not handed
+ * on already, as a reconnect's catch-up and the stream may both hand on one.
+ */
+export function newChanges(baseline) {
+  const handed = new Set();
+  return (change) => change.id > baseline && !handed.has(change.id) && Boolean(handed.add(change.id));
+}
+
+/** Hands on every change kept, oldest first, for a stream that opened again. A failed read waits for the next. */
+export async function caughtUp(hand) {
+  try {
+    for (const change of (await (await import("./request.js")).api("GET", "/v1/checks/changes", undefined, AbortSignal.timeout(10_000))).reverse()) hand(change);
+  } catch { /* The page's refresh reports connection failures. */ }
+}
+
+/** Shows a notice on the channel picked, and returns what closes it. */
+export async function notice(channel, title, body, url) {
+  if (channel === "system") {
+    const shown = new Notification(title, { body });
+    shown.onclick = () => { window.focus(); location.assign(url); shown.close(); };
+    return () => shown.close();
+  }
+  if (channel !== "toast") return () => {};
+  const { el } = await import("./page.js");
+  const toast = el("div", { className: "attention-toast", role: "status" },
+    el("span", { textContent: `${title}: ${body}` }),
+    el("a", { href: url, textContent: "Open" }));
+  const dismiss = el("button", { textContent: "Dismiss", type: "button" });
+  dismiss.onclick = () => toast.remove();
+  toast.append(dismiss);
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 15000);
+  return () => toast.remove();
+}
+
 // Each check's notice, which its next change closes, so a recovery takes its alert away.
 const shown = new Map();
-export function showHealth(change, notice, notificationChannel) {
+// The newest change the page showed, so no change from before it notifies.
+const fresh = newChanges(Number(globalThis.document?.getElementById("health-link")?.dataset.change ?? 0));
+export function showHealth(change, notificationChannel) {
+  if (!fresh(change)) return;
   const n = healthNotice(change);
-  shown.get(n.key)?.();
+  void shown.get(n.key)?.then((close) => close());
   const page = location.pathname === "/health" ? "health" : null;
   const secure = window.isSecureContext && "Notification" in window;
   const channel = n.quiet ? (focused() && page === null ? "toast" : null) : notificationChannel(focused(), page, "health", secure, secure ? Notification.permission : "unavailable");
