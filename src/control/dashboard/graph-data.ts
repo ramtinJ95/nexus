@@ -90,14 +90,15 @@ const labelOf = (s: Series): string => s.kind === "temp" ? s.sensor : s.kind ===
 const none = (): Points => ({ t: [], min: [], avg: [], max: [], n: [] });
 
 /**
- * `a`'s points at the times `b` has one too, each made from `a`'s and `b`'s values at that time by `f`, which takes
- * which of `a`'s values it makes. Every series of a sample has the sample's time, so a point of `a` meets one of `b`.
+ * `a`'s points in the buckets `b` has a point in too, each made from `a`'s and `b`'s values in that bucket by `f`, which
+ * takes which of `a`'s values it makes. A point's time is its bucket's first sample of its own series, so two series
+ * meet by bucket, not by time: a bucket whose first read had CPUs and no load still has a load per CPU.
  */
-function joined(a: Points, b: Points, f: (a: number, b: number, which: "min" | "avg" | "max") => number): Points {
-  const at = new Map(b.t.map((t, i) => [t, i]));
+function joined(a: Points, b: Points, bucketMs: number, f: (a: number, b: number, which: "min" | "avg" | "max") => number): Points {
+  const at = new Map(b.t.map((t, i) => [Math.floor(t / bucketMs), i]));
   const out = none();
   a.t.forEach((t, i) => {
-    const j = at.get(t);
+    const j = at.get(Math.floor(t / bucketMs));
     if (j === undefined) return;
     out.t.push(t);
     out.n.push(a.n[i]!);
@@ -158,8 +159,8 @@ const each = (h: History, slots: Slots, family: string, kind: Series["kind"], id
     .map((s) => ({ id: id(s.series), label: s.label, points: s, look: { slot: slots(family, id(s.series)) } }));
 const pylonId = (s: Series) => s.kind === "pylonCpu" || s.kind === "pylonResident" ? `${s.pylon}:${s.thread ?? ""}` : "";
 
-const perCpu = (h: History, key: string) => joined(held(h, key), held(h, "cpus"), (load, cpus) => load / cpus);
-const memoryUsed = (h: History) => joined(held(h, "memAvailable"), held(h, "memTotal"), (available, total) => total - available);
+const perCpu = (h: History, key: string) => joined(held(h, key), held(h, "cpus"), h.bucketMs, (load, cpus) => load / cpus);
+const memoryUsed = (h: History) => joined(held(h, "memAvailable"), held(h, "memTotal"), h.bucketMs, (available, total) => total - available);
 /** Memory used is the total less what is available, so its lowest is the total less the most available. */
 const usedOf = (p: Points): Points => ({ ...p, min: p.max, max: p.min });
 

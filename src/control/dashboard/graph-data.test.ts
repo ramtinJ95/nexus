@@ -139,3 +139,15 @@ test("a sample the served points already hold is not counted again, and one long
   assert.equal(missed(h, { at: 3 * minute + 40_000 + catchUpMs, values: {}, labels: {} }), false);
   assert.equal(missed(h, { at: 3 * minute + 40_001 + catchUpMs, values: {}, labels: {} }), true, "a hidden tab or failed polls may have missed samples another reader recorded");
 });
+
+test("load per CPU meets the CPUs by bucket, so a bucket whose first read had no load still has a point, served or appended", () => {
+  const two = 2 * minute;
+  const h = historyOf(metrics([
+    served("cpus", "CPUs", [[0, 8, 8, 8, 2]]),
+    served("load1", "1-minute load", [[minute, 4, 4, 4, 1]]),
+  ], { from: 0, to: two, tier: "1m", bucketMs: two, sampledAt: minute }), 24 * hour);
+  assert.deepEqual(linesOf("load-per-cpu", h).find((l) => l.id === "load1")!.points.avg, [0.5], "the load came a minute after the bucket's first CPU count");
+  appended(h, { at: two + 10_000, values: { cpus: 8 }, labels: {} });
+  appended(h, { at: two + 70_000, values: { cpus: 8, load1: 2 }, labels: {} });
+  assert.deepEqual(linesOf("load-per-cpu", h).find((l) => l.id === "load1")!.points.avg, [0.5, 0.25], "live, the load arrives within a bucket the CPUs began");
+});
