@@ -141,10 +141,15 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 				flight.catch(() => undefined);
 				shells.set(pylonId, asking = flight);
 			}
-			const shell = signal === undefined ? await asking : await Promise.race([asking, new Promise<never>((_, reject) => {
-				signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-			})]);
-			signal?.throwIfAborted();
+			let leave = () => {};
+			const left = new Promise<never>((_, reject) => { leave = () => reject(signal!.reason); });
+			signal?.addEventListener("abort", leave, { once: true });
+			let shell: z.infer<typeof shellReplySchema>;
+			try {
+				shell = await Promise.race([asking, left]);
+			} finally {
+				signal?.removeEventListener("abort", leave);
+			}
 			return processStream("ssh", [...guestSsh(shell), "--", remoteCommand(argv)], log);
 		},
 

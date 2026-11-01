@@ -572,6 +572,16 @@ test("streams that start while the pylon's shell action waits share it, and one 
   later.abort(new Error("left again"));
   await assert.rejects(next, /left again/);
   assert.equal(asked, 2, "a start after the action settled asks again, since a reply holds for one boot");
+  let listening = 0;
+  const kept = new AbortController();
+  const add = kept.signal.addEventListener.bind(kept.signal);
+  const remove = kept.signal.removeEventListener.bind(kept.signal);
+  kept.signal.addEventListener = ((...args: Parameters<typeof add>) => { listening++; add(...args); }) as typeof add;
+  kept.signal.removeEventListener = ((...args: Parameters<typeof remove>) => { listening--; remove(...args); }) as typeof remove;
+  const settled = guest.stream(["herdr"], () => undefined, kept.signal);
+  answer(null);
+  await assert.rejects(settled);
+  assert.equal(listening, 0, "a start that settles leaves no listener on its caller's signal");
 });
 
 test("ensure, restart and service-start answer once each service they were answered about is ready or failed, from status reads, and a list does not wait", async () => {
