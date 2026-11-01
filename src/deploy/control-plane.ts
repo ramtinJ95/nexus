@@ -7,6 +7,7 @@
  * that do too.
  */
 import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
@@ -65,12 +66,24 @@ export function legacyControlPlane(probe: unknown, deployer: unknown): ControlPl
 }
 
 /**
+ * Whoever can write the file picks whom the root deployer trusts, so it must belong to the user that reads it, root on a
+ * node, and be writable by that user alone. The deployer refuses it otherwise, and so does the install that adopts it.
+ */
+export async function checkControlPlaneFile(path = controlPlanePath): Promise<void> {
+  const { uid, mode } = await stat(path);
+  if (uid !== process.getuid?.() || (mode & 0o022) !== 0) throw new Error(`${path} must belong to root and be writable by root alone. Run sudo chown root:root ${path} && sudo chmod 0644 ${path}`);
+}
+
+/**
  * The upgrade to this file. Once it exists, probe.json's and deployer.json's old keys are ignored, even when they
  * disagree with it. With neither of those either, this is a fresh machine, whose install writes it.
  */
 export async function adoptControlPlane(etc: string): Promise<"wrote" | "kept" | "none"> {
   const path = join(etc, fileName);
-  if (await readAt(path) !== undefined) return "kept";
+  if (await readAt(path) !== undefined) {
+    await checkControlPlaneFile(path);
+    return "kept";
+  }
   const legacy = async (name: string) => {
     try {
       return await readJson(join(etc, name));
@@ -84,14 +97,45 @@ export async function adoptControlPlane(etc: string): Promise<"wrote" | "kept" |
   return "wrote";
 }
 
-/** Points this node at `value`, restarting what reads the file only when it changed. A file that does not parse is replaced. */
+/**
+ * Points this node at `value`, restarting the probe only when the file changed. A file that does not parse is replaced.
+ * The old keys probe.json and deployer.json still hold follow it, because a rollback's probe and a bootstrap worker from
+ * before the file read them, and must trust the same control plane as the file.
+ */
 export async function setControlPlane(etc: string, value: ControlPlane, restart: () => Promise<void>): Promise<"wrote" | "unchanged"> {
   const control = parseControlPlane(value);
   const path = join(etc, fileName);
-  if (isDeepStrictEqual(await readJson(path).catch(() => undefined), control)) return "unchanged";
-  await saveJson(path, control, { mode: 0o644 });
-  await restart();
-  return "wrote";
+  const changed = !isDeepStrictEqual(await readJson(path).catch(() => undefined), control);
+  if (changed) await saveJson(path, control, { mode: 0o644 });
+  const followed = await followOldKeys(etc, control);
+  if (changed) await restart();
+  return changed || followed ? "wrote" : "unchanged";
+}
+
+type Old = Record<string, unknown>;
+const oldKeys: readonly [string, (old: Old, control: ControlPlane) => Old][] = [
+  ["probe.json", (old, control) => typeof old.auth === "object" && old.auth !== null && "controlPlane" in old.auth
+    ? { ...old, auth: { ...old.auth, controlPlane: control.tailnetNodeId } } : old],
+  ["deployer.json", (old, control) => ({
+    ...old,
+    ..."controlNodeId" in old ? { controlNodeId: control.tailnetNodeId } : {},
+    ..."controlUrl" in old ? { controlUrl: control.url } : {},
+  })],
+];
+
+/** Rewrites only the old keys a file still has, keeping its mode. True when one changed. */
+async function followOldKeys(etc: string, control: ControlPlane): Promise<boolean> {
+  let changed = false;
+  for (const [name, follow] of oldKeys) {
+    const path = join(etc, name);
+    const old = await readJson(path);
+    if (typeof old !== "object" || old === null || Array.isArray(old)) continue;
+    const next = follow(old as Old, control);
+    if (isDeepStrictEqual(old, next)) continue;
+    await saveJson(path, next, { mode: (await stat(path)).mode & 0o777 });
+    changed = true;
+  }
+  return changed;
 }
 
 // try-restart never starts a stopped probe. The deployer needs none: its timer runs a worker that reads the file each poll.

@@ -5,7 +5,7 @@ import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInsta
 import { planDeploy, quarantined, type Attempt, type ReleaseHealth } from "./plan.ts";
 import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "./model.ts";
 import { jsonRequest, urlHost } from "./http.ts";
-import { controlPlanePath, readControlPlane, type ControlPlane } from "./control-plane.ts";
+import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois } from "../tailscale.ts";
 
@@ -32,9 +32,7 @@ export async function runWorker(check = false): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("deployer must run as root");
   const mode = await stat(configPath);
   if (mode.uid !== 0 || (mode.mode & 0o077) !== 0) throw new Error("deployer.json must be root-owned mode 0600");
-  // Whoever can write it picks the control plane this root process takes releases from.
-  const control = await stat(controlPlanePath);
-  if (control.uid !== 0 || (control.mode & 0o022) !== 0) throw new Error(`${controlPlanePath} must be root-owned and writable by root alone`);
+  await checkControlPlaneFile();
   const config = parseWorkerConfig(await readJson(configPath, null), await readControlPlane());
   const peer = { id: config.controlNodeId, whois: localApiWhois() };
   const api = (path: string, body?: unknown) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer);

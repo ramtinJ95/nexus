@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -113,4 +113,30 @@ test("a deployer takes its control plane from the file, not from deployer.json's
   assert.equal(config.controlUrl, moved.url);
   assert.equal(config.controlNodeId, moved.tailnetNodeId);
   assert.equal(config.token, token);
+});
+
+test("adopting refuses a file that others may write, which the deployer would refuse on every poll", async (t) => {
+  const dir = await etc(t, probeJson(firebat), deployerJson(firebat, "http://100.64.0.2:7470/"));
+  assert.equal(await adoptControlPlane(dir), "wrote");
+  await chmod(join(dir, "control-plane.json"), 0o664);
+  await assert.rejects(adoptControlPlane(dir), /must belong to root and be writable by root alone/);
+});
+
+test("setting the control plane points the old keys a rollback or bootstrap worker reads at it too, keeping their modes", async (t) => {
+  const dir = await etc(t, probeJson(firebat), deployerJson(firebat, "http://100.64.0.2:7470/"));
+  let restarts = 0;
+  const restart = async () => { restarts++; };
+  assert.equal(await setControlPlane(dir, moved, restart), "wrote");
+  const probe = JSON.parse(await readFile(join(dir, "probe.json"), "utf8"));
+  const deployer = JSON.parse(await readFile(join(dir, "deployer.json"), "utf8"));
+  assert.deepEqual(probe, probeJson(moved.tailnetNodeId));
+  assert.deepEqual(deployer, deployerJson(moved.tailnetNodeId, moved.url));
+  assert.equal((await stat(join(dir, "deployer.json"))).mode & 0o777, 0o600);
+  assert.equal(await setControlPlane(dir, moved, restart), "unchanged");
+  assert.equal(restarts, 1);
+
+  const fresh = await etc(t, { node: "x", auth: { peers: [] } }, { token, drainTimeoutMs: 300000, healthTimeoutMs: 60000 });
+  assert.equal(await setControlPlane(fresh, moved, restart), "wrote");
+  assert.deepEqual(JSON.parse(await readFile(join(fresh, "probe.json"), "utf8")), { node: "x", auth: { peers: [] } }, "a probe.json without the old key gains none");
+  assert.equal("controlUrl" in JSON.parse(await readFile(join(fresh, "deployer.json"), "utf8")), false);
 });
