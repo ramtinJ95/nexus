@@ -149,7 +149,7 @@ test("output the terminal cannot take yet pauses the socket until it drains", as
     send(ws, { type: "attached" });
     ws.send(Buffer.from("a lot"), { binary: true });
   });
-  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 0, delayMs: () => 0 });
+  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 0, delayMs: () => 0, steadyMs: 0 });
   while (cp.clients[0]?.isPaused !== true) await new Promise((resolve) => setTimeout(resolve, 5));
   accepting = true;
   t.output.emit("drain");
@@ -174,7 +174,7 @@ test("a link that drops after attached links again with the terminal's size, sta
       if (data.toString() === "q") endWith(ws, { type: "exit", code: 0 });
     });
   });
-  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 50 });
+  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 50, steadyMs: 0 });
   await until(() => t.written.includes("screen 1"));
   t.input.write("a");
   await until(() => received.length === 1);
@@ -195,7 +195,7 @@ test("a link that drops after attached links again with the terminal's size, sta
 test("Ctrl-C while attach links again exits 130 with the terminal put back", async () => {
   const t = fakeTty();
   const cp = controlPlane((ws) => send(ws, { type: "attached" }));
-  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 60_000 });
+  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 60_000, steadyMs: 0 });
   await until(() => t.modes.length === 1);
   cp.links[0]!.destroy(new Error("reset"));
   await until(() => t.status.length === 1);
@@ -214,7 +214,7 @@ test("an unreachable error, such as the control plane stopping for a deploy, lin
     if (++links === 1) endWith(ws, { type: "error", kind: "unreachable", message: "the control plane is stopping" });
     else endWith(ws, { type: "exit", code: 0 });
   });
-  await attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0 });
+  await attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0, steadyMs: 0 });
   assert.equal(cp.paths.length, 2);
   assert.deepEqual(t.status, ["the control plane is stopping. Attaching again in 0 s, Ctrl-C quits"]);
   assert.deepEqual(t.modes, [true, false]);
@@ -225,7 +225,7 @@ test("a refusal of another kind when linking again ends the attach with it", asy
   const cp = controlPlane((ws) => send(ws, { type: "attached" }));
   let calls = 0;
   const connect = (path: string) => ++calls === 1 ? cp.connect(path) : Promise.reject(new CliError("conflict", "thread th-0123456789ab is archived"));
-  const attaching = attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0 });
+  const attaching = attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0, steadyMs: 0 });
   await until(() => t.modes.length === 1);
   cp.links[0]!.destroy(new Error("reset"));
   await assert.rejects(attaching, kindOf("conflict", /^thread th-0123456789ab is archived$/));
@@ -238,7 +238,7 @@ test("attach gives up once linking again fails every try, and says Herdr keeps t
   const cp = controlPlane((ws) => send(ws, { type: "attached" }));
   let calls = 0;
   const connect = (path: string) => ++calls === 1 ? cp.connect(path) : Promise.reject(new CliError("unreachable", "cannot reach nexus:443: ECONNREFUSED"));
-  const attaching = attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 3, delayMs: () => 0 });
+  const attaching = attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 3, delayMs: () => 0, steadyMs: 0 });
   await until(() => t.modes.length === 1);
   cp.links[0]!.destroy(new Error("reset"));
   await assert.rejects(attaching, kindOf("unreachable", /^cannot reach nexus:443: ECONNREFUSED, and attaching again failed 3 times\. Herdr keeps the session, so `nexus attach th-0123456789ab` again$/));
@@ -247,11 +247,23 @@ test("attach gives up once linking again fails every try, and says Herdr keeps t
   assert.deepEqual(t.modes, [true, false]);
 });
 
+test("a link that attaches and drops at once counts as a failed try, so a pylon that keeps dropping it is not tried for good", async () => {
+  const t = fakeTty();
+  let links = 0;
+  const cp = controlPlane((ws) => {
+    send(ws, { type: "attached" });
+    if (++links > 10) return endWith(ws, { type: "exit", code: 0 });
+    endWith(ws, { type: "error", kind: "unreachable", message: "the link to the pylon of th-0123456789ab was lost" });
+  });
+  await assert.rejects(attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 3, delayMs: () => 0, steadyMs: 60_000 }), kindOf("unreachable", /was lost, and attaching again failed 3 times/));
+  assert.equal(links, 4, "the first link and three tries");
+});
+
 test("a control plane that cannot be reached on the first link fails at once", async () => {
   const t = fakeTty();
   let calls = 0;
   const connect = () => { calls++; return Promise.reject(new CliError("unreachable", "cannot reach nexus:443: ECONNREFUSED")); };
-  await assert.rejects(attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0 }), kindOf("unreachable", /^cannot reach nexus:443/));
+  await assert.rejects(attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0, steadyMs: 0 }), kindOf("unreachable", /^cannot reach nexus:443/));
   assert.equal(calls, 1);
   assert.deepEqual(t.status, []);
 });

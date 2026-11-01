@@ -46,10 +46,15 @@ export interface Retry {
   readonly tries: number;
   /** The wait before the retry after `retry` failed ones in a row. */
   delayMs(retry: number): number;
+  /**
+   * How long a link stays attached before the count starts over. `attached` comes before Herdr's client runs, so a
+   * pylon whose sshd takes the link and drops it at once would otherwise be tried again every second for good.
+   */
+  readonly steadyMs: number;
 }
 
 /** As the dashboard does: 1 s, doubling, at most 30 s, 8 times, about two minutes. */
-const retry: Retry = { tries: 8, delayMs: (n) => Math.min(30_000, 1000 * 2 ** n) };
+const retry: Retry = { tries: 8, delayMs: (n) => Math.min(30_000, 1000 * 2 ** n), steadyMs: 10_000 };
 
 /** How one WebSocket link to the attach route ended: with the attach, or lost, so attach links again. */
 type LinkEnd = { kind: "over"; message: Extract<ServerMessage, { type: "exit" | "error" }> } | { kind: "lost"; why: string };
@@ -115,6 +120,7 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
     const at: Link = { ws, attached: false };
     current = at;
     let final: LinkEnd | null = null;
+    let steady: NodeJS.Timeout | undefined;
     /** Why the link failed, when it did. */
     let cause: Error | null = null;
     const unwritten = () => {
@@ -142,7 +148,7 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
           if (message.type === "waiting") return tty.status(`waiting for the pylon of ${thread}, which is ${message.pylon}`);
           if (message.type === "attached") {
             at.attached = true;
-            tries = 0;
+            steady = setTimeout(() => { tries = 0; }, retries.steadyMs);
             if (raw) return;
             input.setRawMode(true);
             raw = true;
@@ -156,6 +162,7 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
         ws.resume();
       });
     } finally {
+      clearTimeout(steady);
       if (current === at) current = null;
     }
   };

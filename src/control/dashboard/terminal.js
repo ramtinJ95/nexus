@@ -105,6 +105,11 @@ export function clipboardOf(clipboard) {
 /** How long a page stays attached while hidden, short of the 20 minutes without a human that pause a pylon. */
 export const hiddenDetachMs = 10 * 60_000;
 const maxTries = 8;
+/**
+ * How long a join stays attached before the tries start over. `attached` comes before Herdr's client runs, so a pylon
+ * whose sshd takes the link and drops it at once would otherwise be tried again every second for good.
+ */
+export const steadyMs = 10_000;
 
 /** Whether a join that ended so may be tried again. A control plane that is restarting refuses a retry's upgrade. */
 const transient = (s, retry) => s.why === "dropped" || (s.why === "error" && s.kind === "unreachable") || (s.why === "refused" && retry);
@@ -123,6 +128,7 @@ export function keepAttached(term, open, status, page = document) {
     state = next;
     if (was.kind === "joined") {
       clearTimeout(was.hiding);
+      clearTimeout(was.steady);
       was.detach();
     }
     if (was.kind === "retrying") clearTimeout(was.timer);
@@ -138,7 +144,7 @@ export function keepAttached(term, open, status, page = document) {
   };
   const untilShown = "The connection dropped. It attaches again when the page shows.";
   const join = (retry) => {
-    const joined = { kind: "joined", retry, hiding: undefined, detach: () => {} };
+    const joined = { kind: "joined", retry, hiding: undefined, steady: undefined, detach: () => {} };
     enter(joined);
     joined.detach = joinTerminal(term, open(), (s) => { if (state === joined) heard(joined, s); });
   };
@@ -146,7 +152,7 @@ export function keepAttached(term, open, status, page = document) {
     if (!s.over) {
       // `attached`: Herdr redraws the screen, and a reattach must not keep the modes the dropped client set.
       if (s.text === null) {
-        tries = 0;
+        joined.steady = setTimeout(() => { tries = 0; }, steadyMs);
         term.reset();
       }
       return status(s);

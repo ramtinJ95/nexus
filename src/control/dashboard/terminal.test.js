@@ -1,7 +1,7 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { attachPath, defaultTerm } from "../../attach-route.ts";
-import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing } from "./terminal.js";
+import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing, steadyMs } from "./terminal.js";
 import { styleAdopter } from "./term-styles.js";
 
 /** A terminal as xterm.js exposes it: what it was written, how often it was reset, and the keys and resizes it hands out. */
@@ -168,8 +168,9 @@ test("a dropped link attaches again after 1 s, then 2 s while each try is refuse
   k.sockets[2].text({ type: "attached" });
   assert.equal(k.term.resets, resets + 1, "a reattach starts from a clean terminal");
   assert.deepEqual(k.statuses.slice(-2), [{ text: "Waiting for the pylon, which is starting. Attaching wakes it.", over: false }, { text: null, over: false }]);
+  k.tick(steadyMs);
   k.sockets[2].close();
-  assert.deepEqual(k.statuses.at(-1), { text: "The connection dropped. Attaching again in 1 s.", over: false }, "attached, the backoff starts over");
+  assert.deepEqual(k.statuses.at(-1), { text: "The connection dropped. Attaching again in 1 s.", over: false }, "attached for long enough, the backoff starts over");
   assert.equal(k.statuses.filter((s) => s.over).length, 0);
 });
 
@@ -189,9 +190,22 @@ test("a reattach sends none of the keys typed while it waited, and an unreachabl
   assert.deepEqual(k.sockets[1].socket.sent, [JSON.stringify({ type: "resize", cols: 80, rows: 24 }), "after"]);
   k.sockets[1].text({ type: "error", kind: "unreachable", message: "infra-testbench: pylon pylon-x is not answering: it did not start a process within 10 s. It may be out of memory or busy" });
   k.sockets[1].close();
-  assert.deepEqual(k.statuses.at(-1), { text: "Infra-testbench: pylon pylon-x is not answering: it did not start a process within 10 s. It may be out of memory or busy. Attaching again in 1 s.", over: false });
-  k.tick(1000);
+  assert.deepEqual(k.statuses.at(-1), { text: "Infra-testbench: pylon pylon-x is not answering: it did not start a process within 10 s. It may be out of memory or busy. Attaching again in 2 s.", over: false });
+  k.tick(2000);
   assert.equal(k.sockets.length, 3, "same as a drop, it attaches again");
+});
+
+test("a join that attaches and drops at once counts as a failed try, so a pylon that keeps dropping it is not tried for good", (t) => {
+  const k = kept(t);
+  for (let i = 0; i <= 8; i++) {
+    k.sockets[i].text({ type: "attached" });
+    k.tick(steadyMs - 1);
+    k.sockets[i].close();
+    k.tick(30_000);
+  }
+  assert.equal(k.sockets.length, 9, "the first join and 8 tries");
+  assert.equal(k.statuses.at(-1).over, true);
+  assert.match(k.statuses.at(-1).text, /failed 8 times/);
 });
 
 test("a session shown while the link reattaches waits for the reattach to draw, so the reattach's own focus cannot undo it", async (t) => {
