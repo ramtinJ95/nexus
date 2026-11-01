@@ -879,7 +879,7 @@ test("a thread in a turn as its review lands stays open, and the other is archiv
   assert.deepEqual(f.statuses(), ["active", "archived"], "the person archives a builder that was busy as it landed");
 });
 
-test("a review that ends merged, closed, cancelled by its builder's archive, or out of rounds archives its reviewer in the pass that ends it", async (t) => {
+test("a review that ends merged, closed, cancelled by its builder's archive, or out of rounds archives its reviewer by the next pass", async (t) => {
   const ends: [Review["phase"]["kind"], (f: ReturnType<typeof fixture>) => void][] = [
     ["merged", (f) => f.watched("merged")],
     ["closed", (f) => f.watched("closed")],
@@ -893,6 +893,7 @@ test("a review that ends merged, closed, cancelled by its builder's archive, or 
     await loop.poll();
     const reviewer = f.review().reviewer;
     end(f);
+    await loop.poll();
     await loop.poll();
     assert.equal(f.review().phase.kind, kind);
     assert.equal(f.registry.thread(reviewer)!.status, "archived", `${kind}: no round can go to the reviewer`);
@@ -938,6 +939,19 @@ test("a review held for the person keeps its reviewer across passes, for the rou
   await loop.poll();
   await loop.poll();
   assert.deepEqual(f.statuses(), ["active", "active"]);
+});
+
+test("a merged review held for the person over its rolled-back deploy archives its reviewer by the next pass, and keeps its builder", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  const loop = await approved(f, "nLAPTOP");
+  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  await loop.poll();
+  healthy(f, previous);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "no round can follow a merge");
 });
 
 test("a reviewer the person has been to since it started stays open after its review ends", async (t) => {

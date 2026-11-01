@@ -43,7 +43,7 @@ import {
 } from "./review-model.ts";
 import type { StartRequest } from "./start-request.ts";
 
-type ReviewRegistry = Pick<Registry, "agent" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "releaseReports" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "storedThreads" | "thread">;
+type ReviewRegistry = Pick<Registry, "agent" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "releaseReports" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
@@ -554,7 +554,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
     for (const [who, t] of [["builder", builder], ["reviewer", reviewer]] as const) {
       if (landing || t?.status === "active") continue;
-      // The loop archives a builder and a reviewer only as their review lands, so here the person did.
+      // The loop archives a review's threads only once it can no longer use them, so here the person did.
       if (t?.status === "archived" || t?.status === "deleted") return end(r, { kind: "cancelled", who, status: t.status });
       return toPerson(r, "thread", `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
@@ -575,11 +575,19 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   /**
    * A landed PR leaves its builder and reviewer nothing to do, and a cancelled review its reviewer, so they are
-   * archived in the transaction that saves it, and never later. A thread in a turn, such as one the person is talking
-   * to, stays open.
+   * archived in the transaction that saves it. A thread in a turn, such as one the person is talking to, stays open: a
+   * builder for the person, a reviewer for a later pass.
    */
   const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
+
+  /**
+   * Whether `r` may still use its reviewer: while it runs, or while it waits at approval or for the person, unmerged, in
+   * a way a land or a new head takes back to its rounds. Every step from there needs the reviewer open.
+   */
+  const usesReviewer = (r: Review) => !ended.has(r.phase.kind) || (r.merged === null && (landable(r) || heldForGate(r)));
+  /** Reviewers begin() has started and not yet saved a review for. */
+  let beginning = 0;
 
   async function pass() {
     reads = new Map();
@@ -589,6 +597,17 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const held = new Set(reviews.flatMap((r) => gateThread(r.phase)?.thread ?? []));
     for (const t of registry.storedThreads({ status: ["active", "idle", "archived"], startedBy: checkCaller })) if (!held.has(t.id)) checks.discard(t.id);
     for (const t of registry.storedThreads({ status: ["active"], startedBy: verifyCaller })) if (t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
+    // So has a reviewer its builder's current review can no longer use, as one whose review ended other than by landing
+    // or was replaced, one in a turn as its review landed, or one a crash left before its review saved. A reviewer the
+    // person has been to since it started is theirs.
+    if (beginning === 0) {
+      const using = new Set(reviews.filter(usesReviewer).map((r) => r.reviewer));
+      const left = registry.storedThreads({ status: ["active", "idle"], startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
+      for (const t of finished(...left.map((t) => t.id))) {
+        registry.setThreadStatus(t.id, "archived");
+        deps.wake(t);
+      }
+    }
     for (const stored of reviews) {
       let r = stored;
       try {
@@ -630,12 +649,18 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       since: now(), nudges: 0, startedAt: now(), asked: "",
     };
     const prompt = reviewerRequest(draft, snapshot.detail, draft.expect);
-    const reviewer = await deps.startThread({
-      project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
-      ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
-    }, reviewerCaller);
-    const review: Review = { ...draft, reviewer: reviewer.id, asked: prompt, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
-    registry.saveReview(review);
+    beginning++;
+    let review: Review;
+    try {
+      const reviewer = await deps.startThread({
+        project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
+        ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
+      }, reviewerCaller);
+      review = { ...draft, reviewer: reviewer.id, asked: prompt, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
+      registry.saveReview(review);
+    } finally {
+      beginning--;
+    }
     void poll();
     return review;
   }
