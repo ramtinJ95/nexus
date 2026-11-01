@@ -132,7 +132,7 @@ test("a page owes a seen mark once for each reply it shows, so one marked unseen
  * One dashboard tab's attention code from rows.js, run on fakes of the browser. Tabs given the same `browser` share its
  * BroadcastChannel and its one Web Lock, which the first tab to ask holds.
  */
-function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
+function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
   const timers = [];
   const intervals = [];
   const favicon = { href: "/assets/favicon.svg?v=0123456789ab" };
@@ -158,7 +158,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, conversation = 
     navigator: locks ? { locks: { request: (_, hold) => { if (!browser.locked) { browser.locked = true; hold(); } return new Promise(() => {}); } } } : {},
     document: doc, fetch, Date: { now },
     AbortSignal: { timeout }, setTimeout: (f, ms) => timers.push({ f, at: now() + ms }), clearTimeout: () => timers.splice(0),
-    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), owedSeen,
+    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), health, owedSeen,
     currentThread: () => "t1", focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
   };
   const code = startRows(context, context);
@@ -231,7 +231,7 @@ test("a hidden tab notifies from the rows the tab that follows the events read, 
   assert.equal(shared.streams.length, 1, "only the tab that took the lock follows the events");
   const query = new URL(shared.streams[0].url, "http://nexus").searchParams;
   assert.deepEqual([query.get("follow"), query.get("since"), query.getAll("kind")],
-    ["true", "latest", ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"]]);
+    ["true", "latest", ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended", "health.changed"]]);
   assert.deepEqual(leader.intervals.map((i) => i.ms), [10_000], "and reads the list every 10 s for what sends no event");
   assert.deepEqual(hidden.intervals, []);
 
@@ -300,7 +300,7 @@ test("over plain HTTP, with no Web Locks, a visible tab follows the events itsel
   await settle();
   assert.equal(shared.streams.length, 1, "only the visible tab follows the events");
   const query = new URL(shared.streams[0].url, "http://nexus").searchParams;
-  assert.deepEqual(query.getAll("kind"), ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"]);
+  assert.deepEqual(query.getAll("kind"), ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended", "health.changed"]);
   for (const each of [visible, hidden]) assert.deepEqual(each.intervals.map((i) => i.ms), [10_000], "every tab reads the list every 10 s, not every second");
   assert.deepEqual(reads, { visible: 1, hidden: 1 }, "each tab reads the list once as it loads");
 
@@ -343,4 +343,22 @@ test("a usage-limit stop notifies at once, where the reply that recorded it woul
   update([row("limited")], 100);
   update([row("limited")], 5000);
   assert.deepEqual(events.map((r) => r.attention), ["limited"]);
+});
+
+test("a check's change reaches every tab from the one that follows the events, and reads no rows", async () => {
+  const shared = browser();
+  let reads = 0;
+  const heard = { leader: [], hidden: [] };
+  const page = (name) => tab(shared, { health: (change) => heard[name].push(change.status), fetch: async () => { reads += 1; return json([]); } });
+  page("leader");
+  page("hidden");
+  await settle();
+  const before = reads;
+  shared.streams[0].onmessage({ data: JSON.stringify({ id: "9", time: 0, thread: null, project: null, kind: "health.changed", payload: { id: 4, node: null, name: "backup", from: "ok", status: "warn", text: "the run failed" } }) });
+  await settle();
+  assert.deepEqual(heard, { leader: ["warn"], hidden: ["warn"] });
+  assert.equal(reads, before);
+  shared.streams[0].onmessage({ data: JSON.stringify({ id: "10", time: 0, thread: "t1", project: "p", kind: "attention.changed", payload: { attention: "waiting" } }) });
+  await settle();
+  assert.equal(reads, before + 1, "a row's event still reads the rows");
 });

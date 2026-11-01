@@ -76,24 +76,30 @@ document.addEventListener("click", (event) => {
 
 const currentThread = () => /^\/threads\/([^/]+)$/.exec(location.pathname)?.[1] ?? null;
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
-const notifications = coordinator((row) => {
-  const channel = notificationChannel(focused(), currentThread(), row.id, window.isSecureContext,
-    window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable");
-  const url = noticeUrl(row);
+/** Shows a notice on the channel picked, and returns what closes it. */
+function notice(channel, title, body, url) {
   if (channel === "system") {
-    const notice = new Notification(row.title, { body: noticeText(row) });
-    notice.onclick = () => { window.focus(); location.assign(url); notice.close(); };
-  } else if (channel === "toast") {
-    const toast = el("div", { className: "attention-toast", role: "status" },
-      el("span", { textContent: `${row.title}: ${noticeText(row)}` }),
-      el("a", { href: url, textContent: "Open" }));
-    const dismiss = el("button", { textContent: "Dismiss", type: "button" });
-    dismiss.onclick = () => toast.remove();
-    toast.append(dismiss);
-    document.body.append(toast);
-    setTimeout(() => toast.remove(), 15000);
+    const shown = new Notification(title, { body });
+    shown.onclick = () => { window.focus(); location.assign(url); shown.close(); };
+    return () => shown.close();
   }
+  if (channel !== "toast") return () => {};
+  const toast = el("div", { className: "attention-toast", role: "status" },
+    el("span", { textContent: `${title}: ${body}` }),
+    el("a", { href: url, textContent: "Open" }));
+  const dismiss = el("button", { textContent: "Dismiss", type: "button" });
+  dismiss.onclick = () => toast.remove();
+  toast.append(dismiss);
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 15000);
+  return () => toast.remove();
+}
+const notifications = coordinator((row) => {
+  notice(notificationChannel(focused(), currentThread(), row.id, window.isSecureContext,
+    window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable"), row.title, noticeText(row), noticeUrl(row));
 });
+const health = (change) => void import("./health.js").then(({ showHealth }) => showHealth(change, notice, notificationChannel));
+if (location.pathname === "/health") void import("./health.js").then(({ markHealthSeen }) => markHealthSeen());
 const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
 if (window.isSecureContext && "Notification" in window) {
   permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };
@@ -104,5 +110,5 @@ if (window.isSecureContext && "Notification" in window) {
 document.querySelector("aside")?.append(permission);
 // After the button, which shortens the list it joins.
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-const { markSeen, askRows } = startRows({ api, notifications, currentThread, focused, activeTab: () => activeTab });
+const { markSeen, askRows } = startRows({ api, notifications, health, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);

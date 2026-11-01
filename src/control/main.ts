@@ -45,7 +45,7 @@ import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";
-import { dailyReports, runDoctor, servedCertificate } from "./doctor-run.ts";
+import { checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { backupStatusFile, readBackupStatus } from "./backup-status.ts";
 import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
@@ -249,8 +249,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     // The API listens on one address, or on every one, where the loopback reaches it too.
     certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, dashboardPort, config.https.hostname) : { kind: "none" },
   });
-  const reports = dailyReports({ registry, run: doctor, startedAt });
-  every(5 * 60_000, () => reports.poll());
+  const health = healthPasses({ registry, run: doctor, startedAt });
+  every(checkEveryMs, () => health.poll());
   const sampling = healthSampling({ registry, probes: probeMap, log });
   every(backgroundReadMs, () => sampling.poll());
   every(60_000, () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)));
@@ -280,6 +280,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     images,
     usageBackfill: backfill,
     doctor,
+    health: health.latest,
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);
 
@@ -287,7 +288,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       for (const timer of timers) clearInterval(timer);
-      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, reports, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
+      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, health, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };

@@ -2,9 +2,10 @@
 // a thread page owes. The page passes its own pieces and a test its fakes, with the browser globals last.
 import { owedSeen } from "./notifications.js";
 
-export function startRows({ api, notifications, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
-  // The events that change a row's attention, its reply or whether it works.
-  const rowEvents = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"];
+export function startRows({ api, notifications, health = () => {}, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
+  // The events that change a row's attention, its reply or whether it works, and a check's change, which every tab
+  // hears from the one that follows the events, as it hears the rows.
+  const rowEvents = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended", "health.changed"];
   // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
   // rows it hands them, so a hidden tab notifies without a request or a stream of its own. Every tab showing that one
   // tab's reads, in order, means none shows older rows over newer ones, and each holds a reply back to the same moment.
@@ -47,7 +48,8 @@ export function startRows({ api, notifications, currentThread, focused, activeTa
   rowsChannel?.addEventListener("message", ({ data }) => {
     if (data === "read") {
       if (following) void readRows();
-    } else showRows(data.rows, data.now);
+    } else if (data.health !== undefined) health(data.health);
+    else showRows(data.rows, data.now);
   });
   let events = null;
   function followEvents() {
@@ -56,7 +58,12 @@ export function startRows({ api, notifications, currentThread, focused, activeTa
     const query = new URLSearchParams([["follow", "true"], ["since", "latest"], ...rowEvents.map((kind) => ["kind", kind])]);
     events = new EventSource(`/v1/events?${query}`);
     events.onopen = () => void readRows();
-    events.onmessage = () => void readRows();
+    events.onmessage = ({ data }) => {
+      const event = data?.includes('"health.changed"') ? JSON.parse(data) : null;
+      if (event?.kind !== "health.changed") return void readRows();
+      rowsChannel?.postMessage({ health: event.payload });
+      health(event.payload);
+    };
     events.onerror = () => {
       events.close();
       events = null;

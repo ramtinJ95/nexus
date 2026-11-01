@@ -13,8 +13,7 @@ import type { ThreadId } from "../../ids.ts";
 import { gib, nodePylons, overcommitted } from "../placement.ts";
 import type { QueuedThread } from "../queue.ts";
 import { releaseView } from "../releases.ts";
-import { summary, type Status } from "../doctor-model.ts";
-import { utc } from "../usage.ts";
+import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
@@ -31,7 +30,7 @@ export interface Shell {
   /** The thread the sidebar marks as open. */
   active?: ThreadId;
   /** The sidebar's link to mark as the open page. */
-  nav?: "usage" | "pipeline" | "reports";
+  nav?: "usage" | "pipeline" | "health";
   main: Html;
   inspector?: Html;
   /** The thread whose visits count as human activity: an open thread's page. */
@@ -125,7 +124,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-report" data-live>${reportBadge(c, nav === "reports")}</div></nav>
+<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
@@ -146,15 +145,14 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </aside>`;
 }
 
-export const reportTone: Record<Status, Tone> = { ok: "ok", warn: "busy", fail: "bad" };
+export const statusTone: Record<Status, Tone> = { ok: "ok", warn: "busy", fail: "bad" };
 
-/** A link to the latest report while it holds a warn or a fail, and nothing otherwise. */
-function reportBadge(c: Context, open: boolean): Html {
-  const latest = c.registry.latestReport();
-  if (latest === null || latest.status === "ok") return html``;
-  const { counts } = summary(latest);
-  const found = [counts.fail > 0 && `${counts.fail} failed`, counts.warn > 0 && `${counts.warn} warned`].filter(Boolean).join(" and ");
-  return html`<a class="side-link${open && " active"}" id="report-badge" href="/reports/${latest.id}" title="The daily report of ${utc(Date.parse(latest.at))}: ${found}">${icon("cross")}Daily report<span class="side-count">${counts.fail + counts.warn}</span></a>`;
+/** The Health page's link, which counts each open problem the person has not seen there. */
+function healthLink(c: Context, open: boolean): Html {
+  const problems = c.registry.healthStates().filter((s) => s.status !== "ok");
+  const unseen = problems.filter((p) => p.seenAt === null).length;
+  const title = problems.length === 0 ? "Every check is ok" : `${problems.length} open ${problems.length === 1 ? "problem" : "problems"}, ${unseen} not seen`;
+  return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
 }
 
 /**

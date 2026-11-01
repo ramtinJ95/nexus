@@ -53,7 +53,7 @@ export function openRegistry(path: string, clock = Date.now) {
     ...judgmentStore(kernel),
     ...nudges,
     ...releaseStore(kernel, appendEvent),
-    ...reportStore(kernel),
+    ...reportStore(kernel, appendEvent),
     ...nodes,
     ...nodeMetricsStore(kernel),
     ...projectStore(kernel),

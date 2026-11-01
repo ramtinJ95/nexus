@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lstat, mkdir, symlink, writeFile } from "node:fs/promises";
 import { createServer, TLSSocket } from "node:tls";
-import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import { tempDir, testCapacity, testObservation } from "../test-kit.ts";
@@ -10,63 +9,141 @@ import { testCertificate } from "../test-certificate.ts";
 import { ModelsError, type Models } from "@earendil-works/pi-ai/models";
 import { harnessModels, loginState, openCredentials } from "../harness/credentials.ts";
 import { readBackupStatus, writeBackupStatus } from "./backup-status.ts";
-import { dailyReports, reportsKeptMs, runDoctor, servedCertificate } from "./doctor-run.ts";
-import type { DoctorReport } from "./doctor-model.ts";
+import { changesKeptMs, checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
+import { healthView, type Check, type DoctorReport, type Status } from "./doctor-model.ts";
 import { testRegistry } from "./test-kit.ts";
 
 const day = 24 * 60 * 60_000;
 const start = Date.parse("2026-11-01T00:00:00Z");
-const report = (at: number, status: DoctorReport["status"] = "ok"): DoctorReport => ({ at: new Date(at).toISOString(), status, checks: [{ node: null, name: "backup", status, text: status }] });
+const minute = 60_000;
+const disk = (status: Status): Check => ({ node: "rj-firebat" as NodeName, name: "disk", status, text: `the disk is ${status}` });
+const backup = (status: Status): Check => ({ node: null, name: "backup", status, text: `the backup is ${status}` });
 
-test("the daily report runs once the control plane has settled, then once a day, through restarts, and keeps 30 days of reports", async (t) => {
+/** Passes over a registry, each running the checks the test sets, 5 minutes apart from the end of the settling. */
+function passes(t: import("node:test").TestContext, registry = testRegistry(t), startedAt = start) {
+  let now = startedAt;
+  let checks: Check[] = [backup("ok"), disk("ok")];
+  const logged: string[] = [];
+  const health = healthPasses({ registry, startedAt, clock: () => now, log: (m) => logged.push(m), run: async () => ({ at: new Date(now).toISOString(), status: "ok", checks }) });
+  const alerts = () => registry.events("0", { kinds: ["health.changed"] }).map((e) => e.payload as { name: string; from: Status; status: Status });
+  return {
+    registry, logged, health, alerts,
+    async pass(...next: Check[]) {
+      if (next.length > 0) checks = next;
+      now = Math.max(now + checkEveryMs, startedAt + 5 * minute);
+      await health.poll();
+    },
+    view: () => healthView(health.latest(), registry.healthStates()),
+    at: () => now,
+    advance(ms: number) { now += ms; },
+  };
+}
+
+test("a check that goes bad alerts once, on its second bad pass in a row, and a single bad pass alerts nothing", async (t) => {
+  const p = passes(t);
+  await p.pass();
+  await p.pass(backup("ok"), disk("warn"));
+  assert.deepEqual(p.alerts(), [], "one bad pass, as a deploy's restart of a probe gives");
+  assert.equal(p.view().checks.find((c) => c.name === "disk")?.status, "warn", "the Health page still shows the pass as it ran");
+  await p.pass(backup("ok"), disk("ok"));
+  await p.pass(backup("ok"), disk("warn"));
+  assert.deepEqual(p.alerts(), []);
+  await p.pass();
+  assert.deepEqual(p.alerts().map((a) => [a.name, a.from, a.status]), [["disk", "ok", "warn"]]);
+  assert.deepEqual([p.view().problems.length, p.view().unseen], [1, 1]);
+  await p.pass();
+  await p.pass();
+  assert.equal(p.alerts().length, 1, "a problem that stays alerts no more");
+  await p.pass(backup("ok"), disk("fail"));
+  assert.equal(p.alerts().length, 1, "one pass worse is not yet worse");
+  await p.pass();
+  assert.deepEqual(p.alerts().map((a) => [a.from, a.status]), [["ok", "warn"], ["warn", "fail"]]);
+  assert.match(p.logged.join("\n"), /the rj-firebat disk check went from warn to fail: the disk is fail/);
+});
+
+test("a check that recovers clears its alert and the badge on its first good pass", async (t) => {
+  const p = passes(t);
+  await p.pass(backup("fail"), disk("ok"));
+  await p.pass();
+  assert.deepEqual([p.view().problems.map((c) => c.name), p.view().unseen], [["backup"], 1]);
+  await p.pass(backup("ok"), disk("ok"));
+  assert.deepEqual(p.alerts().map((a) => [a.name, a.from, a.status]), [["backup", "ok", "fail"], ["backup", "fail", "ok"]]);
+  assert.deepEqual([p.view().problems, p.view().unseen], [[], 0]);
+  await p.pass(backup("warn"), disk("ok"));
+  await p.pass(backup("ok"), disk("ok"));
+  assert.equal(p.alerts().length, 2, "a bad pass between good ones is noise");
+});
+
+test("the first pass waits 5 minutes after a start, and a restart neither alerts again on a problem recorded nor on its own first pass", async (t) => {
   const registry = testRegistry(t);
   let now = start;
   let runs = 0;
-  const logged: string[] = [];
-  const reports = (startedAt: number) => dailyReports({ registry, startedAt, clock: () => now, log: (m) => logged.push(m), run: async () => { runs++; return report(now, runs % 2 === 0 ? "warn" : "ok"); } });
-  let first = reports(start);
+  let checks = [backup("warn")];
+  const health = (startedAt: number) => healthPasses({ registry, startedAt, clock: () => now, log: () => {}, run: async () => { runs++; return { at: new Date(now).toISOString(), status: "warn", checks }; } });
+  const alerts = () => registry.events("0", { kinds: ["health.changed"] }).length;
+  let first = health(start);
+  now += 5 * minute - 1;
   await first.poll();
-  assert.equal(runs, 0, "not in the first minutes after a start, while the loop reconnects to every probe");
-  now += 5 * 60_000;
-  await first.poll();
-  assert.equal(runs, 1);
-  now += day - 60_000;
-  await first.poll();
-  assert.equal(runs, 1, "not again within a day");
-  now += 60_000;
-  await first.poll();
-  assert.equal(runs, 2);
-  assert.match(logged.join("\n"), /the daily report 2 found a problem: control plane backup warn/);
-  first = reports(now);
-  now += 6 * 60_000;
-  await first.poll();
-  assert.equal(runs, 2, "a restart runs nothing while the latest report is under a day old");
-  now += 2 * day;
-  await first.poll();
-  assert.equal(runs, 3, "and a control plane that was down a day runs one as soon as it settles");
-  assert.deepEqual(registry.reports().map((r) => r.id), [3, 2, 1]);
-  for (let i = 0; i < 31; i++) {
-    now += day;
+  assert.deepEqual([runs, first.latest()], [0, null], "not while the loop reconnects to every probe");
+  for (const _ of [1, 2]) {
+    now += checkEveryMs;
     await first.poll();
   }
-  const kept = registry.reports();
-  assert.ok(kept.every((r) => Date.parse(r.at) >= now - reportsKeptMs), "none older than 30 days is kept");
-  assert.equal(kept.length, 31, "a report a day for 30 days, and today's");
-  assert.equal(registry.report(1), null);
-  assert.equal(registry.latestReport()?.id, 34);
+  assert.equal(alerts(), 1);
+  first = health(now);
+  for (const _ of [1, 2, 3]) {
+    now += checkEveryMs;
+    await first.poll();
+  }
+  assert.equal(alerts(), 1, "the restarted control plane finds the warn it recorded");
+  checks = [backup("warn"), disk("fail")];
+  first = health(now);
+  now += checkEveryMs;
+  await first.poll();
+  assert.equal(alerts(), 1, "a new node's first pass after a restart is only one pass");
+  now += checkEveryMs;
+  await first.poll();
+  assert.equal(alerts(), 2);
 });
 
-test("a daily report whose checks throw is logged and stores nothing, so the next poll tries again", async (t) => {
-  const registry = testRegistry(t);
+test("a problem whose check is no longer run, as a removed node's, recovers", async (t) => {
+  const p = passes(t);
+  await p.pass(backup("ok"), disk("fail"));
+  await p.pass();
+  await p.pass(backup("ok"));
+  assert.deepEqual(p.registry.healthStates().map((c) => [c.name, c.status, c.text]), [["disk", "ok", "no longer checked"]]);
+  assert.deepEqual(p.view().problems, []);
+});
+
+test("a pass whose checks or registry throw logs it and records nothing, so a fired poll never rejects and the next pass tries again", async (t) => {
   const logged: string[] = [];
   let fails = true;
-  const reports = dailyReports({ registry, startedAt: start - day, clock: () => start, log: (m) => logged.push(m), run: async () => { if (fails) throw new Error("registry is busy"); return report(start); } });
-  await reports.poll();
-  assert.deepEqual([registry.latestReport(), logged], [null, ["the daily report failed: registry is busy"]]);
+  const registry = testRegistry(t);
+  const health = healthPasses({ registry, startedAt: start - checkEveryMs, clock: () => start, log: (m) => logged.push(m), run: async () => { if (fails) throw new Error("registry is busy"); return { at: new Date(start).toISOString(), status: "fail", checks: [backup("fail")] }; } });
+  await assert.doesNotReject(health.poll());
+  assert.deepEqual([health.latest(), logged], [null, ["a health pass failed: registry is busy"]]);
   fails = false;
-  await reports.poll();
-  assert.equal(registry.latestReport()?.at, new Date(start).toISOString());
+  await health.poll();
+  assert.equal(health.latest()?.checks[0]?.status, "fail");
+  const throwing = healthPasses({ registry: { healthStates: () => { throw new SyntaxError("Unexpected token"); }, recordHealthChanges: () => [] }, startedAt: start - checkEveryMs, clock: () => start, log: (m) => logged.push(m), run: async () => ({ at: new Date(start).toISOString(), status: "ok", checks: [] }) });
+  await assert.doesNotReject(throwing.poll());
+  assert.equal(logged.at(-1), "a health pass failed: Unexpected token");
 });
+
+test("changes are kept 30 days, but the one that set a problem still open", async (t) => {
+  const p = passes(t);
+  await p.pass(backup("warn"), disk("ok"));
+  await p.pass();
+  await p.pass(backup("ok"), disk("ok"));
+  await p.pass(backup("ok"), disk("fail"));
+  await p.pass();
+  assert.equal(p.registry.healthChanges().length, 3);
+  p.advance(changesKeptMs);
+  await p.pass();
+  assert.deepEqual(p.registry.healthChanges().map((c) => [c.name, c.status]), [["disk", "fail"]], "the backup's changes went, and the disk's open problem stays");
+  assert.deepEqual(p.alerts().length, 3, "and it raises no alert again");
+});
+
 
 test("the doctor reads each node, the release and the control node from the registry, and the rest from what it is handed", async (t) => {
   const registry = testRegistry(t);
@@ -153,31 +230,6 @@ test("a login that no longer refreshes keeps only pi-ai's error code, never the 
   const state = await loginState(models, { provider: "openai", modelId: "gpt-6-astra" });
   assert.deepEqual(state.refresh, { ok: false, code: "oauth" });
   assert.doesNotMatch(JSON.stringify(state), /rt-secret|invalid_grant/);
-});
-
-test("a daily pass whose registry read throws logs it and settles, so a fired poll never rejects", async () => {
-  const logged: string[] = [];
-  const registry = { latestReport: () => { throw new SyntaxError("Unexpected token"); }, saveReport: () => { throw new Error("unused"); } };
-  const reports = dailyReports({ registry, startedAt: start - day, clock: () => start, log: (m) => logged.push(m), run: async () => report(start) });
-  await assert.doesNotReject(reports.poll());
-  assert.deepEqual(logged, ["the daily report failed: Unexpected token"]);
-});
-
-test("a stored report that does not parse is passed over, so the latest, the list and the next daily run still work", async (t) => {
-  const dir = await tempDir("nexus-doctor-rows-", t);
-  const path = join(dir, "registry.db");
-  const registry = testRegistry(t, path);
-  const good = registry.saveReport(report(start - 2 * day), 0);
-  const raw = new DatabaseSync(path);
-  raw.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?)").run(start - day, "{ not json");
-  raw.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?)").run(start - day, JSON.stringify({ at: "never", checks: [] }));
-  raw.close();
-  assert.deepEqual(registry.reports().map((r) => r.id), [good.id]);
-  assert.equal(registry.latestReport()?.id, good.id);
-  assert.equal(registry.report(good.id + 1), null);
-  let runs = 0;
-  await dailyReports({ registry, startedAt: start - day, clock: () => start, log: () => {}, run: async () => { runs++; return report(start); } }).poll();
-  assert.equal(runs, 1, "the newest good report is two days old, so the day's report runs");
 });
 
 test("a certificate that throws while it is read becomes an unreachable fact, not an uncaught error", async (t) => {

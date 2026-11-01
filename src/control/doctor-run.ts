@@ -1,6 +1,7 @@
 /**
- * Where `nexus doctor`'s facts come from, and the daily report. The checks in src/control/doctor.ts are pure; this reads
- * the registry, the backup unit's status file, the harness's login and the certificate the dashboard serves.
+ * Where `nexus doctor`'s facts come from, and the passes that turn its checks into health alerts. The checks in
+ * src/control/doctor.ts are pure; this reads the registry, the backup unit's status file, the harness's login and the
+ * certificate the dashboard serves.
  */
 import { connect } from "node:tls";
 import type { TailnetNodeId } from "../ids.ts";
@@ -8,10 +9,11 @@ import type { LoginState } from "../harness/credentials.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { BackupStatusRead } from "./backup-status.ts";
 import { doctorReport, type CertificateFact } from "./doctor.ts";
-import type { DoctorReport } from "./doctor-model.ts";
+import { checkKey, statuses, type Check, type DoctorReport, type HealthChange } from "./doctor-model.ts";
 import { nodeSummary } from "./api/node-routes.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry } from "./registry.ts";
+import type { NewHealthChange } from "./report-store.ts";
 
 export interface DoctorSources {
   registry: Pick<Registry, "nodes" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
@@ -23,7 +25,7 @@ export interface DoctorSources {
   clock?: () => number;
 }
 
-/** An error's code, such as pi-ai's `auth` or Node's `EACCES`, and never its message, which a report keeps 30 days. */
+/** An error's code, such as pi-ai's `auth` or Node's `EACCES`, and never its message, which a change keeps 30 days. */
 const codeOf = (err: unknown): string => {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" && /^[\w-]{1,40}$/.test(code) ? code : err instanceof Error ? err.name : "unknown";
@@ -74,30 +76,56 @@ function validTo(text: string): string {
   return new Date(at).toISOString();
 }
 
-export const reportEveryMs = 24 * 60 * 60_000;
-export const reportsKeptMs = 30 * 24 * 60 * 60_000;
-/** After a restart the loop reconnects to every probe before the first report, so a report never finds nodes not yet followed. */
+export const checkEveryMs = 5 * 60_000;
+export const changesKeptMs = 30 * 24 * 60 * 60_000;
+/** After a restart the loop reconnects to every probe before the first pass, so a pass never finds nodes not yet followed. */
 const settleMs = 5 * 60_000;
 
+const rank = (c: Pick<Check, "status">) => statuses.indexOf(c.status);
+
 /**
- * Runs the checks once a day and stores the report, keeping 30 days of them. Each poll runs them only when the newest
- * report is a day old, so a restart neither skips a day nor runs twice.
+ * The changes a pass confirms. A check's status is the better of its last two passes, so it goes bad only on its
+ * second bad pass in a row, and gets better on its first better pass. Before a start's first pass, the status
+ * recorded stands for the pass before. A check that went bad and is no longer run, as a removed node's, recovers.
  */
-export function dailyReports(options: { registry: Pick<Registry, "latestReport" | "saveReport">; run(): Promise<DoctorReport>; startedAt: number; clock?: () => number; log?: (message: string) => void }) {
+export function confirmedChanges(recorded: readonly HealthChange[], previous: ReadonlyMap<string, Check> | null, report: DoctorReport): NewHealthChange[] {
+  const states = new Map(recorded.map((c) => [checkKey(c), c]));
+  const run = new Set(report.checks.map(checkKey));
+  const changes: NewHealthChange[] = [];
+  for (const check of report.checks) {
+    const key = checkKey(check);
+    const from = states.get(key)?.status ?? "ok";
+    const prior = (previous === null ? states.get(key) : previous.get(key)) ?? { ...check, status: "ok" };
+    const confirmed = rank(prior) < rank(check) ? prior : check;
+    if (confirmed.status !== from) changes.push({ ...check, status: confirmed.status, text: confirmed.text, from, at: report.at });
+  }
+  for (const [key, state] of states) {
+    if (!run.has(key) && state.status !== "ok") changes.push({ node: state.node, name: state.name, status: "ok", text: "no longer checked", from: state.status, at: report.at } as NewHealthChange);
+  }
+  return changes;
+}
+
+/**
+ * Runs the checks every 5 minutes once the control plane has settled, and records each change they confirm, keeping 30
+ * days of changes. It holds the latest pass, which the Health page shows.
+ */
+export function healthPasses(options: { registry: Pick<Registry, "healthStates" | "recordHealthChanges">; run(): Promise<DoctorReport>; startedAt: number; clock?: () => number; log?: (message: string) => void }) {
   const { registry, run, startedAt, clock = Date.now, log = (message: string) => console.error(message) } = options;
+  let latest: DoctorReport | null = null;
+  let previous: Map<string, Check> | null = null;
   // Every poll is fired and forgotten, so nothing may escape it: a rejection would end the control plane.
   async function pass() {
     try {
-      const now = clock();
-      if (now - startedAt < settleMs) return;
-      const latest = registry.latestReport();
-      if (latest !== null && now - Date.parse(latest.at) < reportEveryMs) return;
-      const report = registry.saveReport(await run(), now - reportsKeptMs);
-      if (report.status !== "ok") log(`the daily report ${report.id} found a problem: ${report.checks.filter((c) => c.status !== "ok").map((c) => `${c.node ?? "control plane"} ${c.name} ${c.status}`).join(", ")}`);
+      if (clock() - startedAt < settleMs) return;
+      const report = await run();
+      const changes = registry.recordHealthChanges(confirmedChanges(registry.healthStates(), previous, report), clock() - changesKeptMs);
+      previous = new Map(report.checks.map((c) => [checkKey(c), c]));
+      latest = report;
+      for (const c of changes) log(`the ${c.node ?? "control plane"} ${c.name} check went from ${c.from} to ${c.status}: ${c.text}`);
     } catch (err) {
-      log(`the daily report failed: ${(err as Error).message}`);
+      log(`a health pass failed: ${(err as Error).message}`);
     }
   }
   const passes = singleFlight(pass);
-  return { poll: passes.join, close: passes.settled };
+  return { poll: passes.join, close: passes.settled, latest: () => latest };
 }
