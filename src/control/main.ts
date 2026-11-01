@@ -36,6 +36,7 @@ import { prWatcher } from "./pr-watch.ts";
 import { prWatchMs } from "./pr-watch-model.ts";
 import { builderNudger } from "./nudge.ts";
 import { judgmentPass } from "./judgment.ts";
+import { cleanupEveryMs, cleanupPass } from "./cleanup.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageCounter } from "./usage-counter.ts";
@@ -240,6 +241,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   // Judgments need no GitHub, so they run without a token too.
   const judgments = judgmentPass({ registry, harness, probes: probeMap, wake });
   every(15_000, () => judgments.poll());
+  const cleanup = cleanupPass({ registry, probes: probeMap, log });
+  every(cleanupEveryMs, () => cleanup.poll());
   const dashboardPort = 7443;
   const startedAt = Date.now();
   const doctor = () => runDoctor({
@@ -261,6 +264,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     ...threads.api,
     gate,
     deployment,
+    cleanup,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     joins: {
@@ -288,7 +292,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       for (const timer of timers) clearInterval(timer);
-      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, health, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
+      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, cleanup, health, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };

@@ -72,6 +72,7 @@ import type { ImageRollout } from "./image-rollout.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 import type { Pipeline } from "./pipeline.ts";
 import type { Planning } from "./planning.ts";
+import type { CleanupPass } from "./cleanup.ts";
 import type { ThreadQueue } from "./queue.ts";
 import type { ReviewLoop } from "./review.ts";
 
@@ -86,6 +87,8 @@ export interface ApiOptions {
   pipeline?: Pipeline | null;
   /** Marks planning threads, writes what their messages start with, and adds the items the person accepts from them. */
   planning?: Planning | null;
+  /** Asks the person what each node could delete, and deletes what they agree to. Without it, a deployer's releases are not recorded. */
+  cleanup?: CleanupPass;
   deployment?: DeploymentOptions;
   /** The drain gate every turn start passes. Omitted: the API builds one over the registry's drain. */
   gate?: TurnGate;
