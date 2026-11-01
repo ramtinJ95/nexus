@@ -70,6 +70,11 @@ export const countedCapacity = (c: ReportedCapacity | null): NodeCapacity | null
 
 export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service: string }
 
+/**
+ * `wakeAfterBoot` on a stopped or broken pylon: the node's last shutdown or reboot found it running and paused it, or
+ * began to, and no spawn or delete of it has succeeded since. The control plane takes it as new activity, so the
+ * pylon wakes as if the node had never gone down. A probe older than the field never sends it.
+ */
 export type PylonObservation =
   | { pylonId: PylonId; phase: "booting" | "stopping" | "deleting" }
   /**
@@ -77,12 +82,12 @@ export type PylonObservation =
    * no Herdr server, or the pylon stopped without a pause, or from a probe older than the field. The wake then
    * relaunches what an earlier record holds, which only the checkpoint knows.
    */
-  | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null; sessions: readonly PausedSession[] | null }
+  | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null; sessions: readonly PausedSession[] | null; wakeAfterBoot?: true }
   /**
    * The backend reports it interrupted or failed. `logTail`: the last lines of its controller's log, at most 60 lines
    * and 8 KiB, with what looks like a secret redacted on the node. Empty when the backend keeps no such log.
    */
-  | { pylonId: PylonId; phase: "broken"; detail: string; cause: BrokenCause | "unknown"; logTail: string }
+  | { pylonId: PylonId; phase: "broken"; detail: string; cause: BrokenCause | "unknown"; logTail: string; wakeAfterBoot?: true }
   | ({ pylonId: PylonId; phase: "running" } & RunningFacts);
 
 /**
@@ -172,8 +177,11 @@ const reportedEventSchema = z.strictObject({
 
 const olderPylonSchema = z.discriminatedUnion("phase", [
   z.looseObject({ pylonId: pylonIdField, phase: z.enum(["booting", "stopping", "deleting"]) }),
-  z.looseObject({ pylonId: pylonIdField, phase: z.literal("stopped"), checkpoint: unchecked<CheckpointId | null>(), sessions: unchecked<readonly PausedSession[] | null>() }),
-  z.looseObject({ pylonId: pylonIdField, phase: z.literal("broken"), detail: unchecked<string>(), cause: unchecked<string>(), logTail: unchecked<string>() }),
+  z.looseObject({
+    pylonId: pylonIdField, phase: z.literal("stopped"), checkpoint: unchecked<CheckpointId | null>(), sessions: unchecked<readonly PausedSession[] | null>(),
+    wakeAfterBoot: unchecked<true>(),
+  }),
+  z.looseObject({ pylonId: pylonIdField, phase: z.literal("broken"), detail: unchecked<string>(), cause: unchecked<string>(), logTail: unchecked<string>(), wakeAfterBoot: unchecked<true>() }),
   z.looseObject({
     pylonId: pylonIdField, phase: z.literal("running"), liveHash: unchecked<LiveHash | null>(), bootedAt: unchecked<string>(),
     bootedFrom: unchecked<RunningFacts["bootedFrom"]>(), services: unchecked<RunningFacts["services"]>(), listening: unchecked<RunningFacts["listening"]>(),

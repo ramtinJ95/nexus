@@ -3,15 +3,15 @@ import { connect } from "node:net";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { promisify } from "node:util";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { isDeepStrictEqual, promisify } from "node:util";
 import { createServer, request } from "node:http";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
 import { nodeSecrets, parseSecretsEnv } from "./config.ts";
-import type { ArtifactId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
+import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
 import type { DeclaredOutput, GitFacts, ProbeEvent, ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
@@ -32,6 +32,7 @@ import { sessionsFile } from "../sessions.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
+import { until } from "../test-kit.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;
@@ -1953,4 +1954,215 @@ test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind 
   const recovered = (await snapshot()).find((p) => p.pylonId === stalled)!;
   assert.ok(recovered.phase === "running");
   assert.deepEqual(recovered.git, facts);
+});
+
+async function shutdownFile(t: import("node:test").TestContext): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-shutdown-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  return join(dir, "shutdown.json");
+}
+const recordIn = async (file: string): Promise<unknown> => JSON.parse(await readFile(file, "utf8"));
+const up = (id: PylonId): BackendPylon => ({ pylonId: id, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+const down = (id: PylonId, checkpoint: CheckpointId): BackendPylon => ({ pylonId: id, vm: "stopped", checkpoint, image, sessions: null });
+const first = async (client: ReturnType<typeof connectProbe>) => {
+  for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
+  return assert.fail("observe ended");
+};
+const pylonA = "pylon-a" as PylonId;
+const pylonB = "pylon-b" as PylonId;
+const pylonC = "pylon-c" as PylonId;
+const pylonD = "pylon-d" as PylonId;
+const pylonE = "pylon-e" as PylonId;
+
+test("a drain for the node's shutdown records every running pylon before its first pause, then pauses each as a job, on a shutdown checkpoint", async (t) => {
+  const file = await shutdownFile(t);
+  const { probe, fake, client } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonA, up(pylonA));
+  fake.pylons.set(pylonB, up(pylonB));
+  fake.pylons.set(pylonC, { pylonId: pylonC, vm: "booting", checkpoint: null, image });
+  fake.pylons.set(pylonD, down(pylonD, "ckpt-d-1"));
+  fake.pylons.set(pylonE, { pylonId: pylonE, vm: "broken", checkpoint: "ckpt-e-1", image, detail: "qcow2 header unreadable", cause: "controller" });
+  const recordAtPauses: unknown[] = [];
+  const pause = fake.backend.ensurePaused;
+  fake.backend.ensurePaused = async (id, checkpoint, signal) => {
+    recordAtPauses.push(await recordIn(file));
+    return pause(id, checkpoint, signal);
+  };
+  const abort = new AbortController();
+  t.after(() => abort.abort());
+  const events = client.observe(abort.signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  const before = Date.now();
+
+  const outcomes = await probe.drain(5_000);
+  const after = Date.now();
+  const recorded = { pylons: { [pylonA]: {}, [pylonB]: {}, [pylonC]: {} } };
+  assert.deepEqual(recordAtPauses, [recorded, recorded, recorded], "every pause starts with the record written");
+  assert.deepEqual(await recordIn(file), recorded);
+  assert.deepEqual(outcomes.map((o) => [o.pylonId, "pausedInMs" in o]), [[pylonA, true], [pylonB, true], [pylonC, true]]);
+  for (const [id, thread] of [[pylonA, "a"], [pylonB, "b"], [pylonC, "c"]] as const) {
+    const paused = fake.pylons.get(id);
+    assert.ok(paused?.vm === "stopped", JSON.stringify(paused));
+    const at = Number(new RegExp(`^ckpt-${thread}-shutdown-(\\d+)$`).exec(paused.checkpoint ?? "")?.[1]);
+    assert.ok(at >= before && at <= after, paused.checkpoint ?? "no checkpoint");
+  }
+  assert.deepEqual(fake.pylons.get(pylonD), down(pylonD, "ckpt-d-1"), "a paused pylon is left as it is");
+  assert.equal(fake.pylons.get(pylonE)?.vm, "broken", "and so is a broken one");
+
+  const ended = new Set<string>();
+  for (let e = await events.next(); !e.done && ended.size < 3; e = await events.next()) {
+    if (e.value.type === "job" && e.value.status.kind === "pause" && e.value.status.state === "succeeded") ended.add(e.value.status.subject);
+  }
+  assert.deepEqual(ended, new Set([pylonA, pylonB, pylonC]), "the control plane sees each pause as a job");
+});
+
+test("the control plane gets the snapshot that shows a drained pylon paused, though the probe closes as soon as the drain ends", async (t) => {
+  const { probe, fake, client } = await setup(t, { log: () => {} });
+  fake.pylons.set(pylonA, up(pylonA));
+  const events = client.observe(new AbortController().signal)[Symbol.asyncIterator]();
+  assert.equal((await events.next()).value?.type, "snapshot");
+  const seen: ProbeEvent[] = [];
+  const read = (async () => {
+    try {
+      for (let e = await events.next(); !e.done; e = await events.next()) seen.push(e.value);
+    } catch { /* The close ends the stream. */ }
+  })();
+
+  await probe.drain(5_000);
+  await probe.close();
+  await read;
+  const phases = seen.flatMap((e) => e.type === "snapshot" ? e.observation.pylons.filter((p) => p.pylonId === pylonA).map((p) => p.phase) : []);
+  assert.equal(phases.at(-1), "stopped", JSON.stringify(seen.map((e) => e.type)));
+});
+
+test("a drain stops a running spawn, lets a pause the control plane sent finish, and refuses every new job with draining until close", async (t) => {
+  const file = await shutdownFile(t);
+  const { probe, fake, client, base } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonC, up(pylonC));
+  const dropped = envelope({ kind: "drop-artifact", artifact: template }, node, Date.now());
+  await client.submit(dropped);
+  const droppedStatus = await finished(client, dropped.jobId);
+  fake.hold();
+  const spawning = envelope(spawnJob, node, Date.now());
+  await client.submit(spawning);
+  const pausing = envelope({ kind: "pause", pylonId: pylonC, checkpoint: "ckpt-c-1" }, node, Date.now());
+  await client.submit(pausing);
+
+  const drained = probe.drain(5_000);
+  const spawned = await finished(client, spawning.jobId);
+  assert.ok(spawned.state === "failed" && spawned.code === "backend" && spawned.message === "the node is shutting down", JSON.stringify(spawned));
+  assert.deepEqual(await client.submit(envelope({ ...spawnJob, pylonId: pylonD, boot: { ...boot, pylonId: pylonD } } as Job, node, Date.now())), { rejected: "draining" });
+  const res = await fetch(`${base}/v1/jobs/raw`, { method: "PUT", body: "not an envelope" });
+  assert.deepEqual([res.status, await res.json()], [503, { rejected: "draining" }]);
+  assert.deepEqual(await client.submit(dropped), { accepted: droppedStatus }, "a job the probe knows still answers its status");
+  fake.release();
+
+  assert.deepEqual(await drained, [], "the control plane's pause left nothing running");
+  assert.equal((await finished(client, pausing.jobId)).state, "succeeded");
+  assert.deepEqual(fake.pylons.get(pylonC), down(pylonC, "ckpt-c-1"));
+  assert.equal(fake.pylons.has(pylonId), false, "the stopped spawn booted nothing");
+  assert.deepEqual(await recordIn(file), { pylons: {} });
+  assert.deepEqual(await client.submit(envelope({ kind: "delete", pylonId: pylonC }, node, Date.now())), { rejected: "draining" }, "draining lasts until close");
+});
+
+test("a drain records why a pause failed, and a pause still running when its time is up as out of time, within that time", async (t) => {
+  const file = await shutdownFile(t);
+  const { probe, fake } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonA, up(pylonA));
+  fake.pylons.set(pylonB, up(pylonB));
+  fake.backend.ensurePaused = async (id, _checkpoint, signal) => {
+    if (id === pylonA) throw new JobFailure("checkpoint-failed", `${pylonA}: qemu refused the checkpoint`);
+    await new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  };
+  const started = Date.now();
+  const outcomes = await probe.drain(300);
+  const took = Date.now() - started;
+  assert.ok(took >= 300 && took < 2_000, `${took} ms`);
+  const failures = { [pylonA]: `${pylonA}: qemu refused the checkpoint`, [pylonB]: "it did not pause within the shutdown's 0.3 s" };
+  assert.deepEqual(outcomes, [{ pylonId: pylonA, failed: failures[pylonA] }, { pylonId: pylonB, failed: failures[pylonB] }]);
+  assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed: failures[pylonA] }, [pylonB]: { failed: failures[pylonB] } } });
+});
+
+test("a drain keeps its time though the backend's pause ignores the abort, and records that pylon as out of time", async (t) => {
+  const file = await shutdownFile(t);
+  const { probe, fake } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonA, up(pylonA));
+  fake.backend.ensurePaused = () => new Promise((resolve) => setTimeout(resolve, 1_500));
+  const started = Date.now();
+  const outcomes = await probe.drain(300);
+  const took = Date.now() - started;
+  assert.ok(took >= 300 && took < 2_000, `${took} ms`);
+  const failed = "it did not pause within the shutdown's 0.3 s";
+  assert.deepEqual(outcomes, [{ pylonId: pylonA, failed }]);
+  assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed } } });
+});
+
+test("a close right after a wake leaves the record without the woken pylon, so a restart does not mark it again", async (t) => {
+  const file = await shutdownFile(t);
+  await writeFile(file, JSON.stringify({ pylons: { [pylonA]: {} } }));
+  const { probe, client, fake } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonA, down(pylonA, "ckpt-a-shutdown-1"));
+  const wake = envelope({ ...spawnJob, pylonId: pylonA, boot: { ...boot, pylonId: pylonA, source: { kind: "resume", checkpoint: "ckpt-a-shutdown-1" } } } as Job, node, Date.now());
+  await client.submit(wake);
+  assert.equal((await finished(client, wake.jobId)).state, "succeeded");
+  await probe.close();
+  assert.deepEqual(await recordIn(file), { pylons: {} });
+});
+
+test("the next boot's probe marks for a wake each pylon the shutdown paused, says why on one it did not finish, and the draining probe shows no mark", async (t) => {
+  const file = await shutdownFile(t);
+  const draining = await setup(t, { shutdownFile: file, log: () => {} });
+  const { fake } = draining;
+  fake.pylons.set(pylonA, up(pylonA));
+  fake.pylons.set(pylonB, up(pylonB));
+  fake.pylons.set(pylonC, down(pylonC, "ckpt-c-1"));
+  const pause = fake.backend.ensurePaused;
+  fake.backend.ensurePaused = async (id, checkpoint, signal) => {
+    if (id !== pylonB) return pause(id, checkpoint, signal);
+    fake.pylons.set(pylonB, { pylonId: pylonB, vm: "broken", checkpoint: null, image, detail: "The VM stopped outside a completed pause", cause: "controller" });
+    throw new JobFailure("checkpoint-failed", `${pylonB}: qemu refused the checkpoint`);
+  };
+  const [paused] = await draining.probe.drain(5_000);
+  assert.ok(paused !== undefined && "pausedInMs" in paused);
+  const checkpoint = fake.pylons.get(pylonA)?.checkpoint ?? assert.fail("pylon-a has no checkpoint");
+  assert.deepEqual((await first(draining.client)).pylons.filter((p) => "wakeAfterBoot" in p), [], "what the draining probe writes reaches only the next boot");
+
+  const booted = await setup(t, { shutdownFile: file, backend: fake.backend, log: () => {} });
+  assert.deepEqual((await first(booted.client)).pylons, [
+    { pylonId: pylonA, phase: "stopped", checkpoint, sessions: null, wakeAfterBoot: true },
+    {
+      pylonId: pylonB, phase: "broken", cause: "controller", logTail: "", wakeAfterBoot: true,
+      detail: `The node's last shutdown did not finish pausing it: ${pylonB}: qemu refused the checkpoint. The VM stopped outside a completed pause`,
+    },
+    { pylonId: pylonC, phase: "stopped", checkpoint: "ckpt-c-1", sessions: null },
+  ]);
+});
+
+test("a mark goes, from the snapshots and the record, once a spawn of its pylon succeeds or its node no longer lists it", async (t) => {
+  const file = await shutdownFile(t);
+  // As a power cut in the middle of a drain leaves it: every pylon recorded, no pause's outcome.
+  await writeFile(file, JSON.stringify({ pylons: { [pylonA]: {}, [pylonB]: {}, [pylonC]: {} } }));
+  const { client, fake } = await setup(t, { shutdownFile: file, log: () => {} });
+  fake.pylons.set(pylonA, down(pylonA, "ckpt-a-shutdown-1"));
+  fake.pylons.set(pylonB, { pylonId: pylonB, vm: "broken", checkpoint: "ckpt-b-1", image, detail: "The VM was interrupted", cause: "controller" });
+  fake.pylons.set(pylonC, down(pylonC, "ckpt-c-shutdown-1"));
+  const marked = async () => (await first(client)).pylons.flatMap((p) => "wakeAfterBoot" in p ? [p.pylonId] : []);
+  const broken = (await first(client)).pylons.find((p) => p.pylonId === pylonB);
+  assert.ok(broken?.phase === "broken" && broken.detail === "The node's last shutdown did not finish pausing it. The VM was interrupted", JSON.stringify(broken));
+  assert.deepEqual(await marked(), [pylonA, pylonB, pylonC]);
+
+  const wake = envelope({ ...spawnJob, pylonId: pylonA, boot: { ...boot, pylonId: pylonA, source: { kind: "resume", checkpoint: "ckpt-a-shutdown-1" } } } as Job, node, Date.now());
+  await client.submit(wake);
+  assert.equal((await finished(client, wake.jobId)).state, "succeeded");
+  await until("the record forgets pylon-a", async () => isDeepStrictEqual(await recordIn(file), { pylons: { [pylonB]: {}, [pylonC]: {} } }), 5_000);
+  const sleep = envelope({ kind: "pause", pylonId: pylonA, checkpoint: "ckpt-a-1" }, node, Date.now());
+  await client.submit(sleep);
+  assert.equal((await finished(client, sleep.jobId)).state, "succeeded");
+  assert.deepEqual(await marked(), [pylonB, pylonC], "a pause after the wake leaves no mark");
+
+  fake.pylons.delete(pylonC);
+  assert.deepEqual(await marked(), [pylonB]);
+  await until("the record forgets pylon-c", async () => isDeepStrictEqual(await recordIn(file), { pylons: { [pylonB]: {} } }), 5_000);
+  fake.pylons.set(pylonC, down(pylonC, "ckpt-c-shutdown-1"));
+  assert.deepEqual(await marked(), [pylonB], "a pylon listed again has no mark");
 });

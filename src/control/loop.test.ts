@@ -22,7 +22,7 @@ import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ReportedEvent } from "../events.ts";
 import { transcriptStart } from "../claude-transcript.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, until, watch } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;
@@ -1087,6 +1087,74 @@ test("a pylon pauses once its agent turn ends and nobody has used it for a while
   registry.recordActivity(thread.id, { agentTurnRunning: false });
   await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause"]);
+});
+
+/**
+ * A thread nobody has used for an hour, whose node the control plane last saw with the pylon as `before`, and which
+ * comes back from a reboot with it as `after`.
+ */
+function rebooted(t: import("node:test").TestContext, before: "running" | "stopped", after: (thread: Thread) => PylonObservation, archived = false) {
+  const registry = openRegistry(tempDb());
+  const longAgo = Date.now() - 60 * 60_000;
+  const thread = seed(registry, { lastAgentActivityAt: longAgo, lastHumanActivityAt: longAgo });
+  if (archived) registry.setThreadStatus(thread.id, "archived");
+  const seen = before === "running" ? runningPylon(thread.pylonId) : stoppedPylon(thread.pylonId, { checkpoint: `ckpt-${thread.id}-1` });
+  registry.ingested(testObservation(node, { artifacts: [image], pylons: [seen] }), []);
+  const fake = fakeNode({ autoFinish: true });
+  fake.pylons.set(thread.pylonId, after(thread));
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
+  return { registry, thread, fake, loop, longAgo };
+}
+
+test("an idle thread whose running pylon a reboot paused wakes from the shutdown's checkpoint, as agent activity", async (t) => {
+  let checkpoint: CheckpointId | undefined;
+  const { registry, thread, fake, longAgo } = rebooted(t, "running", ({ id, pylonId }) => {
+    checkpoint = `ckpt-${id}-shutdown-1800000000000`;
+    return { ...stoppedPylon(pylonId, { checkpoint, sessions: null }), wakeAfterBoot: true };
+  });
+  await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn resume"]);
+  const resume = fake.submitted[0]!;
+  assert.ok(resume.kind === "spawn" && resume.boot.source.kind === "resume" && resume.boot.source.checkpoint === checkpoint, JSON.stringify(resume));
+  assert.ok(registry.thread(thread.id)!.lastAgentActivityAt > longAgo, "the wake is agent activity");
+  assert.equal(registry.thread(thread.id)!.lastHumanActivityAt, longAgo, "and no person's");
+});
+
+test("an archived thread's pylon that a reboot paused stays paused, though the node marks it for a wake", async (t) => {
+  const { fake, loop } = rebooted(t, "running", ({ id, pylonId }) => ({ ...stoppedPylon(pylonId, { checkpoint: `ckpt-${id}-shutdown-1800000000000` }), wakeAfterBoot: true }), true);
+  await settled(fake, loop);
+  await settled(fake, loop);
+  assert.deepEqual(fake.submitted, []);
+});
+
+test("an idle thread whose pylon was paused before the reboot, which the node does not mark, stays paused", async (t) => {
+  const { fake, loop } = rebooted(t, "stopped", ({ id, pylonId }) => stoppedPylon(pylonId, { checkpoint: `ckpt-${id}-1` }));
+  await settled(fake, loop);
+  await settled(fake, loop);
+  assert.deepEqual(fake.submitted, []);
+});
+
+test("a probe draining for its node's shutdown refuses a spawn, which counts no attempt and goes again once the node is back", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  let draining = true;
+  let refused = 0;
+  const probe: ProbeClient = {
+    ...fake.probe,
+    async submit(env) {
+      if (!draining) return fake.probe.submit(env);
+      refused++;
+      return { rejected: "draining" };
+    },
+  };
+  run(t, registry, probe);
+  await until("the probe refused the spawn twice", () => refused >= 2);
+  assert.deepEqual(registry.pylon(thread.pylonId)!.attempts, { count: 0, last: null });
+  assert.equal(registry.pylon(thread.pylonId)!.failed, null);
+  draining = false;
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
 });
 
 test("an unreachable node gets no jobs, is recorded offline after the grace period, and catches up when it returns", async (t) => {

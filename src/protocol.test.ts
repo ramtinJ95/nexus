@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
-import { parseJobEnvelope, parseSubmitReply } from "./protocol/jobs.ts";
+import { encodeSubmitReply, parseJobEnvelope, parseSubmitReply } from "./protocol/jobs.ts";
 import { brokenCauses, parseProbeEvent, upgradeObservation, type BrokenCause } from "./protocol/observations.ts";
 import {
   closeSessionOutcomes, interruptClaudeOutcomes, parsePylonCommand, sendClaudeOutcomes, type CloseSessionOutcome, type InterruptClaudeOutcome,
@@ -199,6 +199,14 @@ test("a submit reply is read by its status, without the fields the control plane
     [409, { rejected: "expired" }], [400, { rejected: "invalid" }], [400, { rejected: "busy", inFlight: "j" }], [500, { rejected: "expired" }], [200, []], [200, null],
   ];
   for (const [status, reply] of bad) assert.throws(() => parseSubmitReply(status, JSON.stringify(reply)), Error, `${status} ${JSON.stringify(reply)}`);
+});
+
+test("a draining probe's refusal is its 503, and no other status or refusal reads as one", () => {
+  assert.deepEqual(encodeSubmitReply({ rejected: "draining" }), { status: 503, body: JSON.stringify({ rejected: "draining" }) });
+  assert.deepEqual(parseSubmitReply(503, JSON.stringify({ rejected: "draining", ...unknown })), { rejected: "draining" });
+  for (const [status, reply] of [[503, { rejected: "busy", inFlight: "j" }], [503, { rejected: "expired" }], [409, { rejected: "draining" }], [410, { rejected: "draining" }]] as const) {
+    assert.throws(() => parseSubmitReply(status, JSON.stringify(reply)), Error, `${status} ${JSON.stringify(reply)}`);
+  }
 });
 
 const observation = {

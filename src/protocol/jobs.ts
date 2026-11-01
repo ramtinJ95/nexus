@@ -97,13 +97,18 @@ export type JobStatus =
   | { jobId: JobId; subject: Subject; kind: Job["kind"]; state: "succeeded"; finishedAt: string }
   | { jobId: JobId; subject: Subject; kind: Job["kind"]; state: "failed"; finishedAt: string; code: JobErrorCode; message: string; logTail: string };
 
+/**
+ * `draining`: the node is shutting down, and its probe, which pauses every running pylon before it exits, starts no
+ * other job until then. The probe of the node's next boot takes jobs again.
+ */
 export type SubmitReply =
   | { accepted: JobStatus } // also returned for a repeated jobId, with its current status
   | { rejected: "busy"; inFlight: JobId }
   | { rejected: "expired" }
+  | { rejected: "draining" }
   | { rejected: "invalid"; message: string };
 
-const submitStatus = { accepted: 200, busy: 409, expired: 410, invalid: 400 } as const;
+const submitStatus = { accepted: 200, busy: 409, expired: 410, draining: 503, invalid: 400 } as const;
 
 export function encodeSubmitReply(reply: SubmitReply): { status: number; body: string } {
   return { status: "accepted" in reply ? submitStatus.accepted : submitStatus[reply.rejected], body: JSON.stringify(reply) };
@@ -125,6 +130,7 @@ const submitReplySchemas: Partial<Record<number, z.ZodType<SubmitReply>>> = {
   [submitStatus.accepted]: z.object({ accepted: asSent(jobStatusSchema) }),
   [submitStatus.busy]: z.object({ rejected: z.literal("busy"), inFlight: named<JobId>() }),
   [submitStatus.expired]: z.object({ rejected: z.literal("expired") }),
+  [submitStatus.draining]: z.object({ rejected: z.literal("draining") }),
   [submitStatus.invalid]: z.object({ rejected: z.literal("invalid"), message: nonEmpty }),
 };
 

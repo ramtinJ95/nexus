@@ -33,6 +33,12 @@ test("previews are optional, and their routes file defaults to the probe's state
   assert.throws(() => parseProbeConfig(withChange((c) => { c.previews = { gatewayPort: 9000, routesFile: "routes.json" }; })), /absolute path/);
 });
 
+test("the shutdown record defaults to the probe's state directory, so a probe.json from before it keeps working", () => {
+  assert.equal(parseProbeConfig(JSON.stringify(valid)).shutdownFile, "/var/lib/nexus/shutdown.json");
+  assert.equal(parseProbeConfig(withChange((c) => { c.shutdownFile = "/srv/nexus/shutdown.json"; })).shutdownFile, "/srv/nexus/shutdown.json");
+  assert.throws(() => parseProbeConfig(withChange((c) => { c.shutdownFile = "shutdown.json"; })), /shutdownFile: must be an absolute path/);
+});
+
 test("a config parses into probe options, with the probe port as the default", () => {
   const config = parseProbeConfig(JSON.stringify(valid));
   assert.deepEqual(config.listen, { host: "100.64.0.7", port: 7480 });

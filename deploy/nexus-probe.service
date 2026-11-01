@@ -11,13 +11,18 @@
 # as left-over processes on the next start, which is expected. Never `systemctl kill` this unit: it signals
 # the whole cgroup by default.
 #
+# On a shutdown or reboot of the node, and only then, the probe pauses every running pylon before it exits,
+# and the next boot's probe wakes them. TimeoutStopSec gives the pauses 150 s and the close 30 s. The probe
+# asks systemd over the system bus whether the system is stopping, and units stop in the reverse of their
+# start order, so After=dbus.service keeps the bus up until it has asked.
+#
 # No mount-namespace hardening (PrivateTmp, ProtectSystem and the like): each start of the unit makes a new
 # namespace, and controllers that outlive a probe would stay in the old one.
 
 [Unit]
 Description=Nexus probe (pylon lifecycle jobs on this node)
 Wants=network-online.target
-After=network-online.target tailscaled.service
+After=network-online.target tailscaled.service dbus.service
 
 [Service]
 Type=simple
@@ -29,7 +34,7 @@ WorkingDirectory=/var/lib/nexus
 Environment=PATH=/usr/local/bin:/usr/bin
 ExecStart=/usr/bin/env node /opt/nexus/current/src/probe/main.ts /etc/nexus/probe.json
 KillMode=process
-TimeoutStopSec=30
+TimeoutStopSec=180
 # The listen address exists only once tailscaled is up, so an early start fails and is retried.
 Restart=on-failure
 RestartSec=5

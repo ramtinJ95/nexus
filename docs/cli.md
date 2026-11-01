@@ -193,7 +193,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `sessionWaitingMessage` | optional `string` | What the latest waiting session's report said, such as "A background command was still running after 2 hours" |
 | `working` | `boolean` | A turn of the Nexus agent or of a session in the pylon runs: `agentTurnRunning` or `sessionTurnRunning`. `threads` prints `working` for it, and `show` `agent working` |
 | `workingSince` | optional `number` | The earliest known start of the running turns, as `threads` describes |
-| `lastAgentActivityAt`, `lastHumanActivityAt` | `number` | The newest agent and human activity, which decide when the pylon pauses |
+| `lastAgentActivityAt`, `lastHumanActivityAt` | `number` | The newest agent and human activity, which decide when the pylon pauses. The boot of a node whose shutdown paused the running pylon counts as agent activity, which wakes it, as [the lifecycle](design.md#lifecycle-follows-amp) describes |
 | `seenAt`, `lastReplyAt` | `number \| null` | The shared seen marker and the latest reply, as the next section describes |
 | `placement` | optional `Placement` | Which node the pylon boots on and why, as [Placement](#placement-0250) describes. Left out for a thread started before 0.20.0 |
 | `usageLimit` | optional `{ stoppedAt: number, resetsAt: number \| null }` | The Claude worker's session stopped on its usage limit at `stoppedAt`, and nothing has run since. `resetsAt` is when the limit resets, null when Claude Code did not say. [Usage-limit stops](#usage-limit-stops-0210) describes it |
