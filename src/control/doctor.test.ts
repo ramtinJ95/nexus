@@ -33,6 +33,7 @@ const report = (n: NodeName, role: ReleaseReport["role"], over: Partial<ReleaseR
 function healthy(over: Partial<DoctorFacts> = {}): DoctorFacts {
   return {
     now,
+    upSince: now - 3 * day,
     nodes: [nodeOf(node), nodeOf(peer)],
     release: { desired: { commit, requestedBy: "nLAPTOP", requestedAt: now - day }, nodes: [report(node, "control"), report(node, "probe"), report(peer, "probe")] },
     controlNode: node,
@@ -117,7 +118,7 @@ test("the backup is ok while the newest is verified and under 26 hours old, warn
   expect(healthy({ backup: { ranAt: ran, succeeded: false, newest: { name: "2026-10-30T09-00-00Z", verified: true, createdAt: iso(now - 3 * day) } } }), null, "backup", "fail", /is 3 days old, and the run at .* failed/);
   expect(healthy({ backup: { ranAt: ran, succeeded: false, newest: { name: "2026-11-01T09-00-00Z", verified: false, createdAt: null } } }), null, "backup", "fail", /does not verify\. .*backup\.ts check says why/);
   expect(healthy({ backup: { ranAt: ran, succeeded: false, newest: null } }), null, "backup", "fail", /no complete backup exists/);
-  expect(healthy({ backup: "missing" }), null, "backup", "fail", /no backup has run.*sudo systemctl start nexus-backup/);
+  expect(healthy({ backup: "missing" }), null, "backup", "fail", /no backup run is recorded in the 3 days this control plane has run.*nexus-backup\.timer is enabled/);
   expect(healthy({ backup: { unreadable: "EACCES: permission denied" } }), null, "backup", "fail", /unreadable: EACCES/);
 });
 
@@ -140,4 +141,14 @@ test("the dashboard's certificate is ok with weeks left or without https, warns 
   expect(served(-hour), null, "certificate", "fail", /expired at/);
   expect(served(60 * day, false), null, "certificate", "fail", /is not for rj-firebat\.example\.ts\.net/);
   expect(healthy({ certificate: { kind: "unreachable", hostname: "rj-firebat.example.ts.net", error: "connect ECONNREFUSED" } }), null, "certificate", "fail", /does not answer: connect ECONNREFUSED/);
+});
+
+test("a missing backup status only warns while this control plane has run under 26 hours, since the unit records a run from this release on", () => {
+  expect(healthy({ backup: "missing", upSince: now - 10 * 60_000 }), null, "backup", "warn", /no backup run is recorded yet.*its next nightly run records one/);
+  expect(healthy({ backup: "missing", upSince: now - 25 * hour }), null, "backup", "warn", /recorded yet/);
+  expect(healthy({ backup: "missing", upSince: now - 27 * hour }), null, "backup", "fail", /no backup run is recorded in the 27 h this control plane has run/);
+});
+
+test("a login that could not be read fails the login check with the error's code", () => {
+  expect(healthy({ login: { unreadable: "EACCES" } }), null, "login", "fail", /could not be read, with a EACCES error/);
 });

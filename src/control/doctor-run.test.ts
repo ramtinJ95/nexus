@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lstat, mkdir, symlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:tls";
+import { createServer, TLSSocket } from "node:tls";
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import { tempDir, testCapacity, testObservation } from "../test-kit.ts";
@@ -76,7 +77,7 @@ test("the doctor reads each node, the release and the control node from the regi
   registry.ingested(testObservation(node, { observedAt: new Date(now - 10_000).toISOString() }), []);
   registry.setDesiredRelease({ commit: "c".repeat(40), requestedBy: "nLAPTOP", requestedAt: now });
   const r = await runDoctor({
-    registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now,
+    registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now, startedAt: now - 3 * day,
     backupStatus: async () => "missing",
     login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: null, offered: [], refresh: { ok: true } }),
     certificate: async () => ({ kind: "none" }),
@@ -152,4 +153,58 @@ test("a login that no longer refreshes keeps only pi-ai's error code, never the 
   const state = await loginState(models, { provider: "openai", modelId: "gpt-6-astra" });
   assert.deepEqual(state.refresh, { ok: false, code: "oauth" });
   assert.doesNotMatch(JSON.stringify(state), /rt-secret|invalid_grant/);
+});
+
+test("a daily pass whose registry read throws logs it and settles, so a fired poll never rejects", async () => {
+  const logged: string[] = [];
+  const registry = { latestReport: () => { throw new SyntaxError("Unexpected token"); }, saveReport: () => { throw new Error("unused"); } };
+  const reports = dailyReports({ registry, startedAt: start - day, clock: () => start, log: (m) => logged.push(m), run: async () => report(start) });
+  await assert.doesNotReject(reports.poll());
+  assert.deepEqual(logged, ["the daily report failed: Unexpected token"]);
+});
+
+test("a stored report that does not parse is passed over, so the latest, the list and the next daily run still work", async (t) => {
+  const dir = await tempDir("nexus-doctor-rows-", t);
+  const path = join(dir, "registry.db");
+  const registry = testRegistry(t, path);
+  const good = registry.saveReport(report(start - 2 * day), 0);
+  const raw = new DatabaseSync(path);
+  raw.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?)").run(start - day, "{ not json");
+  raw.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?)").run(start - day, JSON.stringify({ at: "never", checks: [] }));
+  raw.close();
+  assert.deepEqual(registry.reports().map((r) => r.id), [good.id]);
+  assert.equal(registry.latestReport()?.id, good.id);
+  assert.equal(registry.report(good.id + 1), null);
+  let runs = 0;
+  await dailyReports({ registry, startedAt: start - day, clock: () => start, log: () => {}, run: async () => { runs++; return report(start); } }).poll();
+  assert.equal(runs, 1, "the newest good report is two days old, so the day's report runs");
+});
+
+test("a certificate that throws while it is read becomes an unreachable fact, not an uncaught error", async (t) => {
+  const dir = await tempDir("nexus-doctor-badcert-", t);
+  const server = createServer(await testCertificate(dir, "dashboard.example.ts.net"));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const read = TLSSocket.prototype.getPeerX509Certificate;
+  TLSSocket.prototype.getPeerX509Certificate = function () { throw new Error("the certificate is malformed"); };
+  t.after(() => { TLSSocket.prototype.getPeerX509Certificate = read; });
+  const fact = await servedCertificate("127.0.0.1", (server.address() as import("node:net").AddressInfo).port, "dashboard.example.ts.net");
+  assert.deepEqual(fact, { kind: "unreachable", hostname: "dashboard.example.ts.net", error: "its certificate does not read: the certificate is malformed" });
+});
+
+test("a source that throws fails only its own check, with the error's code and not its message, and the rest still report", async (t) => {
+  const registry = testRegistry(t);
+  registry.upsertNode({ name: "rj-firebat" as NodeName, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  const failing = (code: string) => async () => { throw Object.assign(new Error("the file holds sk-secret"), { code }); };
+  const r = await runDoctor({
+    registry, self: "nFIREBAT" as TailnetNodeId, clock: () => start, startedAt: start,
+    backupStatus: failing("EIO"), login: failing("EACCES"), certificate: failing("ECONNRESET"),
+  });
+  const of = (name: string) => r.checks.find((c) => c.node === null && c.name === name)!;
+  assert.deepEqual([of("backup").status, of("login").status, of("certificate").status], ["fail", "fail", "fail"]);
+  assert.match(of("login").text, /could not be read, with a EACCES error/);
+  assert.match(of("backup").text, /EIO reading it/);
+  assert.match(of("certificate").text, /ECONNRESET reading it/);
+  assert.doesNotMatch(JSON.stringify(r), /sk-secret/);
+  assert.deepEqual(r.checks.filter((c) => c.node !== null).map((c) => c.name), ["online", "release", "disk", "pylons"], "the node's checks still report");
 });

@@ -20,12 +20,15 @@ export type CertificateFact =
 
 export interface DoctorFacts {
   now: number;
+  /** When this control plane process started, which a deploy restarts. */
+  upSince: number;
   nodes: readonly NodeSummary[];
   release: ReleaseView;
   /** The node the control plane runs on, which alone reports the control role. Null when no node is it. */
   controlNode: NodeName | null;
   backup: BackupStatusRead;
-  login: LoginState;
+  /** `unreadable` holds the error's code, never its message, which can carry the login's own text. */
+  login: LoginState | { unreadable: string };
   certificate: CertificateFact;
 }
 
@@ -88,7 +91,12 @@ function pylons(n: NodeSummary): Verdict {
 function backup(f: DoctorFacts): Verdict {
   const s = f.backup;
   const look = "sudo systemctl status nexus-backup and journalctl -u nexus-backup on the control plane's machine say why";
-  if (s === "missing") return fail(`no backup has run on this machine. Start one with sudo systemctl start nexus-backup, and enable nexus-backup.timer`);
+  // The unit writes the status from the release that added it on, so right after that deploy no run has written one yet.
+  if (s === "missing") {
+    const up = f.now - f.upSince;
+    if (up < backupMaxAgeMs) return warn(`no backup run is recorded yet. The backup unit records each run from this release on, so its next nightly run records one, and sudo systemctl start nexus-backup records one now`);
+    return fail(`no backup run is recorded in the ${span(up)} this control plane has run. Start one with sudo systemctl start nexus-backup, and check that nexus-backup.timer is enabled`);
+  }
   if ("unreadable" in s) return fail(`the backup's status is unreadable: ${s.unreadable}`);
   if (s.newest === null) return fail(`no complete backup exists. ${look}`);
   if (!s.newest.verified || s.newest.createdAt === null) return fail(`the newest backup, ${s.newest.name}, does not verify. sudo node /opt/nexus/control-current/src/control/backup.ts check says why`);
@@ -100,6 +108,7 @@ function backup(f: DoctorFacts): Verdict {
 }
 
 function login(f: DoctorFacts): Verdict {
+  if ("unreadable" in f.login) return fail(`the harness's login could not be read, with a ${f.login.unreadable} error. Check that nexus-control can read harness.credentials in control.json`);
   const { provider, modelId, credential, offered, refresh } = f.login;
   const signIn = "Stop the control plane and sign it in with node src/control/login.ts as nexus-control";
   if (offered === null) return fail(`harness.model names provider ${provider}, which the harness does not have. Fix control.json`);

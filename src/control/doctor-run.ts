@@ -8,7 +8,7 @@ import type { LoginState } from "../harness/credentials.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { BackupStatusRead } from "./backup-status.ts";
 import { doctorReport, type CertificateFact } from "./doctor.ts";
-import type { DoctorReport, StoredReport } from "./doctor-model.ts";
+import type { DoctorReport } from "./doctor-model.ts";
 import { nodeSummary } from "./api/node-routes.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry } from "./registry.ts";
@@ -19,14 +19,26 @@ export interface DoctorSources {
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
   certificate(): Promise<CertificateFact>;
+  startedAt: number;
   clock?: () => number;
 }
 
+/** An error's code, such as pi-ai's `auth` or Node's `EACCES`, and never its message, which a report keeps 30 days. */
+const codeOf = (err: unknown): string => {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" && /^[\w-]{1,40}$/.test(code) ? code : err instanceof Error ? err.name : "unknown";
+};
+
+/** Each source that throws fails only its own check, so the others still report. */
 export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
-  const [backup, login, certificate] = await Promise.all([s.backupStatus(), s.login(), s.certificate()]);
+  const [backup, login, certificate] = await Promise.all([
+    s.backupStatus().catch((err: unknown) => ({ unreadable: `${codeOf(err)} reading it` })),
+    s.login().catch((err: unknown) => ({ unreadable: codeOf(err) })),
+    s.certificate().catch((err: unknown): CertificateFact => ({ kind: "unreachable", hostname: "the dashboard", error: `${codeOf(err)} reading it` })),
+  ]);
   const now = (s.clock ?? Date.now)();
   return doctorReport({
-    now,
+    now, upSince: s.startedAt,
     nodes: s.registry.nodes().map((record) => nodeSummary(s.registry, record)),
     release: releaseView(s.registry, s.self, now),
     controlNode: s.registry.nodeByTailnetId(s.self)?.name ?? null,
@@ -43,13 +55,23 @@ export function servedCertificate(host: string, port: number, hostname: string, 
       resolve(fact);
     };
     socket.once("secureConnect", () => {
-      const leaf = socket.getPeerX509Certificate();
-      if (leaf === undefined) return done({ kind: "unreachable", hostname, error: "it sent no certificate" });
-      done({ kind: "served", hostname, validTo: new Date(leaf.validTo).toISOString(), forHostname: leaf.checkHost(hostname) !== undefined });
+      try {
+        const leaf = socket.getPeerX509Certificate();
+        if (leaf === undefined) return done({ kind: "unreachable", hostname, error: "it sent no certificate" });
+        done({ kind: "served", hostname, validTo: validTo(leaf.validTo), forHostname: leaf.checkHost(hostname) !== undefined });
+      } catch (err) {
+        done({ kind: "unreachable", hostname, error: `its certificate does not read: ${(err as Error).message}` });
+      }
     });
     socket.once("timeout", () => done({ kind: "unreachable", hostname, error: `no TLS answer within ${timeoutMs} ms` }));
     socket.once("error", (err) => done({ kind: "unreachable", hostname, error: err.message }));
   });
+}
+
+function validTo(text: string): string {
+  const at = Date.parse(text);
+  if (Number.isNaN(at)) throw new Error(`its expiry ${JSON.stringify(text)} is no date`);
+  return new Date(at).toISOString();
 }
 
 export const reportEveryMs = 24 * 60 * 60_000;
@@ -63,18 +85,18 @@ const settleMs = 5 * 60_000;
  */
 export function dailyReports(options: { registry: Pick<Registry, "latestReport" | "saveReport">; run(): Promise<DoctorReport>; startedAt: number; clock?: () => number; log?: (message: string) => void }) {
   const { registry, run, startedAt, clock = Date.now, log = (message: string) => console.error(message) } = options;
+  // Every poll is fired and forgotten, so nothing may escape it: a rejection would end the control plane.
   async function pass() {
-    const now = clock();
-    const latest = registry.latestReport();
-    if (now - startedAt < settleMs || (latest !== null && now - Date.parse(latest.at) < reportEveryMs)) return;
-    let report: StoredReport;
     try {
-      report = registry.saveReport(await run(), now - reportsKeptMs);
+      const now = clock();
+      if (now - startedAt < settleMs) return;
+      const latest = registry.latestReport();
+      if (latest !== null && now - Date.parse(latest.at) < reportEveryMs) return;
+      const report = registry.saveReport(await run(), now - reportsKeptMs);
+      if (report.status !== "ok") log(`the daily report ${report.id} found a problem: ${report.checks.filter((c) => c.status !== "ok").map((c) => `${c.node ?? "control plane"} ${c.name} ${c.status}`).join(", ")}`);
     } catch (err) {
       log(`the daily report failed: ${(err as Error).message}`);
-      return;
     }
-    if (report.status !== "ok") log(`the daily report ${report.id} found a problem: ${report.checks.filter((c) => c.status !== "ok").map((c) => `${c.node ?? "control plane"} ${c.name} ${c.status}`).join(", ")}`);
   }
   const passes = singleFlight(pass);
   return { poll: passes.join, close: passes.settled };

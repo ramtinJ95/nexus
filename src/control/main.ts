@@ -236,14 +236,15 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const judgments = judgmentPass({ registry, harness, probes: probeMap, wake });
   every(15_000, () => judgments.poll());
   const dashboardPort = 7443;
+  const startedAt = Date.now();
   const doctor = () => runDoctor({
-    registry, self: config.self.tailnetNodeId,
+    registry, self: config.self.tailnetNodeId, startedAt,
     backupStatus: () => readBackupStatus(backupStatusFile),
     login: () => loginState(models, config.harness.model),
     // The API listens on one address, or on every one, where the loopback reaches it too.
     certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, dashboardPort, config.https.hostname) : { kind: "none" },
   });
-  const reports = dailyReports({ registry, run: doctor, startedAt: Date.now() });
+  const reports = dailyReports({ registry, run: doctor, startedAt });
   every(5 * 60_000, () => reports.poll());
   const api = await startApi({
     ...(config.https ? { https: { port: dashboardPort, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
