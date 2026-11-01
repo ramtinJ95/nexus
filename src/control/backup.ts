@@ -266,7 +266,8 @@ async function host(args: string[]) {
   try {
     if (command === "backup") {
       const now = new Date();
-      const dir = await backup({ config: await readConfig(argument ?? join(etcDir, "control.json")), root: backupRoot, etc: etcDir, now, keep: kept })
+      const dir = await readConfig(argument ?? join(etcDir, "control.json"))
+        .then((config) => backup({ config, root: backupRoot, etc: etcDir, now, keep: kept }))
         .catch(async (err: unknown) => {
           await writeBackupStatus(backupStatusFile, await failedRun(backupRoot, now)).catch((failed: unknown) => console.error(`backup: the status was not written: ${(failed as Error).message}`));
           throw err;
