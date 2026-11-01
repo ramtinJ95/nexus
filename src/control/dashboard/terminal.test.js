@@ -132,7 +132,7 @@ function fakePage() {
 function kept(t) {
   mock.timers.enable({ apis: ["setTimeout"] });
   t.after(() => mock.timers.reset());
-  const term = fakeTerm().term;
+  const { term, type } = fakeTerm();
   const sockets = [];
   const statuses = [];
   const lands = landing(term);
@@ -145,7 +145,7 @@ function kept(t) {
     lands.heard(status);
     statuses.push(status);
   }, page);
-  return { term, sockets, statuses, lands, show, close, tick: (ms) => mock.timers.tick(ms) };
+  return { term, type, sockets, statuses, lands, show, close, tick: (ms) => mock.timers.tick(ms) };
 }
 
 test("a dropped link attaches again after 1 s, then 2 s while each try is refused, and anew once one attaches", (t) => {
@@ -171,6 +171,27 @@ test("a dropped link attaches again after 1 s, then 2 s while each try is refuse
   k.sockets[2].close();
   assert.deepEqual(k.statuses.at(-1), { text: "The connection dropped. Attaching again in 1 s.", over: false }, "attached, the backoff starts over");
   assert.equal(k.statuses.filter((s) => s.over).length, 0);
+});
+
+test("a reattach sends none of the keys typed while it waited, and an unreachable error says why it attaches again", (t) => {
+  const k = kept(t);
+  const typed = k.type;
+  k.sockets[0].text({ type: "attached" });
+  typed("before");
+  k.sockets[0].close();
+  typed("in the gap");
+  k.tick(1000);
+  k.sockets[1].open();
+  typed("while it attaches");
+  k.sockets[1].text({ type: "attached" });
+  typed("after");
+  assert.deepEqual(k.sockets[0].socket.sent, ["before"]);
+  assert.deepEqual(k.sockets[1].socket.sent, [JSON.stringify({ type: "resize", cols: 80, rows: 24 }), "after"]);
+  k.sockets[1].text({ type: "error", kind: "unreachable", message: "infra-testbench: pylon pylon-x is not answering: it did not start a process within 10 s. It may be out of memory or busy" });
+  k.sockets[1].close();
+  assert.deepEqual(k.statuses.at(-1), { text: "Infra-testbench: pylon pylon-x is not answering: it did not start a process within 10 s. It may be out of memory or busy. Attaching again in 1 s.", over: false });
+  k.tick(1000);
+  assert.equal(k.sockets.length, 3, "same as a drop, it attaches again");
 });
 
 test("a session shown while the link reattaches waits for the reattach to draw, so the reattach's own focus cannot undo it", async (t) => {
