@@ -397,7 +397,7 @@ ul.error { padding-left: 28px; display: grid; gap: 2px; }
 .theme-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 32px; border-radius: 8px; color: var(--text-3); }
 .theme-pick:hover { background: var(--hover); }
 .theme-pick:focus-within { outline: 2px solid var(--work); outline-offset: 1px; }
-.theme-pick select { all: unset; flex: 1; min-width: 0; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.theme-pick select { all: unset; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--text-2); cursor: pointer; }
 .theme-pick option { color: var(--text); background: var(--bg); }
 
 /* main column */
@@ -446,8 +446,10 @@ body[data-open="actions"] .bar-actions .btn:hover { background: var(--hover); }
 .scroll { flex: 1; overflow: auto; min-height: 0; position: relative; scroll-padding-bottom: 24px; }
 .convo { max-width: calc(var(--read) + 64px); margin: 0 auto; padding: 28px 32px 32px; display: flex; flex-direction: column; gap: 18px; }
 /* the thread's first line, a divider as a chat's day line */
-.convo-meta { margin: 0 0 6px; display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.convo-meta { margin: 0 0 6px; display: flex; align-items: center; gap: 0 4px; font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
 .convo-meta::before, .convo-meta::after { content: ""; flex: 1; border-top: 1px solid var(--line-soft); }
+.convo-meta::before { margin-right: 8px; }
+.convo-meta::after { margin-left: 8px; }
 .convo-meta code { font-size: 11px; }
 
 /* the reading experience: the agent writes in a book face at a reading measure, the person in a bubble */
@@ -600,7 +602,7 @@ h4.md-h { font-size: 1.06em; }
 .landing { --kind: var(--text-3); position: relative; display: grid; gap: 10px; padding: 14px 16px 14px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); overflow: auto; font-size: 13.5px; }
 .dock .landing { max-height: 46vh; }
 .landing::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--kind); }
-.dock .landing > .land-top::before, .dock .ask-card .ask-head::before { content: "◆ Nexus"; flex-basis: 100%; font: 650 10.5px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 2px; }
+.dock .landing > .land-top::before, .dock .ask-card .ask-head::before { content: "Nexus"; flex-basis: 100%; font: 650 10.5px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 2px; }
 .landing.question { --kind: var(--warn); }
 .landing.judgment { --kind: var(--bad); }
 .landing.held-review { --kind: var(--reply); }
@@ -812,6 +814,8 @@ body[data-open="inspect"] .inspect { transform: none; visibility: visible; trans
 
 /* the home page: a composer that starts a thread, the inbox as a feed of Nexus's posts, then every chat */
 .page { max-width: calc(var(--read) + 64px); margin: 0 auto; padding: 24px 32px 40px; display: grid; gap: 28px; }
+.page-needs, #overview { max-width: 1064px; }
+.hero { max-width: 760px; }
 .hero { display: grid; gap: 14px; padding-top: 28px; }
 .hero h2 { margin: 0; font: 400 28px/1.2 var(--serif); letter-spacing: -0.01em; color: var(--text); }
 .hero h2 .brand-mark { width: 30px; height: 30px; font-size: 13px; border-radius: 9px; margin-right: 10px; vertical-align: 3px; }
@@ -888,8 +892,8 @@ body[data-open="inspect"] .inspect { transform: none; visibility: visible; trans
 .need-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding-top: 6px; }
 .need-what { flex: none; font: 650 13.5px/1.4 var(--sans); color: var(--text); }
 .need-what::after { content: "in"; margin-left: 8px; font-weight: 400; color: var(--text-3); }
-.need-thread { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-weight: 500; }
-.need-thread:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+a.need-thread { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-weight: 500; }
+a.need-thread:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .need-at { flex: none; margin-left: auto; font-size: 11.5px; color: var(--text-3); }
 .need-summary { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; color: var(--text); font: 15px/1.6 var(--serif); }
 .need-unchecked { display: grid; gap: 2px; color: var(--text-2); padding: 10px 14px; border-radius: 12px; background: var(--raised); }
