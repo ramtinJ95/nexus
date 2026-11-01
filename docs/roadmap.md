@@ -14,7 +14,7 @@ Run the whole build pipeline on Nexus, with no coordinator chat on the Mac. On 2
 
 ## The maintenance wave
 
-The current wave. Keep a running install healthy without the person reading logs over SSH: report its state every day, survive a reboot, clean up what it no longer needs with the person's yes, back it up, and move the control plane to another machine.
+The current wave. Keep a running install healthy without the person reading logs over SSH: alert when its health changes, survive a reboot, clean up what it no longer needs with the person's yes, back it up, and move the control plane to another machine.
 
 The person decided these on 2026-10-28, as [the design's decision table](design.md#decisions) records. A machine that is reset and has an encrypted root unlocks over SSH at boot, from an SSH server in the initramfs. Backups stay on the control-plane host only. An archived pylon's disk was to be kept 7 days; on 2026-10-30 the person changed that to 24 hours, deleted automatically, while its thread record and conversation stay.
 
