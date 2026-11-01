@@ -14,14 +14,13 @@ Run the whole build pipeline on Nexus, with no coordinator chat on the Mac. On 2
 
 ## The maintenance wave
 
-The current wave. Keep a running install healthy without the person reading logs over SSH: report its state every day, keep its disks from filling, survive a reboot, clean up what it no longer needs with the person's yes, back it up, and move the control plane to another machine.
+The current wave. Keep a running install healthy without the person reading logs over SSH: report its state every day, survive a reboot, clean up what it no longer needs with the person's yes, back it up, and move the control plane to another machine.
 
 The person decided these on 2026-10-28, as [the design's decision table](design.md#decisions) records. A machine that is reset and has an encrypted root unlocks over SSH at boot, from an SSH server in the initramfs. Backups stay on the control-plane host only. An archived pylon's disk was to be kept 7 days; on 2026-10-30 the person changed that to 24 hours, deleted automatically, while its thread record and conversation stay.
 
 `infra-testbench`'s root disk is LUKS with no automatic unlock, so a reboot waits at a passphrase prompt and the node stays offline until someone types it. This was inferred on 2026-10-28 from its initramfs and kernel command line, not from a boot.
 
 - **`nexus doctor` and a daily report.** One command that checks each node and the control plane: services, release, disk, certificates, the harness's login, tailnet reachability and what [node diagnostics](design.md#node-diagnostics) already serve. The control plane runs the same checks once a day, keeps each report 30 days, and shows a badge on the dashboard when the latest one found a problem.
-- **Disk space.** Watch the free space of every path Nexus writes: `/var/lib/nexus/pylons`, `/var/lib/nexus/artifacts`, the Docker and Gondolin caches under `/var/lib/nexus`, `/var/lib/nexus-control`, and `/opt/nexus/releases`. Report it in the node's health and the daily report, and refuse a start on a node about to run out. Rotate each pylon's `controller.log`, which grows for the pylon's whole life today.
 - **Cleanup the person confirms.** The control plane proposes cleanups as questions with a node as their subject, which the person accepts or rejects on cards. Questions today belong to a thread (`questions.thread` is `NOT NULL` in `src/control/schema.ts`), so a node subject needs a registry migration. The candidates:
   - Templates past their 72 hours, what a build that failed with a retryable code left, and images no pylon and no recorded image needs, through `garbage()` in `src/control/templates.ts`, which nothing calls yet. It keeps each project's newest ready template past 72 hours, and counts as garbage every image but the current one that backs no template, so the previous image a rollback needs would need a rule of its own.
   - Releases under `/opt/nexus/releases` that no service links and no pylon controller runs. `deploy/release.sh` never removes one, because a controller keeps running the release it started from.

@@ -3,19 +3,27 @@
  * request. Capacity uses Node's portable readings, so a probe on a Mac reports it too. Health adds what only Linux's
  * /proc and /sys expose, and a reading the host does not expose is null, never zero.
  */
-import { readdir, readFile, statfs } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { availableParallelism, totalmem } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { readDisks } from "../disk-space.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
+import type { DiskFact } from "../protocol/observations.ts";
 
 const gib = 2 ** 30;
 
-/** The free disk is the filesystem that holds `storage`, where the backend keeps its pylons' disks. */
-export async function hostCapacity(storage: string): Promise<{ cpus: number; memoryGiB: number; disk: NodeHealth["disk"] }> {
-  const disk = await statfs(storage);
-  return { cpus: availableParallelism(), memoryGiB: totalmem() / gib, disk: { path: storage, totalGiB: (disk.blocks * disk.bsize) / gib, freeGiB: (disk.bavail * disk.bsize) / gib } };
+/**
+ * The free disk is the filesystem that holds `storage`, where the backend keeps its pylons' disks, or `/` for a backend
+ * that keeps none, such as Docker's. `disks` adds every other filesystem that holds one of `watched`, and marks the
+ * pylons' only where the backend keeps their disks.
+ */
+export async function hostCapacity(storage: string | null, watched: readonly string[] = []): Promise<{ cpus: number; memoryGiB: number; disk: NodeHealth["disk"]; disks: readonly DiskFact[] }> {
+  const path = storage ?? "/";
+  const [first, ...rest] = await readDisks(path, watched);
+  const disks = storage === null ? [first, ...rest] : [{ ...first, pylons: true as const }, ...rest];
+  return { cpus: availableParallelism(), memoryGiB: totalmem() / gib, disk: { path, totalGiB: first.totalGiB, freeGiB: first.freeGiB }, disks };
 }
 
 export function parseLoadavg(text: string): NonNullable<NodeHealth["load"]> {
@@ -127,7 +135,9 @@ async function pylonProcesses(proc: string, roots: readonly { pylonId: PylonId; 
 export interface HealthSources {
   /** Where /proc and /sys are read from. Tests point it at fixture files. */
   root: string;
-  storage: string;
+  storage: string | null;
+  /** The other paths Nexus writes to, whose filesystems health reports beside storage's. */
+  watched?: readonly string[];
   /** Null from a backend that cannot name its pylons' processes. */
   pylons: readonly { pylonId: PylonId; pid: number }[] | null;
   sampleMs: number;
@@ -139,12 +149,12 @@ export interface HealthSources {
 export async function readNodeHealth(node: NodeName, sources: HealthSources): Promise<NodeHealth> {
   const proc = join(sources.root, "proc");
   const [capacity, loadavg, meminfo, temps, pylons] = await Promise.all([
-    hostCapacity(sources.storage), basic("load", join(proc, "loadavg")), basic("memory", join(proc, "meminfo")), temperatures(join(sources.root, "sys")),
+    hostCapacity(sources.storage, sources.watched), basic("load", join(proc, "loadavg")), basic("memory", join(proc, "meminfo")), temperatures(join(sources.root, "sys")),
     sources.pylons === null ? null : pylonProcesses(proc, sources.pylons, sources.sampleMs, sources.wait ?? delay, sources.now ?? performance.now.bind(performance)),
   ]);
   return {
     node, readAt: new Date().toISOString(), cpus: capacity.cpus,
     load: loadavg === null ? null : parseLoadavg(loadavg), memory: meminfo === null ? null : parseMeminfo(meminfo),
-    disk: capacity.disk, temperatures: temps, pylons,
+    disk: capacity.disk, disks: capacity.disks, temperatures: temps, pylons,
   };
 }

@@ -1,5 +1,6 @@
 import type { BootInputs } from "../spawn.ts";
 import type { NodeName, PylonId } from "../ids.ts";
+import { diskRefusal } from "../disk-space.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
@@ -55,8 +56,27 @@ function weigh(registry: PlacementRegistry, node: NodeRecord, need: Need): Weigh
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
-  if (left.diskGiB < 0) return refused(`has ${gib(left.diskGiB + need.resources.diskGiB)} GiB of disk free, and the pylon needs ${need.resources.diskGiB}`);
+  const short = diskShort(c, left, need.resources);
+  if (short !== null) return refused(short);
   return { node: node.name, left };
+}
+
+/** A probe from before filesystems were reported is held only to the disk fitting. */
+function diskShort(c: NodeCapacity, left: Room, need: Room): string | null {
+  const pylons = c.disks?.find((d) => d.pylons === true);
+  if (pylons !== undefined) return diskRefusal(pylons, left.diskGiB + need.diskGiB, need.diskGiB);
+  return left.diskGiB < 0 ? `has ${gib(left.diskGiB + need.diskGiB)} GiB of disk free, and the pylon needs ${need.diskGiB}` : null;
+}
+
+/**
+ * Why a start on a node it names cannot boot the pylon there for want of disk, or null. Also null for a node it cannot
+ * weigh, and for one that reports no pylons' filesystem, such as a Docker node or one with an older probe.
+ */
+export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need: Room): string | null {
+  const node = registry.nodes().find((n) => n.name === name);
+  const o = node?.state === "online" ? node.observation : null;
+  if (o == null || o.capacity === null || !o.capacity.disks?.some((d) => d.pylons === true)) return null;
+  return diskShort(o.capacity, roomLeft(registry, name, o, o.capacity, need).left, need);
 }
 
 /**

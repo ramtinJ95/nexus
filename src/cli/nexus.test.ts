@@ -1422,6 +1422,23 @@ test("nodes prints what an older probe does not count as unknown, never as 0, wi
   assert.deepEqual((await s.json(["nodes"]))[0].capacity, capacity);
 });
 
+test("nodes says on a node's row which of its filesystems is low, and node prints each filesystem with its paths", async (t) => {
+  const s = await setup(t);
+  const disks = [
+    { paths: ["/var/lib/nexus/pylons", "/var/lib/nexus/artifacts"], totalGiB: 1000, freeGiB: 99, pylons: true as const },
+    { paths: ["/opt/nexus/releases"], totalGiB: 50, freeGiB: 30 },
+  ];
+  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ diskFreeGiB: 99, disks }) });
+  assert.match((await s.nexus(["nodes"])).stdout, /^rj-firebat +online +.+, 99 GiB disk free, disk low at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts$/m,
+    "99 of 1000 GiB is under 10%, and 30 GiB of 50 is neither under 20 GiB nor under 10%");
+  const health: NodeHealth = {
+    node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: null, memory: null, disk: { path: "/var/lib/nexus/pylons", totalGiB: 1000, freeGiB: 99 }, disks, temperatures: null, pylons: null,
+  };
+  s.nodeHealth(async () => health);
+  assert.match((await s.nexus(["node", node])).stdout,
+    /\ndisk: 99\.0 of 1000\.0 GiB free at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts, low\ndisk: 30\.0 of 50\.0 GiB free at \/opt\/nexus\/releases\ntemperatures: unknown\n/);
+});
+
 test("show prints PR metadata and one disabled-watch notice without waking the pylon", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "PR"]);

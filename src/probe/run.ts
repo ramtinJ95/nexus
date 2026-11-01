@@ -8,6 +8,7 @@ import type { ServiceName } from "../services-file.ts";
 import { checkoutDir } from "../session-harness.ts";
 import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "../sessions.ts";
 import { type SecretSource, type VmBackend } from "../backend.ts";
+import { refuseShortDisk } from "../disk-space.ts";
 
 /** Linking or unlinking a pylon's port together with its preview route, so no snapshot read overlaps either. */
 export interface PortLinks {
@@ -45,6 +46,8 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
         for (const grant of job.boot.network.secrets) {
           if (deps.secrets.value(grant.name) === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
         }
+        // A pylon that is up already holds its overlay.
+        if (deps.backend.storage !== undefined && ["absent", "stopped"].includes(await deps.backend.state(job.pylonId))) await refuseShortDisk(deps.backend.storage, job.boot.resources.diskGiB);
         await deps.backend.ensureRunning(job.boot, job.live, signal, job.relaunch ?? true);
         await deps.serve.converge(job.pylonId, job.live.previews, signal);
         return;

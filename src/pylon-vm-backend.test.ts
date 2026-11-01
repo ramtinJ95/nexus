@@ -807,6 +807,27 @@ test("a prepared build that a crash left unpublished is published without bootin
   await backend.buildTemplate("tpl-prepared0000", buildInputs, signal());
 });
 
+test("a template build whose disk would leave the pylons' filesystem short fails as capacity, naming it, and boots nothing", async () => {
+  const { backend, stateRoot } = await backendWith();
+  const huge = 2 ** 40;
+  await assert.rejects(backend.buildTemplate("tpl-short0000000", { ...buildInputs, resources: { cpus: 2, memoryGiB: 4, diskGiB: huge } }, signal()), (err: Error & { code?: string }) =>
+    err.code === "capacity" && new RegExp(`^this node has [\\d.]+ of [\\d.]+ GiB free on the filesystem of ${stateRoot}, and a ${huge} GiB pylon disk would leave less than`).test(err.message));
+  assert.equal(existsSync(join(stateRoot, "templates", "tpl-short0000000")), false);
+});
+
+test("a replay of a template build that published or prepared is never refused for disk, since it boots nothing", { skip: !gnuTar && "publishing hashes a GNU tar archive" }, async () => {
+  const { backend, stateRoot } = await backendWith();
+  const short = { ...buildInputs, resources: { cpus: 2, memoryGiB: 4, diskGiB: 2 ** 40 } };
+  await publishedTemplate("tpl-published000", image);
+  const swept = await leftBuild(stateRoot, "tpl-published000", { state: "prepared" }, "");
+  await backend.buildTemplate("tpl-published000", short, signal());
+  assert.equal(existsSync(swept), false, "the prepared copy a build that died after publishing left is swept");
+  const prepared = await leftBuild(stateRoot, "tpl-prepared0001", { state: "prepared" }, "");
+  await writeFile(join(prepared, "disk.qcow2"), "prepared disk");
+  await backend.buildTemplate("tpl-prepared0001", short, signal());
+  assert.ok((await backend.artifacts.list()).includes("tpl-prepared0001"), "a prepared build is published");
+});
+
 test("an image a pylon or a template still needs is not dropped, and a template always is", async () => {
   const { backend, instances } = await backendWith();
   await leftInstance(instances, "pylon-needs", "stopped");

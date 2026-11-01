@@ -7,6 +7,7 @@ import { controlSocket } from "./client.ts";
 import { type Action, actionSchema, bootSchema } from "./contracts.ts";
 import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
+import { controllerLogLimit, rotateLog } from "./log-rotation.ts";
 import { agentError, readRecord } from "./storage.ts";
 import { parse } from "../parse.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
@@ -17,6 +18,8 @@ async function main(): Promise<void> {
 	const record = await readRecord(dir);
 	const pidFile = join(dir, "controller.pid");
 	await publishIdentity(pidFile);
+	const log = join(dir, "controller.log");
+	setInterval(() => void rotateLog(log, controllerLogLimit).catch((error: unknown) => console.error(error)), 60_000).unref();
 	// The launching client writes the boot spec, secrets included, to stdin and closes it.
 	const spec = bootSchema.parse(JSON.parse(await text(process.stdin)));
 	const runtime = new SandboxRuntime(dir, record, spec);

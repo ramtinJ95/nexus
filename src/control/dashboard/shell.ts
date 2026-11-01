@@ -2,6 +2,7 @@
  * Renders the console every page shares: the layout, the sidebar of threads by project, the start and add-project
  * dialogs, and the not-found page.
  */
+import { diskText, lowDisk } from "../../disk-space.ts";
 import { countedCapacity } from "../../protocol/observations.ts";
 import { defaultProjectResources } from "../project.ts";
 import { githubTokenGrant } from "../../secret-grants.ts";
@@ -123,7 +124,7 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}</span>${memoryLine(c, n)}${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}`)}</div>
+<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}${lowDisks(n).length > 0 && html`<em title="${lowDisks(n).map(diskText).join("; ")}">disk low</em>`}</span>${memoryLine(c, n)}${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}`)}</div>
 <div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
@@ -138,6 +139,8 @@ function releaseLines(c: Context) {
   const control = c.registry.releaseReports().find((r) => r.role === "control")?.node;
   return releaseView(c.registry, c.registry.nodes().find((n) => n.name === control)?.tailnetNodeId, c.now).nodes;
 }
+
+const lowDisks = (n: NodeRecord) => countedCapacity(n.capacity)?.disks?.filter(lowDisk) ?? [];
 
 /** A node's committed and total memory, and what its paused pylons need to wake. */
 function memoryLine(c: Context, n: NodeRecord): Html | false {

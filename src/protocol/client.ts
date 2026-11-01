@@ -11,7 +11,7 @@ import { asSent, named, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactManifest } from "../images.ts";
 import type { JobId, NodeName, PortableArtifactId, PylonId, TailnetNodeId } from "../ids.ts";
 import { jobStatusSchema, parseSubmitReply, type JobEnvelope, type JobStatus, type SubmitReply } from "./jobs.ts";
-import { parseProbeEvent, type ProbeEvent } from "./observations.ts";
+import { parseProbeEvent, type DiskFact, type ProbeEvent } from "./observations.ts";
 import { parseCommandResult, type CommandResult, type PylonCommand } from "./commands.ts";
 import { clientByteStream, streamPath, streamProtocol, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
@@ -55,12 +55,14 @@ export interface NodeHealth {
   load: { one: number; five: number; fifteen: number } | null;
   memory: { totalGiB: number; availableGiB: number; swapTotalGiB: number; swapFreeGiB: number } | null;
   disk: { path: string; totalGiB: number; freeGiB: number };
+  /** Each filesystem Nexus writes to, the pylons' first. Absent from a probe older than the field. */
+  disks?: readonly DiskFact[];
   temperatures: readonly { sensor: string; celsius: number }[] | null;
   pylons: readonly { pylonId: PylonId; processes: number; cpuPercent: number; residentGiB: number }[] | null;
 }
 const nodeHealthSchema = z.looseObject({
   node: named<NodeName>(), readAt: unchecked<string>(), cpus: unchecked<number>(), load: unchecked<NodeHealth["load"]>(), memory: unchecked<NodeHealth["memory"]>(),
-  disk: unchecked<NodeHealth["disk"]>(), temperatures: unchecked<NodeHealth["temperatures"]>(), pylons: unchecked<NodeHealth["pylons"]>(),
+  disk: unchecked<NodeHealth["disk"]>(), disks: unchecked<readonly DiskFact[]>().exactOptional(), temperatures: unchecked<NodeHealth["temperatures"]>(), pylons: unchecked<NodeHealth["pylons"]>(),
 }) satisfies z.ZodType<NodeHealth>;
 
 const requestTimeoutMs = 10_000;
