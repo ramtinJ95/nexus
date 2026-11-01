@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import { tempDir, testCapacity, testObservation } from "../test-kit.ts";
 import { testCertificate } from "../test-certificate.ts";
+import { ModelsError, type Models } from "@earendil-works/pi-ai/models";
 import { harnessModels, loginState, openCredentials } from "../harness/credentials.ts";
 import { readBackupStatus, writeBackupStatus } from "./backup-status.ts";
 import { dailyReports, reportsKeptMs, runDoctor, servedCertificate } from "./doctor-run.ts";
@@ -141,4 +142,14 @@ test("the harness's login state says whether it is signed in and which models it
   assert.equal(keyed.credential, "api_key");
   assert.ok(keyed.offered !== null && keyed.offered.length > 0);
   assert.deepEqual(keyed.refresh, { ok: true });
+});
+
+test("a login that no longer refreshes keeps only pi-ai's error code, never the token endpoint's reply", async () => {
+  const models = {
+    getProvider: () => ({}), checkAuth: async () => ({ type: "oauth" }), getAvailable: async () => [{ id: "gpt-6-astra" }],
+    getAuth: async () => { throw new ModelsError("oauth", 'token refresh failed: HTTP 400 {"error":"invalid_grant","refresh_token":"rt-secret"}'); },
+  } as unknown as Models;
+  const state = await loginState(models, { provider: "openai", modelId: "gpt-6-astra" });
+  assert.deepEqual(state.refresh, { ok: false, code: "oauth" });
+  assert.doesNotMatch(JSON.stringify(state), /rt-secret|invalid_grant/);
 });

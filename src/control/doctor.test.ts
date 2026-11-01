@@ -127,7 +127,7 @@ test("the harness's login is ok signed in and offering its model, and fails with
   expect(healthy({ login: { ...login, credential: "api_key" } }), null, "login", "ok", /an API key for openai, which Nexus cannot check without calling a model/);
   expect(healthy({ login: { ...login, provider: "anthropic", credential: null, offered: null } }), null, "login", "fail", /provider anthropic, which the harness does not have/);
   expect(healthy({ login: { ...login, credential: null, offered: [] } }), null, "login", "fail", /not signed in to openai.*src\/control\/login\.ts/);
-  expect(healthy({ login: { ...login, refresh: { ok: false, error: "refresh token was revoked" } } }), null, "login", "fail", /no longer refreshes: refresh token was revoked\. Stop the control plane and sign it in/);
+  expect(healthy({ login: { ...login, refresh: { ok: false, code: "oauth" } } }), null, "login", "fail", /no longer resolves, with pi-ai's oauth error\. Stop the control plane and sign it in/);
   expect(healthy({ login: { ...login, offered: ["gpt-6-mini"] } }), null, "login", "fail", /does not offer harness\.model gpt-6-astra\. Name one of gpt-6-mini/);
 });
 

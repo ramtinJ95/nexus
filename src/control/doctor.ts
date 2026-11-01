@@ -104,7 +104,7 @@ function login(f: DoctorFacts): Verdict {
   const signIn = "Stop the control plane and sign it in with node src/control/login.ts as nexus-control";
   if (offered === null) return fail(`harness.model names provider ${provider}, which the harness does not have. Fix control.json`);
   if (credential === null || offered.length === 0) return fail(`the harness is not signed in to ${provider}, so every thread fails at its first turn. ${signIn}`);
-  if (!refresh.ok) return fail(`the harness's ${provider} login no longer refreshes: ${refresh.error}. ${signIn}`);
+  if (!refresh.ok) return fail(`the harness's ${provider} login no longer resolves, with pi-ai's ${refresh.code} error. ${signIn}`);
   if (!offered.includes(modelId)) return fail(`the harness's ${provider} login does not offer harness.model ${modelId}. Name one of ${offered.toSorted().join(", ")} in control.json`);
   return ok(credential === "oauth" ? `signed in to ${provider} with ChatGPT, which offers ${modelId}` : `an API key for ${provider}, which Nexus cannot check without calling a model`);
 }

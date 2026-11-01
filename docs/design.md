@@ -142,7 +142,7 @@ The control plane gets four more:
 
 The backup check reads `/var/lib/nexus-backup/status.json`, which the root backup unit writes after each run. The control plane runs as `nexus-control`, which may not read `/var/backups/nexus`, because it holds credentials. Running the check as root would need a sudo rule for the control plane's user, and a socket to a root helper would be a new service. The file holds no credentials: times, a backup's name and whether it verified.
 
-The login check reads the stored login, lists the models it offers, and resolves its auth as a turn would, which refreshes an expired OAuth token against OpenAI's auth server. It never calls a model. An API key resolves without a request, so the check cannot tell a revoked key from a good one.
+The login check reads the stored login, lists the models it offers, and resolves its auth as a turn would, which refreshes an expired OAuth token against OpenAI's auth server. It never calls a model. A failure keeps only pi-ai's error code, such as `oauth`, because its message can carry the token endpoint's reply, which reports keep 30 days. An API key resolves without a request, so the check cannot tell a revoked key from a good one.
 
 The certificate check opens a TLS connection to the dashboard's port, as a browser does, without trusting what it gets, so an expiring certificate is still read. The API asks tailscaled for a certificate valid a week and reloads it every 12 hours, so under 6 days left means renewal fails. Nexus cannot read the certificates `tailscale serve` uses for previews on each node, which tailscaled renews on its own, and the probes speak plain HTTP over WireGuard, so they rely on no certificate.
 

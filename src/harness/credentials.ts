@@ -12,7 +12,7 @@ import { open, readFile, rename } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 import type { AuthInteraction, Credential, CredentialStore } from "@earendil-works/pi-ai";
-import { createModels, type Models, type MutableModels } from "@earendil-works/pi-ai/models";
+import { createModels, ModelsError, type Models, type ModelsErrorCode, type MutableModels } from "@earendil-works/pi-ai/models";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
 import type { ModelRef } from "@earendil-works/pi-durable";
@@ -63,14 +63,15 @@ export async function requireModel(models: Models, model: ModelRef): Promise<voi
 
 /**
  * The harness's login as `nexus doctor` checks it. `offered` is null when the harness has no such provider. `refresh`
- * resolves the login as a turn would, which refreshes an expired OAuth token, and holds why that failed. No model is called.
+ * resolves the login as a turn would, which refreshes an expired OAuth token, and holds pi-ai's error code when that
+ * failed, never its message, which can carry the token endpoint's reply. No model is called.
  */
 export interface LoginState {
   provider: string;
   modelId: string;
   credential: "oauth" | "api_key" | null;
   offered: readonly string[] | null;
-  refresh: { ok: true } | { ok: false; error: string };
+  refresh: { ok: true } | { ok: false; code: ModelsErrorCode | "unknown" };
 }
 
 export async function loginState(models: Models, model: ModelRef): Promise<LoginState> {
@@ -78,7 +79,7 @@ export async function loginState(models: Models, model: ModelRef): Promise<Login
   if (models.getProvider(provider) === undefined) return { provider, modelId, credential: null, offered: null, refresh: { ok: true } };
   const credential = (await models.checkAuth(provider))?.type ?? null;
   const offered = (await models.getAvailable(provider)).map((m) => m.id);
-  const refresh = credential === null ? { ok: true as const } : await models.getAuth(provider).then(() => ({ ok: true as const }), (err: unknown) => ({ ok: false as const, error: (err as Error).message }));
+  const refresh = credential === null ? { ok: true as const } : await models.getAuth(provider).then(() => ({ ok: true as const }), (err: unknown) => ({ ok: false as const, code: err instanceof ModelsError ? err.code : "unknown" as const }));
   return { provider, modelId, credential, offered, refresh };
 }
 
