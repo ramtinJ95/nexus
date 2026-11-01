@@ -2,7 +2,16 @@
 import { json, type Db } from "./db.ts";
 import type { DoctorReport, StoredReport } from "./doctor-model.ts";
 
-const reportRow = (r: Record<string, unknown>): StoredReport => ({ id: r.id as number, ...json<DoctorReport>(r.record) });
+/** Null for a row whose record does not parse, which every reader passes over rather than fail on. */
+function reportRow(r: Record<string, unknown>): StoredReport | null {
+  try {
+    const record = json<DoctorReport>(r.record);
+    return typeof record?.at === "string" && !Number.isNaN(Date.parse(record.at)) && Array.isArray(record.checks) ? { id: r.id as number, ...record } : null;
+  } catch {
+    return null;
+  }
+}
+const rows = (found: Record<string, unknown>[]) => found.flatMap((r) => reportRow(r) ?? []);
 
 export function reportStore(db: Db) {
   const { sql } = db;
@@ -16,11 +25,9 @@ export function reportStore(db: Db) {
       });
     },
     /** Newest first. */
-    reports: (): StoredReport[] => sql("SELECT id, record FROM doctor_reports ORDER BY at DESC, id DESC").all().map(reportRow),
-    latestReport(): StoredReport | null {
-      const row = sql("SELECT id, record FROM doctor_reports ORDER BY at DESC, id DESC LIMIT 1").get();
-      return row === undefined ? null : reportRow(row);
-    },
+    reports: (): StoredReport[] => rows(sql("SELECT id, record FROM doctor_reports ORDER BY at DESC, id DESC").all()),
+    /** The newest report that parses. */
+    latestReport: (): StoredReport | null => rows(sql("SELECT id, record FROM doctor_reports ORDER BY at DESC, id DESC").all())[0] ?? null,
     report(id: number): StoredReport | null {
       const row = sql("SELECT id, record FROM doctor_reports WHERE id = ?").get(id);
       return row === undefined ? null : reportRow(row);
