@@ -74,7 +74,7 @@ test("a node's metrics name the newest sample their points hold, even from a buc
   const health: NodeHealth = { node, readAt: "2027-01-01T00:00:00.000Z", cpus: 4, load: null, memory: null, disk: { path: "/", totalGiB: 20, freeGiB: 10 }, temperatures: null, pylons: null };
   for (const ago of [70_000, 40_000, 10_000]) s.registry.recordHealthSample(node, sampleOf(health, now - ago, () => null));
   const served = (await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now}`)).body as NodeMetrics;
-  assert.equal(served.tier, "1m");
+  assert.equal(served.tier, "2m");
   assert.equal(served.sampledAt, now - 10_000, "a bucket's time is its first sample, so the newest sample is named apart");
   assert.equal(((await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now - 20_000}`)).body as NodeMetrics).sampledAt, now - 40_000, "only samples up to the range's end count");
 });

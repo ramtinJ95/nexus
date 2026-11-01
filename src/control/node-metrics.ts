@@ -81,12 +81,15 @@ const day = 24 * hour;
 
 /**
  * How the registry keeps samples. `raw` keeps each sample. Each other tier keeps one bucket per series per `stepMs`,
- * which every sample in it adds to. Every tier holds the newest data, and each drops what is older than `keepMs`.
+ * which every sample in it adds to. Every tier holds the newest data, and each drops what is older than `keepMs`. Each
+ * range of the node page's picker is served at a tier's own step, 15 min and 1 h raw, 6 h by the minute, 24 h by two
+ * minutes, 7 d by 15 minutes and 30 d by the hour, so reading one regroups nothing.
  */
 export const tiers = [
   { name: "raw", stepMs: 0, keepMs: 2 * hour },
-  { name: "1m", stepMs: minute, keepMs: 25 * hour },
-  { name: "5m", stepMs: 5 * minute, keepMs: 8 * day },
+  { name: "1m", stepMs: minute, keepMs: 7 * hour },
+  { name: "2m", stepMs: 2 * minute, keepMs: 25 * hour },
+  { name: "15m", stepMs: 15 * minute, keepMs: 8 * day },
   { name: "1h", stepMs: hour, keepMs: 31 * day },
 ] as const satisfies readonly { name: string; stepMs: number; keepMs: number }[];
 export type Tier = typeof tiers[number];

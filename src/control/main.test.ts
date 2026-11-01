@@ -191,7 +191,6 @@ test("each read of a node's health is recorded, and its history read back", asyn
   const { status, body } = await plane.call("nLaptopCNTRL", "GET", `/v1/nodes/rj-firebat/metrics?from=${from}`);
   assert.equal(status, 200);
   assert.deepEqual(body.series.map((s: { key: string; avg: number[] }) => [s.key, s.avg]), [["cpus", [16]], ["diskFree", [180.5]], ["diskTotal", [457]]]);
-  assert.deepEqual((await plane.call("nLaptopCNTRL", "GET", `/v1/nodes/infra-testbench/metrics?from=${from}`)).body.series, [], "only the node read");
 });
 
 test("a machine that joins is followed without a restart, every probe learns it as a peer, and a probe that cannot learn peers keeps working", async (t) => {

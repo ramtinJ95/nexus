@@ -3,8 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { maxPoints, recordingHealth, sampleOf, servingOf } from "./node-metrics.ts";
-import { drainNodeMetrics } from "./node-metrics-store.ts";
+import { DatabaseSync } from "node:sqlite";
+import { maxPoints, minSampleGapMs, recordingHealth, sampleOf, servingOf } from "./node-metrics.ts";
+import { drainNodeMetrics, regroupedRangeSql, wholeRangeSql } from "./node-metrics-store.ts";
+import { migrations } from "./schema.ts";
 import { openRegistry } from "./registry.ts";
 import { tempDir } from "../test-kit.ts";
 import { testRegistry } from "./test-kit.ts";
@@ -72,17 +74,36 @@ test("a bucket holds its samples' min, average and max, and a wider bucket weigh
   assert.deepEqual([sixHours.tier, sixHours.bucketMs], ["1m", minute]);
   assert.deepEqual(pointsOf(sixHours).load1, [[now, 1, 3, 6, 3], [now + minute, 12, 12, 12, 1]]);
   const day1 = registry.nodeMetrics("a", at - 24 * hour, at, at);
-  assert.deepEqual([day1.tier, day1.bucketMs], ["1m", 2 * minute]);
+  assert.deepEqual([day1.tier, day1.bucketMs], ["2m", 2 * minute]);
   assert.deepEqual(pointsOf(day1).load1, [[now, 1, 21 / 4, 12, 4]], "(1 + 2 + 6 + 12) / 4, not the average of 3 and 12");
   assert.deepEqual(pointsOf(registry.nodeMetrics("a", at - 30 * day, at, at)).load1, [[now, 1, 21 / 4, 12, 4]], "the hour tier holds the same");
+  const twoHours = registry.nodeMetrics("a", at - 2 * hour, at, at);
+  assert.deepEqual([twoHours.tier, twoHours.bucketMs], ["raw", 8_000], "raw samples regrouped in 8-s buckets");
+  assert.deepEqual(pointsOf(twoHours).load1, [[now, 1, 1.5, 2, 2], [now + 10_000, 6, 6, 6, 1], [now + minute, 12, 12, 12, 1]]);
 });
 
 test("a range is served from the coarsest tier that still holds its start and fits the point limit", () => {
   const tierOf = (span: number, end = now) => servingOf(end - span, end, now).tier.name;
-  assert.deepEqual([15 * minute, hour, 6 * hour, 24 * hour, 7 * day, 30 * day].map((span) => tierOf(span)), ["raw", "raw", "1m", "1m", "5m", "1h"]);
+  assert.deepEqual([15 * minute, hour, 6 * hour, 24 * hour, 7 * day, 30 * day].map((span) => tierOf(span)), ["raw", "raw", "1m", "2m", "15m", "1h"]);
   assert.equal(tierOf(15 * minute, now - 3 * hour), "1m", "raw keeps 2 h, so a quarter hour from 3 h ago comes from the minutes");
-  assert.equal(tierOf(hour, now - 9 * day), "1h", "past the 5-minute tier's 8 days");
+  assert.equal(tierOf(hour, now - 9 * day), "1h", "past the 15-minute tier's 8 days");
   assert.equal(tierOf(hour, now - 40 * day), "1h", "past every tier's keep, the one that keeps longest");
+});
+
+test("each range of the page's picker is one range of the node's rows, read in key order with no sort, and is served at its tier's own step", (t) => {
+  const registry = testRegistry(t);
+  for (const [span, step] of [[15 * minute, 1_000], [hour, 4_000], [6 * hour, minute], [24 * hour, 2 * minute], [7 * day, 15 * minute], [30 * day, hour]] as const) {
+    const { tier, bucketMs } = servingOf(now - span, now, now);
+    assert.equal(bucketMs, step);
+    assert.ok(tier.stepMs === bucketMs || (tier.stepMs === 0 && bucketMs <= minSampleGapMs), `${span / minute} min regroups nothing`);
+  }
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  for (const sql of migrations) db.exec(sql);
+  const plan = (sql: string, ...args: (string | number)[]) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map((r) => r.detail);
+  assert.deepEqual(plan(wholeRangeSql, "a", "2m", 0, 1), ["SEARCH node_metrics USING PRIMARY KEY (node=? AND tier=? AND at>? AND at<?)"]);
+  assert.deepEqual(plan(regroupedRangeSql, 7_000, "a", "2m", 0, 1), ["SEARCH node_metrics USING PRIMARY KEY (node=? AND tier=? AND at>? AND at<?)", "USE TEMP B-TREE FOR GROUP BY"],
+    "a range off the picker still reads only the node's rows");
 });
 
 test("no range gives a series more than 1,000 points, even with a sample every 4 s", (t) => {
@@ -104,7 +125,7 @@ test("no range gives a series more than 1,000 points, even with a sample every 4
 test("pruning drops what each tier keeps no longer, at most a batch per tier a call", (t) => {
   const registry = testRegistry(t);
   registry.recordHealthSample("a", { at: now, values: { load1: 1 } });
-  const kept = [["raw", 2 * hour], ["1m", 25 * hour], ["5m", 8 * day], ["1h", 31 * day]] as const;
+  const kept = [["raw", 2 * hour], ["1m", 7 * hour], ["2m", 25 * hour], ["15m", 8 * day], ["1h", 31 * day]] as const;
   for (const [tier, keep] of kept) {
     assert.equal(registry.pruneNodeMetrics(now + keep, 500), 0, `${tier} keeps a sample exactly its keep old`);
     assert.equal(registry.pruneNodeMetrics(now + keep + 1, 500), 1, `${tier} drops it after`);
