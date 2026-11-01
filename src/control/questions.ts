@@ -1,18 +1,20 @@
 /**
- * A question a thread asks the person, answered on its card on the dashboard. Its thread's attention is `decision`
- * while it is open. The planning pass asks one per item a planning thread proposes (planning.ts), and a Claude
- * worker's AskUserQuestion call is one while its pylon's hook reports that its dialog waits (the registry's asks).
+ * A question the control plane asks the person about a thread or a node, answered on its card on the dashboard. A
+ * thread's attention is `decision` while one of its questions is open. The planning pass asks one per item a planning
+ * thread proposes (planning.ts), a Claude worker's AskUserQuestion call is one while its pylon's hook reports that its
+ * dialog waits (the registry's asks), and the cleanup pass asks one per node about what it could delete (cleanup.ts).
  */
 import { z } from "zod";
 import type { AskAnswer } from "../../images/pylon/nexus-contract.ts";
 import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
-import type { TailnetNodeId, ThreadId } from "../ids.ts";
+import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ReservedCase } from "./holds.ts";
+import type { Cleanup } from "./cleanup-model.ts";
 
-export interface Question {
+/** What every question has, whatever its subject. */
+interface Asked {
   /** Chosen by the asker, so asking again with one ID asks nothing new. */
   id: string;
-  thread: ThreadId;
   text: string;
   /** Two or more distinct labels, one of which is the answer, or none for a Claude worker's ask, which is answered through `choices`. */
   options: readonly string[];
@@ -21,13 +23,34 @@ export interface Question {
   /** A deployer question needs the right `nexus deploy` takes, since its answer may deploy. */
   answerer: "person" | "deployer";
   askedAt: number;
+  /** An ask's answer holds a choice per asked question, and `option` sums them up in one line. */
+  answer: { option: string; by: TailnetNodeId; at: number; choices?: readonly Choice[] } | null;
+}
+
+/** A question about a thread, whose attention it holds while it is open. */
+export interface ThreadQuestion extends Asked {
+  thread: ThreadId;
+  node?: never;
   /** The item a planning thread proposed, which an answer to accept adds to the pipeline. */
   proposal?: Proposal;
   /** The Claude worker's AskUserQuestion call the question is. */
   ask?: ClaudeAsk;
-  /** An ask's answer holds a choice per asked question, and `option` sums them up in one line. */
-  answer: { option: string; by: TailnetNodeId; at: number; choices?: readonly Choice[] } | null;
+  cleanup?: never;
 }
+
+/** A question about a node: what the node could delete, which an answer to accept deletes. */
+export interface NodeQuestion extends Asked {
+  node: NodeName;
+  thread?: never;
+  proposal?: never;
+  ask?: never;
+  cleanup: Cleanup;
+}
+
+/** Its subject is the thread or the node it names, and never both. */
+export type Question = ThreadQuestion | NodeQuestion;
+export type Unanswered = Omit<ThreadQuestion, "answer"> | Omit<NodeQuestion, "answer">;
+export const isNodeQuestion = (q: Question): q is NodeQuestion => q.node !== undefined;
 
 /** One item of a planning thread's block. `after` holds keys of earlier items of the block, or pipeline item IDs. */
 export interface Proposal { block: string; index: number; key: string; title: string; brief: string; after: readonly string[] }
@@ -89,7 +112,7 @@ export function reportedAsks(output: string): WaitingAsk[] {
 export const askQuestionId = (toolUseId: string) => `ask-${toolUseId}`;
 
 /** The question an ask is. Each line of its text is one asked question. */
-export function askRecord(thread: ThreadId, ask: ClaudeAsk, askedAt: number): Omit<Question, "answer"> {
+export function askRecord(thread: ThreadId, ask: ClaudeAsk, askedAt: number): Omit<ThreadQuestion, "answer"> {
   return {
     id: askQuestionId(ask.toolUseId), thread, text: ask.questions.map((q) => `${q.header}: ${q.question}`).join("\n"), options: [], reserved: null,
     answerer: "person", askedAt, ask,

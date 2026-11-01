@@ -1,13 +1,14 @@
 /**
- * The question store: each question a thread asked, in `questions`, and the asks each thread's pylon last reported
- * waiting, in `waiting_asks`. A write recomputes the thread's attention, in its transaction. Its participant tells the
- * thread core of an unanswered question, drops a closed thread's asks, and runs `reconcileAsks` when a Claude worker,
- * its transcript or its thread's status changes.
+ * The question store: each question asked about a thread or a node, in `questions`, and the asks each thread's pylon
+ * last reported waiting, in `waiting_asks`. A write recomputes a thread's attention, in its transaction. Its
+ * participant tells the thread core of an unanswered question, drops a closed thread's asks, and runs `reconcileAsks`
+ * when a Claude worker, its transcript or its thread's status changes.
  */
 import { json, jsonOrNull, type Db } from "./db.ts";
-import type { ThreadId } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
-import { askQuestionId, askRecord, type Question, type WaitingAsk } from "./questions.ts";
+import { askQuestionId, askRecord, isNodeQuestion, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
+import type { DeleteOutcome } from "../protocol/cleanup.ts";
 
 export type QuestionStore = ReturnType<typeof questionStore>;
 
@@ -46,11 +47,11 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
   return {
     participant: { needsPerson, closed, reconcile: reconcileAsks },
     /** Stores the question unless one with its ID exists, and answers the stored one either way. */
-    askQuestion(question: Omit<Question, "answer">): Question {
+    askQuestion<Q extends Unanswered>(question: Q): Q extends Omit<NodeQuestion, "answer"> ? NodeQuestion : ThreadQuestion {
       return transaction(() => {
-        sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, question.thread, JSON.stringify({ ...question, answer: null }));
-        updateAttention(question.thread);
-        return questionRecord(question.id)!;
+        sql("INSERT OR IGNORE INTO questions (id, thread, node, record) VALUES (?, ?, ?, ?)").run(question.id, question.thread ?? null, question.node ?? null, JSON.stringify({ ...question, answer: null }));
+        if (question.thread !== undefined) updateAttention(question.thread);
+        return questionRecord(question.id)! as never;
       });
     },
     question: (id: string): Question | null => questionRecord(id),
@@ -83,7 +84,23 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
         updateAttention(thread);
       });
     },
-    questions: (thread: ThreadId): Question[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(thread).map((r) => json<Question>(r.record)),
+    questions: (thread: ThreadId): ThreadQuestion[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(thread).map((r) => json<ThreadQuestion>(r.record)),
+    /** The node's questions, in the order they were asked. */
+    nodeQuestions: (node: NodeName): NodeQuestion[] => sql("SELECT record FROM questions WHERE node = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(node).map((r) => json<NodeQuestion>(r.record)),
+    /** Every node's open questions, which wait on the person as a thread's do. */
+    openNodeQuestions: (): NodeQuestion[] => sql("SELECT record FROM questions WHERE node IS NOT NULL AND json_extract(record, '$.answer') IS NULL ORDER BY json_extract(record, '$.askedAt'), rowid").all().map((r) => json<NodeQuestion>(r.record)),
+    /** Withdraws an open node question that a later one replaces. An answered one stays, with its answer. */
+    withdrawNodeQuestion(id: string) { sql("DELETE FROM questions WHERE id = ? AND node IS NOT NULL AND json_extract(record, '$.answer') IS NULL").run(id); },
+    /** Records what each delete of an answered cleanup did, beside what earlier deletes reported. The first report of an item stands. */
+    recordCleanup(id: string, outcomes: Readonly<Record<string, DeleteOutcome>>): NodeQuestion {
+      return transaction(() => {
+        const stored = questionRecord(id);
+        if (stored === null || !isNodeQuestion(stored)) throw new Error(`no node question ${id}`);
+        const recorded = { ...stored, cleanup: { ...stored.cleanup, outcomes: { ...outcomes, ...stored.cleanup.outcomes } } };
+        sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(recorded), id);
+        return recorded;
+      });
+    },
     /**
      * Records the answer to an open question. An answered one keeps its first answer, which this returns. `then` runs
      * in the same transaction once the answer is recorded, and a throw from it records nothing.
@@ -96,7 +113,7 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
         const answered = { ...stored, answer };
         sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(answered), id);
         then?.(answered);
-        updateAttention(stored.thread);
+        if (answered.thread !== undefined) updateAttention(answered.thread);
         return answered;
       });
     },

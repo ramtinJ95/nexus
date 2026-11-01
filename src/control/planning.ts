@@ -20,7 +20,7 @@ import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Pipeline } from "./pipeline.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";
-import type { Proposal, Question } from "./questions.ts";
+import type { Proposal, Question, ThreadQuestion } from "./questions.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
@@ -63,7 +63,7 @@ export const proposalId = (thread: ThreadId, p: Pick<Proposal, "block" | "index"
 /** The item an accepted proposal became. Made from the question, so the thread can be told it without a stored link. */
 export const proposalItem = (question: string) => `it-${createHash("sha256").update(question).digest("hex").slice(0, 12)}` as ItemId;
 
-export function proposalQuestion(t: Thread, p: Proposal, siblings: readonly Proposal[], askedAt: number): Omit<Question, "answer"> {
+export function proposalQuestion(t: Thread, p: Proposal, siblings: readonly Proposal[], askedAt: number): Omit<ThreadQuestion, "answer"> {
   const waits = p.after.map((ref) => {
     const sibling = siblings.find((s) => s.key === ref && s.index < p.index);
     return sibling === undefined ? `pipeline item ${ref}` : `"${sibling.title}", proposed above`;
