@@ -1,5 +1,5 @@
 /**
- * `nexus doctor`'s checks, which the daily report runs too: pure functions over the facts the control plane already
+ * `nexus doctor`'s checks, which the health passes run too: pure functions over the facts the control plane already
  * holds, gathered by src/control/doctor-run.ts. Each gives ok, warn or fail with one line that says what is wrong and
  * what to do.
  */
@@ -39,6 +39,12 @@ const day = 24 * hour;
 export const staleObservationMs = 5 * minute;
 /** A day between runs and the timer's random hour, with an hour to spare. */
 export const backupMaxAgeMs = 26 * hour;
+/**
+ * How long a role may take to reach a desired release before its check warns: the deadline `nexus deploy --wait` and a
+ * landing give a rollout, which covers the control role's drain of up to 5 minutes, its build and its health check, and
+ * the probes after it.
+ */
+export const rolloutMs = 30 * minute;
 /** The API asks tailscaled for a certificate valid a week and reloads it every 12 hours, so less than this left means renewal fails. */
 export const certificateWarnMs = 6 * day;
 export const certificateFailMs = 2 * day;
@@ -56,7 +62,7 @@ function online(n: NodeSummary, f: DoctorFacts): Verdict {
   return ok("online and observed in the last 5 min");
 }
 
-function release(report: ReleaseReport | undefined, desired: ReleaseView["desired"]): Verdict {
+function release(report: ReleaseReport | undefined, desired: ReleaseView["desired"], now: number): Verdict {
   if (report === undefined) return warn("no node is the control plane's, so nothing reports its release");
   const where = `${report.role} on ${report.node}`;
   const reason = report.reason === null ? "" : `: ${report.reason}`;
@@ -64,6 +70,8 @@ function release(report: ReleaseReport | undefined, desired: ReleaseView["desire
   if (report.state === "failed" || report.state === "rolled-back") return fail(`${where} ${report.state} toward ${report.target?.slice(0, 12) ?? "the desired release"}${reason}. journalctl -u nexus-deployer on ${report.node} says why`);
   if (desired === null) return ok(`${where} runs ${commit}, and no release is desired`);
   if (report.state === "healthy" && report.commit === desired.commit) return ok(`${where} runs the desired ${commit} and is healthy`);
+  const since = now - desired.requestedAt;
+  if (since < rolloutMs) return ok(`${where} is ${report.state} toward ${desired.commit.slice(0, 12)}, requested ${span(since)} ago, which a rollout may take up to ${span(rolloutMs)}`);
   return warn(`${where} runs ${commit} and is ${report.state} toward ${desired.commit.slice(0, 12)}${reason}. nexus release shows where it is, and a deployer that stopped reporting needs nexus-deployer.timer on ${report.node}`);
 }
 
@@ -133,12 +141,12 @@ function certificate(f: DoctorFacts): Verdict {
 
 const nodeChecks: Readonly<Record<NodeCheckName, (n: NodeSummary, f: DoctorFacts) => Verdict>> = {
   online,
-  release: (n, f) => release(f.release.nodes.find((r) => r.node === n.name && r.role === "probe"), f.release.desired),
+  release: (n, f) => release(f.release.nodes.find((r) => r.node === n.name && r.role === "probe"), f.release.desired, f.now),
   disk,
   pylons,
 };
 const controlChecks: Readonly<Record<ControlCheckName, (f: DoctorFacts) => Verdict>> = {
-  release: (f) => release(f.release.nodes.find((r) => r.node === f.controlNode && r.role === "control"), f.release.desired),
+  release: (f) => release(f.release.nodes.find((r) => r.node === f.controlNode && r.role === "control"), f.release.desired, f.now),
   backup,
   login,
   certificate,

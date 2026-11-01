@@ -84,9 +84,11 @@ const settleMs = 5 * 60_000;
 const rank = (c: Pick<Check, "status">) => statuses.indexOf(c.status);
 
 /**
- * The changes a pass confirms. A check's status is the better of its last two passes, so it goes bad only on its
- * second bad pass in a row, and gets better on its first better pass. Before a start's first pass, the status
- * recorded stands for the pass before. A check that went bad and is no longer run, as a removed node's, recovers.
+ * The changes a pass confirms. A check's status changes only once two passes in a row agree it moved the same way:
+ * both worse than its status, which then becomes the better of the two, or both better, which then becomes the worse.
+ * So one bad pass alerts nothing, and a check that flips at a threshold alerts once and stays a problem until it is
+ * steady. Before a start's first pass, the status recorded stands for the pass before. A check that went bad and is no
+ * longer run, as a removed node's, recovers.
  */
 export function confirmedChanges(recorded: readonly HealthChange[], previous: ReadonlyMap<string, Check> | null, report: DoctorReport): NewHealthChange[] {
   const states = new Map(recorded.map((c) => [checkKey(c), c]));
@@ -96,8 +98,9 @@ export function confirmedChanges(recorded: readonly HealthChange[], previous: Re
     const key = checkKey(check);
     const from = states.get(key)?.status ?? "ok";
     const prior = (previous === null ? states.get(key) : previous.get(key)) ?? { ...check, status: "ok" };
-    const confirmed = rank(prior) < rank(check) ? prior : check;
-    if (confirmed.status !== from) changes.push({ ...check, status: confirmed.status, text: confirmed.text, from, at: report.at });
+    const [better, worse] = rank(prior) < rank(check) ? [prior, check] : [check, prior];
+    const confirmed = rank(better) > rank({ status: from }) ? better : rank(worse) < rank({ status: from }) ? worse : null;
+    if (confirmed !== null) changes.push({ ...check, status: confirmed.status, text: confirmed.text, from, at: report.at });
   }
   for (const [key, state] of states) {
     if (!run.has(key) && state.status !== "ok") changes.push({ node: state.node, name: state.name, status: "ok", text: "no longer checked", from: state.status, at: report.at } as NewHealthChange);

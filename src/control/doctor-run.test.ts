@@ -61,17 +61,34 @@ test("a check that goes bad alerts once, on its second bad pass in a row, and a 
   assert.match(p.logged.join("\n"), /the rj-firebat disk check went from warn to fail: the disk is fail/);
 });
 
-test("a check that recovers clears its alert and the badge on its first good pass", async (t) => {
+test("a check that recovers clears its alert and the badge on its second good pass in a row", async (t) => {
   const p = passes(t);
   await p.pass(backup("fail"), disk("ok"));
   await p.pass();
   assert.deepEqual([p.view().problems.map((c) => c.name), p.view().unseen], [["backup"], 1]);
   await p.pass(backup("ok"), disk("ok"));
+  assert.equal(p.alerts().length, 1, "one good pass is not yet steady");
+  await p.pass();
   assert.deepEqual(p.alerts().map((a) => [a.name, a.from, a.status]), [["backup", "ok", "fail"], ["backup", "fail", "ok"]]);
   assert.deepEqual([p.view().problems, p.view().unseen], [[], 0]);
   await p.pass(backup("warn"), disk("ok"));
   await p.pass(backup("ok"), disk("ok"));
   assert.equal(p.alerts().length, 2, "a bad pass between good ones is noise");
+});
+
+test("a check that flips at its threshold on every pass alerts once, and stays one problem, seen once, until it is steady", async (t) => {
+  const p = passes(t);
+  await p.pass(backup("ok"), disk("warn"));
+  await p.pass(backup("ok"), disk("fail"));
+  assert.deepEqual(p.alerts().map((a) => [a.from, a.status]), [["ok", "warn"]], "two bad passes, the better of them");
+  const [problem] = p.view().problems;
+  p.registry.markHealthSeen(problem!.id, p.at());
+  for (const status of ["ok", "warn", "ok", "warn", "ok", "fail", "warn"] as const) await p.pass(backup("ok"), disk(status));
+  assert.equal(p.alerts().length, 1, "no recovery and no new alert while it flips");
+  assert.deepEqual([p.view().problems.map((c) => c.id), p.view().unseen], [[problem!.id], 0]);
+  await p.pass(backup("ok"), disk("ok"));
+  await p.pass();
+  assert.deepEqual(p.alerts().map((a) => a.status), ["warn", "ok"], "steady at ok, it recovers");
 });
 
 test("the first pass waits 5 minutes after a start, and a restart neither alerts again on a problem recorded nor on its own first pass", async (t) => {
@@ -152,7 +169,7 @@ test("the doctor reads each node, the release and the control node from the regi
   const now = Date.now();
   registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 5, pylons: true }] }) });
   registry.ingested(testObservation(node, { observedAt: new Date(now - 10_000).toISOString() }), []);
-  registry.setDesiredRelease({ commit: "c".repeat(40), requestedBy: "nLAPTOP", requestedAt: now });
+  registry.setDesiredRelease({ commit: "c".repeat(40), requestedBy: "nLAPTOP", requestedAt: now - day });
   const r = await runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now, startedAt: now - 3 * day,
     backupStatus: async () => "missing",

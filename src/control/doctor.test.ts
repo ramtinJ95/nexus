@@ -143,6 +143,16 @@ test("the dashboard's certificate is ok with weeks left or without https, warns 
   expect(healthy({ certificate: { kind: "unreachable", hostname: "rj-firebat.example.ts.net", error: "connect ECONNREFUSED" } }), null, "certificate", "fail", /does not answer: connect ECONNREFUSED/);
 });
 
+test("a role still rolling out toward a release requested under 30 minutes ago is ok, and warns once the rollout overstays that, while a failure fails at once", () => {
+  const rollout = (minutesAgo: number, control: Partial<ReleaseReport>) => healthy({ release: { desired: { commit, requestedBy: "nLAPTOP", requestedAt: now - minutesAgo * 60_000 }, nodes: [report(node, "control", control), report(node, "probe", { state: "waiting-for-control", commit: older }), report(peer, "probe", { state: "pending", reason: "deployer report is stale" })] } });
+  expect(rollout(12, { state: "waiting-for-idle", commit: older }), null, "release", "ok", /control on rj-firebat is waiting-for-idle toward cccccccccccc, requested 12 min ago, which a rollout may take up to 30 min/);
+  expect(rollout(12, { state: "installing", commit: older }), node, "release", "ok", /probe on rj-firebat is waiting-for-control/);
+  expect(rollout(12, { state: "installing", commit: older }), peer, "release", "ok", /is pending toward/);
+  expect(rollout(31, { state: "installing", commit: older }), null, "release", "warn", /is installing toward cccccccccccc/);
+  expect(rollout(31, { state: "installing", commit: older }), peer, "release", "warn", /deployer report is stale/);
+  expect(rollout(2, { state: "failed", commit: older, reason: "build failed" }), null, "release", "fail", /failed toward cccccccccccc: build failed/);
+});
+
 test("a missing backup status only warns while this control plane has run under 26 hours, since the unit records a run from this release on", () => {
   expect(healthy({ backup: "missing", upSince: now - 10 * 60_000 }), null, "backup", "warn", /no backup run is recorded yet.*its next nightly run records one/);
   expect(healthy({ backup: "missing", upSince: now - 25 * hour }), null, "backup", "warn", /recorded yet/);
