@@ -49,6 +49,7 @@ import { dailyReports, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { backupStatusFile, readBackupStatus } from "./backup-status.ts";
 import { recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
+import { healthSampling } from "./health-sampling.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
@@ -250,6 +251,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   });
   const reports = dailyReports({ registry, run: doctor, startedAt });
   every(5 * 60_000, () => reports.poll());
+  const sampling = healthSampling({ registry, probes: probeMap, log });
+  every(60_000, () => sampling.poll());
   every(60_000, () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)));
   const api = await startApi({
     ...(config.https ? { https: { port: dashboardPort, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
@@ -284,7 +287,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       for (const timer of timers) clearInterval(timer);
-      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, reports, api, backfill, usage, harness, loop, images]) await service?.close();
+      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, reports, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };
