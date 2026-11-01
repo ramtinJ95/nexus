@@ -10,7 +10,7 @@ import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText
 import type { Context, Need } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
-import { layout, threadsOf, queuedLook, threadTitle, closedLabel, newProjectButton, type Shell } from "./shell.ts";
+import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
 
 /** Every open thread with what its pylon is asked to be and is, for the desk and for the phone's thread list. */
 export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
@@ -39,11 +39,11 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): 
 <div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
 <div class="page" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
-  const { open, closed } = threadsOf(c, p.id);
+  const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
   return html`<section aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
-${open.length === 0 ? html`<p class="empty">No open threads.</p>` : table(open)}
+${recent.length > 0 ? table(recent) : quiet.length === 0 && html`<p class="empty">No open threads.</p>`}
 ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-queued">
 <thead><tr><th>Thread</th><th>Waits for</th><th class="wide">Node</th></tr></thead>
 <tbody>${queued.map((q) => {
@@ -55,6 +55,7 @@ ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-qu
 </tr>`;
 })}</tbody>
 </table>`}
+${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)}</summary>${table(quiet)}</details>`}
 ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
 </section>`;
 })}

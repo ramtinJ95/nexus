@@ -69,4 +69,4 @@ These come from t3code, and we decided against them for Nexus:
 - **Event sourcing** with an effect outbox and projections. pi-durable, the registry and the pure planner already make Nexus durable.
 - **Remote access machinery,** such as several routes per machine, pairing links, a relay, OAuth and guest links. The tailnet and its whois check already cover a single user.
 - **Approvals and permission modes.** Pylons run unattended in a VM with an egress allowlist, and approval prompts would stop work while you're away.
-- **Settle and snooze shelves.** Idle pylons already pause, and archived threads fold away.
+- **Settle and snooze shelves.** Idle pylons already pause, and archived threads and threads quiet for over 8 hours fold away.

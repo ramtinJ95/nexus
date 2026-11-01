@@ -72,11 +72,24 @@ ${projectDialog(c, page.addProject === true)}
 `;
 }
 
-/** A project's threads, newest first: the open ones, and the archived or deleted ones folded below them. */
+/** How long an open thread whose pylon is down and whose agent is not working stays listed before it folds away as quiet. */
+export const quietAfterMs = 8 * 60 * 60 * 1000;
+const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
+
+/**
+ * A project's threads, newest first: the recent open ones, the open ones quiet for over `quietAfterMs` with their pylon
+ * paused or absent and their agent not working, and the archived or deleted ones. The last two fold below the first.
+ * An unread reply does not keep a thread out of the quiet fold, since Needs you does not list one either.
+ */
 export function threadsOf(c: Context, project: string) {
   const threads = c.threadsIn(project).toReversed();
   const closed = (t: Thread) => t.status === "archived" || t.status === "deleted";
-  return { open: threads.filter((t) => !closed(t)), closed: threads.filter(closed) };
+  const quiet = (t: Thread) => {
+    const state = c.row(t).pylon.actualState;
+    return (state === "paused" || state === "absent") && !t.working && c.now - lastActive(t) > quietAfterMs;
+  };
+  const open = threads.filter((t) => !closed(t));
+  return { recent: open.filter((t) => !quiet(t)), quiet: open.filter(quiet), closed: threads.filter(closed) };
 }
 /** A blocked thread waits for the person, as a review that ended for them does. */
 export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
@@ -86,7 +99,7 @@ export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
 
 /** A thread's title, started or queued. */
 export const threadTitle = (c: Context, id: ThreadId) => c.registry.thread(id)?.title ?? c.registry.queuedThread(id)?.title ?? id;
-const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt);
+export const quietLabel = (threads: readonly Thread[]) => `${threads.length} quiet for over ${quietAfterMs / 3_600_000} hours`;
 export function closedLabel(threads: readonly Thread[]): string {
   const deleted = threads.filter((t) => t.status === "deleted").length;
   const archived = threads.length - deleted;
@@ -113,13 +126,14 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
 <nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}</nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
-  const { open, closed } = threadsOf(c, p.id);
+  const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
   // A project folds like a folder. client.js remembers which ones the reader folded.
   return html`<details class="group" id="group-${p.id}" open>
 <summary class="group-h">${icon("chevron")}${icon("folder")}<span class="group-name"><span>${p.id}</span><span class="group-branch">${p.defaultBranch}</span></span></summary>
 <a class="group-new" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}" aria-label="New thread in ${p.id}" title="New thread in ${p.id}">${icon("plus")}</a>
-${open.length + queued.length > 0 && html`<ul>${open.map(row)}${queued.map(queuedRow)}</ul>`}
+${recent.length + queued.length > 0 && html`<ul>${recent.map(row)}${queued.map(queuedRow)}</ul>`}
+${quiet.length > 0 && html`<details class="archived" id="side-quiet-${p.id}"${quiet.some((t) => t.id === active) && " open"}><summary>${quietLabel(quiet)}</summary><ul>${quiet.map(row)}</ul></details>`}
 ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${closed.some((t) => t.id === active) && " open"}><summary>${closedLabel(closed)}</summary><ul>${closed.map(row)}</ul></details>`}
 </details>`;
 })}
