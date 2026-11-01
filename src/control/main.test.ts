@@ -9,7 +9,7 @@ import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import { ProbeHttpError } from "../protocol/http.ts";
-import type { ProbeClient } from "../protocol/client.ts";
+import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import { tokenDigest } from "../deploy/model.ts";
 import { joinControlPlane } from "../deploy/setup.ts";
 import { call as callJson, tempDir, testObservation, until } from "../test-kit.ts";
@@ -98,7 +98,7 @@ test("the image build node is optional, and one given must be a configured node"
 });
 
 /** A control plane as `main` starts it, on loopback, with a fake tailscaled and a fake probe for each node it follows. */
-async function controlPlaneOf(t: import("node:test").TestContext, config: Record<string, unknown>, options: { before?: (db: string) => void; unaware?: readonly string[] } = {}) {
+async function controlPlaneOf(t: import("node:test").TestContext, config: Record<string, unknown>, options: { before?: (db: string) => void; unaware?: readonly string[]; health?: ProbeClient["health"] } = {}) {
   const dir = await tempDir("nexus-main-", t);
   let caller: string | null = null;
   const hosts = new Map<string, string>();
@@ -120,7 +120,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
     followed.push([node.name, node.tailnetHost, node.tailnetNodeId]);
     const unused = () => Promise.reject(new Error("unused"));
     return {
-      node: node.name, submit: unused, job: unused, command: unused, stream: unused, manifest: unused, putSecret: unused, health: unused,
+      node: node.name, submit: unused, job: unused, command: unused, stream: unused, manifest: unused, putSecret: unused, health: options.health ?? unused,
       async putPeers(list) {
         if (unaware.has(node.name)) throw new ProbeHttpError(`${node.name}: PUT /v1/peers: HTTP 404: no route /v1/peers`, 404);
         peers.set(node.name, list);
@@ -181,6 +181,17 @@ test("a registry and control.json from before join tokens come up with the same 
   assert.equal((await plane.call("nPeerProbeCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer firebat-token" })).status, 403);
   const registry = testRegistry(t, plane.db);
   assert.deepEqual(registry.joinedNodes(), []);
+});
+
+test("each read of a node's health is recorded, and its history read back", async (t) => {
+  const health = { node: "rj-firebat", readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: null, memory: null, disk: { path: "/var/lib/nexus", totalGiB: 457, freeGiB: 180.5 }, temperatures: null, pylons: null } as NodeHealth;
+  const plane = await controlPlaneOf(t, today, { health: async () => health });
+  const from = Date.now() - 60_000;
+  assert.equal((await plane.call("nLaptopCNTRL", "GET", "/v1/nodes/rj-firebat/health")).status, 200);
+  const { status, body } = await plane.call("nLaptopCNTRL", "GET", `/v1/nodes/rj-firebat/metrics?from=${from}`);
+  assert.equal(status, 200);
+  assert.deepEqual(body.series.map((s: { key: string; avg: number[] }) => [s.key, s.avg]), [["cpus", [16]], ["diskFree", [180.5]], ["diskTotal", [457]]]);
+  assert.deepEqual((await plane.call("nLaptopCNTRL", "GET", `/v1/nodes/infra-testbench/metrics?from=${from}`)).body.series, [], "only the node read");
 });
 
 test("a machine that joins is followed without a restart, every probe learns it as a peer, and a probe that cannot learn peers keeps working", async (t) => {
