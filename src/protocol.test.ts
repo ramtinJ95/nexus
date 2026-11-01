@@ -362,6 +362,19 @@ test("a status a method gives no meaning rejects with its status, and with a Pro
   }
 });
 
+test("a stream the probe took but did not answer in time says its pylon is not answering and what to try", async (t) => {
+  const server = createServer().listen(0, "127.0.0.1");
+  server.on("upgrade", () => undefined);
+  await new Promise((ready) => server.once("listening", ready));
+  t.after(() => server.close());
+  const client = connectProbe(node as NodeName, "127.0.0.1", "nPROBE" as TailnetNodeId, { port: (server.address() as { port: number }).port, whois: async () => "nPROBE" as TailnetNodeId, streamTimeoutMs: 50 });
+  await assert.rejects(client.stream(pylonId as PylonId, ["herdr"]), (err: Error & Partial<ProbeError>) => {
+    assert.equal(err.code, "unreachable");
+    assert.equal(err.message, `${node}: pylon ${pylonId} is not answering: it did not start a process within 0.05 s. It may be out of memory or busy. Pausing and waking it, as archiving and unarchiving its thread does, gives it a fresh VM`);
+    return true;
+  });
+});
+
 test("each union's list holds exactly its type's members, and the parser that reads it takes those and no other", async (t) => {
   const members = {
     send: { sent: true, queued: true, blocked: true, starting: true, moved: true } satisfies Record<SendClaudeOutcome, true>,

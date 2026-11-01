@@ -16,7 +16,7 @@ import { parseCommandResult, type CommandResult, type PylonCommand } from "./com
 import { clientByteStream, streamPath, streamProtocol, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { probePort } from "./routes.ts";
-import { isProbeError, probeError, ProbeHttpError, text } from "./http.ts";
+import { isProbeError, probeError, ProbeHttpError, text, type ProbeError } from "./http.ts";
 
 /**
  * The control plane's handle on one probe. Methods reject with ProbeError when the probe cannot be reached or is not
@@ -73,11 +73,12 @@ const commandTimeoutMs = 90_000;
  * `whois` defaults to the local tailscaled. Tests pass a fake one, and `port` exists so they can run
  * a probe on a free loopback port.
  */
-export function connectProbe(node: NodeName, tailnetHost: string, expected: TailnetNodeId, options: { port?: number; whois?: Whois } = {}): ProbeClient {
+export function connectProbe(node: NodeName, tailnetHost: string, expected: TailnetNodeId, options: { port?: number; whois?: Whois; streamTimeoutMs?: number } = {}): ProbeClient {
   // Plain HTTP, because WireGuard already encrypts the link. The identity check is whois on the socket we got.
   const port = options.port ?? probePort;
   const whois = options.whois ?? localApiWhois();
   const agent = new Agent({ keepAlive: false });
+  const streamTimeoutMs = options.streamTimeoutMs ?? requestTimeoutMs;
 
   /** A silent socket for `requestTimeoutMs` fails the call as unreachable. Observe lifts the limit once its stream starts. */
   function open(method: "GET" | "PUT" | "POST", path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {
@@ -175,7 +176,9 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     stream(pylonId, argv) {
       const path = streamPath(pylonId, argv);
       return new Promise((resolve, reject) => {
-        const req = request({ host: tailnetHost, port, method: "GET", path, agent, timeout: requestTimeoutMs, headers: { connection: "upgrade", upgrade: streamProtocol } });
+        const req = request({ host: tailnetHost, port, method: "GET", path, agent, timeout: streamTimeoutMs, headers: { connection: "upgrade", upgrade: streamProtocol } });
+        let sent = false;
+        req.once("finish", () => { sent = true; });
         req.on("upgrade", (_res, socket, head) => {
           // Node hands over an upgraded socket without its error handler. A reset ends the stream as lost.
           socket.on("error", () => undefined);
@@ -188,8 +191,9 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
         req.on("response", (res) => {
           text(res).then((body) => reject(statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
         });
-        req.on("timeout", () => req.destroy(new Error(`no answer within ${requestTimeoutMs} ms`)));
-        req.on("error", (err) => reject(probeError("unreachable", `${node}: ${err.message}`)));
+        // The probe answers a stream once the guest has started its process, so a probe that took the request and is silent waits on the guest.
+        req.on("timeout", () => req.destroy(sent ? notAnswering(node, pylonId, streamTimeoutMs) : new Error(`no answer within ${streamTimeoutMs} ms`)));
+        req.on("error", (err) => reject(isProbeError(err) ? err : probeError("unreachable", `${node}: ${err.message}`)));
         req.end();
       });
     },
@@ -201,6 +205,11 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       return parseArtifactManifest(JSON.parse(res.body));
     },
   };
+}
+
+/** Why a stream failed whose pylon's guest did not start the process within `ms`, and what the person can do about it. */
+export function notAnswering(node: NodeName, pylonId: PylonId, ms: number): Error & ProbeError {
+  return probeError("unreachable", `${node}: pylon ${pylonId} is not answering: it did not start a process within ${ms / 1000} s. It may be out of memory or busy. Pausing and waking it, as archiving and unarchiving its thread does, gives it a fresh VM`);
 }
 
 /** Ends quietly when the link drops or the caller aborts: that is how observe reports a lost link. */
