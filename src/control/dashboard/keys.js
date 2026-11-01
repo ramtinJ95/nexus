@@ -119,10 +119,12 @@ document.addEventListener("keydown", (event) => {
   if (!onItem && event.target !== document.body && key !== "j" && key !== "k") return;
   const list = items();
   const at = current();
-  if (key === "j" || key === "k" || key === "ArrowDown" && onItem || key === "ArrowUp" && onItem) {
+  const down = key === "j" || (onItem && key === "ArrowDown");
+  const up = key === "k" || (onItem && key === "ArrowUp");
+  if (down || up) {
     if (list.length === 0) return;
     event.preventDefault();
-    const index = at === null ? (key === "j" || key === "ArrowDown" ? 0 : list.length - 1) : list.indexOf(at) + (key === "j" || key === "ArrowDown" ? 1 : -1);
+    const index = at === null ? (down ? 0 : list.length - 1) : list.indexOf(at) + (down ? 1 : -1);
     pick(list[Math.max(0, Math.min(list.length - 1, index))]);
   } else if (at === null) {
     return;
