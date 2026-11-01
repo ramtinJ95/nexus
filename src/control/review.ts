@@ -28,7 +28,7 @@ import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
 import { isDraining } from "./drain.ts";
 import { reservedCases, reservedNames, waivable, type Hold } from "./holds.ts";
-import { heldBy, landingHolds, unwaived } from "./policy.ts";
+import { carryWaiver, heldBy, landingHolds, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
@@ -37,8 +37,8 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 import {
-  answered, answersSchema, approves, blocks, cancellable, cannotLand, checkOutput, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
-  landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, roundsSpent, settledKinds, verdictSchema,
+  answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
+  landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, reviewerApproved, roundsSpent, settledKinds, verdictSchema,
   type Finding, type HoldCause, type Phase, type PhaseKind, type Review, type Round, type Waiver,
 } from "./review-model.ts";
 import type { StartRequest } from "./start-request.ts";
@@ -228,17 +228,37 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The last message again, under a new request ID, so it keeps its token. */
   const resend = (r: Review, to: "builder" | "reviewer"): Review => ({ ...r, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: r.asked, attempted: null } });
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
-  /** The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. */
-  const newHead = (r: Review, head: string, base: string, why: string): Review => {
+  /** The PR's change at commit `head`, as GitHub shows it against `base`. */
+  const changeAt = async (r: Review, base: string, head: string) => changeOf(await github.change(r.pr.repo, base, head));
+  /**
+   * The reviewer's approval of the latest round carried to `head`, pushed after it, when the change at both is the
+   * same, so the checks run at `head` with no reviewer round. Null when the reviewer did not approve it, or the change
+   * differs or cannot be compared, and `head` needs a round of its own.
+   */
+  const carryApproval = async (r: Review, head: string, base: string): Promise<Review | null> => {
+    const round = r.rounds.at(-1)!;
+    if (!reviewerApproved(round)) return null;
+    const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
+    if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
+    return { ...r, rounds: [...r.rounds, { head, verdict: round.verdict, check: null, answers: null, carried: { from: round.head } }], phase: checking(), outbox: null, nudges: 0 };
+  };
+  /**
+   * The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. The
+   * same change as the approved head's only runs the checks again.
+   */
+  const newHead = async (r: Review, head: string, base: string, why: string): Promise<Review> => {
+    const carried = await carryApproval(r, head, base);
+    if (carried !== null) return carried;
     const n = roundsSpent(r);
     if (n >= r.maxRounds) return end(r, { ...personPhase("rounds", `${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`), label: { state: "adding" }, unreviewed: head });
     const next: Review = { ...r, rounds: [...r.rounds, { head, verdict: null, check: null, answers: null }] };
     return send(next, "reviewer", (token) => nextRound(next, r.rounds.at(-1)!, token, base), { kind: "reviewing" });
   };
-  /** The builder rebases a branch that conflicts with its base, unless no round is left to review the rebase. */
+  /**
+   * The builder rebases a branch that conflicts with its base, even after the last round: a rebase that keeps the
+   * approved change needs no round, and one that changes it runs out of rounds when the builder pushes it.
+   */
   const rebase = (r: Review, base: string): Review => {
-    const n = roundsSpent(r);
-    if (n >= r.maxRounds) return ranOut(r, `The branch conflicts with ${base}, and round ${n} was the last this review allows, so a rebase could not be reviewed.`);
     const next = withRound(r, { conflict: { base } });
     return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
   };
@@ -319,6 +339,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.
       if (snapshot.detail.head === round.head && approves(round)) return { ...withAnswers, phase: checking(), nudges: 0 };
+      // A rebase for a conflict or a failed gate that left the approved change as it was needs no reviewer.
+      if (snapshot.detail.head !== round.head) {
+        const carried = await carryApproval(withAnswers, snapshot.detail.head, snapshot.detail.base);
+        if (carried !== null) return carried;
+      }
       if (n >= r.maxRounds) return ranOut(withAnswers, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
       const next: Review = { ...withAnswers, rounds: [...withAnswers.rounds, { head: snapshot.detail.head, verdict: null, check: null, answers: null }] };
       return send(next, "reviewer", (token) => nextRound(next, withAnswers.rounds.at(-1)!, token, snapshot.detail.base), { kind: "reviewing" });
@@ -377,37 +402,42 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       reads.delete(prKey(r));
       const snapshot = await read(r);
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
+      // The change the person pressed Land for is read at once, so a rebase after it can still be compared with it.
+      if (r.waiver !== null && r.waiver.change === null && r.waiver.head === head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, snapshot.detail.base, head) } };
       // Landings deploy one at a time, so each deploy's rollback target is a release that was healthy. One that has
       // authorized its merge holds the turn, which every other waits for.
       if (deploys(r) && phase.authorized !== head) {
         const waiting = landingAhead(r);
         if (waiting !== null) return phase.waiting === waiting ? r : { ...r, phase: { ...phase, waiting } };
       }
-      // `left` is what the person's waiver does not get past. A landing that holds goes to the person with every hold,
-      // those it waived too, so the person's next confirmation can name them all.
+      // `left` is what the person's waiver does not get past, once carried to this head if its change is the one they
+      // waived, and `why` why it did not carry. A landing that holds goes to the person with every hold, those it
+      // waived too, so the person's next confirmation can name them all.
       const holds = async () => {
         if (snapshot.checksUnread) throw new Error("GitHub's checks for the head could not be read");
         const all = [...unauthorized(r, builder), ...landingHolds({ review: r, pr: snapshot, files: await github.files(r.pr.repo, r.pr.number), nexus: deploys(r) })];
-        return { all, left: unwaived(r, all) };
+        const left = unwaived(r, all);
+        const { review, why } = left.length && r.waiver !== null && r.waiver.head !== head ? carryWaiver(r, await changeAt(r, snapshot.detail.base, head), all) : { review: r, why: null };
+        return { all, left: unwaived(review, all), review, why: why === null ? [] : [why] };
       };
       let commit: string;
       if (snapshot.detail.mergeCommit !== null) {
         if (snapshot.detail.head !== head) return toPerson(r, "outside", { code: "not-approved-head", text: `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.` });
         // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
         if (phase.authorized !== head) {
-          const { all, left } = await holds();
-          if (left.length) return toPerson(r, "outside", `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...all);
+          const { all, left, why } = await holds();
+          if (left.length) return toPerson(r, "outside", `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...why, ...all);
         }
         commit = snapshot.detail.mergeCommit;
       } else {
         // A head pushed after the approval, such as a rebase on the PR watch's news of a conflict, gets its own round.
-        if (snapshot.detail.head !== head) return newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
+        if (snapshot.detail.head !== head) return await newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
-        const { all, left } = await holds();
+        const { all, left, review, why } = await holds();
         if (left.length === 1 && left[0]!.code === "conflict") return rebase(r, snapshot.detail.base);
-        if (left.length) return toPerson(r, "policy", ...all);
-        if (phase.authorized !== head) return { ...r, phase: { kind: "merging", authorized: head } };
+        if (left.length) return toPerson(r, "policy", ...why, ...all);
+        if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         reads.delete(prKey(r));
         if (merged.kind !== "merged") {
@@ -473,11 +503,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * approval, which the push may answer. One the loop gave up on otherwise stays the person's, and its reasons name the
    * new head.
    */
-  function pushedAfter(r: Review, snapshot: PrSnapshot): Review | null {
+  async function pushedAfter(r: Review, snapshot: PrSnapshot): Promise<Review | null> {
     const head = pushedHead(r, { ...snapshot.pr, head: snapshot.detail.head });
     if (head === null) return null;
     const phase = r.phase;
-    if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
+    if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return await newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
     const stale: Hold = { code: "stale-head", text: `The pull request's head moved to ${head} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.` };
     return { ...r, phase: { ...phase, ...personPhase(phase.cause, ...phase.holds.filter((h) => h.code !== "stale-head"), stale), unreviewed: head } };
   }
@@ -500,7 +530,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const pr = fresh !== null ? { ...fresh.pr, head: fresh.detail.head } : capped ? undefined : watchedPr(r);
       if (held && pr?.state === "closed") return end(r, { kind: "closed" });
       // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
-      const moved = pushedHead(r, pr) === null ? null : pushedAfter(r, fresh ?? await read(r));
+      const moved = pushedHead(r, pr) === null ? null : await pushedAfter(r, fresh ?? await read(r));
       if (moved !== null) return moved;
     }
     // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.
@@ -665,7 +695,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (!waivable(hold.code)) throw new HttpError(409, `"${text}" cannot be waived: only the holds the merge policy reserves for the person`);
         return hold.code;
       };
-      const waiver: Waiver | null = waive === undefined ? null : { head: r.rounds.at(-1)!.head, holds: [...waive], codes: waive.map(waived), by: requestedBy, at: now() };
+      const waiver: Waiver | null = waive === undefined ? null : { head: r.rounds.at(-1)!.head, holds: [...waive], codes: waive.map(waived), by: requestedBy, at: now(), change: null };
       const next: Review = { ...r, land: { requestedBy }, waiver, phase: checking(), outbox: null, nudges: 0 };
       registry.saveReview(next);
       void poll();

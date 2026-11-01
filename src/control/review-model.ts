@@ -2,9 +2,10 @@
  * A review's record and the pure rules over it. The review loop (review.ts) steps the record, the merge policy
  * (policy.ts) reads it, and the registry, the CLI and the dashboard store or show it.
  */
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { reviewPrefix } from "../agent-protocol.ts";
-import type { PullRequest } from "./github.ts";
+import type { ChangedFile, PullRequest } from "./github.ts";
 import { legacyHoldCode, reservedCases, type Hold, type HoldCode } from "./holds.ts";
 import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
@@ -49,7 +50,12 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string } }
+export interface Round { head: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string } }
+/**
+ * `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
+ * change at both is the same, so no reviewer round ran for it and it counts against no limit. Its checks run as any
+ * round's do, since the base under the change moved.
+ */
 /**
  * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
  * instead. `ran` when the script gave its verdict in verify pylon `thread`.
@@ -114,10 +120,33 @@ export type Label = { state: "adding" } | { state: "added" } | { state: "failed"
 export type PhaseKind = Phase["kind"];
 
 /**
- * The person's waiver of holds the policy reserves for them, for this review at `head`: `holds` as the person saw
- * them, and `codes`, which the landing matches. It lasts for the landing it started, and a later land replaces it.
+ * A pull request's change at a head, as `git patch-id --stable` identifies it: one identity per changed file, of its
+ * path, its path before a rename and its patch against the base without the hunk headers, so a rebase that only moves
+ * hunks keeps it, and any changed line, context lines included, does not. `unknown` when GitHub does not show the
+ * whole change, such as a binary file's, so nothing can say it is the same.
  */
-export interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: string; at: number }
+export type Change = { kind: "known"; files: { path: string; id: string }[] } | { kind: "unknown"; why: string };
+export function changeOf(files: readonly ChangedFile[] | null): Change {
+  if (files === null) return { kind: "unknown", why: "GitHub did not show the whole change" };
+  const unshown = files.find((f) => f.patch === "");
+  if (unshown !== undefined) return { kind: "unknown", why: `GitHub shows no patch for ${unshown.path}` };
+  const id = (f: ChangedFile) => createHash("sha256").update(JSON.stringify([f.previous, f.path, f.patch.split("\n").filter((line) => !line.startsWith("@@"))])).digest("hex");
+  return { kind: "known", files: files.map((f) => ({ path: f.path, id: id(f) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) };
+}
+/** The paths whose patches differ between two changes, an empty list for the same change. */
+export function changedPaths(a: Extract<Change, { kind: "known" }>, b: Extract<Change, { kind: "known" }>): string[] {
+  const ids = (c: typeof a) => new Map(c.files.map((f) => [f.path, f.id]));
+  const [before, after] = [ids(a), ids(b)];
+  return [...new Set([...before.keys(), ...after.keys()])].filter((path) => before.get(path) !== after.get(path)).sort();
+}
+
+/**
+ * The person's waiver of holds the policy reserves for them, for this review at `head`: `holds` as the person saw
+ * them, and `codes`, which the landing matches. `change` is the change at the head they pressed Land at, null until
+ * the landing reads it and absent from a waiver saved before Nexus recorded it, and `from` that head once the waiver carried to a later head with the same change. It lasts
+ * for the landing it started, and a later land replaces it.
+ */
+export interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: string; at: number; change?: Change | null; from?: string }
 
 export interface Review {
   /** Part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
@@ -184,7 +213,8 @@ export const personPhase = (cause: HoldCause, ...items: readonly (Hold | string)
 /**
  * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
  * priorities, one saved before waivers has none, holds and a waiver saved before hold codes get them from their texts,
- * and a hold saved before causes gets one from its label.
+ * and a hold saved before causes gets one from its label. A waiver saved before changes keeps none, so it holds at its
+ * own head alone.
  */
 export function storedReview(record: Review): Review {
   const { phase, waiver } = record;
@@ -217,7 +247,7 @@ const gates = {
   conflict: (head: string, base: string): GateFailure => ({
     kind: "conflict", finding: {
       id: "CONFLICT", priority: "P0", where: `origin/${base}`, summary: `The branch conflicts with ${base}, so ${head} cannot merge`,
-      detail: `Rebase the branch onto the current base: git fetch origin && git rebase origin/${base}. Resolve each conflict so that both sides' intent survives: keep what ${base} changed and what this pull request adds. Run the typecheck and the full test suite again, then push with git push --force-with-lease. The rebased head gets a new review round. If you cannot resolve a conflict, reject CONFLICT with the reason, and the person takes over.`,
+      detail: `Rebase the branch onto the current base: git fetch origin && git rebase origin/${base}. Resolve each conflict so that both sides' intent survives: keep what ${base} changed and what this pull request adds. Run the typecheck and the full test suite again, then push with git push --force-with-lease. A rebase that leaves the change as it was keeps the approval, and any other gets a new review round. If you cannot resolve a conflict, reject CONFLICT with the reason, and the person takes over.`,
     }, failed: `The branch conflicted with ${base}`,
     verdict: `the reviewer approved, but the branch conflicts with ${base}, so it cannot merge`, code: "loop", pushedNothing: `The branch conflicts with ${base}, and the builder did not rebase it`, output: null,
   }),
@@ -234,6 +264,8 @@ export const findingsOf = (round: Round): Finding[] => {
   const gate = gateFailure(round);
   return [...round.verdict?.findings ?? [], ...gate === null ? [] : [gate.finding]];
 };
+/** The reviewer approved the round, whatever a gate after it found. */
+export const reviewerApproved = (round: Round) => round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks);
 /** An approval with no blocking finding open, the check included. */
 export const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some(blocks);
 /**
@@ -263,10 +295,13 @@ export const heldForGate = (r: Review) => {
   return r.phase.kind === "needs-person" && r.phase.cause !== "rounds" && r.merged === null && roundsSpent(r) < r.maxRounds
     && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks) && gateFailure(round) !== null;
 };
-/** The rounds that count against the limit. One that approves again the head its previous round approved reviewed nothing new. */
+/**
+ * The rounds that count against the limit. One that approves again the head its previous round approved reviewed
+ * nothing new, and an approval carried to the same change reviewed nothing at all.
+ */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
-  return !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
+  return round.carried === undefined && !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
 }).length;
 /**
  * The head `pr` was read at, when it is open there at another head than the latest round's and than the one its hold
@@ -274,9 +309,13 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
  */
 export const pushedHead = (r: Review, pr: Pick<PullRequest, "state" | "head"> | undefined): string | null =>
   pr?.state !== "open" || pr.head === undefined || r.rounds.at(-1)!.head === pr.head || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
-/** Why the latest round started, when it reviews a head pushed after the previous round's approval rather than the builder's fixes. */
+/**
+ * Why the latest round started, when it reviews a head pushed after the previous round's approval rather than the
+ * builder's fixes, or carries that approval to the head.
+ */
 export function roundNote(r: Review): string | null {
   const [previous, round] = r.rounds.slice(-2);
+  if (round?.carried !== undefined) return `approval carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
   if (round === undefined || previous!.answers !== null || previous!.verdict?.verdict !== "approve") return null;
   return `a new round reviews ${round.head.slice(0, 12)}, since the pull request's head moved from ${previous!.head.slice(0, 12)} after its approval`;
 }

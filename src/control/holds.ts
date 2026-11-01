@@ -15,13 +15,14 @@ export const personOnly = "Always needs the person: ";
 /**
  * What a hold is, which decides its rule, and its text, which only the person reads. A reserved case the reviewer
  * named and one the paths hit are separate codes, so a waiver of the one the person saw never covers the other.
- * `loop` is a reason of the review loop's own, such as a deploy's failure, and `stale-head` the line a held review
- * gains when its head moves.
+ * `loop` is a reason of the review loop's own, such as a deploy's failure, `stale-head` the line a held review
+ * gains when its head moves, and `waiver-not-carried` the line saying why the person's Land at an earlier head did not
+ * carry to this one.
  */
 export type HoldCode =
   | "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
   | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed"
-  | "verify-changed" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "loop";
+  | "verify-changed" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "waiver-not-carried" | "loop";
 export interface Hold { code: HoldCode; text: string }
 const cases = Object.keys(reservedNames) as ReservedCase[];
 
@@ -47,6 +48,7 @@ const holdRules: Record<HoldCode, HoldRule> = {
   "same-model": notWaivable("The policy needs a reviewer on another model than the builder's."),
   "not-checked-live": notWaivable("The description must say what could not be checked live, which the builder can add."),
   "stale-head": loopRule,
+  "waiver-not-carried": notWaivable("Your Land was for the change at an earlier commit, so the holds it waived are yours to look at again here."),
   loop: loopRule,
 };
 export const holdRule = (code: HoldCode): HoldRule => holdRules[code];
