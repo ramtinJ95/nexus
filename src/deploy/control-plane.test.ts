@@ -140,3 +140,28 @@ test("setting the control plane points the old keys a rollback or bootstrap work
   assert.deepEqual(JSON.parse(await readFile(join(fresh, "probe.json"), "utf8")), { node: "x", auth: { peers: [] } }, "a probe.json without the old key gains none");
   assert.equal("controlUrl" in JSON.parse(await readFile(join(fresh, "deployer.json"), "utf8")), false);
 });
+
+test("a set that fails on a broken deployer.json changes nothing, and its retry restarts the probe", async (t) => {
+  const dir = await etc(t, probeJson(firebat), deployerJson(firebat, "http://100.64.0.2:7470/"));
+  assert.equal(await adoptControlPlane(dir), "wrote");
+  await writeFile(join(dir, "deployer.json"), "{ not json", { mode: 0o600 });
+  let restarts = 0;
+  const restart = async () => { restarts++; };
+  await assert.rejects(setControlPlane(dir, moved, restart), /deployer\.json: .*Nothing was changed/);
+  assert.equal((await readControlPlane(join(dir, "control-plane.json"))).tailnetNodeId, firebat);
+  assert.equal(JSON.parse(await readFile(join(dir, "probe.json"), "utf8")).auth.controlPlane, firebat);
+  await writeFile(join(dir, "deployer.json"), JSON.stringify(deployerJson(firebat, "http://100.64.0.2:7470/")), { mode: 0o600 });
+  assert.equal(await setControlPlane(dir, moved, restart), "wrote");
+  assert.equal(restarts, 1);
+  assert.deepEqual(await readControlPlane(join(dir, "control-plane.json")), moved);
+});
+
+test("a set whose probe restart fails puts the file back, so its retry restarts the probe", async (t) => {
+  const dir = await etc(t, probeJson(firebat), deployerJson(firebat, "http://100.64.0.2:7470/"));
+  assert.equal(await adoptControlPlane(dir), "wrote");
+  await assert.rejects(setControlPlane(dir, moved, async () => { throw new Error("systemd is busy"); }), /systemd is busy/);
+  assert.equal((await readControlPlane(join(dir, "control-plane.json"))).tailnetNodeId, firebat, "the file names the control plane the running probe trusts");
+  let restarts = 0;
+  assert.equal(await setControlPlane(dir, moved, async () => { restarts++; }), "wrote");
+  assert.equal(restarts, 1);
+});

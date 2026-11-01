@@ -7,7 +7,7 @@
  * that do too.
  */
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
@@ -105,11 +105,23 @@ export async function adoptControlPlane(etc: string): Promise<"wrote" | "kept" |
 export async function setControlPlane(etc: string, value: ControlPlane, restart: () => Promise<void>): Promise<"wrote" | "unchanged"> {
   const control = parseControlPlane(value);
   const path = join(etc, fileName);
-  const changed = !isDeepStrictEqual(await readJson(path).catch(() => undefined), control);
-  if (changed) await saveJson(path, control, { mode: 0o644 });
-  const followed = await followOldKeys(etc, control);
-  if (changed) await restart();
-  return changed || followed ? "wrote" : "unchanged";
+  const followed = await oldKeyWrites(etc, control);
+  const before = await readJson(path).catch(() => undefined);
+  const changed = !isDeepStrictEqual(before, control);
+  for (const write of followed) await saveJson(write.path, write.value, { mode: write.mode });
+  // Last, so a failure before it leaves the file as it was, and a retry still restarts the probe onto the new one.
+  if (changed) {
+    await saveJson(path, control, { mode: 0o644 });
+    try {
+      await restart();
+    } catch (err) {
+      // The running probe still trusts what the file said, so the file says it again until a restart succeeds.
+      if (before === undefined) await rm(path, { force: true });
+      else await saveJson(path, before, { mode: 0o644 });
+      throw err;
+    }
+  }
+  return changed || followed.length > 0 ? "wrote" : "unchanged";
 }
 
 type Old = Record<string, unknown>;
@@ -123,19 +135,22 @@ const oldKeys: readonly [string, (old: Old, control: ControlPlane) => Old][] = [
   })],
 ];
 
-/** Rewrites only the old keys a file still has, keeping its mode. True when one changed. */
-async function followOldKeys(etc: string, control: ControlPlane): Promise<boolean> {
-  let changed = false;
+/** The rewrites of the old keys each file still has, keeping its mode. Every file is read before anything is written. */
+async function oldKeyWrites(etc: string, control: ControlPlane): Promise<{ path: string; value: Old; mode: number }[]> {
+  const writes: { path: string; value: Old; mode: number }[] = [];
   for (const [name, follow] of oldKeys) {
     const path = join(etc, name);
-    const old = await readJson(path);
+    let old: unknown;
+    try {
+      old = await readJson(path);
+    } catch (err) {
+      throw new Error(`${path}: ${(err as Error).message}. Nothing was changed`);
+    }
     if (typeof old !== "object" || old === null || Array.isArray(old)) continue;
-    const next = follow(old as Old, control);
-    if (isDeepStrictEqual(old, next)) continue;
-    await saveJson(path, next, { mode: (await stat(path)).mode & 0o777 });
-    changed = true;
+    const value = follow(old as Old, control);
+    if (!isDeepStrictEqual(old, value)) writes.push({ path, value, mode: (await stat(path)).mode & 0o777 });
   }
-  return changed;
+  return writes;
 }
 
 // try-restart never starts a stopped probe. The deployer needs none: its timer runs a worker that reads the file each poll.
@@ -143,8 +158,7 @@ async function restartProbe(): Promise<void> {
   try {
     await promisify(execFile)("systemctl", ["try-restart", "nexus-probe.service"]);
   } catch (err) {
-    // A rerun finds the file unchanged and restarts nothing.
-    throw new Error(`wrote ${fileName}, but the probe did not restart onto it: ${(err as Error).message}. Run sudo systemctl try-restart nexus-probe.service`);
+    throw new Error(`the probe did not restart, so ${fileName} names the control plane it trusts again: ${(err as Error).message}. Fix the restart and run this again`);
   }
 }
 const describe = (control: ControlPlane) => `control plane ${control.tailnetNodeId} at ${control.url}`;
