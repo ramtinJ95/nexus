@@ -83,12 +83,16 @@ test("an image or template a pylon on the node boots from is no candidate, and i
 test("the person is asked again only once a candidate joins that the latest question did not hold", () => {
   const items = cleanupCandidates(node, facts, now).map((c) => ({ ...c, bytes: 1024 }));
   const latest = cleanupQuestion(node, items, now);
-  assert.equal(grew(cleanupCandidates(node, facts, now), undefined), true, "with no question yet");
-  assert.equal(grew(cleanupCandidates(node, facts, now), latest), false, "the same set");
-  assert.equal(grew(cleanupCandidates(node, { ...facts, held: facts.held!.filter((id) => id !== older) }, now), latest), false, "a smaller set");
+  assert.equal(grew(cleanupCandidates(node, facts, now), []), true, "with no question yet");
+  assert.equal(grew(cleanupCandidates(node, facts, now), [latest]), false, "the same set");
+  assert.equal(grew(cleanupCandidates(node, { ...facts, held: facts.held!.filter((id) => id !== older) }, now), [latest]), false, "a smaller set");
   const unused: ImageId = "img-000000000009";
-  assert.equal(grew(cleanupCandidates(node, { ...facts, held: [...facts.held!, unused] }, now), latest), true, "an image nothing needs joined");
+  assert.equal(grew(cleanupCandidates(node, { ...facts, held: [...facts.held!, unused] }, now), [latest]), true, "an image nothing needs joined");
   assert.equal(cleanupQuestion(node, [...items].reverse(), now).id, latest.id, "one ID for one set and asking, whatever its order");
   assert.notEqual(cleanupQuestion(node, items, now + 1).id, latest.id, "the same set asked again is a new question");
+  const other = cleanupQuestion(node, [{ kind: "release", name: "9".repeat(40), commit: null, bytes: 1 }], now + 2);
+  assert.equal(grew(cleanupCandidates(node, facts, now), [latest, other]), false, "an item asked about before the latest question still counts as asked");
+  const deleted = { ...latest, cleanup: { ...latest.cleanup, outcomes: { [older]: { state: "deleted" as const, bytes: 1 } } } };
+  assert.equal(grew(cleanupCandidates(node, facts, now), [deleted, other]), false, "nor does one a delete removed, which an observation may still list");
   assert.match(latest.text, /^rj-firebat holds 6 things nothing needs any more, which take 6\.0 KiB\. Delete them\?\n\n- template tpl-00000000000a of project acme, 1\.0 KiB\n/);
 });

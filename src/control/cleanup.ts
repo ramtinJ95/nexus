@@ -53,18 +53,20 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
 
   async function ask(node: NodeName) {
     const facts = factsOf(node);
+    // An offline node's images and templates are unknown, and a question without them would be asked again with them.
+    if (facts.held === null) return;
     const asked = registry.nodeQuestions(node);
     const latest = asked.at(-1);
     const deleting = new Set(asked.flatMap((q) => undeleted(q).map(itemKey)));
     const candidates = cleanupCandidates(node, facts, now()).filter((c) => !deleting.has(itemKey(c)));
-    if (!grew(candidates, latest)) return;
+    if (!grew(candidates, asked)) return;
     const usage = candidates.some((c) => c.kind !== "release") ? await usageOn(node) : { artifacts: [] };
     // An artifact the probe does not size is outside its artifact directory, such as a Docker image a node configures.
     const items = candidates.flatMap((c): CleanupItem[] => {
       const bytes = c.kind === "release" ? facts.releases!.releases.find((r) => r.name === c.name)!.bytes : usage.artifacts.find((a) => a.id === c.id)?.bytes;
       return bytes === undefined ? [] : [{ ...c, bytes }];
     });
-    if (!grew(items, latest)) return;
+    if (!grew(items, asked)) return;
     if (latest !== undefined && latest.answer === null) registry.withdrawNodeQuestion(latest.id);
     const question = registry.askQuestion(cleanupQuestion(node, items, now()));
     log(`${node}: asked ${question.id}, whether to delete ${items.length} items that take ${bytesText(items.reduce((sum, i) => sum + i.bytes, 0))}`);
