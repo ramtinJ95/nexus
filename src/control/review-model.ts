@@ -122,16 +122,16 @@ export type PhaseKind = Phase["kind"];
 
 /**
  * A pull request's change at a head against branch `base`, as `git patch-id --stable` identifies it: one identity per
- * changed file, of its path, its path before a rename, its mode and its patch without the hunk headers, so a rebase
- * that only moves hunks keeps it, and any changed line, context lines included, does not. `unknown` when GitHub does
- * not show the whole change, such as a binary file's, so nothing can say it is the same.
+ * changed file, of its path, its path before a rename, its modes before and after, and its patch without the hunk
+ * headers, so a rebase that only moves hunks keeps it, and any changed line, context lines included, or mode does not.
+ * `unknown` when GitHub does not show the whole change, such as a binary file's, so nothing can say it is the same.
  */
 export type Change = { kind: "known"; base: string; files: { path: string; id: string }[] } | { kind: "unknown"; why: string };
 export function changeOf(base: string, files: readonly ChangedFile[] | null): Change {
   if (files === null) return { kind: "unknown", why: "GitHub did not show the whole change" };
   const unshown = files.find((f) => f.patch === "");
   if (unshown !== undefined) return { kind: "unknown", why: `GitHub shows no patch for ${unshown.path}` };
-  const id = (f: ChangedFile) => createHash("sha256").update(JSON.stringify([f.previous, f.path, f.mode ?? null, f.patch.split("\n").filter((line) => !line.startsWith("@@"))])).digest("hex");
+  const id = (f: ChangedFile) => createHash("sha256").update(JSON.stringify([f.previous, f.path, f.modes ?? null, f.patch.split("\n").filter((line) => !line.startsWith("@@"))])).digest("hex");
   return { kind: "known", base, files: files.map((f) => ({ path: f.path, id: id(f) })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) };
 }
 /** The paths whose patches differ between two changes, an empty list for the same change. */

@@ -2861,7 +2861,9 @@ test("an approval carried to the same change never carries past a hold the perso
   assert.match(carryWaiver({ ...review, waiver: legacy }, same, [irreversible]).why!.text, /the waiver was saved before Nexus recorded the change it waives/, "a waiver saved before changes holds at its own head alone");
   assert.deepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -9 +9 @@ function f() {\n-a\n+b" }]), "only hunk headers are ignored");
   assert.notDeepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: "z.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]), "a rename's old path is part of the change");
-  assert.notDeepEqual(changeOf("main", [{ path: "a.sh", previous: null, patch: "@@ -1 +1 @@\n-a\n+b", mode: "100644" }]), changeOf("main", [{ path: "a.sh", previous: null, patch: "@@ -1 +1 @@\n-a\n+b", mode: "100755" }]), "so is a file's mode, which its patch does not show");
+  const script = (modes: [string, string]) => changeOf("main", [{ path: "a.sh", previous: null, patch: "@@ -1 +1 @@\n-a\n+b", modes }]);
+  assert.notDeepEqual(script(["100755", "100755"]), script(["100755", "100644"]), "so is a file's mode, which its patch does not show");
+  assert.notDeepEqual(script(["100755", "100755"]), script(["100644", "100755"]), "and its mode before, so a base that dropped a mode the head keeps is a mode change");
   assert.match(carryWaiver({ ...review, waiver }, changeOf("release/1", migration(270)), [irreversible]).why!.text, /as the pull request's base moved from main to release\/1/, "a waiver never carries to another base");
 });
 
