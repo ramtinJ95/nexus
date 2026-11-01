@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { startProbe } from "./server.ts";
 import { nodeSecrets } from "./config.ts";
@@ -28,13 +28,20 @@ test("the probe sizes each artifact in its directory, deletes those it is sent u
     await writeFile(join(root, id, "disk"), "x".repeat(64 * 1024));
   }
   const fail = (): never => { throw new Error("no pylon here"); };
+  let slow = Promise.resolve();
   const backend: VmBackend = {
     ensureRunning: fail, ensurePaused: fail, ensureDeleted: fail, buildTemplate: fail, buildImage: fail, guest: fail,
     list: async () => [], state: async () => "absent", updateSecret: async () => [],
     artifacts: {
       list: () => store.list(), has: fail, manifest: async () => null, export: fail, import: fail,
       bytes: async (id) => existsSync(store.path(id)) ? diskBytes(store.path(id)) : null,
-      drop: (id) => id === used ? Promise.reject(new JobFailure("invalid", `${id} is still needed by pylon pylon-th-1`)) : store.drop(id, []),
+      drop: async (id) => {
+        if (id === used) throw new JobFailure("invalid", `${id} is still needed by pylon pylon-th-1`);
+        // As the store's drop does, the artifact is set aside first, so a listing no longer holds it while it goes.
+        if (existsSync(store.path(id))) await rename(store.path(id), join(root, `.${id}.dropping`));
+        await slow;
+        await store.drop(id, []);
+      },
     },
   };
   const probe = await startProbe({
@@ -56,10 +63,28 @@ test("the probe sizes each artifact in its directory, deletes those it is sent u
     "img-00000000000f": { state: "gone" },
   });
   assert.equal(existsSync(join(root, template)), false);
-  assert.deepEqual((await client.dropArtifacts!([template])).outcomes, { [template]: { state: "gone" } }, "the same delete again changes nothing");
+  assert.deepEqual((await client.dropArtifacts!([template])).outcomes, { [template]: { state: "deleted", bytes } },
+    "the same delete again, as after a reply lost to a timeout, deletes nothing more and reports what the first freed");
   await mkdir(join(root, `.${template}.dropping`));
-  assert.deepEqual((await client.dropArtifacts!([template])).outcomes, { [template]: { state: "gone" } });
-  assert.equal(existsSync(join(root, `.${template}.dropping`)), false, "what a delete a crash cut short set aside goes");
+  assert.deepEqual((await client.dropArtifacts!([image])).outcomes[image]!.state, "deleted");
+  await mkdir(join(root, `.${image}.dropping`));
+  assert.deepEqual((await client.dropArtifacts!(["img-00000000000f" as PortableArtifactId])).outcomes, { "img-00000000000f": { state: "gone" } });
+  assert.deepEqual((await client.dropArtifacts!([image])).outcomes[image]!.state, "deleted");
+  assert.equal(existsSync(join(root, `.${image}.dropping`)), false, "what a delete a crash cut short set aside goes");
+
+  const fresh: ImageId = "img-000000000003";
+  await mkdir(join(root, fresh));
+  await writeFile(join(root, fresh, "image.json"), "{}");
+  const gate = Promise.withResolvers<void>();
+  slow = gate.promise;
+  const original = client.dropArtifacts!([fresh]);
+  await new Promise((r) => setTimeout(r, 50));
+  const resent = client.dropArtifacts!([fresh]);
+  await new Promise((r) => setTimeout(r, 50));
+  gate.resolve();
+  const [once, again] = await Promise.all([original, resent]);
+  assert.equal(once.outcomes[fresh]!.state, "deleted");
+  assert.deepEqual(again.outcomes[fresh], once.outcomes[fresh], "a resend while the first delete runs waits for it and reports what it freed");
 
   const checkpoint = await fetch(`http://127.0.0.1:${probe.port}/v1/cleanup`, { method: "POST", body: JSON.stringify({ drop: ["ckpt-th-1-1"] }) });
   assert.equal(checkpoint.status, 400, "no cleanup deletes a checkpoint");
