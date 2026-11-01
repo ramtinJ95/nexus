@@ -13,6 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../artifacts.ts";
+import { readControlPlane } from "../deploy/control-plane.ts";
 import { exit, type Exit } from "../exec.ts";
 import { shellQuote } from "../shell.ts";
 import { isImageId, type TailnetNodeId } from "../ids.ts";
@@ -48,7 +49,8 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
   const self = z.object({ Self: z.object({ ID: tailnetNodeIdSchema }) }).parse(JSON.parse(statusJson)).Self.ID;
   // Preview URLs name the node by its MagicDNS name, because that is the name its tailscale serve certificate is for.
   const dnsName = parseSelfDnsName(statusJson);
-  if (probeConfig.auth.controlPlane !== self) throw new Error(`set auth.controlPlane in the probe's config to this node's ID ${self} (it is ${probeConfig.auth.controlPlane}), then restart the probe`);
+  const trusted = (await readControlPlane()).tailnetNodeId;
+  if (trusted !== self) throw new Error(`/etc/nexus/control-plane.json names ${trusted} as the control plane, not this node's ID ${self}. Point it at this node with sudo deploy/set-control-plane.sh ${self} <url>`);
   const tailscaledSocket = await personWhois(self);
   const manifest = await store.manifest(image);
   const host = probeConfig.listen.host;

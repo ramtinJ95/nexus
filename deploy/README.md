@@ -40,8 +40,9 @@ Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
 | File | What the installer puts in it |
 | --- | --- |
 | `/etc/nexus/control.json` | This machine as `self`, the first of `nodes` and `imageBuildNode`; its tailnet IP, short and full MagicDNS names in `listen`; its full name as `https.hostname`; the `--admit` devices as `callers` and `deployers`; and this machine's deploy key digest in `deployKeys`. |
-| `/etc/nexus/probe.json` | This machine's name and tailnet IP, the control plane's node ID as `auth.controlPlane`, and previews on gateway port 7481. `gitSsh` is added once `/etc/nexus/git_ed25519` exists. |
-| `/etc/nexus/deployer.json` | The deployer's control plane URL and node ID, and its token. Root, mode 0600. Only the token's SHA-256 digest leaves this file. |
+| `/etc/nexus/control-plane.json` | The control plane this machine follows: its stable tailnet node ID as `tailnetNodeId`, and its API's URL as `url`. The probe admits the control plane's calls by that ID, and the deployer asks that URL for the desired release after checking that ID. Root, mode 0644. See [The control plane's identity](#the-control-planes-identity). |
+| `/etc/nexus/probe.json` | This machine's name and tailnet IP, and previews on gateway port 7481. `gitSsh` is added once `/etc/nexus/git_ed25519` exists. |
+| `/etc/nexus/deployer.json` | The deployer's token and timeouts. Root, mode 0600. Only the token's SHA-256 digest leaves this file. |
 
 Then it installs the release and the units with `deploy/install-control.sh`, `deploy/install-probe.sh` and `deploy/install-deployer.sh`, and starts the probe and the deployer's timer. The control plane refuses to start before its harness is signed in, so on a first install its unit is left stopped until the next step signs it in.
 
@@ -80,7 +81,7 @@ The installer ends with what is left and the command for each, in the order to d
 
 ### Rerun to upgrade, admit or recover
 
-Every run checks the prerequisites and installs the checkout's release, so a rerun from a newer checkout upgrades by hand. A rerun keeps each existing config and secret. It adds only what is missing, such as a new `--admit` device, and says what it left alone, such as a `listen.host` that differs from this machine's address. It never replaces the deployer's token. On the control plane's machine it refreshes what follows from that token and the control plane's address: this machine's digest in `deployKeys`, and `controlUrl` and `controlNodeId` in `deployer.json`. A service restarts only when its release, unit file or config changed.
+Every run checks the prerequisites and installs the checkout's release, so a rerun from a newer checkout upgrades by hand. A rerun keeps each existing config and secret. It adds only what is missing, such as a new `--admit` device, and says what it left alone, such as a `listen.host` that differs from this machine's address. It never replaces the deployer's token. On the control plane's machine it refreshes what follows from that token and the control plane's address: this machine's digest in `deployKeys`, and `tailnetNodeId` and `url` in `control-plane.json`. A service restarts only when its release, unit file or config changed.
 
 ### Add a node
 
@@ -96,9 +97,29 @@ It prints the command to run on the new machine, from a checkout, which joins on
 sudo deploy/install.sh --join <token> --node <control>
 ```
 
-That run checks the prerequisites, writes `probe.json` and `deployer.json` and installs a probe and the deployer, as `--node` does. Then it sends the token and its deployer's key digest to the control plane's `POST /v1/join`, after checking the control plane's tailnet identity with tailscaled, and only then asks for the node's own credentials. The control plane records the node as tailscaled's whois names the caller, its stable node ID and MagicDNS name, never as the request says. It keeps the node and its digest in the registry and follows its probe without a restart. Every probe learns its peers from the control plane within a minute, so no node needs a `--peer` rerun.
+That run checks the prerequisites, writes `control-plane.json`, `probe.json` and `deployer.json` and installs a probe and the deployer, as `--node` does. Then it sends the token and its deployer's key digest to the control plane's `POST /v1/join`, after checking the control plane's tailnet identity with tailscaled, and only then asks for the node's own credentials. The control plane records the node as tailscaled's whois names the caller, its stable node ID and MagicDNS name, never as the request says. It keeps the node and its digest in the registry and follows its probe without a restart. Every probe learns its peers from the control plane within a minute, so no node needs a `--peer` rerun.
 
 Only root on the control plane's machine can mint a token, because the token's digest goes straight into the registry, which only the control plane's user can write. The join route is the only route besides `/v1/whoami` that a machine the control plane does not know may call. A used, expired or unknown token is refused, and so are the control plane's machine, a device in `callers` and a node `control.json` names, and the refusal records nothing. A node that joined may join again with a new token, which replaces its deploy key, for instance after its `deployer.json` was lost.
+
+### The control plane's identity
+
+Each machine names its control plane in one file, `/etc/nexus/control-plane.json`:
+
+```json
+{ "tailnetNodeId": "nAbCdEf1CNTRL", "url": "http://rj-firebat.tail1234.ts.net:7470/" }
+```
+
+The probe reads it at start and admits the control plane's calls from that tailnet node only. The deployer reads it on every poll, asks `url` for the desired release, and checks with tailscaled that `url` is that node before it sends its token. Neither keeps a copy, so pointing a machine at another control plane changes this file and nothing else. The deployer refuses the file unless root owns it and only root may write it, because it decides whom the root deployer trusts, and an upgrade that finds such a file fails its install rather than leaving the deployer to fail every poll. The control plane itself does not read it: on its own machine the file names the control plane's own `self`.
+
+To point a machine at another control plane, run as root from a checkout or a release:
+
+```sh
+sudo deploy/set-control-plane.sh <tailnet node ID> <url>
+```
+
+It takes the deployer's lock, writes the file atomically, points the old keys that `probe.json` and `deployer.json` may still hold at the same control plane, keeping their modes, and restarts the probe whenever this machine has its unit, enabled or not, starting it if a failed restart left it down, which then refuses the old control plane's calls. The deployer reads the file on its next poll. It reads every file before it writes one, and writes `control-plane.json` last, so a failure leaves it as it was. A failed restart puts back every file it changed, so the file and the old keys always name the control plane the running probe trusts, and a rerun finishes the change. A rerun that names what the file already holds changes nothing and restarts nothing. It moves no control plane: the machine must already be a node the new control plane knows, with its deploy key.
+
+Before this file, the identity sat in `probe.json` as `auth.controlPlane` and in `deployer.json` as `controlUrl` and `controlNodeId`. The release that ships the file writes it from those keys when it is missing, in the role installers' preparation that the deployer runs before it restarts a service, and in `deploy/install.sh`'s config step. It refuses to guess when `probe.json` and `deployer.json` name different control planes, and the install fails and keeps the previous release. After that the old keys are ignored, and stay in their files for an older release: a rollback's probe and a deployer bootstrap installed before the file read them. `set-control-plane.sh` keeps them in step with the file, so that older code also follows one control plane.
 
 Nodes in `control.json` stay as they are. At each start the control plane follows those nodes and every node that joined, and reads `deployKeys`, `callers` and `deployers` from the file as before. `auth.peers` in `probe.json` holds until the control plane puts its list, and a probe from before join tokens keeps it. The older way also still works: `sudo deploy/install.sh --add-node <name>=<digest>` on the control plane's machine edits `control.json` and restarts the control plane, and probe-only nodes then need `--peer` reruns. Removing a node, joined or listed, is not built.
 
@@ -121,7 +142,7 @@ nexus release --json
 
 `deploy/install.sh` installs the root `nexus-deployer.service` and its 15-second timer on every machine, records the machine's roles, and puts the SHA-256 digest of the deployer's token in the control plane's `deployKeys`. On the control plane's machine it does this itself. A node's digest arrives with its join, or with `--add-node`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. To read a node's digest again, run as root `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
 
-Only the `deployers` in control.json, which `--admit` sets, may change the release. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed, and the installer refuses to admit one. The deployer's `controlUrl` names the control plane's tailnet IP on its own machine and its MagicDNS name on port 7470 elsewhere; that name must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Check `nexus release` for fresh reports from every role.
+Only the `deployers` in control.json, which `--admit` sets, may change the release. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed, and the installer refuses to admit one. The `url` in `control-plane.json` names the control plane's tailnet IP on its own machine and its MagicDNS name on port 7470 elsewhere; that name must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Check `nexus release` for fresh reports from every role.
 
 Node polling goes directly to the control plane, not through a probe. This keeps root credentials out of the probe and reuses the existing mutual tailnet identity check. Node routes additionally require the root-only token, so pylon egress through its host cannot forge health reports or drain control. Node credentials cannot set a release. The in-pylon CLI bridge accepts only its closed operation schema; it cannot forward an arbitrary API route. Tests cover the bridge, a pylon presenting its host's allowed/deployer identity, spoofed forwarding headers, missing node tokens, and the wrong control endpoint. Do not run an unauthenticated proxy on an allowed deployer: tailnet identity authorizes that machine, not individual programs on it.
 
@@ -224,6 +245,7 @@ The probe runs as the system user `nexus`. These are its paths:
 | Path | What it holds |
 | --- | --- |
 | `/etc/nexus/probe.json` | The config. `src/probe/config.ts` parses it. |
+| `/etc/nexus/control-plane.json` | The control plane the probe admits, as [The control plane's identity](#the-control-planes-identity) describes. |
 | `/etc/nexus/secrets.env` | Secret values, `NAME=value` per line. Mode 0640, owner `root:nexus`. |
 | `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints, and each instance's `controller.log`, which its controller rotates at 10 MiB into `controller.log.1` and `controller.log.2`. |
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
@@ -312,7 +334,7 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 | `/opt/nexus/control-current` | The release the control plane runs, apart from the probe's link. |
 | `/var/backups/nexus` | The daily backups, as [Daily backup](#daily-backup) describes. Root, mode 0700. |
 
-`control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`), the model new threads start with (`harness.model`), and the https ports previews are allocated from on each node (`previewPorts`, 10200 to 10999 when omitted). A node's `tailnetHost` is its MagicDNS name, such as `infra-testbench.example.ts.net`, because preview URLs name it and its `tailscale serve` certificate is for that name. Each probe's `auth.controlPlane` must be the control plane's own stable node ID, `self.tailnetNodeId`. `"resumeAfterUsageLimit": true` makes the control plane type a continue into each Claude worker that stopped on its usage limit, three minutes after the limit resets, as [the CLI's usage-limit stops](../docs/cli.md#usage-limit-stops-0210) describe. It is off when omitted.
+`control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`), the model new threads start with (`harness.model`), and the https ports previews are allocated from on each node (`previewPorts`, 10200 to 10999 when omitted). A node's `tailnetHost` is its MagicDNS name, such as `infra-testbench.example.ts.net`, because preview URLs name it and its `tailscale serve` certificate is for that name. Each machine's `control-plane.json` must name the control plane's own stable node ID, `self.tailnetNodeId`. The control plane's machine must also be one of its nodes, with a probe: the release view lists the control role under the node whose ID is `self`, and only that node's deployer, authenticated by its deploy key like any node's, may report the control plane's health or drain it. `"resumeAfterUsageLimit": true` makes the control plane type a continue into each Claude worker that stopped on its usage limit, three minutes after the limit resets, as [the CLI's usage-limit stops](../docs/cli.md#usage-limit-stops-0210) describe. It is off when omitted.
 
 ### HTTPS dashboard
 
@@ -397,7 +419,7 @@ The control role installs `nexus-backup.timer`, which runs `nexus-backup.service
 | `harness.sqlite` | `harness.storage`, `/var/lib/nexus-control/harness.sqlite` | the same |
 | `harness-credentials.json` | `harness.credentials`, `/var/lib/nexus-control/harness-credentials.json` | its bytes as they are |
 | `github-token` | `github.tokenFile`, only when it lies outside `/etc/nexus` | its bytes as they are |
-| `etc/<path>` | every file under `/etc/nexus`: `control.json`, `probe.json`, `deployer.json` with the deployer's token, `secrets.env`, `github-token`, `git_ed25519`, `git_known_hosts` | its bytes as they are |
+| `etc/<path>` | every file under `/etc/nexus`: `control.json`, `control-plane.json`, `probe.json`, `deployer.json` with the deployer's token, `secrets.env`, `github-token`, `git_ed25519`, `git_known_hosts` | its bytes as they are |
 
 After the copies, the run checks each copied database with `PRAGMA integrity_check`, and then writes `manifest.json` last: each file's source path, size, SHA-256, and the source's mode and owner. A directory without a manifest is incomplete, and nothing counts it as a backup. Only once the new backup verifies does the run delete older ones, keeping the newest 7, along with any incomplete directory a crashed run left. A run that fails removes its own directory, leaves the earlier backups as they were, and fails the unit, so `systemctl status nexus-backup` and `journalctl -u nexus-backup` say why. A missing source fails the run, so a control plane that has not started yet, with no registry, has no backup.
 

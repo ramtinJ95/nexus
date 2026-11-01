@@ -13,12 +13,14 @@
 import { createDockerBackend } from "../docker-backend.ts";
 import { createPylonVmBackend } from "../pylon-vm-backend.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { nodeSecrets, parseSelfDnsName, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
+import { readControlPlane } from "../deploy/control-plane.ts";
+import { nodeSecrets, parseSelfDnsName, probeAuth, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
 import { tailscaleCli } from "./serve.ts";
 import { startProbe } from "./server.ts";
 import { closeProbe } from "./shutdown.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
+const control = await readControlPlane();
 // One source, so the probe's pre-boot check, the VMs and the control plane's handoffs see the same values.
 const secrets = nodeSecrets(await readSecretsFile(config.secretsFile));
 // `tailscale serve` as the probe's user needs `tailscale set --operator=nexus`, which deploy/install-probe.sh runs.
@@ -35,7 +37,7 @@ const probe = await startProbe({
   node: config.node,
   host: config.listen.host,
   port: config.listen.port,
-  auth: config.auth,
+  auth: probeAuth(config, control),
   whois: localApiWhois(),
   backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : docker(config.backend),
   secrets,
@@ -44,7 +46,7 @@ const probe = await startProbe({
   // /var/lib/nexus, the probe user's home, holds the Docker and Gondolin caches of image builds.
   watched: [...config.backend.artifacts === undefined ? [] : [config.backend.artifacts], "/var/lib/nexus", "/var/lib/nexus-control", "/opt/nexus/releases"],
 });
-console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend`);
+console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend, trusting control plane ${control.tailnetNodeId}`);
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {

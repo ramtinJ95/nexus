@@ -12,8 +12,8 @@
  * runs a second tool and serves both previews on the same URLs once the agent starts the server again, unpublish the
  * linked port with the real CLI and check it stays unpublished across a second pause and wake and a restart of this
  * control plane, publish it again, then delete it. A second thread, on a repository that does not exist,
- * fails setup, which removes its instance, and a human retry boots it fresh and runs a second setup job, which fails again. The probe's auth.controlPlane must be this node's own
- * stable node ID, and its config must set `previews`. With holdSeconds it prints the preview URL and holds that long,
+ * fails setup, which removes its instance, and a human retry boots it fresh and runs a second setup job, which fails again. The node's control-plane.json must name this node's own
+ * stable node ID, and the probe's config must set `previews`. With holdSeconds it prints the preview URL and holds that long,
  * so another tailnet device can open it. Deleting the thread must leave `tailscale serve` as the check found it.
  */
 import assert from "node:assert/strict";

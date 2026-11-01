@@ -76,11 +76,15 @@ with_deployer_lock() {
   flock -x "$prefix/deployer/lock" "$@"
 }
 
+# Writes $etc/control-plane.json from probe.json and deployer.json on the first release that reads it, and checks it after.
+adopt_control_plane() { PATH=$service_path node "$1/src/deploy/control-plane.ts" adopt "$etc"; }
+
 # The control plane's upgrade steps from the checkout at $1, which neither switch its link nor start it. The deployer
 # runs them alone, as `NEXUS_PREPARE=1 install-control.sh`.
 prepare_control() {
   make_state nexus-control /var/lib/nexus-control
   install -d -o root -g root -m 0755 "$etc"
+  adopt_control_plane "$1"
   install_release "$1"
   install_unit "$1/deploy/nexus-control.service" nexus-control.service
   install_unit "$1/deploy/nexus-backup.service" nexus-backup.service
@@ -96,6 +100,7 @@ prepare_probe() {
   # operator, so this replaces any other user's operator rights.
   tailscale set --operator=nexus
   install -d -o root -g root -m 0755 "$etc"
+  adopt_control_plane "$1"
   install_release "$1"
   [ -e "$etc/secrets.env" ] || install -o root -g nexus -m 0640 "$1/deploy/secrets.example.env" "$etc/secrets.env"
   install_unit "$1/deploy/nexus-probe.service" nexus-probe.service
@@ -114,12 +119,14 @@ install_unit() {
   systemctl enable "$2"
 }
 
-# Starts the unit $1, restarting it when $release, its unit file or its config file $3 differs from what the file $2
-# says it was last started with. The file is written only once the unit runs, so a run that died between the link
+# Starts the unit $1, restarting it when $release, its unit file or one of its config files, $3 onwards, differs from
+# what the file $2 says it was last started with. The file is written only once the unit runs, so a run that died between the link
 # swap and the restart leaves it stale, and the next run still restarts.
 start_unit() {
-  local unit=$1 active_file=$2 config=$3 active
-  active="$release $(sha256sum < "/etc/systemd/system/$unit" | cut -c1-12) $(sha256sum < "$config" | cut -c1-12)"
+  local unit=$1 active_file=$2 config active
+  shift 2
+  active="$release $(sha256sum < "/etc/systemd/system/$unit" | cut -c1-12)"
+  for config in "$@"; do active+=" $(sha256sum < "$config" | cut -c1-12)"; done
   if [ "$(cat "$active_file" 2>/dev/null || true)" != "$active" ]; then
     systemctl restart "$unit"
   else

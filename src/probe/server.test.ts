@@ -10,7 +10,8 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { nodeSecrets, parseSecretsEnv } from "./config.ts";
+import { nodeSecrets, parseProbeConfig, parseSecretsEnv, probeAuth } from "./config.ts";
+import { readControlPlane } from "../deploy/control-plane.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
 import type { DeclaredOutput, GitFacts, ProbeEvent, ServiceFact } from "../protocol/observations.ts";
@@ -147,6 +148,24 @@ test("callers that are not the configured node get 403", async (t) => {
   assert.equal((await fetch(`${base}/v1/artifacts/img-1?sha256=${"0".repeat(64)}`)).status, 404, "a peer may reach the artifacts route, and this node holds no img-1");
   callAs(controlPlane);
   assert.equal((await fetch(`${base}/v1/artifacts/img-1`)).status, 403);
+  assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
+});
+
+test("the probe trusts the control plane control-plane.json names, not the one an old probe.json still names", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-control-plane-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const moved = "nMOVED" as TailnetNodeId;
+  const controlPlaneFile = join(dir, "control-plane.json");
+  await writeFile(controlPlaneFile, JSON.stringify({ tailnetNodeId: moved, url: "http://100.64.0.9:7470/" }));
+  const config = parseProbeConfig(JSON.stringify({
+    node, listen: { host: "100.64.0.7" }, auth: { controlPlane, peers: [peer] },
+    backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" },
+    secretsFile: "/etc/nexus/secrets.env",
+  }));
+  const { base, callAs } = await setup(t, { auth: probeAuth(config, await readControlPlane(controlPlaneFile)) });
+  callAs(controlPlane);
+  assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 403);
+  callAs(moved);
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
 });
 
