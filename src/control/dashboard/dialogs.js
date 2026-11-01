@@ -171,7 +171,6 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-const typing = (el) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable === true;
 document.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
     const form = event.target instanceof Element ? event.target.closest("#prompt, #start, #project") : null;
@@ -184,9 +183,5 @@ document.addEventListener("keydown", (event) => {
     if (queue !== null) queue.form.requestSubmit(queue);
   } else if (event.key === "Escape" && document.body.dataset.open !== undefined) {
     setOpen(null);
-  } else if (event.key === "n" && !event.metaKey && !event.ctrlKey && !event.altKey && !typing(event.target) && dialog !== null && document.querySelector("dialog[open]") === null) {
-    // Browsers keep ⌘N for a new window, so the shortcut is the bare key.
-    event.preventDefault();
-    openStart(null);
   }
 });

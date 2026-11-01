@@ -250,7 +250,7 @@ export function renderTabs() {
     close.addEventListener("click", () => closeTab(file.path));
     return el("div", { className: `tab tab-file${active ? " active" : ""}` }, pick, close);
   });
-  tabsBar.replaceChildren(...[convoTab, termTab].filter((tab) => tab !== null), ...fileTabs);
+  tabsBar.replaceChildren(...[convoTab, termTab].filter((tab) => tab !== null), ...fileTabs, ...tabsBar.querySelectorAll(".tab-split"));
   tabsBar.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   for (const button of document.querySelectorAll(".tree-file")) button.classList.toggle("active", button.dataset.path === activeTab);
   if (focused === undefined) return;
@@ -259,13 +259,22 @@ export function renderTabs() {
   (controls.find((b) => b.dataset.key === focused) ?? controls.find((b) => b.dataset.key === replacement))?.focus();
 }
 
+/** A wide window the reader split with \ keeps the conversation beside the open file or terminal. */
+const wide = matchMedia("(min-width: 761px)");
+const split = () => wide.matches && (document.documentElement.dataset.panes ?? "").split(" ").includes("split");
+export function placeViews() {
+  if (scroller === null) return;
+  scroller.hidden = activeTab !== null && !split();
+  if (!scroller.hidden) end.settle();
+}
+wide.addEventListener("change", placeViews);
+
 export function showTab(path) {
   activeTab = path;
   main.dataset.view = path === null ? "convo" : path === terminalTab ? "term" : "file";
-  scroller.hidden = path !== null;
+  placeViews();
   fileView.hidden = typeof path !== "string";
   if (termView !== null) termView.hidden = path !== terminalTab;
-  if (path === null) end.settle();
   renderTabs();
   if (typeof path === "string") void readDiff(path);
   if (path === terminalTab) void showTerminal();

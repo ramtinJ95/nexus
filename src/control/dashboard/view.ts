@@ -12,15 +12,16 @@ import { agoText, clock } from "./elapsed.ts";
 export interface Page { status: number; headers: Record<string, string>; body: string }
 
 /**
- * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
- * that refuses the page its storage throws on reading it, and the device's theme stands.
+ * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it, and the panes
+ * the reader folded or split, as keys.js does after it. A browser that refuses the page its storage throws on reading
+ * it, and the device's theme and every pane stand.
  */
-export const themeScript = `{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
+export const themeScript = `{ let theme = null, panes = null; try { theme = localStorage.getItem("nexus.theme"); panes = localStorage.getItem("nexus.panes"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); if (panes) document.documentElement.dataset.panes = panes; }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
-  "content-security-policy": `default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(themeScript).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+  "content-security-policy": `default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(themeScript).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
 };
@@ -79,13 +80,18 @@ const iconPaths = {
   cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   dash: "M5 8h6",
   inbox: "M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z",
+  search: "M7 2.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 1 0 0-9zM10.3 10.3l3.2 3.2",
+  split: "M2.5 3.5h11v9h-11zM8 3.5v9",
 } as const;
 type IconName = keyof typeof iconPaths;
 export const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
 /** The icons client.js clones from the page's `#icons`, for the folders of the changed files' tree. */
 export const clonedIcons = ["chevron", "folder"] as const satisfies readonly IconName[];
-/** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
-export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
+/**
+ * Every page's way to the sidebar, and on a phone, where the sidebar is a drawer and no key opens the palette, to what
+ * waits on the person and to the palette.
+ */
+export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a><button type="button" class="icon-btn phone-only" data-palette aria-label="Commands" title="Commands">${icon("search")}</button>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 

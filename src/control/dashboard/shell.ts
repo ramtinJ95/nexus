@@ -62,7 +62,7 @@ ${page.main}
 </main>
 ${page.inspector}
 </div>
-<p id="refresh-state" class="refresh-state" role="status"></p>
+<footer class="statusline" aria-label="Keys"><button type="button" class="sl-mode" data-palette title="Commands">⌘K</button><span class="sl-pending" id="sl-pending" aria-live="polite"></span><span class="sl-keys" id="sl-keys"></span><span class="sl-end"><p id="refresh-state" class="refresh-state" role="status"></p></span></footer>
 <div class="scrim" data-close aria-hidden="true"></div>
 <template id="icons">${clonedIcons.map(icon)}</template>
 ${startDialog(c, page.start)}
@@ -123,7 +123,8 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   };
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
-<label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
+<button type="button" class="cmdk" data-palette>${icon("search")}<span>Go to or run anything</span><kbd class="mod">⌘</kbd><kbd>K</kbd></button>
+<label class="filter"><span aria-hidden="true">/</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
 <nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
