@@ -82,7 +82,7 @@ const keyList = [
 let help = null;
 function showKeys() {
   help ??= document.body.appendChild(el("dialog", { className: "modal keys-modal", ariaLabel: "Keyboard shortcuts" },
-    el("header", {}, el("h2", { textContent: "Keyboard" }), el("button", { type: "button", className: "icon-btn", textContent: "✕", ariaLabel: "Close", onclick: () => help.close() })),
+    el("header", {}, el("h2", { textContent: "Keyboard" }), el("button", { type: "button", className: "icon-btn", textContent: "Esc", ariaLabel: "Close", onclick: () => help.close() })),
     el("dl", { className: "keys-list" }, ...keyList.flatMap(([key, what]) => [el("dt", {}, el("kbd", { textContent: key })), el("dd", { textContent: what })]))));
   help.showModal();
 }

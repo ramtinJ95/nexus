@@ -103,14 +103,14 @@ function termView(t: Thread): Html {
 </section>`;
 }
 
-/** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */
+/** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under its more button. */
 function threadBar(t: { project: string; title: string }, [label, tone]: readonly [string, Tone], actions: readonly Part[], tag: Part = null): Html {
   const shown = actions.filter((a) => a !== false);
   return html`<header class="bar" id="bar" data-live>
 ${menu}
 <div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1>${tag}</div>
 <span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
-${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
+${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">${icon("more")}</button>`}
 </header>`;
 }
 
@@ -195,11 +195,11 @@ function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageT
   // The Previews tab counts what its pane lists: the previews and the ports without one.
   const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
   return html`<aside class="inspect" aria-label="Thread details">
-<button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
+<button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">${icon("cross")}</button>
 <div class="seg-bar" role="radiogroup" aria-label="Inspector">${panes.map(([pane, label, glyph]) => html`<label class="seg-tab"><input type="radio" name="pane" value="${pane}"${pane === "changes" && " checked"}>${icon(glyph)}<span class="seg-label">${label}</span>${pane === "previews" && html`<span class="count" id="count-previews" data-live>${listed}</span>`}</label>`)}</div>
 <section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${d.thread.id}">
 <h2 id="changes-h" class="vh">Changes</h2>
-<div class="ch-head"><label class="switch"><input type="checkbox" id="changes-head"><span class="switch-label">Only uncommitted</span></label><label class="switch"><input type="checkbox" id="changes-turn"><span class="switch-label">Latest turn</span></label><button type="button" class="icon-btn" id="changes-reload" aria-label="Read the changes again" title="Read the changes again">↻</button></div>
+<div class="ch-head"><label class="switch"><input type="checkbox" id="changes-head"><span class="switch-label">Only uncommitted</span></label><label class="switch"><input type="checkbox" id="changes-turn"><span class="switch-label">Latest turn</span></label><button type="button" class="icon-btn" id="changes-reload" aria-label="Read the changes again" title="Read the changes again">${icon("reload")}</button></div>
 <p class="ch-base dim small" id="changes-base">Since the pylon booted</p>
 <div id="changes-body"><p class="empty">The changes show once the page's script loads.</p></div>
 </section>

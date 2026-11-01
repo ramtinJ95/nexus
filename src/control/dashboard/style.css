@@ -267,6 +267,9 @@ a.link:hover { text-decoration: underline; text-underline-offset: 2px; }
 kbd { font: 500 10.5px/1 var(--sans); color: var(--text-3); }
 
 .i { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.i-more { stroke-width: 2.4; }
+.i-mark { fill: currentColor; stroke: none; }
+.keys-modal header .icon-btn { width: auto; padding: 0 8px; font-size: var(--fs-xs); }
 
 .app { display: grid; grid-template-columns: 248px minmax(0, 1fr); height: 100vh; height: 100dvh; }
 .app.has-inspect { grid-template-columns: 248px minmax(0, 1fr) 336px; }
@@ -313,7 +316,8 @@ kbd { font: 500 10.5px/1 var(--sans); color: var(--text-3); }
 .side { background: var(--side); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; min-height: 0; }
 .side-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 10px 18px; }
 .brand { font: 650 var(--fs-md)/1 var(--sans); letter-spacing: -0.01em; display: flex; gap: 8px; align-items: center; }
-.brand-mark { color: var(--accent); font-size: 10px; }
+.brand-mark { color: var(--accent); display: inline-flex; }
+.brand-mark .i { width: 12px; height: 12px; }
 .btn-new { padding: 6px 10px; }
 .side .btn-new { background: transparent; box-shadow: none; }
 .side .btn-new:hover { background: var(--bg); }
@@ -396,6 +400,11 @@ kbd { font: 500 10.5px/1 var(--sans); color: var(--text-3); }
 .bar-actions .btn-ghost.danger { color: var(--text-3); }
 .bar-actions .btn-ghost.danger:hover { color: var(--bad); }
 .bar-end { margin-left: auto; display: flex; gap: 6px; }
+/* A page of its own heads its column with its title, aligned to the column, where a thread's bar stays a thin line. */
+.bar:not(#bar) { height: 96px; align-items: flex-end; padding: 0 24px 14px max(24px, calc((100% - 960px) / 2 + 40px)); }
+.bar:not(#bar) .crumb h1 { font: 650 var(--fs-2xl)/1.15 var(--sans); letter-spacing: -0.025em; }
+.bar:not(#bar):not(:has(h1)) { height: 52px; align-items: center; padding-bottom: 0; }
+.bar:not(#bar):has(h1) + .scroll > .page:first-child { padding-top: 16px; }
 
 /* the tabs over a thread's views: the conversation, then each file the reader opened, as plain text with a rule under the open one */
 .tabs { --convo-tab: 96px; display: flex; gap: 4px; margin: 0 24px; padding: 0; border-bottom: 1px solid var(--line-soft); flex: none; overflow-x: auto; scrollbar-width: none; scroll-padding-left: calc(var(--convo-tab) + 2px); }
@@ -581,7 +590,7 @@ h4.md-h { font-size: 1.07em; }
 .question:not(.cleanup) .question-options .btn:first-child:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
 .question.answered { gap: 4px; }
 /* a Claude worker's AskUserQuestion: a form in the dock while it waits, and a card in the conversation. A fieldset is as wide as its content unless told, so a long preview scrolls inside its block. */
-.ask, .ask-all, .ask-q { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+form.ask, .ask-all, .ask-q { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .ask-all:disabled { opacity: 0.6; }
 .ask-q { gap: 4px; }
 .ask-q legend { padding: 0; margin-bottom: 6px; font-weight: 500; overflow-wrap: anywhere; }
@@ -868,8 +877,8 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--t
 .need .landing { max-height: none; padding: 0; border: 0; background: none; box-shadow: none; gap: 8px; overflow: visible; }
 .need .landing + .landing { padding-top: 10px; border-top: 1px dashed var(--line-soft); border-radius: 0; }
 .need .land-top h2 { font-size: var(--fs-md); font-weight: 500; color: var(--text-2); }
-.need .question .land-top h2 { display: none; }
-.need .question .land-top:not(:has(.tag)) { display: none; }
+.need .question:not(.cleanup) .land-top h2 { display: none; }
+.need .question:not(.cleanup) .land-top:not(:has(.tag)) { display: none; }
 .need .question-text { color: var(--text); }
 .need .land-meta { color: var(--text-3); font-size: var(--fs-xs); }
 .need .land-note { color: var(--text-2); font-size: var(--fs-md); }
@@ -980,6 +989,8 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--t
   .bar .more { margin-left: auto; }
   .crumb-p, .crumb .sep { display: none; }
   .crumb h1 { font-size: 15px; }
+  .bar:not(#bar) { height: 52px; align-items: center; padding: 0 6px; }
+  .bar:not(#bar) .crumb h1 { font-size: var(--fs-xl); }
   .bar .chip { padding: 5px; gap: 0; }
   .bar .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .bar-actions { display: none; }
@@ -1045,9 +1056,15 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--t
 .attention-toast a { color: #9dcaff; }
 .ov-sub { margin: 14px 0 6px; font: 500 12px var(--sans); color: var(--text-3); }
 .ov-wait { display: block; overflow: hidden; text-overflow: ellipsis; }
-.ov-items th:first-child { width: 26%; }
-.ov-items th:nth-child(2) { width: 34%; }
-.ov-items .ov-act { width: 150px; }
+.ov-items th:first-child { width: 28%; }
+.ov-items th:nth-child(2) { width: 32%; }
+.ov-items th:nth-child(3) { width: 16%; }
+.ov-items .ov-act { width: 96px; }
+.ov-items td:nth-child(4) { white-space: nowrap; text-overflow: ellipsis; overflow-wrap: normal; }
+.ov-items td:nth-child(4) .link { color: var(--text-2); }
+.ov-items td:nth-child(4) .link:hover { color: var(--accent); }
+.ov-items .state { color: var(--text); font-weight: 500; }
+.ov-items tr[data-phase="held"] .state { color: var(--bad); }
 .ov-why { display: block; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
 .ov-items td { white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 760px) {

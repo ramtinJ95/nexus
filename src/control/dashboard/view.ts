@@ -79,13 +79,18 @@ const iconPaths = {
   cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   dash: "M5 8h6",
   inbox: "M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z",
+  menu: "M2.5 4.5h11M2.5 8h11M2.5 11.5h11",
+  more: "M3.5 8h.01M8 8h.01M12.5 8h.01",
+  search: "M7 3a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM10 10l3.5 3.5",
+  reload: "M13 8a5 5 0 1 1-1.5-3.55M13 2.5v2.5h-2.5",
+  mark: "M8 2.5 13.5 8 8 13.5 2.5 8z",
 } as const;
 type IconName = keyof typeof iconPaths;
 export const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
 /** The icons client.js clones from the page's `#icons`, for the folders of the changed files' tree. */
 export const clonedIcons = ["chevron", "folder"] as const satisfies readonly IconName[];
 /** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
-export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Inbox" title="Inbox">${icon("inbox")}</a>`;
+export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">${icon("menu")}</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Inbox" title="Inbox">${icon("inbox")}</a>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 

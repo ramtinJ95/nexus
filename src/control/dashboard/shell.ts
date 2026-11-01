@@ -122,8 +122,8 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
     return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
-<div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
-<label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
+<div class="side-head"><a class="brand" href="/"><span class="brand-mark">${icon("mark")}</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
+<label class="filter">${icon("search")}<input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
 <nav class="side-nav" aria-label="Pages"><a class="side-link${nav === "inbox" && " active"}" href="/#needs-you"${nav === "inbox" && html` aria-current="page"`}>${icon("inbox")}Inbox<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
@@ -186,7 +186,7 @@ function startDialog(c: Context, start: Shell["start"]): Html {
   const image = c.registry.currentImage();
   const chosen = projects.find((p) => p.id === start?.project) ?? projects[0];
   return html`<dialog id="start-dialog" class="modal" aria-labelledby="start-h"${start !== undefined && " data-autoopen"}>
-<header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+<header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">${icon("cross")}</button></header>
 <div id="start-body" data-live>
 ${chosen === undefined ? html`<div class="modal-empty"><p class="empty">No projects yet, so there is no repository to start a thread on.</p>${newProjectButton}</div>` : html`<form id="start" class="form">
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}
@@ -246,7 +246,7 @@ function projectDialog(c: Context, open: boolean): Html {
   const nodes = c.registry.nodes();
   const { cpus, memoryGiB, diskGiB } = defaultProjectResources;
   return html`<dialog id="project-dialog" class="modal" aria-labelledby="project-h"${open && " data-autoopen"}>
-<header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+<header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">${icon("cross")}</button></header>
 ${nodes.length === 0 ? html`<p class="empty modal-empty">No nodes yet, so a project has nowhere to run.</p>` : html`<form id="project" class="form" data-resources="${JSON.stringify(defaultProjectResources)}" data-github-grant="${JSON.stringify(githubTokenGrant)}">
 <label for="project-id">ID</label>
 <input id="project-id" name="id" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-app" autofocus>
