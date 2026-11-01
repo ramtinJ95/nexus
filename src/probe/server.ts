@@ -245,9 +245,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   // and each delete in flight, which a resend that arrives meanwhile waits for.
   const deleted = new Map<PortableArtifactId, number>();
   const deleting = new Map<PortableArtifactId, Promise<DeleteOutcome>>();
-  async function dropOnce(id: PortableArtifactId, held: boolean): Promise<DeleteOutcome> {
+  async function dropOnce(id: PortableArtifactId): Promise<DeleteOutcome> {
     const run = (async (): Promise<DeleteOutcome> => {
-      if (!held) {
+      // Read as the delete starts, since another request may have deleted it while this one waited on an earlier item.
+      // What the node lists is what its observation reported, and what the person was asked about.
+      if (!(await backend.artifacts.list()).includes(id)) {
         // A delete a crash cut short left what it set aside, which the backend's drop of an absent artifact removes.
         await backend.artifacts.drop(id).catch(() => undefined);
         const freed = deleted.get(id);
@@ -617,11 +619,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
         return send(res, 400, `a cleanup names the artifacts to delete, as {"drop": [...]}: ${(err as Error).message}`);
       }
       const outcomes: Record<string, DeleteOutcome> = {};
-      // What the node lists is what its observation reported, and what the person was asked about.
-      const held = await backend.artifacts.list();
-      for (const id of new Set(asked.drop)) {
-        outcomes[id] = await (deleting.get(id) ?? dropOnce(id, held.includes(id)));
-      }
+      for (const id of new Set(asked.drop)) outcomes[id] = await (deleting.get(id) ?? dropOnce(id));
       void publishSnapshot();
       return send(res, 200, JSON.stringify({ outcomes }), "application/json");
     },

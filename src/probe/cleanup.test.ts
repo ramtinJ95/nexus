@@ -29,6 +29,7 @@ test("the probe sizes each artifact in its directory, deletes those it is sent u
   }
   const fail = (): never => { throw new Error("no pylon here"); };
   let slow = Promise.resolve();
+  const gates = new Map<PortableArtifactId, Promise<void>>();
   const backend: VmBackend = {
     ensureRunning: fail, ensurePaused: fail, ensureDeleted: fail, buildTemplate: fail, buildImage: fail, guest: fail,
     list: async () => [], state: async () => "absent", updateSecret: async () => [],
@@ -40,6 +41,7 @@ test("the probe sizes each artifact in its directory, deletes those it is sent u
         // As the store's drop does, the artifact is set aside first, so a listing no longer holds it while it goes.
         if (existsSync(store.path(id))) await rename(store.path(id), join(root, `.${id}.dropping`));
         await slow;
+        await gates.get(id);
         await store.drop(id, []);
       },
     },
@@ -85,6 +87,19 @@ test("the probe sizes each artifact in its directory, deletes those it is sent u
   const [once, again] = await Promise.all([original, resent]);
   assert.equal(once.outcomes[fresh]!.state, "deleted");
   assert.deepEqual(again.outcomes[fresh], once.outcomes[fresh], "a resend while the first delete runs waits for it and reports what it freed");
+
+  const early: ImageId = "img-000000000004";
+  const late: ImageId = "img-000000000005";
+  for (const id of [early, late]) { await mkdir(join(root, id)); await writeFile(join(root, id, "image.json"), "{}"); await writeFile(join(root, id, "disk"), "y".repeat(8192)); }
+  const lateBytes = (await client.artifactUsage!()).artifacts.find((a) => a.id === late)!.bytes;
+  const blocked = Promise.withResolvers<void>();
+  gates.set(early, blocked.promise);
+  const batch = client.dropArtifacts!([early, late]);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual((await client.dropArtifacts!([late])).outcomes, { [late]: { state: "deleted", bytes: lateBytes } }, "another request deletes the later item meanwhile");
+  blocked.resolve();
+  assert.deepEqual((await batch).outcomes[late], { state: "deleted", bytes: lateBytes }, "the blocked batch reports what that delete freed, not a delete of nothing");
+  assert.deepEqual((await client.dropArtifacts!([late])).outcomes[late], { state: "deleted", bytes: lateBytes }, "and the remembered bytes stay");
 
   const checkpoint = await fetch(`http://127.0.0.1:${probe.port}/v1/cleanup`, { method: "POST", body: JSON.stringify({ drop: ["ckpt-th-1-1"] }) });
   assert.equal(checkpoint.status, 400, "no cleanup deletes a checkpoint");
