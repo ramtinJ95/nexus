@@ -49,8 +49,8 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
   const self = z.object({ Self: z.object({ ID: tailnetNodeIdSchema }) }).parse(JSON.parse(statusJson)).Self.ID;
   // Preview URLs name the node by its MagicDNS name, because that is the name its tailscale serve certificate is for.
   const dnsName = parseSelfDnsName(statusJson);
-  const trusted = (await readControlPlane(probeConfig.controlPlaneFile)).tailnetNodeId;
-  if (trusted !== self) throw new Error(`${probeConfig.controlPlaneFile} names ${trusted} as the control plane, not this node's ID ${self}. Point it at this node with sudo deploy/set-control-plane.sh ${self} <url>`);
+  const trusted = (await readControlPlane()).tailnetNodeId;
+  if (trusted !== self) throw new Error(`/etc/nexus/control-plane.json names ${trusted} as the control plane, not this node's ID ${self}. Point it at this node with sudo deploy/set-control-plane.sh ${self} <url>`);
   const tailscaledSocket = await personWhois(self);
   const manifest = await store.manifest(image);
   const host = probeConfig.listen.host;

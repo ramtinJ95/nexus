@@ -20,7 +20,7 @@ import { startProbe } from "./server.ts";
 import { closeProbe } from "./shutdown.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
-const control = await readControlPlane(config.controlPlaneFile);
+const control = await readControlPlane();
 // One source, so the probe's pre-boot check, the VMs and the control plane's handoffs see the same values.
 const secrets = nodeSecrets(await readSecretsFile(config.secretsFile));
 // `tailscale serve` as the probe's user needs `tailscale set --operator=nexus`, which deploy/install-probe.sh runs.

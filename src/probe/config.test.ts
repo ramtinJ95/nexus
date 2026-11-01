@@ -43,7 +43,6 @@ test("a config parses into probe options, with the probe port as the default", (
   const config = parseProbeConfig(JSON.stringify(valid));
   assert.deepEqual(config.listen, { host: "100.64.0.7", port: 7480 });
   assert.deepEqual(config.auth, { peers: valid.auth.peers }, "the control plane comes from control-plane.json, not probe.json");
-  assert.equal(config.controlPlaneFile, "/etc/nexus/control-plane.json");
   assert.deepEqual(config.backend, valid.backend);
 });
 
@@ -94,6 +93,7 @@ test("a config with a mistake is refused, naming the field", () => {
     ["an unknown backend", (c) => { c.backend = { kind: "firecracker" }; }, /backend\.kind/],
     ["a field from the other backend", (c) => { c.backend.labels = {}; }, /labels/],
     ["a missing secrets file", (c) => { delete c.secretsFile; }, /secretsFile/],
+    ["another control plane file, which the deployer would not read", (c) => { c.controlPlaneFile = "/tmp/control-plane.json"; }, /controlPlaneFile/],
   ];
   for (const [what, change, field] of cases) {
     assert.throws(() => parseProbeConfig(withChange(change)), field, what);

@@ -109,7 +109,7 @@ Each machine names its control plane in one file, `/etc/nexus/control-plane.json
 { "tailnetNodeId": "nAbCdEf1CNTRL", "url": "http://rj-firebat.tail1234.ts.net:7470/" }
 ```
 
-The probe reads it at start and admits the control plane's calls from that tailnet node only. The deployer reads it on every poll, asks `url` for the desired release, and checks with tailscaled that `url` is that node before it sends its token. Neither keeps a copy, so pointing a machine at another control plane changes this file and nothing else. The deployer refuses the file unless root owns it and only root may write it, because it decides whom the root deployer trusts. The control plane itself does not read it: on its own machine the file names the control plane's own `self`.
+The probe reads it at start and admits the control plane's calls from that tailnet node only. The deployer reads it on every poll, asks `url` for the desired release, and checks with tailscaled that `url` is that node before it sends its token. Neither keeps a copy, so pointing a machine at another control plane changes this file and nothing else. The deployer refuses the file unless root owns it and only root may write it, because it decides whom the root deployer trusts, and an upgrade that finds such a file fails its install rather than leaving the deployer to fail every poll. The control plane itself does not read it: on its own machine the file names the control plane's own `self`.
 
 To point a machine at another control plane, run as root from a checkout or a release:
 
@@ -117,9 +117,9 @@ To point a machine at another control plane, run as root from a checkout or a re
 sudo deploy/set-control-plane.sh <tailnet node ID> <url>
 ```
 
-It takes the deployer's lock, writes the file atomically and restarts a running probe, which then refuses the old control plane's calls. The deployer reads the file on its next poll. A rerun that names what the file already holds changes nothing and restarts nothing. It moves no control plane: the machine must already be a node the new control plane knows, with its deploy key.
+It takes the deployer's lock, writes the file atomically, points the old keys that `probe.json` and `deployer.json` may still hold at the same control plane, keeping their modes, and restarts a running probe, which then refuses the old control plane's calls. The deployer reads the file on its next poll. A rerun that names what the file already holds changes nothing and restarts nothing. It moves no control plane: the machine must already be a node the new control plane knows, with its deploy key.
 
-Before this file, the identity sat in `probe.json` as `auth.controlPlane` and in `deployer.json` as `controlUrl` and `controlNodeId`. The release that ships the file writes it from those keys when it is missing, in the role installers' preparation that the deployer runs before it restarts a service, and in `deploy/install.sh`'s config step. It refuses to guess when `probe.json` and `deployer.json` name different control planes, and the install fails and keeps the previous release. After that the old keys are ignored, and stay in their files for an older release: a rollback's probe and a deployer bootstrap installed before the file read them.
+Before this file, the identity sat in `probe.json` as `auth.controlPlane` and in `deployer.json` as `controlUrl` and `controlNodeId`. The release that ships the file writes it from those keys when it is missing, in the role installers' preparation that the deployer runs before it restarts a service, and in `deploy/install.sh`'s config step. It refuses to guess when `probe.json` and `deployer.json` name different control planes, and the install fails and keeps the previous release. After that the old keys are ignored, and stay in their files for an older release: a rollback's probe and a deployer bootstrap installed before the file read them. `set-control-plane.sh` keeps them in step with the file, so that older code also follows one control plane.
 
 Nodes in `control.json` stay as they are. At each start the control plane follows those nodes and every node that joined, and reads `deployKeys`, `callers` and `deployers` from the file as before. `auth.peers` in `probe.json` holds until the control plane puts its list, and a probe from before join tokens keeps it. The older way also still works: `sudo deploy/install.sh --add-node <name>=<digest>` on the control plane's machine edits `control.json` and restarts the control plane, and probe-only nodes then need `--peer` reruns. Removing a node, joined or listed, is not built.
 
@@ -245,7 +245,7 @@ The probe runs as the system user `nexus`. These are its paths:
 | Path | What it holds |
 | --- | --- |
 | `/etc/nexus/probe.json` | The config. `src/probe/config.ts` parses it. |
-| `/etc/nexus/control-plane.json` | The control plane the probe admits, as [The control plane's identity](#the-control-planes-identity) describes. `controlPlaneFile` in `probe.json` moves it. |
+| `/etc/nexus/control-plane.json` | The control plane the probe admits, as [The control plane's identity](#the-control-planes-identity) describes. |
 | `/etc/nexus/secrets.env` | Secret values, `NAME=value` per line. Mode 0640, owner `root:nexus`. |
 | `/var/lib/nexus/pylons` | Pylon instances, their disks and checkpoints, and each instance's `controller.log`, which its controller rotates at 10 MiB into `controller.log.1` and `controller.log.2`. |
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |

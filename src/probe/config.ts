@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backend.ts";
 import { parseJson } from "../parse.ts";
-import { controlPlanePath, type ControlPlane } from "../deploy/control-plane.ts";
+import type { ControlPlane } from "../deploy/control-plane.ts";
 import { type ImageId, isImageId, type TailnetNodeId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { heldSecrets } from "../protocol/observations.ts";
@@ -59,7 +59,6 @@ const configSchema = z.strictObject({
     z.strictObject({ kind: z.literal("docker"), images: z.record(z.custom<ImageId>(isImageId, "must be an image ID, such as img-000000000000"), z.string()), labels: z.record(z.string(), z.string()).default({}), artifacts: absolutePath.optional() }),
   ])),
   secretsFile: absolutePath,
-  controlPlaneFile: absolutePath.default(controlPlanePath),
   /** In the probe's state directory, so the next boot's probe reads what the node's shutdown paused. */
   shutdownFile: absolutePath.default("/var/lib/nexus/shutdown.json"),
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */

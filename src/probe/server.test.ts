@@ -160,9 +160,9 @@ test("the probe trusts the control plane control-plane.json names, not the one a
   const config = parseProbeConfig(JSON.stringify({
     node, listen: { host: "100.64.0.7" }, auth: { controlPlane, peers: [peer] },
     backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" },
-    secretsFile: "/etc/nexus/secrets.env", controlPlaneFile,
+    secretsFile: "/etc/nexus/secrets.env",
   }));
-  const { base, callAs } = await setup(t, { auth: probeAuth(config, await readControlPlane(config.controlPlaneFile)) });
+  const { base, callAs } = await setup(t, { auth: probeAuth(config, await readControlPlane(controlPlaneFile)) });
   callAs(controlPlane);
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 403);
   callAs(moved);
