@@ -484,7 +484,9 @@ const checkoutFiles = {
 
 /** The pylons running on `node`, which its health lists with their processes. */
 const runningOn = (registry: Demo["registry"], node: NodeName) =>
-  registry.pylonsWithThreadsOn(node).filter(({ thread }) => thread.status === "active").map(({ pylon }) => pylon.pylonId).slice(0, 6);
+  registry.pylonsWithThreadsOn(node).filter(({ pylon }) => running.has(pylon.pylonId)).map(({ pylon }) => pylon.pylonId);
+/** The pylons the seed reported running, which only they list as processes. */
+const running = new Set<PylonId>();
 
 /**
  * A probe per node that answers from memory: commands succeed and health is made up. Its pipes run checkout reads
@@ -507,7 +509,8 @@ function health(node: NodeName, at: number, pylons: readonly PylonId[]): NodeHea
   const hourOfDay = new Date(at).getUTCHours() + 1;
   const busy = hourOfDay >= 8 && hourOfDay <= 22 ? 1 : 0.25;
   const wave = Math.sin((at / day) * 2 * Math.PI) * 0.5 + 0.5;
-  const noise = (seed: number) => Math.abs(Math.sin(at / 7_919 + seed)) ;
+  // Two slow waves and a faster one, so a line wanders the way a real host's does instead of zigzagging every sample.
+  const noise = (seed: number) => 0.5 + (Math.sin(at / (83 * minute) + seed) * 0.5 + Math.sin(at / (19 * minute) + seed * 2.3) * 0.35 + Math.sin(at / (4 * minute) + seed * 5.1) * 0.15) / 2;
   const load = (big ? 6 : 2.5) * busy * (0.6 + wave * 0.6) + noise(1) * 1.5;
   const memTotal = big ? 64 : 32;
   const used = memTotal * (0.35 + 0.35 * busy * wave + noise(2) * 0.08);
@@ -727,6 +730,7 @@ export async function seedDemo(d: Demo) {
       if (s.pylon === "absent") return [];
       if (s.pylon === "paused" || s.archived) return [stoppedPylon(t.pylonId, { checkpoint: `ck-${t.id}` as never })];
       if (s.pylon === "broken") return [{ pylonId: t.pylonId, phase: "broken" as const, detail: "the controller exited", cause: "controller" as const, logTail: "qemu-system-x86_64: terminating on signal 15 from pid 1\n" }];
+      running.add(t.pylonId);
       return [runningPylon(t.pylonId, { liveHash: live.liveHash, bootedAt: new Date(t.createdAt + minute).toISOString(), bootedFrom: { image: image.id as ImageId, checkpoint: null }, listening: [{ port: 5173 }, { port: 3000 }] })];
     });
     const capacity = testCapacity(node === firebat
