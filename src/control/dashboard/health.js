@@ -47,11 +47,31 @@ export async function caughtUp(hand, wait = 1000) {
   }
 }
 
+/** Shows a notice on the channel picked, and returns what closes it. */
+export async function notice(channel, title, body, url) {
+  if (channel === "system") {
+    const shown = new Notification(title, { body });
+    shown.onclick = () => { window.focus(); location.assign(url); shown.close(); };
+    return () => shown.close();
+  }
+  if (channel !== "toast") return () => {};
+  const { el } = await import("./page.js");
+  const toast = el("div", { className: "attention-toast", role: "status" },
+    el("span", { textContent: `${title}: ${body}` }),
+    el("a", { href: url, textContent: "Open" }));
+  const dismiss = el("button", { textContent: "Dismiss", type: "button" });
+  dismiss.onclick = () => toast.remove();
+  toast.append(dismiss);
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 15000);
+  return () => toast.remove();
+}
+
 // Each check's notice, which its next change closes, so a recovery takes its alert away.
 const shown = new Map();
 // The newest change the page showed, so no change from before it notifies.
 const fresh = newChanges(Number(globalThis.document?.getElementById("health-link")?.dataset.change ?? 0));
-export function showHealth(change, notificationChannel) {
+export function showHealth(change, notificationChannel, refreshed = refresh) {
   if (!fresh(change)) return;
   const n = healthNotice(change);
   void shown.get(n.key)?.then((close) => close());
@@ -60,7 +80,7 @@ export function showHealth(change, notificationChannel) {
   const channel = n.quiet ? (focused() && page === null ? "toast" : null) : notificationChannel(focused(), page, "health", secure, secure ? Notification.permission : "unavailable");
   shown.set(n.key, notice(channel, n.title, n.body, n.url));
   // The sidebar's count, and the Health page, show the change without waiting for the next poll.
-  void refresh();
+  void refreshed();
 }
 
 /** Marks the problems the Health page shows seen once the person looks at it, which clears the sidebar's count. */

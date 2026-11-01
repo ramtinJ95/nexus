@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { caughtUp, healthNotice, newChanges, owedHealthSeen } from "./health.js";
+import { caughtUp, healthNotice, newChanges, notice, owedHealthSeen, showHealth } from "./health.js";
+import { notificationChannel } from "./notifications.js";
+import * as health from "./health.js";
+import { readFileSync } from "node:fs";
 
 const change = (from, status, node = "rj-firebat") => ({ id: 3, node, name: "disk", from, status, text: "12.4 of 98.0 GiB free", at: "2026-11-02T00:30:00.000Z", seenAt: null });
 
@@ -54,4 +57,36 @@ test("a stream that opened again hands on every change kept, oldest first, and a
   t.mock.timers.tick(60_000);
   await settled();
   assert.equal(asked.length, 3, "and stops");
+});
+
+test("a change in a background tab shows a system notification that its recovery closes, and a thread's notice shows one too", async (t) => {
+  const shown = [];
+  class Notification {
+    static permission = "granted";
+    constructor(title, { body }) { this.title = title; this.body = body; this.open = true; shown.push(this); }
+    close() { this.open = false; }
+  }
+  const globals = { location: { pathname: "/", assign: () => {} }, window: { isSecureContext: true, Notification, focus: () => {} }, document: { visibilityState: "hidden", hasFocus: () => false }, Notification };
+  const before = Object.fromEntries(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  for (const [k, v] of Object.entries(globals)) Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  t.after(() => { for (const [k, d] of Object.entries(before)) d === undefined ? delete globalThis[k] : Object.defineProperty(globalThis, k, d); });
+  let refreshes = 0;
+  const refreshed = async () => { refreshes += 1; };
+  showHealth({ ...change("ok", "warn"), id: 101 }, notificationChannel, refreshed);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(shown.map((n) => [n.title, n.body, n.open]), [["rj-firebat disk: warn", "12.4 of 98.0 GiB free", true]]);
+  showHealth({ ...change("warn", "ok"), id: 102 }, notificationChannel, refreshed);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(shown.map((n) => n.open), [false], "the recovery closes the alert, and says so in no system notification");
+  assert.equal(refreshes, 2, "each change refreshes the sidebar's count");
+  const close = await notice("system", "Fix", "Waiting on you", "/threads/t1");
+  assert.deepEqual([shown.at(-1).title, shown.at(-1).body, shown.at(-1).open], ["Fix", "Waiting on you", true]);
+  close();
+  assert.equal(shown.at(-1).open, false);
+});
+
+test("every function the client calls on the module it loads is one the module exports", () => {
+  const called = [...readFileSync(new URL("./client.js", import.meta.url), "utf8").matchAll(/checks\.then\(\(m\) => m\.(\w+)\(/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(called)].sort(), ["caughtUp", "markHealthSeen", "notice", "showHealth"]);
+  for (const name of called) assert.equal(typeof health[name], "function", name);
 });
