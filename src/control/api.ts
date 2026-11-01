@@ -135,7 +135,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (cal
     ...streamRoutes(kit),
     ...projectRoutes(kit, options),
     ...usageRoutes(kit, options),
-    ...nodeRoutes(kit, nodeHealth),
+    ...nodeRoutes(kit, options, nodeHealth),
     ...threadRoutes(kit, options),
     ...pipelineRoutes(kit, options),
     ...reviewRoutes(kit, options),

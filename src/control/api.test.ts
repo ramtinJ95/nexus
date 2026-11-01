@@ -630,6 +630,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "GET ^\\/v1\\/items\\/([^/]+)$",
     "GET ^\\/v1\\/nodes$",
     "GET ^\\/v1\\/nodes\\/([^/]+)\\/health$",
+    "GET ^\\/v1\\/nodes\\/([^/]+)\\/metrics$",
     "GET ^\\/v1\\/projects$",
     "GET ^\\/v1\\/queued$",
     "GET ^\\/v1\\/queued\\/([^/]+)$",
