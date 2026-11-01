@@ -261,6 +261,7 @@ a.link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .resizer:hover::after, .resizer:focus-visible::after, :root[data-resizing] .resizer::after { background: var(--accent); width: 2px; left: 2.5px; }
 .resizer:focus-visible { outline: none; }
 .side-sep, .inspect-sep { position: absolute; top: 0; bottom: 0; }
+.ws-sep { display: none; position: relative; }
 .side-sep { left: calc(var(--side-w, 236px) - 4px); }
 .inspect-sep { right: calc(var(--inspect-w, 330px) - 4px); }
 :root[data-resizing] { cursor: col-resize; user-select: none; }
@@ -984,12 +985,11 @@ a.need-thread:hover { color: var(--accent); }
   .main:has(> .tabs) > .tabs { grid-row: 2; }
   .main:has(> .tabs) > .scroll { grid-row: 3; }
   .main:has(> .tabs) > .dock { grid-row: 4; }
-  .main:has(> .tabs) > .ws-sep { display: none; }
   .main:is([data-view="file"], [data-view="term"]) { grid-template-columns: minmax(340px, 1fr) 7px min(var(--work-w, 54%), calc(100% - 347px)); }
   .main:is([data-view="file"], [data-view="term"]) > .tabs { grid-column: 3; }
   .main:is([data-view="file"], [data-view="term"]) > .scroll { grid-row: 2 / 4; }
   .main:is([data-view="file"], [data-view="term"]) > :is(.file-view, .term-view) { grid-column: 3; grid-row: 3 / 5; }
-  .main:is([data-view="file"], [data-view="term"]) > .ws-sep { display: block; position: relative; grid-column: 2; grid-row: 2 / 5; }
+  .main:is([data-view="file"], [data-view="term"]) > .ws-sep { display: block; grid-column: 2; grid-row: 2 / 5; }
   .main:is([data-view="file"], [data-view="term"]) .convo { padding-left: 18px; padding-right: 18px; }
   .main:is([data-view="file"], [data-view="term"]) .dock { padding-left: 14px; padding-right: 14px; }
   .main:is([data-view="file"], [data-view="term"]) > .tabs > .tab[data-tab="convo"] { min-width: 0; width: 34px; padding: 0; }
