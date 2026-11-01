@@ -45,17 +45,20 @@ const answerers: Record<Question["answerer"], string> = { person: "You answer.",
 
 /**
  * Above the questions, each judgment of the thread's failed pylon: what failed, the verdict and who gave it, and what
- * Nexus did, with what the judgment was asked and what it answered. A question it asks is the question card below.
+ * Nexus did, with what the judgment was asked and what it answered, all but what failed folded where `fold` asks, as
+ * the inbox does. A question it asks is the question card below.
  */
-export function judgmentCards(c: Context, d: ThreadDetail): Html[] {
+export function judgmentCards(c: Context, d: ThreadDetail, fold = false): Html[] {
   return (d.judgments ?? []).map((j) => {
     const did = j.outcome !== null ? `Nexus ${j.outcome}.` : j.question !== null ? "It waits for your answer below." : j.verdict === null ? "Nexus acts on its answer." : "Nexus acts on it now.";
+    const verdict = html`<p class="land-meta">${j.verdict === null ? "The judgment has not answered yet." : html`<b>${j.verdict.answer}</b>, by the ${j.verdict.by}: ${j.verdict.why}`}</p>
+<p class="land-meta">${did}</p>`;
+    const brief = j.brief !== null && html`<details><summary>What the judgment was asked and answered</summary><pre>${j.brief}</pre>${j.reply !== null && html`<pre>${j.reply}</pre>`}</details>`;
     return html`<section class="landing judgment" data-judgment="${j.failure}" aria-label="Judgment of a failure">
 <div class="land-top"><h2>Failed on ${j.node}</h2><span class="land-meta">judged ${ago(j.startedAt, c.now)}</span></div>
 <p class="land-note">${j.failed.split("\n")[0]}</p>
-<p class="land-meta">${j.verdict === null ? "The judgment has not answered yet." : html`<b>${j.verdict.answer}</b>, by the ${j.verdict.by}: ${j.verdict.why}`}</p>
-<p class="land-meta">${did}</p>
-${j.brief !== null && html`<details><summary>What the judgment was asked and answered</summary><pre>${j.brief}</pre>${j.reply !== null && html`<pre>${j.reply}</pre>`}</details>`}
+${fold ? html`<details class="land-fold" id="judgment-${d.thread.id}-${j.failure}"><summary>The judgment's verdict</summary>${verdict}${brief}</details>` : html`${verdict}
+${brief}`}
 </section>`;
   });
 }

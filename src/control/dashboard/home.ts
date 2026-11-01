@@ -164,7 +164,7 @@ ${card}`];
       const q = n.question;
       const judgment = (d.judgments ?? []).filter((j) => j.question === q.id);
       return [q.ask !== undefined ? "Claude asks" : q.proposal !== undefined ? "Proposed item" : judgment.length > 0 ? "Judgment" : "Question",
-        html`${judgment.length > 0 && judgmentCards(c, { ...d, judgments: judgment })}${questionCard(c, q)}`];
+        html`${judgment.length > 0 && judgmentCards(c, { ...d, judgments: judgment }, true)}${questionCard(c, q)}`];
     }
     case "thread": switch (n.attention) {
       case "waiting": return ["Dialog in its terminal", fix(`${t.sessionWaitingMessage ?? "A dialog waits for input"}, in the pylon's terminal.`, html`<a class="btn btn-xs" href="/threads/${t.id}#terminal">${icon("terminal")}Open terminal</a>`)];
