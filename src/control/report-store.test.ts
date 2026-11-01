@@ -18,10 +18,11 @@ const change = (at: string, from: Status, status: Status, name: "disk" | "online
 test("a registry from the daily reports drops them, and one rewound past that keeps every change and its seen mark", (t) => {
   const path = join(dir, `${randomUUID()}.db`);
   openRegistry(path).close();
-  const version = versionBefore(/DELETE FROM doctor_reports WHERE json_extract/);
+  const version = versionBefore(/DELETE FROM doctor_reports WHERE CASE WHEN json_valid/);
   rewindTo(path, version);
   const daily = new DatabaseSync(path);
   daily.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?)").run(Date.parse("2026-11-01T00:30:00Z"), JSON.stringify({ at: "2026-11-01T00:30:00.000Z", status: "warn", checks: [{ node: null, name: "backup", status: "warn", text: "no backup run is recorded yet" }] }));
+  daily.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?)").run(Date.parse("2026-11-01T00:31:00Z"), "{ not json");
   daily.close();
   const upgraded = openRegistry(path);
   assert.deepEqual(upgraded.healthChanges(), [], "the daily report holds no change");
@@ -77,4 +78,14 @@ test("a change is dropped once older than what is kept, unless it set a problem 
   assert.deepEqual(registry.healthChanges().map((c) => [c.name, c.from, c.status]), [["disk", "warn", "fail"]], "the online problem and its recovery are past what is kept, and so is the disk's first change, which no longer sets its state");
   registry.recordHealthChanges([], Date.parse("2026-12-01T00:00:00Z"));
   assert.deepEqual(registry.healthStates().map((c) => c.status), ["fail"], "the open problem's change stays however old");
+});
+
+test("a change's ID never repeats, though every change before it was dropped", (t) => {
+  const registry = testRegistry(t);
+  const [first] = registry.recordHealthChanges([change("2026-10-01T00:00:00.000Z", "ok", "warn")], 0);
+  const [recovered] = registry.recordHealthChanges([change("2026-10-01T01:00:00.000Z", "warn", "ok")], 0);
+  registry.recordHealthChanges([], Date.parse("2026-12-01T00:00:00Z"));
+  const [next] = registry.recordHealthChanges([change("2026-12-01T00:00:00.000Z", "ok", "fail")], Date.parse("2026-12-01T00:00:00Z"));
+  assert.ok(next!.id > recovered!.id && recovered!.id > first!.id, "a Health page that marked the old ID seen does not mark the new problem");
+  assert.equal(registry.markHealthSeen(first!.id, Date.parse("2026-12-01T00:01:00Z")), 0);
 });

@@ -35,8 +35,8 @@ export function reportStore(db: Db, appendEvent: (kind: EventKind, thread: null,
     healthChanges: (): HealthChange[] => changes().reverse(),
     /**
      * Records each change, with the event the dashboard alerts on, and drops every change from before `keepSince`, in
-     * ms, but one that set a problem still open. A problem that only got better keeps its seen mark, so only a new or
-     * worse problem counts as unseen.
+     * ms, but one that set a problem still open and the newest. A problem that only got better keeps its seen mark, so
+     * only a new or worse problem counts as unseen.
      */
     recordHealthChanges(next: readonly NewHealthChange[], keepSince: number): HealthChange[] {
       return db.transaction(() => {
@@ -51,7 +51,10 @@ export function reportStore(db: Db, appendEvent: (kind: EventKind, thread: null,
           return saved;
         });
         const open = new Set(latest(changes()).filter((c) => c.status !== "ok").map((c) => c.id));
-        for (const { id } of sql("SELECT id FROM doctor_reports WHERE at < ?").all(keepSince)) if (!open.has(id as number)) sql("DELETE FROM doctor_reports WHERE id = ?").run(id as number);
+        // The newest row stays too, as SQLite gives the next row the highest ID left plus one, and the Health page's
+        // seen mark relies on IDs that never repeat.
+        const { newest } = sql("SELECT max(id) AS newest FROM doctor_reports").get()!;
+        for (const { id } of sql("SELECT id FROM doctor_reports WHERE at < ? AND id < ?").all(keepSince, newest as number | null)) if (!open.has(id as number)) sql("DELETE FROM doctor_reports WHERE id = ?").run(id as number);
         return recorded;
       });
     },
