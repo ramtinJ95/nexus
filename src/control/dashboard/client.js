@@ -25,7 +25,11 @@ if (changesPane !== null) {
 end?.toEnd();
 follow(document.getElementById("convo")?.dataset.stream);
 // The nudge card's Write to it, from Needs you or from the thread's own page.
-const writeTo = () => { if (location.hash === "#write") document.getElementById("prompt-text")?.focus(); };
+const writeTo = () => {
+  if (location.hash !== "#write") return;
+  if (tabsBar !== null && activeTab !== null) showTab(null);
+  document.getElementById("prompt-text")?.focus();
+};
 writeTo();
 addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
@@ -64,6 +68,7 @@ async function showNeed() {
   const card = find() ?? document.getElementById("needs-you");
   for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
   card?.classList.add("picked");
+  card?.querySelector(".need-fold")?.setAttribute("open", "");
   card?.scrollIntoView({ block: "start" });
   card?.focus({ preventScroll: true });
 }

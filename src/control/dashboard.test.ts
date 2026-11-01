@@ -478,9 +478,9 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
   assert.ok(!claude.includes("Land #7"));
 });
 
-/** The home page's Needs you cards as a reader takes them in: what each is, its thread, and the card's text. */
+/** The home page's Needs you cards, the board's column held for the person, as a reader takes them in: what each is, its thread, and the card's text. */
 function needsOf(page: string) {
-  const region = page.split('id="needs-you"')[1]!.split('<div class="page" id="overview"')[0]!;
+  const region = page.split('id="needs-you"')[1]!.split('<section class="col" id="col-landing"')[0]!;
   return {
     cards: [...region.matchAll(/<article class="need need-(\w+)" id="([^"]+)" data-thread="([^"]+)" data-attention="(\w+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(m[0]), html: m[0] })),
     text: textOf(region.replace(/^[^>]*>/, "")),
@@ -491,7 +491,7 @@ const needsCount = (page: string) => /<span class="side-count" id="needs-count" 
 test("Needs you lists, oldest first, each held review, open question and ask, and each thread stopped where only the person moves it, with the action on its card", async (t) => {
   const s = await seeded(t, landingOptions());
   const empty = (await s.call("GET", "/")).text;
-  assert.equal(needsOf(empty).text, "Needs you Nothing waits on you.");
+  assert.equal(needsOf(empty).text, "Held for you 0 Nothing waits on you.");
   assert.equal(needsCount(empty), "", "the sidebar counts nothing");
 
   const now = Date.now();
@@ -645,7 +645,7 @@ test("acting on a card through the route its button calls takes the card off the
   assert.deepEqual(landed, [held.id]);
   s.registry.saveReview(approvedReview(held.id, { kind: "checking", startedAt: Date.now(), thread: null }, { land: { requestedBy: laptop } }));
   const after = (await s.call("GET", "/")).text;
-  assert.equal(needsOf(after).text, "Needs you Nothing waits on you.", "a landing on its way and an archived thread wait on no one");
+  assert.equal(needsOf(after).text, "Held for you 0 Nothing waits on you.", "a landing on its way and an archived thread wait on no one");
   assert.equal(needsCount(after), "");
 });
 
@@ -931,7 +931,7 @@ test("the inspector's tabs pick the changes, the previews or the pylon, and the 
   assert.match(page, /id="changes-turn"><span class="switch-label">Latest turn<\/span>/);
   assert.ok(!regions.includes('id="pane-changes"') && page.includes(`<section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${fix.id}">`), "no refresh replaces what the client read");
   assert.match(page, /<div id="facts" data-live hidden><span data-pylon="running" data-turn="false" data-agent-at="0" data-thread-status="(active|idle)"><\/span><\/div>/, "the client learns when the pylon runs and a turn ends");
-  assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the conversation is the first tab, and the terminal is one click away beside it");
+  assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+" data-default="timeline"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="timeline-view" data-tab="timeline">.*Timeline<\/span><\/button><button type="button" class="tab" role="tab" aria-selected="false" aria-controls="scroll" data-tab="convo">.*Conversation<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the timeline is the first tab, and the conversation and the terminal are each one click away beside it");
 });
 
 test("the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews", async (t) => {
@@ -1812,7 +1812,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
   assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
     "the turn is timed from when control heard it start, and Interrupt stops it");
   const since = s.registry.thread(thread.id)!.workingSince;
-  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
+  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 4, "the run bar, the sidebar row, the inspector and the timeline tick the same clock");
   assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's pane");
   assert.match(html, /placeholder="Steer the run…"/);
   assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
@@ -2337,10 +2337,10 @@ test("the pipeline page lists each project's items with the phase their records 
   const page = (await s.call("GET", "/pipeline")).text;
   assert.match(page, /<a class="side-link active" href="\/pipeline" aria-current="page">/);
   const section = sectionOf(page, "pipeline-acme");
-  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Phase After Thread/);
-  const row = (id: string) => textOf(section.split(`<tr data-item="${id}"`)[1]!.split("</tr>")[0]!.replace(/^[^>]*>/, ""));
-  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ nothing Greet by name$`));
-  assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} Greet by name none yet Approve Cancel`);
+  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Planned /);
+  const row = (id: string) => textOf(section.split(`<li class="card item-card" id="item-${id}"`)[1]!.split("</li>")[0]!.replace(/^[^>]*>/, ""));
+  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ After nothing Thread Greet by name$`));
+  assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} After Greet by name Thread none yet Approve Cancel`);
   assert.match(section, new RegExp(`<a class="link" href="/threads/${thread}">Greet by name</a>`));
   assert.match(section, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
   assert.doesNotMatch(section, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");

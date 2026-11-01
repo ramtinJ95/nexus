@@ -22,6 +22,8 @@ import { runOf, stateBar, composer } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
+import { lifeOfThread } from "./lifecycle.ts";
+import { lifeTrack, timeline } from "./timeline.ts";
 import { usageColumns, exact } from "./usage-page.ts";
 
 const waitTone: Record<Wait["state"], Tone> = { waiting: "idle", landed: "ok", blocked: "bad" };
@@ -61,6 +63,9 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = t.status === "active" || t.status === "idle";
+  const life = lifeOfThread(c, t.id);
+  // A reply the person has not read opens the page on the conversation, and anything else on the work's timeline.
+  const first = d.attention === "reply" ? "convo" : "timeline";
   const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
@@ -70,10 +75,12 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
     active: t.id,
     ...(open ? { activity: t.id } : {}),
     main: html`${bar}
-<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
+<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(life)}</nav>
+<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}" data-default="${first}"><button type="button" class="tab${first === "timeline" && " active"}" role="tab" aria-selected="${String(first === "timeline")}" aria-controls="timeline-view" data-tab="timeline">${icon("timeline")}<span class="tab-name">Timeline</span></button><button type="button" class="tab${first === "convo" && " active"}" role="tab" aria-selected="${String(first === "convo")}" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">Conversation</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
-<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
+<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline"${first !== "timeline" && " hidden"}><div class="tl-wrap" id="timeline" data-live>${timeline(c, d, items, life)}</div></section>
+<div class="scroll" id="scroll" role="tabpanel"${first !== "convo" && " hidden"}><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
 <div class="dock">
@@ -132,6 +139,7 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
       q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
       q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
     ])}
+<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(lifeOfThread(c, q.id))}</nav>
 <div class="scroll"><div class="page queued" id="queued" data-live>
 <section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
 <ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>

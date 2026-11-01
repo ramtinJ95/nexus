@@ -18,6 +18,7 @@ import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { assetUrl } from "./assets.ts";
+import { lifeOfThread } from "./lifecycle.ts";
 
 /** How often the client refetches a page. The loop ticks every 5 s, so polling faster shows nothing new. */
 export const pollMs = 5_000;
@@ -75,7 +76,7 @@ ${projectDialog(c, page.addProject === true)}
 
 /** How long an open thread whose pylon is down and whose agent is not working stays listed before it folds away as quiet. */
 export const quietAfterMs = 8 * 60 * 60 * 1000;
-const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
+export const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
 
 /**
  * A project's threads, newest first: the recent open ones, the open ones quiet for over `quietAfterMs` with their pylon
@@ -114,15 +115,16 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   const row = (t: Thread) => {
     const r = c.row(t);
     const [label, tone] = threadState(r, c.now);
-    return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    const life = lifeOfThread(c, t.id);
+    return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`} data-stage="${life.stage ?? "closed"}" data-at="${life.at}"><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   // A queued thread has no time of its own to show until it starts, so its row says what it is instead.
   const queuedRow = (q: QueuedThread) => {
     const [label, tone] = queuedLook(q);
-    return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
+    return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}"${q.id === active && html` aria-current="page"`} data-stage="${q.blocked ? "held" : "queued"}" data-at="queued"><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
-<div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
+<div class="side-head"><a class="brand" href="/"><span class="brand-trk" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
 <nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
