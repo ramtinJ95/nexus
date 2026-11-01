@@ -4,7 +4,7 @@ import type { NodeHealth } from "../../protocol/client.ts";
 import { lowDisk } from "../../disk-space.ts";
 import { gib } from "../placement.ts";
 import { utc } from "../usage.ts";
-import { sampleOf, seriesOf } from "../node-metrics.ts";
+import { sampleOf, seriesLabel, seriesOf } from "../node-metrics.ts";
 import { charts, ranges } from "./graph-data.ts";
 import { Html, html, menu } from "./view.ts";
 import type { Context } from "./context.ts";
@@ -20,8 +20,7 @@ function pageSample(c: Context, health: NodeHealth): string {
   const sample = sampleOf(health, c.now, (p: PylonId) => c.registry.pylon(p)?.thread ?? null);
   const labels = Object.keys(sample.values).flatMap((key) => {
     const s = seriesOf(key);
-    if (s?.kind !== "pylonCpu" && s?.kind !== "pylonResident") return [];
-    return [[key, (s.thread === null ? undefined : c.registry.thread(s.thread)?.title) ?? s.pylon] as const];
+    return s?.kind === "pylonCpu" || s?.kind === "pylonResident" ? [[key, seriesLabel(s, (t) => c.registry.thread(t)?.title)] as const] : [];
   });
   return JSON.stringify({ ...sample, labels: Object.fromEntries(labels) });
 }

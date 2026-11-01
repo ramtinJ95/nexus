@@ -38,6 +38,20 @@ export function seriesOf(key: string): Series | null {
   return { kind, pylon: pylon as PylonId, thread: thread === "" ? null : thread as ThreadId };
 }
 
+const plainLabels: Record<Exclude<Series, { kind: "temp" | "pylonCpu" | "pylonResident" }>["kind"], string> = {
+  load1: "1-minute load", load5: "5-minute load", load15: "15-minute load", cpus: "CPUs", memTotal: "Memory total", memAvailable: "Memory available",
+  swapTotal: "Swap total", swapUsed: "Swap used", diskTotal: "Disk total", diskFree: "Disk free",
+};
+
+/** A sensor's name, a pylon's thread title or else its ID, or a plain series' name. */
+export function seriesLabel(s: Series, titleOf: (thread: ThreadId) => string | undefined): string {
+  switch (s.kind) {
+    case "temp": return s.sensor;
+    case "pylonCpu": case "pylonResident": return (s.thread === null ? undefined : titleOf(s.thread)) ?? s.pylon;
+    default: return plainLabels[s.kind];
+  }
+}
+
 /** What one health read gave each series, by key, at the time the control plane read it. A reading the node lacks has no value. */
 export interface HealthSample { at: number; values: Record<string, number> }
 

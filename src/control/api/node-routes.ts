@@ -6,10 +6,9 @@ import type { NodeName, TailnetNodeId } from "../../ids.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { NodeSummary } from "../wire.ts";
 import { HttpError } from "../http-error.ts";
-import type { MetricSeries, NodeMetrics, Series } from "../node-metrics.ts";
+import { seriesLabel, type MetricSeries, type NodeMetrics } from "../node-metrics.ts";
 import { nodePylons, overcommitted } from "../placement.ts";
 import { canDeploy, type DeploymentOptions } from "../releases.ts";
-import type { Registry } from "../registry.ts";
 import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
 
 /** The node as `GET /v1/nodes` and `nexus doctor` read it: its record without the observation, and what its pylons hold. */
@@ -19,20 +18,6 @@ export function nodeSummary(registry: Parameters<typeof nodePylons>[0], record: 
 }
 
 const maxSpanMs = 31 * 24 * 60 * 60 * 1000;
-
-const plainLabels: Record<Exclude<Series, { kind: "temp" | "pylonCpu" | "pylonResident" }>["kind"], string> = {
-  load1: "1-minute load", load5: "5-minute load", load15: "15-minute load", cpus: "CPUs", memTotal: "Memory total", memAvailable: "Memory available",
-  swapTotal: "Swap total", swapUsed: "Swap used", diskTotal: "Disk total", diskFree: "Disk free",
-};
-
-/** A sensor's name, a pylon's thread title or else its ID, or a plain series' name. */
-function labelOf(registry: Registry, s: Series): string {
-  switch (s.kind) {
-    case "temp": return s.sensor;
-    case "pylonCpu": case "pylonResident": return (s.thread === null ? undefined : registry.thread(s.thread)?.title) ?? s.pylon;
-    default: return plainLabels[s.kind];
-  }
-}
 
 function whole(query: URLSearchParams, name: string): number | null {
   const text = query.get(name);
@@ -56,7 +41,7 @@ export function nodeRoutes(kit: ApiKit, options: { deployment?: DeploymentOption
     if (from >= to) throw new HttpError(400, "from must be before to");
     if (to - from > maxSpanMs) throw new HttpError(400, "the range must span at most 31 days, as long as the registry keeps a node's metrics");
     const { tier, bucketMs, series } = registry.nodeMetrics(name, from, to, now);
-    return { node: name, from, to, tier, bucketMs, series: series.map((s): MetricSeries => ({ ...s, label: labelOf(registry, s.series) })) };
+    return { node: name, from, to, tier, bucketMs, series: series.map((s): MetricSeries => ({ ...s, label: seriesLabel(s.series, (t) => registry.thread(t)?.title) })) };
   }
 
   return [
