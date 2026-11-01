@@ -11,9 +11,11 @@ import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 export type Series =
   | { kind: "load1" | "load5" | "load15" | "cpus" | "memTotal" | "memAvailable" | "swapTotal" | "swapUsed" | "diskTotal" | "diskFree" }
   | { kind: "temp"; sensor: string }
-  | { kind: "pylonCpu" | "pylonResident"; pylon: PylonId; thread: ThreadId | null };
+  | { kind: "pylonCpu" | "pylonResident"; pylon: PylonId; thread: ThreadId | null }
+  /** The pylons past `maxPylons` in a range, summed, which only the API serves. */
+  | { kind: "otherPylonsCpu" | "otherPylonsResident" };
 
-const plain = new Set<string>(["load1", "load5", "load15", "cpus", "memTotal", "memAvailable", "swapTotal", "swapUsed", "diskTotal", "diskFree"]);
+const plain = new Set<string>(["load1", "load5", "load15", "cpus", "memTotal", "memAvailable", "swapTotal", "swapUsed", "diskTotal", "diskFree", "otherPylonsCpu", "otherPylonsResident"]);
 
 /** The series' key in the registry and on the wire. A sensor's name may hold a colon, so it comes last. */
 export function seriesKey(s: Series): string {
@@ -41,6 +43,7 @@ export function seriesOf(key: string): Series | null {
 const plainLabels: Record<Exclude<Series, { kind: "temp" | "pylonCpu" | "pylonResident" }>["kind"], string> = {
   load1: "1-minute load", load5: "5-minute load", load15: "15-minute load", cpus: "CPUs", memTotal: "Memory total", memAvailable: "Memory available",
   swapTotal: "Swap total", swapUsed: "Swap used", diskTotal: "Disk total", diskFree: "Disk free",
+  otherPylonsCpu: "Other pylons, summed", otherPylonsResident: "Other pylons, summed",
 };
 
 /** A sensor's name, a pylon's thread title or else its ID, or a plain series' name. */
@@ -126,10 +129,55 @@ export const merged = (a: Bucket, b: Bucket): Bucket => ({ min: Math.min(a.min, 
 export interface MetricSeries { key: string; series: Series; label: string; t: number[]; min: number[]; avg: number[]; max: number[]; n: number[] }
 
 /**
- * `GET /v1/nodes/<name>/metrics`: the node's series over `from` to `to`, in ms since the epoch. `sampledAt`: the newest
- * sample the points hold, null when none, so a reader that appends later samples counts none twice.
+ * How many pylons a range shows a line of their own. A busy month runs hundreds, each a series for as long as it ran,
+ * so the rest are summed into one line per chart. Eight is the palette's categorical slots.
  */
-export interface NodeMetrics { node: string; from: number; to: number; tier: TierName; bucketMs: number; sampledAt: number | null; series: MetricSeries[] }
+export const maxPylons = 8;
+
+/** A pylon's identity in a series key: its pylon and thread. */
+export const pylonOf = (s: Series): string | null => s.kind === "pylonCpu" || s.kind === "pylonResident" ? `${s.pylon}:${s.thread ?? ""}` : null;
+
+type Served = Omit<MetricSeries, "label">;
+
+/**
+ * The series with only the `maxPylons` pylons of the highest CPU peak in the range kept as their own, and the rest
+ * summed per bucket into `otherPylonsCpu` and `otherPylonsResident`, with the pylons summed. A bucket's sum takes each
+ * pylon's min, average and max, so its band holds every pylon's together.
+ */
+export function foldPylons(series: readonly Served[], bucketMs: number): { series: Served[]; otherPylons: string[] } {
+  const peak = new Map<string, number>();
+  for (const s of series) {
+    const id = pylonOf(s.series);
+    if (id !== null) peak.set(id, Math.max(peak.get(id) ?? -Infinity, s.series.kind === "pylonCpu" ? Math.max(...s.max) : -Infinity));
+  }
+  if (peak.size <= maxPylons) return { series: [...series], otherPylons: [] };
+  const kept = new Set([...peak].sort(([a, pa], [b, pb]) => pb - pa || (a < b ? -1 : 1)).slice(0, maxPylons).map(([id]) => id));
+  const sums = { pylonCpu: new Map<number, Bucket & { t: number }>(), pylonResident: new Map<number, Bucket & { t: number }>() };
+  const out: Served[] = [];
+  for (const s of series) {
+    const id = pylonOf(s.series);
+    if (id === null || kept.has(id)) { out.push(s); continue; }
+    const sum = sums[s.series.kind as "pylonCpu" | "pylonResident"];
+    s.t.forEach((t, i) => {
+      const bucket = Math.floor(t / bucketMs);
+      const was = sum.get(bucket);
+      sum.set(bucket, { t: Math.min(was?.t ?? t, t), min: (was?.min ?? 0) + s.min[i]!, sum: (was?.sum ?? 0) + s.avg[i]!, max: (was?.max ?? 0) + s.max[i]!, n: Math.max(was?.n ?? 0, s.n[i]!) });
+    });
+  }
+  for (const [kind, sum] of [["otherPylonsCpu", sums.pylonCpu], ["otherPylonsResident", sums.pylonResident]] as const) {
+    if (sum.size === 0) continue;
+    const points = [...sum.entries()].sort(([a], [b]) => a - b).map(([, p]) => p);
+    out.push({ key: kind, series: { kind }, t: points.map((p) => p.t), min: points.map((p) => p.min), avg: points.map((p) => p.sum), max: points.map((p) => p.max), n: points.map((p) => p.n) });
+  }
+  return { series: out.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0), otherPylons: [...peak.keys()].filter((id) => !kept.has(id)).sort() };
+}
+
+/**
+ * `GET /v1/nodes/<name>/metrics`: the node's series over `from` to `to`, in ms since the epoch. `sampledAt`: the newest
+ * sample the points hold, null when none, so a reader that appends later samples counts none twice. `otherPylons`: the
+ * pylons, as `<pylon>:<thread>`, summed into the other pylons' series.
+ */
+export interface NodeMetrics { node: string; from: number; to: number; tier: TierName; bucketMs: number; sampledAt: number | null; series: MetricSeries[]; otherPylons: string[] }
 
 /**
  * The probe client with each health read recorded. A read that fails records nothing, and a record that fails is

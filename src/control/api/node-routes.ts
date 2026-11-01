@@ -6,7 +6,7 @@ import type { NodeName, TailnetNodeId } from "../../ids.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { NodeSummary } from "../wire.ts";
 import { HttpError } from "../http-error.ts";
-import { seriesLabel, type MetricSeries, type NodeMetrics } from "../node-metrics.ts";
+import { foldPylons, seriesLabel, type MetricSeries, type NodeMetrics, type Series } from "../node-metrics.ts";
 import { nodePylons, overcommitted } from "../placement.ts";
 import { canDeploy, type DeploymentOptions } from "../releases.ts";
 import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
@@ -40,8 +40,10 @@ export function nodeRoutes(kit: ApiKit, options: { deployment?: DeploymentOption
     const to = whole(query, "to") ?? now;
     if (from >= to) throw new HttpError(400, "from must be before to");
     if (to - from > maxSpanMs) throw new HttpError(400, "the range must span at most 31 days, as long as the registry keeps a node's metrics");
-    const { tier, bucketMs, sampledAt, series } = registry.nodeMetrics(name, from, to, now);
-    return { node: name, from, to, tier, bucketMs, sampledAt, series: series.map((s): MetricSeries => ({ ...s, label: seriesLabel(s.series, (t) => registry.thread(t)?.title) })) };
+    const stored = registry.nodeMetrics(name, from, to, now);
+    const { series, otherPylons } = foldPylons(stored.series, stored.bucketMs);
+    const label = (s: Series) => s.kind === "otherPylonsCpu" || s.kind === "otherPylonsResident" ? `${otherPylons.length} other pylons, summed` : seriesLabel(s, (t) => registry.thread(t)?.title);
+    return { node: name, from, to, tier: stored.tier, bucketMs: stored.bucketMs, sampledAt: stored.sampledAt, series: series.map((s): MetricSeries => ({ ...s, label: label(s.series) })), otherPylons };
   }
 
   return [

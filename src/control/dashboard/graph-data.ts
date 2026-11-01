@@ -3,7 +3,7 @@
  * draws from a node's series, the history the page holds of a range with each poll's sample appended, and the
  * columns uPlot draws. Pure, so node-page.ts renders the charts' figures from it and a test reads it without a browser.
  */
-import { seriesOf, type NodeMetrics, type Series } from "../node-metrics.ts";
+import { maxPylons, pylonOf, seriesOf, type NodeMetrics, type Series } from "../node-metrics.ts";
 
 const minute = 60_000;
 const hour = 60 * minute;
@@ -26,10 +26,10 @@ export interface Held extends Points { key: string; series: Series; label: strin
  * What the page holds of one range: the points the API served for it and the samples polls appended since. `seen`: the
  * newest sample the points hold, so a sample is counted once however often a poll carries it.
  */
-export interface History { rangeMs: number; from: number; to: number; bucketMs: number; seen: number; series: Map<string, Held> }
+export interface History { rangeMs: number; from: number; to: number; bucketMs: number; seen: number; series: Map<string, Held>; otherPylons: Set<string> }
 
 export const historyOf = (m: NodeMetrics, rangeMs: number): History => ({
-  rangeMs, from: m.from, to: m.to, bucketMs: m.bucketMs, seen: m.sampledAt ?? -Infinity,
+  rangeMs, from: m.from, to: m.to, bucketMs: m.bucketMs, seen: m.sampledAt ?? -Infinity, otherPylons: new Set(m.otherPylons),
   series: new Map(m.series.map((s) => [s.key, { key: s.key, series: s.series, label: s.label, t: [...s.t], min: [...s.min], avg: [...s.avg], max: [...s.max], n: [...s.n] }])),
 });
 
@@ -51,7 +51,7 @@ export const missed = (h: History, sample: PageSample): boolean => sample.at - h
 export function appended(h: History, sample: PageSample): boolean {
   if (sample.at <= h.seen) return false;
   h.seen = sample.at;
-  for (const [key, value] of Object.entries(sample.values)) {
+  for (const [key, value] of Object.entries(folded(h, sample.values))) {
     let held = h.series.get(key);
     const label = sample.labels[key];
     if (held === undefined) {
@@ -83,6 +83,38 @@ export function appended(h: History, sample: PageSample): boolean {
     else if (keep > 0) for (const column of [held.t, held.min, held.avg, held.max, held.n]) column.splice(0, keep);
   }
   return true;
+}
+
+const otherKeys = { pylonCpu: "otherPylonsCpu", pylonResident: "otherPylonsResident" } as const;
+
+/**
+ * The sample's values with the pylons the range sums summed as the API sums them: those it named, and a pylon that
+ * starts once `maxPylons` pylons have lines of their own. The other pylons' labels follow their count.
+ */
+function folded(h: History, values: Record<string, number>): Record<string, number> {
+  const own = new Set([...h.series.values()].flatMap((s) => pylonOf(s.series) ?? []));
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(values)) {
+    const series = seriesOf(key);
+    const id = series === null ? null : pylonOf(series);
+    if (id === null || own.has(id) || (!h.otherPylons.has(id) && own.size < maxPylons)) {
+      out[key] = value;
+      if (id !== null) own.add(id);
+      continue;
+    }
+    h.otherPylons.add(id);
+    const other = otherKeys[series!.kind as keyof typeof otherKeys];
+    out[other] = (out[other] ?? 0) + value;
+  }
+  for (const other of Object.values(otherKeys)) {
+    const held = h.series.get(other);
+    if (held !== undefined || other in out) {
+      const label = `${h.otherPylons.size} other pylons, summed`;
+      if (held !== undefined) held.label = label;
+      else h.series.set(other, { key: other, series: { kind: other }, label, t: [], min: [], avg: [], max: [], n: [] });
+    }
+  }
+  return out;
 }
 
 const labelOf = (s: Series): string => s.kind === "temp" ? s.sensor : s.kind === "pylonCpu" || s.kind === "pylonResident" ? s.pylon : s.kind;
@@ -198,12 +230,12 @@ export const charts: readonly Chart[] = [
   },
   {
     id: "pylon-cpu", title: "Pylon CPU", unit: "% of one CPU", zero: true, digits: 1, suffix: "%", tick: (v) => `${short(v)}%`,
-    lines: (h, slots) => each(h, slots, "pylon", "pylonCpu", pylonId),
+    lines: (h, slots) => [...each(h, slots, "pylon", "pylonCpu", pylonId), ...line(h, "otherPylonsCpu", h.series.get("otherPylonsCpu")?.label ?? "", { ref: true })],
     note: (h) => noneOf(h, "pylonCpu", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'."),
   },
   {
     id: "pylon-memory", title: "Pylon memory", unit: "GiB resident", zero: true, ...gibs, tick: short,
-    lines: (h, slots) => each(h, slots, "pylon", "pylonResident", pylonId),
+    lines: (h, slots) => [...each(h, slots, "pylon", "pylonResident", pylonId), ...line(h, "otherPylonsResident", h.series.get("otherPylonsResident")?.label ?? "", { ref: true })],
     note: (h) => noneOf(h, "pylonResident", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'."),
   },
 ];

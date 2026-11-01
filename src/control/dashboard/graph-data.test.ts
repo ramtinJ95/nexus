@@ -13,7 +13,7 @@ function served(key: string, label: string, points: [number, number, number, num
 /** Raw points of one sample each. */
 const raw = (key: string, label: string, points: [number, number][]) => served(key, label, points.map(([t, v]) => [t, v, v, v, 1]));
 const metrics = (series: MetricSeries[], over: Partial<NodeMetrics> = {}): NodeMetrics =>
-  ({ node: "rj-firebat", from: 0, to: hour, tier: "raw", bucketMs: 4_000, sampledAt: Math.max(-Infinity, ...series.flatMap((s) => s.t)), series, ...over });
+  ({ node: "rj-firebat", from: 0, to: hour, tier: "raw", bucketMs: 4_000, sampledAt: Math.max(-Infinity, ...series.flatMap((s) => s.t)), series, otherPylons: [], ...over });
 const chart = (id: string) => charts.find((c) => c.id === id)!;
 const linesOf = (id: string, h: History) => chart(id).lines(h, slotter());
 
@@ -150,4 +150,16 @@ test("load per CPU meets the CPUs by bucket, so a bucket whose first read had no
   appended(h, { at: two + 10_000, values: { cpus: 8 }, labels: {} });
   appended(h, { at: two + 70_000, values: { cpus: 8, load1: 2 }, labels: {} });
   assert.deepEqual(linesOf("load-per-cpu", h).find((l) => l.id === "load1")!.points.avg, [0.5, 0.25], "live, the load arrives within a bucket the CPUs began");
+});
+
+test("a live sample sums the pylons the range summed, and a pylon that starts past eight lines, into the other pylons' line", () => {
+  const own = Array.from({ length: 8 }, (_, i) => raw(`pylonCpu:pylon-th-${i}:th-${i}`, `T${i}`, [[0, 10]]));
+  const h = historyOf(metrics([...own, raw("otherPylonsCpu", "2 other pylons, summed", [[0, 5]])], { otherPylons: ["pylon-th-8:th-8", "pylon-th-9:th-9"] }), hour);
+  assert.deepEqual(linesOf("pylon-cpu", h).map((l) => [l.label, "ref" in l.look]).at(-1), ["2 other pylons, summed", true], "a muted line, apart from the pylons' colours");
+  appended(h, { at: 5_000, values: { "pylonCpu:pylon-th-0:th-0": 11, "pylonCpu:pylon-th-8:th-8": 2, "pylonCpu:pylon-th-9:th-9": 3, "pylonCpu:pylon-th-10:th-10": 4 }, labels: {} });
+  const lines = linesOf("pylon-cpu", h);
+  assert.equal(lines.length, 9, "eight pylons and the other pylons");
+  assert.equal(h.series.has("pylonCpu:pylon-th-10:th-10"), false, "a ninth pylon that starts is summed");
+  assert.deepEqual([lines.at(-1)!.label, lines.at(-1)!.points.avg], ["3 other pylons, summed", [5, 9]]);
+  assert.deepEqual(h.series.get("pylonCpu:pylon-th-0:th-0")!.avg, [10, 11]);
 });

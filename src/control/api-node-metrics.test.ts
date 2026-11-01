@@ -50,7 +50,7 @@ test("only a deployer reads a node's metrics, of a node that exists, over a rang
   const to = Date.now();
   const path = (query: string, name: string = node) => `/v1/nodes/${name}/metrics?${query}`;
   const refused = (error: string) => ({ status: 400, body: { error } });
-  assert.deepEqual(await s.call("GET", path(`from=${to - hour}&to=${to}`)), { status: 200, body: { node, from: to - hour, to, tier: "raw", bucketMs: 4_000, sampledAt: null, series: [] } });
+  assert.deepEqual(await s.call("GET", path(`from=${to - hour}&to=${to}`)), { status: 200, body: { node, from: to - hour, to, tier: "raw", bucketMs: 4_000, sampledAt: null, series: [], otherPylons: [] } });
   assert.deepEqual(await s.call("GET", path("")), refused("from must be a whole number of milliseconds since the epoch"));
   for (const bad of ["from=1.5", "from=-1", "from=soon", `from=1&to=${to}x`]) assert.equal((await s.call("GET", path(bad))).status, 400, bad);
   assert.deepEqual(await s.call("GET", path(`from=${to}&to=${to}`)), refused("from must be before to"));
@@ -77,4 +77,19 @@ test("a node's metrics name the newest sample their points hold, even from a buc
   assert.equal(served.tier, "2m");
   assert.equal(served.sampledAt, now - 10_000, "a bucket's time is its first sample, so the newest sample is named apart");
   assert.equal(((await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now - 20_000}`)).body as NodeMetrics).sampledAt, now - 40_000, "only samples up to the range's end count");
+});
+
+test("a node's metrics give at most eight pylons a line of their own, and name the rest summed in one", async (t) => {
+  const s = await testApi(t, { deployment });
+  const now = Date.now();
+  const values = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [[`pylonCpu:pylon-th-${i}:`, i], [`pylonResident:pylon-th-${i}:`, 1]]).flat());
+  for (let at = now - 25 * hour + 30_000; at < now; at += 10 * 60_000) s.registry.recordHealthSample(node, { at, values });
+  for (const span of [hour, day, 30 * day]) {
+    const m = (await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - span}&to=${now}`)).body as NodeMetrics;
+    assert.equal(m.series.filter((x) => x.series.kind === "pylonCpu").length, 8, `${span}`);
+    assert.equal(m.otherPylons.length, 12);
+    const other = m.series.find((x) => x.key === "otherPylonsCpu")!;
+    assert.equal(other.label, "12 other pylons, summed");
+    assert.equal(other.avg.at(-1), 66, "0 + 1 + ... + 11");
+  }
 });

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import { DatabaseSync } from "node:sqlite";
-import { maxPoints, minSampleGapMs, recordingHealth, sampleOf, servingOf } from "./node-metrics.ts";
+import { foldPylons, maxPoints, maxPylons, minSampleGapMs, recordingHealth, sampleOf, seriesOf, servingOf } from "./node-metrics.ts";
 import { drainNodeMetrics, regroupedRangeSql, wholeRangeSql } from "./node-metrics-store.ts";
 import { migrations } from "./schema.ts";
 import { openRegistry } from "./registry.ts";
@@ -168,4 +168,22 @@ test("the probe client records each health read it makes, nothing for a failed r
   record = () => { throw new Error("database is locked"); };
   assert.equal(await probe.health(), health);
   assert.deepEqual(logged, ["rj-firebat: recording its health failed: database is locked"]);
+});
+
+test("a range keeps the pylons of the highest CPU peaks as their own lines, and sums the rest per bucket into one per chart", () => {
+  const pylon = (i: number, kind: "pylonCpu" | "pylonResident", points: [number, number][]) => {
+    const key = `${kind}:pylon-th-${i}:th-${i}`;
+    return { key, series: seriesOf(key)!, t: points.map(([t]) => t), min: points.map(([, v]) => v), avg: points.map(([, v]) => v), max: points.map(([, v]) => v + 1), n: points.map(() => 1) };
+  };
+  const few = Array.from({ length: maxPylons }, (_, i) => pylon(i, "pylonCpu", [[0, i]]));
+  assert.deepEqual(foldPylons(few, minute), { series: few, otherPylons: [] }, "eight pylons keep their own lines");
+  const many = Array.from({ length: 12 }, (_, i) => [pylon(i, "pylonCpu", [[0, i], [minute, i]]), pylon(i, "pylonResident", [[0, 1], [minute + 5_000, 2]])]).flat();
+  const { series, otherPylons } = foldPylons([{ key: "load1", series: { kind: "load1" }, t: [0], min: [1], avg: [1], max: [1], n: [1] }, ...many], minute);
+  assert.deepEqual(otherPylons, ["pylon-th-0:th-0", "pylon-th-1:th-1", "pylon-th-2:th-2", "pylon-th-3:th-3"], "the four of the lowest peaks");
+  assert.equal(series.filter((s) => s.series.kind === "pylonCpu").length, maxPylons);
+  assert.equal(series.filter((s) => s.series.kind === "pylonResident").length, maxPylons, "a pylon kept for its CPU keeps its memory line too");
+  assert.ok(series.some((s) => s.key === "load1"));
+  const other = (key: string) => series.find((s) => s.key === key)!;
+  assert.deepEqual([other("otherPylonsCpu").t, other("otherPylonsCpu").avg, other("otherPylonsCpu").max], [[0, minute], [6, 6], [10, 10]], "0 + 1 + 2 + 3, with each max");
+  assert.deepEqual([other("otherPylonsResident").t, other("otherPylonsResident").avg], [[0, minute + 5_000], [4, 8]], "points in one bucket meet whatever their first sample's time");
 });
