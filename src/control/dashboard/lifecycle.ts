@@ -95,7 +95,7 @@ export function needWhy(n: ThreadNeed, now: number): string {
 }
 
 /** A started or queued thread's life, from its pipeline phase and what of it waits on the person. */
-export function lifeOfThread(c: Pick<Context, "registry" | "needs">, id: ThreadId): Life {
+export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id: ThreadId): Life {
   const phase = threadPhase(c.registry, id);
   const needs = c.needs().filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.d.thread.id === id);
   const review = c.registry.review(id);
@@ -108,12 +108,12 @@ export function lifeOfThread(c: Pick<Context, "registry" | "needs">, id: ThreadI
     : !started ? "queued"
     : c.registry.prWatch(id)?.links.some((l) => l.pr.state === "open") ? "review" : "building";
   const stage = needs.length > 0 ? "held" : mapped;
-  const said = (needs.length === 0 ? null : needWhy(needs[0]!, Date.now()) || null) ?? (review === null ? null : reviewNext(review));
+  const said = (needs.length === 0 ? null : needWhy(needs[0]!, c.now) || null) ?? (review === null ? null : reviewNext(review));
   return { stage, at, why: said ?? phase.why, needs };
 }
 
 /** An item's life: its thread's once it has one, and before then its own phase on the first step. */
-export function lifeOfItem(c: Pick<Context, "registry" | "needs">, item: PipelineItem): Life {
+export function lifeOfItem(c: Pick<Context, "registry" | "needs" | "now">, item: PipelineItem): Life {
   if (item.thread !== null) return lifeOfThread(c, item.thread);
   return { stage: ofPhase[item.phase.kind], at: "planned", why: item.phase.why, needs: [] };
 }

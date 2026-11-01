@@ -189,6 +189,7 @@ function startDialog(c: Context, start: Shell["start"]): Html {
   const chosen = projects.find((p) => p.id === start?.project) ?? projects[0];
   return html`<dialog id="start-dialog" class="modal" aria-labelledby="start-h"${start !== undefined && " data-autoopen"}>
 <header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+<p class="modal-life"><span class="trk" aria-hidden="true"><i class="trk-done"></i><i class="trk-done"></i><i class="trk-now"></i><i></i><i></i><i></i></span>It joins the board at Building, and moves on to review once its agent opens a pull request.</p>
 <div id="start-body" data-live>
 ${chosen === undefined ? html`<div class="modal-empty"><p class="empty">No projects yet, so there is no repository to start a thread on.</p>${newProjectButton}</div>` : html`<form id="start" class="form">
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}

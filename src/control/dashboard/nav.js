@@ -75,4 +75,4 @@ document.addEventListener("change", (event) => {
 // The home page's view the reader picked last: the board, or the table of every thread.
 const view = document.getElementById(`view-${localStorage.getItem("nexus.view")}`);
 if (view !== null) view.checked = true;
-document.addEventListener("change", ({ target }) => { if (target.name === "home-view") localStorage.setItem("nexus.view", target.value); });
+addEventListener("change", ({ target }) => target.name === "home-view" && localStorage.setItem("nexus.view", target.value));

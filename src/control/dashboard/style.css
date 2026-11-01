@@ -524,7 +524,7 @@ h4.md-h { font-size: 1.07em; }
 .attach-line code { color: var(--text-2); padding: 2px 6px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line-soft); white-space: nowrap; }
 .spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--work) 25%, transparent); border-top-color: var(--work); animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin, .caret { animation: none; } .row.dim > *, .ov tr.dim td { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .spin, .caret { animation: none; } .row.dim > *, .ov tr.dim td, .card { transition: none; } }
 .comp-box { padding: 2px 0 0; }
 .comp-box textarea { all: unset; display: block; width: 100%; font: 15px/1.5 var(--sans); color: var(--text); min-height: 46px; max-height: 40vh; overflow: auto; field-sizing: content; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comp-box textarea::placeholder { color: var(--text-3); }
@@ -855,6 +855,8 @@ h4.md-h { font-size: 1.07em; }
 .col > .need-list { padding: 0 8px 10px; align-content: start; }
 .col-held > .col-cards { flex: none; overflow: visible; padding-top: 6px; }
 .col-held:has(.need-list) { overflow-y: auto; }
+.col-held .col-h { position: sticky; top: 0; z-index: 1; background: inherit; border-radius: 10px 10px 0 0; }
+.col-held .need { scroll-margin-top: 48px; }
 .col-held:has(.need-list) > .need-list { flex: none; overflow: visible; }
 
 /* a card: where it is, what it is, how far it got, and the next thing that moves it */
@@ -1013,6 +1015,7 @@ a.card-main:focus-visible { outline-offset: -2px; }
 /* the header and footer pad into the space the form leaves around them, so they cover what scrolls beneath without moving */
 .modal header { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px 20px; margin-bottom: -10px; position: sticky; top: 0; z-index: 1; background: var(--bg); }
 .modal h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.modal-life { --stage: var(--work); margin: 6px 20px 0; display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 12px; color: var(--text-3); }
 .modal-empty { padding: 14px 20px 20px; display: grid; gap: 12px; justify-items: start; }
 .form { padding: 10px 20px 18px; display: grid; gap: 6px; }
 .form label, .seg legend { font-size: 12px; color: var(--text-2); margin-top: 8px; }
