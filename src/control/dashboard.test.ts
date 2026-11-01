@@ -745,6 +745,27 @@ test("a new thread whose node does not have its pylon yet reads as absent, not d
   assert.equal(overviewRow((await s.call("GET", "/")).text, fix), "Fix checkout running not on its node rj-firebat just now never");
 });
 
+test("a paused thread's unread reply has a dot of its own, so it never looks like a running pylon", async (t) => {
+  const s = await seeded(t);
+  const [live, replied, busy] = [await s.start("acme", "Live"), await s.start("acme", "Replied"), await s.start("acme", "Busy")];
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested(testObservation(node, { pylons: [runningPylon(live.pylonId), stoppedPylon(replied.pylonId, { sessions: null }), runningPylon(busy.pylonId)] }), []);
+  s.registry.recordReply(replied.id, Date.now());
+  s.registry.recordActivity(busy.id, { agent: Date.now(), agentTurnRunning: true });
+
+  const home = (await s.call("GET", "/")).text;
+  /** Each thread's dot in rows split this way, as its name and its tone. */
+  const dots = (rows: string[]) => [live, replied, busy].map((thread) => {
+    const dot = /class="dot dot-(\w+)" role="img" aria-label="([^"]+)"/.exec(rows.find((row) => row.includes(`href="/threads/${thread.id}"`)) ?? "");
+    assert.ok(dot !== null, `a dot for ${thread.title}`);
+    return `${dot[2]} ${dot[1]}`;
+  });
+  const want = ["running ok", "new reply reply", "agent working work"];
+  assert.deepEqual(dots(home.split('id="overview"')[1]!.split("<tr")), want, "the home table, which the phone lists too");
+  assert.deepEqual(dots(home.split('id="side-threads"')[1]!.split("</nav>")[0]!.split("<li>")), want, "the sidebar");
+  assert.match((await s.call("GET", `/threads/${replied.id}`)).text, /<span class="chip chip-reply"><span class="dot dot-reply" aria-hidden="true"><\/span><span class="chip-label">new reply<\/span><\/span>/, "the thread page's header");
+});
+
 test("the side nodes show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
   const s = await seeded(t);
   const [fix, docs] = [await s.start("acme", "Fix checkout"), await s.start("acme", "Write docs")];
