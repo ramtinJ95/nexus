@@ -2,7 +2,7 @@
  * The control plane this node trusts, in /etc/nexus/control-plane.json: its tailnet node ID and its URL. The probe and
  * the deployer both read it, so pointing a node at another control plane changes one file.
  * `node src/deploy/control-plane.ts adopt <etc dir>` writes it once from what probe.json and deployer.json named before it.
- * `node src/deploy/control-plane.ts set <etc dir> <tailnet node ID> <url>` changes it and restarts a running probe.
+ * `node src/deploy/control-plane.ts set <etc dir> <tailnet node ID> <url>` changes it and restarts the probe.
  * The bootstrap deployer and deploy/release.sh run it without node_modules, so it imports only Node's builtins and modules
  * that do too.
  */
@@ -153,12 +153,15 @@ async function oldKeyWrites(etc: string, control: ControlPlane): Promise<{ path:
   return writes;
 }
 
-// try-restart never starts a stopped probe. The deployer needs none: its timer runs a worker that reads the file each poll.
+// restart, not try-restart: a restart that failed after its stop leaves the probe down, and the retry must start it. A
+// machine without the probe's unit has nothing to restart. The deployer needs none: its timer's worker reads the file each poll.
 async function restartProbe(): Promise<void> {
+  const systemctl = (args: string[]) => promisify(execFile)("systemctl", args);
+  if (!await systemctl(["is-enabled", "--quiet", "nexus-probe.service"]).then(() => true, () => false)) return;
   try {
-    await promisify(execFile)("systemctl", ["try-restart", "nexus-probe.service"]);
+    await systemctl(["restart", "nexus-probe.service"]);
   } catch (err) {
-    throw new Error(`the probe did not restart, so ${fileName} names the control plane it trusts again: ${(err as Error).message}. Fix the restart and run this again`);
+    throw new Error(`the probe did not restart, so ${fileName} names the control plane it trusted again: ${(err as Error).message}. Fix the restart and run this again, which restarts the probe whether it runs or not`);
   }
 }
 const describe = (control: ControlPlane) => `control plane ${control.tailnetNodeId} at ${control.url}`;
@@ -177,7 +180,7 @@ async function main(args: readonly string[]): Promise<number> {
     const path = join(etc, fileName);
     const control = parseControlPlane({ tailnetNodeId, url });
     const result = await setControlPlane(etc, control, restartProbe);
-    console.log(result === "wrote" ? `wrote ${path}: ${describe(control)}, and restarted the probe if it was running` : `${path} already names ${describe(control)}`);
+    console.log(result === "wrote" ? `wrote ${path}: ${describe(control)}, and restarted the probe` : `${path} already names ${describe(control)}`);
     return 0;
   }
   console.error("usage: node src/deploy/control-plane.ts adopt <etc dir> | set <etc dir> <tailnet node ID> <url>");

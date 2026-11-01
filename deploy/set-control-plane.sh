@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Points this node at a control plane: writes /etc/nexus/control-plane.json, which the probe and the deployer read, and
-# restarts the probe if it is running. The deployer reads the file on its next poll.
+# restarts the probe when this machine has one installed. The deployer reads the file on its next poll.
 #
 # Usage: sudo deploy/set-control-plane.sh <tailnet node ID> <url>, such as nAbCdEf1CNTRL http://100.64.0.2:7470/.
 #

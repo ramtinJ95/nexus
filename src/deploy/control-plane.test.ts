@@ -91,18 +91,46 @@ test("setting the control plane restarts only when the file changes", async (t) 
   assert.equal(restarts, 2);
 });
 
-test("the set command, run twice, writes the file and try-restarts the probe once", async (t) => {
+test("the set command restarts the probe once, and after a restart that stopped it and failed to start it, its retry starts it", async (t) => {
   const dir = await etc(t);
   const bin = await etc(t);
   const log = join(bin, "systemctl.log");
-  await writeFile(join(bin, "systemctl"), `#!/bin/sh\necho "$*" >>"${log}"\n`, { mode: 0o755 });
+  const state = join(bin, "state");
+  await writeFile(state, "active");
+  // A stand-in for systemd: the second restart stops the probe and fails to start it, as a broken start would.
+  await writeFile(join(bin, "systemctl"), `#!/bin/sh
+echo "$*" >>"${log}"
+case "$1" in
+  is-enabled) exit 0 ;;
+  restart) if [ -e "${bin}/fail-start" ]; then echo inactive >"${state}"; rm "${bin}/fail-start"; exit 1; fi; echo active >"${state}" ;;
+esac
+`, { mode: 0o755 });
   const script = new URL("./control-plane.ts", import.meta.url).pathname;
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
-  const outputs = [];
-  for (let i = 0; i < 2; i++) outputs.push((await exec(process.execPath, [script, "set", dir, moved.tailnetNodeId, moved.url], { env })).stdout);
-  assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["try-restart nexus-probe.service"]);
+  const set = (control: typeof moved) => exec(process.execPath, [script, "set", dir, control.tailnetNodeId, control.url], { env });
+  await set(moved);
+  assert.match((await set(moved)).stdout, /already names control plane nMoved1CNTRL at http:\/\/100\.64\.0\.9:7470\//);
+  assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["is-enabled --quiet nexus-probe.service", "restart nexus-probe.service"]);
+
+  const other = { tailnetNodeId: firebat, url: "http://100.64.0.2:7470/" };
+  await writeFile(join(bin, "fail-start"), "");
+  await assert.rejects(set(other), /the probe did not restart/);
+  assert.equal(await readFile(state, "utf8"), "inactive\n");
+  assert.deepEqual(await readControlPlane(join(dir, "control-plane.json")), moved, "the file names what the probe last trusted");
+  await set(other);
+  assert.equal(await readFile(state, "utf8"), "active\n", "the retry started the probe the failed restart left down");
+  assert.deepEqual(await readControlPlane(join(dir, "control-plane.json")), other);
+});
+
+test("the set command restarts nothing on a machine without the probe's unit", async (t) => {
+  const dir = await etc(t);
+  const bin = await etc(t);
+  const log = join(bin, "systemctl.log");
+  await writeFile(join(bin, "systemctl"), `#!/bin/sh\necho "$*" >>"${log}"\n[ "$1" != is-enabled ] || exit 1\n`, { mode: 0o755 });
+  const script = new URL("./control-plane.ts", import.meta.url).pathname;
+  await exec(process.execPath, [script, "set", dir, moved.tailnetNodeId, moved.url], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"), ["is-enabled --quiet nexus-probe.service"]);
   assert.deepEqual(await readControlPlane(join(dir, "control-plane.json")), moved);
-  assert.match(outputs[1]!, /already names control plane nMoved1CNTRL at http:\/\/100\.64\.0\.9:7470\//);
 });
 
 test("a deployer takes its control plane from the file, not from deployer.json's old keys", async (t) => {
