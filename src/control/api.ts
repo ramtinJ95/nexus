@@ -65,6 +65,8 @@ import { reviewRoutes } from "./api/review-routes.ts";
 import { questionRoutes } from "./api/question-routes.ts";
 import { pylonRoutes } from "./api/pylon-routes.ts";
 import { imageRoutes } from "./api/image-routes.ts";
+import { doctorRoutes } from "./api/doctor-routes.ts";
+import type { DoctorReport } from "./doctor-model.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 import type { ImageRollout } from "./image-rollout.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
@@ -109,6 +111,8 @@ export interface ApiOptions {
   images?: ImageRollout;
   /** The usage backfill. Without it, its routes answer 409. */
   usageBackfill?: UsageBackfillJob;
+  /** Runs `nexus doctor`'s checks now. Without it, `GET /v1/doctor` answers 409. */
+  doctor?: () => Promise<DoctorReport>;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
@@ -138,6 +142,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (cal
     ...questionRoutes(kit, options),
     ...pylonRoutes(kit, options),
     ...imageRoutes(kit, options),
+    ...doctorRoutes(kit, options),
   ];
 }
 

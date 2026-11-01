@@ -15,7 +15,7 @@ import { gitUrl } from "./project.ts";
 import { ingest } from "../reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { chatgptToken, harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
+import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "../harness/credentials.ts";
 import { openHarnessHost, type ConversationId } from "../harness/host.ts";
 import { startApi } from "./api.ts";
 import { registryLocator } from "./locator.ts";
@@ -45,6 +45,8 @@ import { loadImageRecipe } from "../image-build.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";
+import { dailyReports, runDoctor, servedCertificate } from "./doctor-run.ts";
+import { backupStatusFile, readBackupStatus } from "./backup-status.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
@@ -233,8 +235,18 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   // Judgments need no GitHub, so they run without a token too.
   const judgments = judgmentPass({ registry, harness, probes: probeMap, wake });
   every(15_000, () => judgments.poll());
+  const dashboardPort = 7443;
+  const doctor = () => runDoctor({
+    registry, self: config.self.tailnetNodeId,
+    backupStatus: () => readBackupStatus(backupStatusFile),
+    login: () => loginState(models, config.harness.model),
+    // The API listens on one address, or on every one, where the loopback reaches it too.
+    certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, dashboardPort, config.https.hostname) : { kind: "none" },
+  });
+  const reports = dailyReports({ registry, run: doctor, startedAt: Date.now() });
+  every(5 * 60_000, () => reports.poll());
   const api = await startApi({
-    ...(config.https ? { https: { port: 7443, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
+    ...(config.https ? { https: { port: dashboardPort, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
     reviews,
     ...threads.api,
@@ -258,6 +270,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     previewPorts: config.previewPorts,
     images,
     usageBackfill: backfill,
+    doctor,
   });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);
 
@@ -265,7 +278,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       for (const timer of timers) clearInterval(timer);
-      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, api, backfill, usage, harness, loop, images]) await service?.close();
+      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, reports, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };
