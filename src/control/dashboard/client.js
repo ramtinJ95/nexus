@@ -11,7 +11,6 @@ import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { activeTab, canRead, changesPane, changesUnreadable, checkout, factsNow, readChanges, renderTabs, showTab, tabsBar, terminalTab } from "./checkout.js";
 import "./composer.js";
 import "./actions.js";
-import "./keys.js";
 import { startRows } from "./rows.js";
 
 for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
@@ -30,6 +29,8 @@ const writeTo = () => { if (location.hash === "#write") document.getElementById(
 writeTo();
 addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
+// The keys and the command palette follow the first paint, as the health checks do, so the page's own script stays small.
+void import("./keys.js");
 // A node's graphs bring uPlot, which no other page needs.
 if (document.getElementById("node-graphs") !== null) void import("./node-graphs.js");
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
