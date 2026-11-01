@@ -301,6 +301,9 @@ a.link:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* The menu and the actions button draw their glyphs, which not every font has; the characters stay for their text. */
 .icon-btn.menu, .icon-btn.more { font-size: 0; }
 .icon-btn.menu::before { content: ""; width: 14px; height: 2px; background: currentColor; box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor; }
+.icon-btn[data-close] { position: relative; font-size: 0; }
+.icon-btn[data-close]::before, .icon-btn[data-close]::after { content: ""; position: absolute; width: 14px; height: 1.6px; background: currentColor; transform: rotate(45deg); }
+.icon-btn[data-close]::after { transform: rotate(-45deg); }
 .icon-btn.more::before { content: ""; width: 16px; height: 4px; background: radial-gradient(circle, currentColor 1.6px, transparent 2px) 0 0 / 6px 4px repeat-x; }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; font: 600 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 7px; border-radius: 2px; background: var(--raised); color: var(--text-2); white-space: nowrap; border: 1px solid var(--line-soft); }
@@ -513,6 +516,8 @@ h4.md-h { font-size: 1.05em; }
 
 /* the dock: the run's state, the cards that wait on the person and the composer, under a hairline */
 .dock { flex: none; padding: 8px 20px 12px; width: 100%; position: relative; display: grid; grid-template-columns: minmax(0, 840px); justify-content: center; gap: 6px; border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--side) 40%, var(--bg)); }
+/* A dock that holds only a hidden error, as on the pipeline and queued pages, takes no room until it says something. */
+.dock:not(:has(> :not([hidden]))) { padding: 0; border: 0; }
 /* a Claude worker's terminal is its prompt, so under the terminal the composer gives way to it */
 .main[data-view="term"] #composer { display: none; }
 .refresh-state { position: fixed; left: 50%; top: 50px; transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 24px); margin: 0; padding: 5px 10px; font: 11px var(--mono); color: var(--warn); background: var(--card); border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 3px; box-shadow: var(--pop); }
@@ -702,6 +707,7 @@ form.ask, .ask-all, .ask-q { display: grid; gap: 7px; margin: 0; padding: 0; bor
 .node-health { grid-template-columns: 110px 1fr; font-family: var(--mono); font-size: 11.5px; }
 .id { display: block; margin-top: 8px; font-size: 10.5px; color: var(--text-3); }
 .inspect .error { margin-top: 8px; }
+.inspect ul.error { padding-left: 24px; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .pv { border: 1px solid var(--line-soft); border-left: 2px solid var(--ok); border-radius: 2px; padding: 6px 8px; background: var(--bg); }
 .pv-busy { border-left-color: var(--warn); border-style: dashed solid dashed solid; }
@@ -996,7 +1002,7 @@ a.need-thread:hover { color: var(--accent); }
 @media (min-width: 761px) and (max-width: 1199px) {
   .board { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .home-grid { grid-template-columns: minmax(0, 1fr); }
-  .fleet { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .fleet { position: static; order: -1; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .app.has-inspect { grid-template-columns: var(--side-w, 236px) minmax(0, 1fr) var(--inspect-w, 300px); }
 }
 
