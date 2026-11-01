@@ -88,6 +88,7 @@ test("the person is asked again only once a candidate joins that the latest ques
   assert.equal(grew(cleanupCandidates(node, { ...facts, held: facts.held!.filter((id) => id !== older) }, now), latest), false, "a smaller set");
   const unused: ImageId = "img-000000000009";
   assert.equal(grew(cleanupCandidates(node, { ...facts, held: [...facts.held!, unused] }, now), latest), true, "an image nothing needs joined");
-  assert.equal(cleanupQuestion(node, [...items].reverse(), now + 1).id, latest.id, "one ID for one set, whatever its order");
+  assert.equal(cleanupQuestion(node, [...items].reverse(), now).id, latest.id, "one ID for one set and asking, whatever its order");
+  assert.notEqual(cleanupQuestion(node, items, now + 1).id, latest.id, "the same set asked again is a new question");
   assert.match(latest.text, /^rj-firebat holds 6 things nothing needs any more, which take 6\.0 KiB\. Delete them\?\n\n- template tpl-00000000000a of project acme, 1\.0 KiB\n/);
 });

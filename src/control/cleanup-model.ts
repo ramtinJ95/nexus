@@ -114,14 +114,17 @@ export function itemText(item: CleanupItem): string {
   }
 }
 
-/** One ID per node and set of items, so asking again about the same set asks nothing new. */
-export const cleanupQuestionId = (node: NodeName, items: readonly CleanupItem[]) =>
-  `cleanup-${node}-${createHash("sha256").update(JSON.stringify(items.map(itemKey).sort())).digest("hex").slice(0, 12)}`;
+/**
+ * One ID per node, set of items and asking, so a set asked again after the node's latest question names a new question
+ * rather than an answered one of the same set.
+ */
+export const cleanupQuestionId = (node: NodeName, items: readonly CleanupItem[], askedAt: number) =>
+  `cleanup-${node}-${createHash("sha256").update(JSON.stringify([items.map(itemKey).sort(), askedAt])).digest("hex").slice(0, 12)}`;
 
 export function cleanupQuestion(node: NodeName, items: readonly CleanupItem[], askedAt: number) {
   const total = items.reduce((sum, i) => sum + i.bytes, 0);
   return {
-    id: cleanupQuestionId(node, items),
+    id: cleanupQuestionId(node, items, askedAt),
     node,
     text: `${node} holds ${items.length === 1 ? "one thing" : `${items.length} things`} nothing needs any more, which ${items.length === 1 ? "takes" : "take"} ${bytesText(total)}. Delete ${items.length === 1 ? "it" : "them"}?\n\n${items.map((i) => `- ${itemText(i)}, ${bytesText(i.bytes)}`).join("\n")}`,
     options: [...cleanupOptions],

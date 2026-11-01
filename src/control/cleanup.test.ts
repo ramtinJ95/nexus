@@ -47,7 +47,8 @@ function setUp(t: import("node:test").TestContext) {
     },
   };
   const logs: string[] = [];
-  const pass = cleanupPass({ registry, probes: new Map([[testNode, probe]]), log: (m) => logs.push(m), now: () => now });
+  let clock = now;
+  const pass = cleanupPass({ registry, probes: new Map([[testNode, probe]]), log: (m) => logs.push(m), now: () => clock++ });
   return { registry, pass, dropped, refuse, observe, onDrop: (next: () => void) => { dropping = next; } };
 }
 
@@ -160,4 +161,26 @@ test("an approved artifact the node no longer lists is not sent while a rule kee
   await pass.poll();
   assert.deepEqual(dropped, [[oldTemplate.id]]);
   assert.deepEqual(asked(registry)[0]!.cleanup.outcomes[older], { state: "skipped", reason: "it is the current image" });
+});
+
+test("a set asked about before is asked again as a new open question once it recurs after another question", async (t) => {
+  const { registry, pass, observe } = setUp(t);
+  observe([older, previous, current, newest.id]);
+  await pass.poll();
+  assert.deepEqual(keysOf(registry), [[older]]);
+  answer(registry, "Keep");
+  const thread = addThread(registry, { boot: { image: older } });
+  observe([older, previous, current, newest.id, oldTemplate.id]);
+  await pass.poll();
+  assert.deepEqual(keysOf(registry), [[older], [oldTemplate.id]], "the older image is in use, and the old template joined");
+  registry.setThreadStatus(thread.id, "deleted");
+  addThread(registry, { firstBoot: { kind: "template", template: oldTemplate.id } });
+  await pass.poll();
+  assert.deepEqual(keysOf(registry), [[older], [older]], "the open question about the template is withdrawn for a new one about the image");
+  const [kept, again] = asked(registry);
+  assert.notEqual(again!.id, kept!.id);
+  assert.equal(kept!.answer!.option, "Keep", "the answered one keeps its answer");
+  assert.deepEqual(registry.openNodeQuestions().map((q) => q.id), [again!.id]);
+  await pass.poll();
+  assert.equal(asked(registry).length, 2, "and it is not asked again");
 });
