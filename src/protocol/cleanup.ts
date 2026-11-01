@@ -1,5 +1,5 @@
 /**
- * Probe contract, cleanup: the space each image and template in the node's artifact directory takes, and deleting the
+ * Probe contract, cleanup: the space each image and template the node could delete takes, and deleting the
  * ones the person agreed to. The deployer deletes releases with the same outcomes (src/deploy/release-cleanup.ts).
  */
 import { z } from "zod";
@@ -11,7 +11,7 @@ import { isPortableArtifactId, type PortableArtifactId } from "../ids.ts";
  */
 export type DeleteOutcome = { state: "deleted"; bytes: number } | { state: "gone" } | { state: "skipped"; reason: string };
 
-/** GET /v1/cleanup: each image and template in the artifact directory, with the bytes its files take on disk. */
+/** GET /v1/cleanup: each image and template the backend could delete, with the bytes its files take on disk. */
 export interface ArtifactUsage { artifacts: readonly { id: PortableArtifactId; bytes: number }[] }
 /** POST /v1/cleanup takes the artifacts to delete, in order, and answers with what each delete did. */
 export interface DropRequest { drop: readonly PortableArtifactId[] }

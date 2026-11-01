@@ -14,7 +14,7 @@ import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { type BackendPylon, type VmBackend } from "../backend.ts";
 import { commandPolicies, runCommand, runJob, type CommandPolicy, type ProbeDeps } from "./run.ts";
-import { isPortableArtifactId, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
+import { isPortableArtifactId, type JobId, type PortableArtifactId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
 import {
   encodeSubmitReply, jobDeadlineMs, JobFailure, jobSubject, parseJobEnvelope, type Job, type JobEnvelope, type JobStatus, type Subject,
 } from "../protocol/jobs.ts";
@@ -22,6 +22,7 @@ import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } 
 import { parsePylonCommand, type CommandResult, type PylonCommand } from "../protocol/commands.ts";
 import { notAnswering, parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
+import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropRequest } from "../protocol/cleanup.ts";
 import { peersSchema, probePort, routeAuth, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
 import { onePerClaudeSession } from "../session-wake.ts";
@@ -238,6 +239,15 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
   const storage = backend.storage ?? null;
   const watched = options.watched ?? [];
+  // An artifact never changes once published, so its size is read once.
+  const artifactBytes = new Map<PortableArtifactId, number>();
+  const sizeOf = async (id: PortableArtifactId): Promise<number | null> => {
+    const known = artifactBytes.get(id);
+    if (known !== undefined) return known;
+    const bytes = await backend.artifacts.bytes?.(id) ?? null;
+    if (bytes !== null) artifactBytes.set(id, bytes);
+    return bytes;
+  };
 
   /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
   const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
@@ -564,6 +574,44 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       res.writeHead(200, artifactHeaders(manifest));
       // A failed archive destroys the response, so the peer's copy breaks off instead of ending as if complete.
       return pipeline(stream, res).catch((err: Error) => log(`artifact ${id}: ${err.message}`));
+    },
+  }, {
+    path: /^\/v1\/cleanup$/,
+    async GET(_req, res) {
+      const sized = await Promise.all((await backend.artifacts.list()).map(async (id) => ({ id, bytes: await sizeOf(id) })));
+      const usage: ArtifactUsage = { artifacts: sized.filter((a): a is { id: PortableArtifactId; bytes: number } => a.bytes !== null) };
+      return send(res, 200, JSON.stringify(usage), "application/json");
+    },
+    /** The backend refuses an artifact a pylon, a template or a create still needs, which leaves it skipped with the refusal. */
+    async POST(req, res) {
+      let asked: DropRequest;
+      try {
+        asked = dropRequestSchema.parse(JSON.parse(await readBody(req)));
+      } catch (err) {
+        return send(res, 400, `a cleanup names the artifacts to delete, as {"drop": [...]}: ${(err as Error).message}`);
+      }
+      const outcomes: Record<string, DeleteOutcome> = {};
+      // What the node lists is what its observation reported, and what the person was asked about.
+      const held = await backend.artifacts.list();
+      for (const id of new Set(asked.drop)) {
+        if (!held.includes(id)) {
+          // A delete a crash cut short left what it set aside, which the backend's drop of an absent artifact removes.
+          await backend.artifacts.drop(id).catch(() => undefined);
+          outcomes[id] = { state: "gone" };
+          continue;
+        }
+        const bytes = await sizeOf(id) ?? 0;
+        try {
+          await backend.artifacts.drop(id);
+          artifactBytes.delete(id);
+          outcomes[id] = { state: "deleted", bytes };
+          log(`artifact ${id}: deleted by the person's cleanup, freeing ${bytes} bytes`);
+        } catch (err) {
+          outcomes[id] = { state: "skipped", reason: (err as Error).message };
+        }
+      }
+      void publishSnapshot();
+      return send(res, 200, JSON.stringify({ outcomes }), "application/json");
     },
   }, {
     path: /^\/v1\/node-health$/, notAllowed: ": node health is read-only",

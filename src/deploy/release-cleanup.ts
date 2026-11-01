@@ -54,8 +54,11 @@ export function releaseKeeps(inventory: ReleaseInventory): Map<string, string> {
   return keeps;
 }
 
-/** The bytes the files under `path` take on disk, links not followed. */
-export async function diskBytes(path: string): Promise<number> {
+/**
+ * The bytes the files under `path` take on disk, links not followed. As src/disk-space.ts's, which the bootstrap worker,
+ * holding only src/deploy and the files install-deployer.sh lists, cannot import.
+ */
+async function diskBytes(path: string): Promise<number> {
   const info = await lstat(path);
   if (!info.isDirectory()) return info.blocks * 512;
   let total = info.blocks * 512;

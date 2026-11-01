@@ -1,5 +1,6 @@
 /** The free space of the filesystems Nexus writes to on a node, and the two limits on it. */
-import { stat, statfs } from "node:fs/promises";
+import { lstat, readdir, stat, statfs } from "node:fs/promises";
+import { join } from "node:path";
 import { JobFailure } from "./protocol/jobs.ts";
 import type { DiskFact } from "./protocol/observations.ts";
 
@@ -54,4 +55,13 @@ export async function refuseShortDisk(storage: string, diskGiB: number): Promise
   const [pylons] = await readDisks(storage, []);
   const short = diskRefusal(pylons, pylons.freeGiB, diskGiB);
   if (short !== null) throw new JobFailure("capacity", `this node ${short}`);
+}
+
+/** The bytes the files under `path` take on disk, links not followed. */
+export async function diskBytes(path: string): Promise<number> {
+  const info = await lstat(path);
+  if (!info.isDirectory()) return info.blocks * 512;
+  let total = info.blocks * 512;
+  for (const entry of await readdir(path)) total += await diskBytes(join(path, entry));
+  return total;
 }
