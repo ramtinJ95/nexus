@@ -138,6 +138,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `project add <id> (<repo-url> \| --scratch) [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]...` | `POST /v1/projects` | `Project`, the project that was added |
 | `nodes` | `GET /v1/nodes` | `NodeSummary[]` |
 | `node <name>` | `GET /v1/nodes/<name>/health` | `NodeHealth` |
+| `doctor` | `GET /v1/doctor` | `DoctorReport`, as [Doctor](#doctor-0550) describes. It exits 1 with its report on stdout when a check failed |
 | `usage [--since today\|7d\|30d\|all\|DATE] [--project P] [--by model\|project\|kind\|role\|day]` | `GET /v1/usage?since=<since>[&project=P][&by=B]`, with `since=7d` unless `--since` is given | `UsageReport` |
 | `usage backfill [--dry-run \| --stop]` | `POST /v1/usage/backfill`, or `GET` with `--dry-run`, or `DELETE` with `--stop` | `UsageBackfill`, or `{ backfill: UsageBackfill, plan: BackfillPlanRow[] }` with `--dry-run` |
 
@@ -284,7 +285,7 @@ The control plane also serves `POST /v1/images`, which records the manifest of a
 
 ## Failures
 
-A failed command prints nothing on stdout and exits with one of these codes:
+A failed command prints nothing on stdout and exits with one of these codes. `doctor` alone prints its report and then exits 1 when a check failed:
 
 | Exit | Kind | Meaning |
 |---|---|---|
@@ -1342,6 +1343,41 @@ interface NodeHealth {
 A reading the host does not expose is null, and plain `node` prints `unknown`, never 0. Load and memory come from `/proc/loadavg` and `/proc/meminfo`, so a probe on a host without Linux's `/proc` reports them unknown. Temperatures come from every hwmon sensor, named by the sensor's `name` and its label, or by the thermal zones on a host without hwmon, since a zone usually repeats a sensor. A VM often exposes neither. A sensor the host lists but cannot read, such as an AMD GPU's that answers `EBUSY` while the GPU sleeps, is left out of `temperatures`, and the rest of the reading stays. A pylon's processes are its controller and what the controller started, such as QEMU. `cpuPercent` is the percent of one CPU they used over the probe's sample, which asks for one second and is divided by the time it took, so four busy CPUs read 400. `residentGiB` sums their `VmRSS`. A process whose `/proc` files cannot be read, such as one that exits mid-read, is not counted, and a pylon whose controller's cannot be read is not listed. Load and memory fail the whole read when `/proc` has them but cannot read them, and the route answers 500 with `cannot read the node's load` or `memory` and the reason. Free disk fails it too when the filesystem of the pylons' disks cannot be read, with the error that names its path. No other reading fails it. `pylons` lists only running pylons whose controller is alive, and is null from a backend that cannot name its pylons' processes, such as Docker's. The capacity in `nodes` reads the same CPUs and free disk, so its `diskFreeGiB` is now the filesystem of the pylons' disks rather than `/`. `disks` lists each filesystem that holds one of the paths Nexus writes to, once, with those paths: the pylons' state root, `/var/lib/nexus/artifacts`, the probe user's home `/var/lib/nexus` with the Docker and Gondolin caches of image builds, `/var/lib/nexus-control` and `/opt/nexus/releases`. A path the node lacks, such as `/var/lib/nexus-control` on a node without the control plane, is left out. The pylons' filesystem comes first. Plain `node` prints a `disk:` line per filesystem, ending in `, low` for a low one, and prints the single `disk:` line of `disk` from a probe older than 0.54.0. The dashboard's node page lists the same, and its sidebar marks a node with a low filesystem `disk low`.
 
 The reply takes about a second, for the CPU sample. Only a deployer may read it, because it lists what runs on the node. Being allowed to call the API is not enough, though it is for `nodes`, and an infrastructure node or the control node never is a deployer. A caller that is not one fails with exit code 3, an unknown node with exit code 4, and a node whose probe does not answer with exit code 1. The dashboard links each node in its sidebar to a page with the same reading, which polls like any other page and shows a caller that is not a deployer why it cannot read it. Nothing on the route or the page acts on the node: the probe's route takes only `GET`, and there is no restart, kill or retry through it.
+
+## Doctor (0.55.0)
+
+`nexus doctor` runs every check of each node and the control plane now, as [the design's doctor](design.md#doctor-and-the-daily-report) describes, and prints one line per check under the control plane and each node. It exits 1 when a check failed and 0 when they only warned, with its report on stdout either way:
+
+```text
+control plane
+  ok    release      control on rj-firebat runs the desired 0123456789ab and is healthy
+  fail  backup       the newest backup, 2026-10-30T00-23-41Z, is 2 days old, and the run at 2026-11-01T00:41:02.000Z failed. sudo systemctl status nexus-backup and journalctl -u nexus-backup on the control plane's machine say why
+  ok    login        signed in to openai with ChatGPT, which offers gpt-6-astra
+  ok    certificate  the dashboard's certificate for rj-firebat.example.ts.net is valid for 62 days
+rj-firebat
+  ok    online       online and observed in the last 5 min
+  ok    release      probe on rj-firebat runs the desired 0123456789ab and is healthy
+  warn  disk         12.4 of 98.0 GiB free at /var/lib/nexus-control, low. Free space there, or delete archived threads
+  ok    pylons       3 up, 2 paused, none crashed or orphaned
+1 failed, 1 warned, 6 ok
+```
+
+`--json` prints the report:
+
+```ts
+interface DoctorReport {
+  at: string;                         // ISO time the checks ran
+  status: "ok" | "warn" | "fail";     // the worst check's
+  checks: Array<{
+    node: string | null;              // null for the control plane
+    name: "online" | "release" | "disk" | "pylons" | "backup" | "login" | "certificate";
+    status: "ok" | "warn" | "fail";
+    text: string;                     // one line: what is wrong and what to do
+  }>;
+}
+```
+
+The control plane runs the same checks once a day and keeps each report 30 days. `GET /v1/reports` lists them newest first, as `{ id, at, status, counts: { ok, warn, fail } }`, and `GET /v1/reports/latest` or `GET /v1/reports/<id>` reads one, as a `DoctorReport` with its `id`, or answers 404. Any allowed caller may read them, as it may `nodes` and `release`. A control plane older than 0.55.0 answers `doctor` with 404, `no route /v1/doctor`.
 
 ## Usage backfill (0.33.0)
 
