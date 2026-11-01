@@ -7,8 +7,8 @@
 #
 # It checks every prerequisite first, and stops before changing anything when one is missing. It writes
 # /etc/nexus/control.json, control-plane.json, probe.json and deployer.json from `tailscale status --json`
-# (src/deploy/setup.ts), runs
-# the role installers, then asks for the agents' credentials this machine lacks (src/deploy/credentials.ts), and ends
+# (src/deploy/setup.ts), runs the role installers, then asks for the agents' credentials this machine lacks
+# (src/deploy/credentials.ts), and ends
 # with what is left for the person. Without a terminal, or with --non-interactive, the credentials come from NEXUS_*
 # variables instead. Safe to rerun: an existing config keeps its values and secrets, and gains only what is missing,
 # and an existing credential is left as it is.

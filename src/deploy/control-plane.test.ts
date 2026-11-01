@@ -81,6 +81,7 @@ test("setting the control plane restarts only when the file changes", async (t) 
   assert.equal(await setControlPlane(dir, moved, restart), "wrote");
   assert.equal(restarts, 1);
   assert.equal(await setControlPlane(dir, { ...moved }, restart), "unchanged");
+  assert.equal(await setControlPlane(dir, { ...moved, url: "http://100.64.0.9:7470" }, restart), "unchanged", "the same origin without its slash is the same control plane");
   assert.equal(restarts, 1);
   const other = { tailnetNodeId: firebat, url: "http://100.64.0.2:7470/" };
   assert.equal(await setControlPlane(dir, other, restart), "wrote");

@@ -29,7 +29,7 @@ export function parseControlPlane(value: unknown): ControlPlane {
   if (origin === undefined || origin.protocol !== "http:" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) {
     throw new Error(`url must be the control plane's tailnet HTTP origin, such as http://100.64.0.2:7470/, not ${JSON.stringify(url)}`);
   }
-  return { tailnetNodeId, url: url as string };
+  return { tailnetNodeId, url: origin.href };
 }
 
 /** Undefined when there is no file. */
