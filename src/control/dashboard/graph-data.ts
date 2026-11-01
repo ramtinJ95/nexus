@@ -141,6 +141,8 @@ const held = (h: History, key: string) => h.series.get(key) ?? none();
 const line = (h: History, key: string, label: string, look: Look, extra: Partial<Line> = {}): Line[] =>
   h.series.has(key) ? [{ id: key, label, points: held(h, key), look, ...extra }] : [];
 const lastOf = (h: History, key: string) => h.series.get(key)?.avg.at(-1);
+/** The node was read in the range, but no read held a series of the kind, so the chart says why it is empty. */
+const noneOf = (h: History, kind: string, why: string) => h.series.size > 0 && ![...h.series.keys()].some((key) => key.startsWith(`${kind}:`)) ? why : null;
 /** A line for each series of a kind, ordered by label, coloured by the identity `id` names. */
 const each = (h: History, slots: Slots, family: string, kind: Series["kind"], id: (s: Series) => string): Line[] =>
   [...h.series.values()].filter((s) => s.series.kind === kind).sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key))
@@ -182,14 +184,17 @@ export const charts: readonly Chart[] = [
   {
     id: "temperatures", title: "Temperatures", unit: "°C", zero: false, digits: 1, suffix: " °C", tick: (v) => `${short(v)}°`,
     lines: (h, slots) => each(h, slots, "temp", "temp", (s) => s.kind === "temp" ? s.sensor : ""),
+    note: (h) => noneOf(h, "temp", "This node reported no temperatures in this range. A VM often exposes none."),
   },
   {
     id: "pylon-cpu", title: "Pylon CPU", unit: "% of one CPU", zero: true, digits: 1, suffix: "%", tick: (v) => `${short(v)}%`,
     lines: (h, slots) => each(h, slots, "pylon", "pylonCpu", pylonId),
+    note: (h) => noneOf(h, "pylonCpu", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'."),
   },
   {
     id: "pylon-memory", title: "Pylon memory", unit: "GiB resident", zero: true, ...gibs, tick: short,
     lines: (h, slots) => each(h, slots, "pylon", "pylonResident", pylonId),
+    note: (h) => noneOf(h, "pylonResident", "No pylon's processes were reported in this range, as none ran or the node's backend does not say which are its pylons'."),
   },
 ];
 

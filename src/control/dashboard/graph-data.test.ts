@@ -123,3 +123,11 @@ test("swap says the node has none when its total is 0", () => {
   assert.equal(swap.note!(historyOf(metrics([raw("swapTotal", "Swap total", [[0, 0]])]), hour)), "This node has no swap.");
   assert.equal(swap.note!(historyOf(metrics([raw("swapTotal", "Swap total", [[0, 8]])]), hour)), null);
 });
+
+test("temperatures and pylon charts say why they are empty when the node was read but reported none", () => {
+  const read = historyOf(metrics([raw("cpus", "CPUs", [[0, 4]])]), hour);
+  assert.match(chart("temperatures").note!(read)!, /reported no temperatures/);
+  for (const id of ["pylon-cpu", "pylon-memory"]) assert.match(chart(id).note!(read)!, /No pylon's processes were reported/);
+  assert.equal(chart("temperatures").note!(historyOf(metrics([]), hour)), null, "a range with no reading at all keeps the general note");
+  assert.equal(chart("temperatures").note!(historyOf(metrics([raw("temp:Tctl", "Tctl", [[0, 50]])]), hour)), null);
+});
