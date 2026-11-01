@@ -8,11 +8,21 @@ import { encodeMessage, parseClientMessage, type ServerMessage } from "../attach
 import { attachTerminal, type Tty } from "./attach.ts";
 import { CliError } from "./transport.ts";
 
-/** A terminal that records its raw mode, what was written to it and its status lines, and whose size the test sets. */
+/** What the fake terminal's exit throws, as process.exit would not return. */
+class Exited extends Error {
+  readonly code: number;
+  constructor(code: number) {
+    super(`exited ${code}`);
+    this.code = code;
+  }
+}
+
+/** A terminal that records its raw mode, what was written to it, its status lines and exits, and whose size the test sets. */
 function fakeTty(options: { isTTY?: boolean; writes?: () => boolean } = {}) {
   const modes: boolean[] = [];
   const written: string[] = [];
   const status: string[] = [];
+  const exits: number[] = [];
   const input = Object.assign(new PassThrough(), { isTTY: options.isTTY ?? true, setRawMode: (raw: boolean) => modes.push(raw) });
   const output = Object.assign(new Writable({
     write(chunk: Buffer, _encoding, done) {
@@ -21,8 +31,12 @@ function fakeTty(options: { isTTY?: boolean; writes?: () => boolean } = {}) {
     },
   }), { isTTY: options.isTTY ?? true, columns: 100, rows: 30 });
   if (options.writes !== undefined) output.write = options.writes as never;
-  const tty: Tty = { input, output, term: "xterm-ghostty", status: (line) => status.push(line) };
-  return { tty, input, output, modes, written, status };
+  const exit = (code: number) => {
+    exits.push(code);
+    throw new Exited(code);
+  };
+  const tty: Tty = { input, output, term: "xterm-ghostty", status: (line) => status.push(line), exit };
+  return { tty, input, output, modes, written, status, exits };
 }
 
 /**
@@ -57,6 +71,9 @@ const endWith = (ws: WebSocket, message: ServerMessage) => {
   send(ws, message);
   ws.close(1000);
 };
+const until = async (done: () => boolean) => {
+  while (!done()) await new Promise((resolve) => setTimeout(resolve, 5));
+};
 const kindOf = (kind: string, message: RegExp) => (err: unknown) => err instanceof CliError && err.kind === kind && message.test(err.message);
 
 test("attach says each state the pylon waits in, then gives it the terminal raw, with keys, resizes and output, until Herdr detaches", async () => {
@@ -89,11 +106,9 @@ test("attach says each state the pylon waits in, then gives it the terminal raw,
 });
 
 test("every other end is a CliError of its own kind, and puts the terminal and its screen modes back", async () => {
-  const ends: [ServerMessage | "drop" | "garbage", (err: unknown) => boolean][] = [
+  const ends: [ServerMessage | "garbage", (err: unknown) => boolean][] = [
     [{ type: "exit", code: 3 }, kindOf("failed", /^Herdr in the pylon of th-0123456789ab exited 3$/)],
     [{ type: "error", kind: "conflict", message: "thread th-0123456789ab is deleted" }, kindOf("conflict", /^thread th-0123456789ab is deleted$/)],
-    [{ type: "error", kind: "unreachable", message: "the control plane is stopping" }, kindOf("unreachable", /stopping/)],
-    ["drop", kindOf("unreachable", /^the connection to the control plane dropped.*Herdr keeps the session, so `nexus attach th-0123456789ab` again$/)],
     ["garbage", kindOf("failed", /a message attach does not understand/)],
   ];
   for (const [end, expected] of ends) {
@@ -101,13 +116,9 @@ test("every other end is a CliError of its own kind, and puts the terminal and i
     const cp = controlPlane((ws) => {
       send(ws, { type: "attached" });
       if (end === "garbage") ws.send("{not json");
-      else if (end !== "drop") endWith(ws, end);
+      else endWith(ws, end);
     });
     const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty);
-    if (end === "drop") {
-      while (t.modes.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
-      cp.links[0]!.destroy(new Error("reset"));
-    }
     await assert.rejects(attaching, expected, JSON.stringify(end));
     assert.deepEqual(t.modes, [true, false], `restored after ${JSON.stringify(end)}`);
     assert.ok(t.written.at(-1)?.startsWith("\x1b[?1049l"), `the screen modes Herdr set are reset after ${JSON.stringify(end)}, because Herdr did not`);
@@ -138,11 +149,109 @@ test("output the terminal cannot take yet pauses the socket until it drains", as
     send(ws, { type: "attached" });
     ws.send(Buffer.from("a lot"), { binary: true });
   });
-  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty);
+  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 0, delayMs: () => 0 });
   while (cp.clients[0]?.isPaused !== true) await new Promise((resolve) => setTimeout(resolve, 5));
   accepting = true;
   t.output.emit("drain");
   assert.equal(cp.clients[0]!.isPaused, false);
   cp.clients[0]!.close();
   await assert.rejects(attaching, kindOf("unreachable", /dropped/));
+});
+
+const path = (cols: number) => `/v1/threads/th-0123456789ab/attach?cols=${cols}&rows=30&term=xterm-ghostty`;
+
+test("a link that drops after attached links again with the terminal's size, staying raw and dropping the keys typed in between", async () => {
+  const t = fakeTty();
+  const received: string[] = [];
+  let links = 0;
+  const cp = controlPlane((ws) => {
+    const n = ++links;
+    send(ws, { type: "attached" });
+    ws.send(Buffer.from(`screen ${n}`), { binary: true });
+    ws.on("message", (data, binary) => {
+      if (!binary) return;
+      received.push(`${n}:${data.toString()}`);
+      if (data.toString() === "q") endWith(ws, { type: "exit", code: 0 });
+    });
+  });
+  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 50 });
+  await until(() => t.written.includes("screen 1"));
+  t.input.write("a");
+  await until(() => received.length === 1);
+  cp.links[0]!.destroy(new Error("reset"));
+  await until(() => t.status.length === 1);
+  assert.match(t.status[0]!, /^the connection to the control plane dropped.*\. Attaching again in 0\.05 s, Ctrl-C quits$/);
+  assert.ok(t.written.at(-1)!.startsWith("\x1b[?1049l"), "the screen leaves Herdr's modes while it waits");
+  t.input.write("typed in the gap");
+  t.output.columns = 120;
+  await until(() => t.written.includes("screen 2"));
+  t.input.write("q");
+  await attaching;
+  assert.deepEqual(cp.paths, [path(100), path(120)]);
+  assert.deepEqual(received, ["1:a", "2:q"], "keys typed while reconnecting reach no session");
+  assert.deepEqual(t.modes, [true, false], "raw through the gap, and back once Herdr detaches");
+});
+
+test("Ctrl-C while attach links again exits 130 with the terminal put back", async () => {
+  const t = fakeTty();
+  const cp = controlPlane((ws) => send(ws, { type: "attached" }));
+  const attaching = attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 60_000 });
+  await until(() => t.modes.length === 1);
+  cp.links[0]!.destroy(new Error("reset"));
+  await until(() => t.status.length === 1);
+  t.input.write("\x03");
+  await assert.rejects(attaching, (err) => err instanceof Exited && err.code === 130);
+  assert.deepEqual(t.exits, [130]);
+  assert.deepEqual(t.modes, [true, false]);
+  assert.equal(cp.paths.length, 1);
+});
+
+test("an unreachable error, such as the control plane stopping for a deploy, links again", async () => {
+  const t = fakeTty();
+  let links = 0;
+  const cp = controlPlane((ws) => {
+    send(ws, { type: "attached" });
+    if (++links === 1) endWith(ws, { type: "error", kind: "unreachable", message: "the control plane is stopping" });
+    else endWith(ws, { type: "exit", code: 0 });
+  });
+  await attachTerminal(cp.connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0 });
+  assert.equal(cp.paths.length, 2);
+  assert.deepEqual(t.status, ["the control plane is stopping. Attaching again in 0 s, Ctrl-C quits"]);
+  assert.deepEqual(t.modes, [true, false]);
+});
+
+test("a refusal of another kind when linking again ends the attach with it", async () => {
+  const t = fakeTty();
+  const cp = controlPlane((ws) => send(ws, { type: "attached" }));
+  let calls = 0;
+  const connect = (path: string) => ++calls === 1 ? cp.connect(path) : Promise.reject(new CliError("conflict", "thread th-0123456789ab is archived"));
+  const attaching = attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0 });
+  await until(() => t.modes.length === 1);
+  cp.links[0]!.destroy(new Error("reset"));
+  await assert.rejects(attaching, kindOf("conflict", /^thread th-0123456789ab is archived$/));
+  assert.equal(calls, 2);
+  assert.deepEqual(t.modes, [true, false]);
+});
+
+test("attach gives up once linking again fails every try, and says Herdr keeps the session", async () => {
+  const t = fakeTty();
+  const cp = controlPlane((ws) => send(ws, { type: "attached" }));
+  let calls = 0;
+  const connect = (path: string) => ++calls === 1 ? cp.connect(path) : Promise.reject(new CliError("unreachable", "cannot reach nexus:443: ECONNREFUSED"));
+  const attaching = attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 3, delayMs: () => 0 });
+  await until(() => t.modes.length === 1);
+  cp.links[0]!.destroy(new Error("reset"));
+  await assert.rejects(attaching, kindOf("unreachable", /^cannot reach nexus:443: ECONNREFUSED, and attaching again failed 3 times\. Herdr keeps the session, so `nexus attach th-0123456789ab` again$/));
+  assert.equal(calls, 4, "the first link and three tries");
+  assert.equal(t.status.length, 3, "a line for each try");
+  assert.deepEqual(t.modes, [true, false]);
+});
+
+test("a control plane that cannot be reached on the first link fails at once", async () => {
+  const t = fakeTty();
+  let calls = 0;
+  const connect = () => { calls++; return Promise.reject(new CliError("unreachable", "cannot reach nexus:443: ECONNREFUSED")); };
+  await assert.rejects(attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 8, delayMs: () => 0 }), kindOf("unreachable", /^cannot reach nexus:443/));
+  assert.equal(calls, 1);
+  assert.deepEqual(t.status, []);
 });
