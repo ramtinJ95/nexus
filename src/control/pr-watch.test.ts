@@ -449,6 +449,23 @@ test("GitHub says whether a commit has a file, and a failure other than 404 says
   assert.deepEqual(asked, ["/repos/acme/repo/contents/.nexus/verify?ref=c1", "/repos/acme/repo/contents/.nexus/verify?ref=c2", "/repos/acme/repo/contents/.nexus/verify?ref=c3"]);
 });
 
+test("GitHub gives a commit's change against its base, and none it cannot show in full", async () => {
+  const asked: string[] = [];
+  const fake: typeof fetch = async (input) => {
+    const path = new URL(String(input)).pathname; asked.push(path);
+    if (path.endsWith("...c1")) return Response.json({ files: [{ filename: "b.ts", previous_filename: "a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { filename: "logo.png" }] });
+    if (path.endsWith("...c2")) return Response.json({ files: Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.ts`, patch: "+x" })) });
+    if (path.endsWith("...gone")) return Response.json({ message: "Not Found" }, { status: 404 });
+    return new Response(null, { status: 502 });
+  };
+  const client = githubClient("secret", fake);
+  assert.deepEqual(await client.change("acme/repo", "release/1", "c1"), [{ path: "b.ts", previous: "a.ts", patch: "@@ -1 +1 @@\n-a\n+b" }, { path: "logo.png", previous: null, patch: "" }]);
+  assert.equal(await client.change("acme/repo", "main", "c2"), null, "GitHub lists at most 300 files, so 300 may be a part");
+  assert.equal(await client.change("acme/repo", "main", "gone"), null, "a commit GitHub no longer has");
+  await assert.rejects(client.change("acme/repo", "main", "c3"), /HTTP 502/);
+  assert.deepEqual(asked, ["/repos/acme/repo/compare/release%2F1...c1", "/repos/acme/repo/compare/main...c2", "/repos/acme/repo/compare/main...gone", "/repos/acme/repo/compare/main...c3"]);
+});
+
 for (const [name, headers, delay] of [
   ["short Retry-After", { "retry-after": "5" }, 5_000],
   ["long Retry-After", { "retry-after": "360" }, 360_000],

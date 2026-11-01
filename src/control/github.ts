@@ -37,6 +37,11 @@ export interface GitHub {
   poll(repo: string, number: number): Promise<PrSnapshot>;
   /** Each changed file with its patch, empty for a binary file or one too large for GitHub to diff. */
   files(repo: string, number: number): Promise<ChangedFile[]>;
+  /**
+   * The change at commit `head` against its merge base with branch `base`, each file with its patch as `files` gives
+   * it, or null when GitHub cannot show all of it: it lists at most 300 files, and none for a commit it no longer has.
+   */
+  change(repo: string, base: string, head: string): Promise<ChangedFile[] | null>;
   /** Squash-merges only while the PR's head is still `head`, so it never merges a commit nobody reviewed. */
   merge(repo: string, number: number, head: string): Promise<MergeResult>;
   /** Adds the label `name` to the PR, creating it in the repository first if it has none. Adding it twice is harmless. */
@@ -166,6 +171,19 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     },
     async files(repo, number) {
       return (await list<{ filename: string; previous_filename?: string; patch?: string }>(`/repos/${repo}/pulls/${number}/files`)).map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" }));
+    },
+    async change(repo, base, head) {
+      const response = await call(`/repos/${repo}/compare/${encodeURIComponent(base)}...${head}`);
+      if (response.status === 404 || response.status === 422) {
+        await response.body?.cancel();
+        return null;
+      }
+      if (!response.ok) {
+        limited(response);
+        throw new Error(`GitHub compare: HTTP ${response.status}`);
+      }
+      const { files = [] } = await response.json() as { files?: { filename: string; previous_filename?: string; patch?: string }[] };
+      return files.length >= 300 ? null : files.map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" }));
     },
     async merge(repo, number, head) {
       const { response, reply, message } = await write("PUT", `/repos/${repo}/pulls/${number}/merge`, { sha: head, merge_method: "squash" }, "merge");
