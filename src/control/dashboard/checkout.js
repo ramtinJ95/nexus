@@ -259,10 +259,14 @@ export function renderTabs() {
   (controls.find((b) => b.dataset.key === focused) ?? controls.find((b) => b.dataset.key === replacement))?.focus();
 }
 
+/** A window wide enough to show the conversation beside an open diff or the terminal, rather than in its place. */
+export const sideBySide = matchMedia("(min-width: 1200px)");
+sideBySide.addEventListener("change", () => { if (tabsBar !== null) showTab(activeTab); });
+
 export function showTab(path) {
   activeTab = path;
   main.dataset.view = path === null ? "convo" : path === terminalTab ? "term" : "file";
-  scroller.hidden = path !== null;
+  scroller.hidden = path !== null && !sideBySide.matches;
   fileView.hidden = typeof path !== "string";
   if (termView !== null) termView.hidden = path !== terminalTab;
   if (path === null) end.settle();

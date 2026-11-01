@@ -10,6 +10,7 @@ import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText
 import type { Context, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
+import { board, fleet } from "./board.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
 
 /** Every open thread with what its pylon is asked to be and is, for the desk and for the phone's thread list. */
@@ -36,12 +37,14 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): 
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
     main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
-<div class="page" id="overview" data-live>
+<div class="scroll"><div class="page page-home">${board(c)}
+<div class="home-grid"><div class="home-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs panel" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
+${fleet(c)}</div>
+<div class="overview" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
-  return html`<section aria-labelledby="project-${p.id}">
+  return html`<section class="panel" aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
 ${recent.length > 0 ? table(recent) : quiet.length === 0 && html`<p class="empty">No open threads.</p>`}
 ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-queued">
@@ -59,7 +62,7 @@ ${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summar
 ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
 </section>`;
 })}
-</div></div>`,
+</div></div></div>`,
   });
 }
 
