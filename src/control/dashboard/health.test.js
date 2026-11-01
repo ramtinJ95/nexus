@@ -21,19 +21,37 @@ test("a Health page owes a seen mark for the newest problem it shows, once", () 
   assert.equal(owedHealthSeen(null, null), null, "not the Health page");
 });
 
-test("a tab takes only changes newer than its page showed, each once, though a catch-up and the stream both hand one on", () => {
+test("a tab takes only changes newer than its page showed and than its check's latest, so a catch-up never undoes a recovery the stream passed first", () => {
   const fresh = newChanges(4);
-  assert.deepEqual([3, 4, 5, 6, 5].map((id) => fresh({ id })), [false, false, true, true, false]);
+  const of = (id, name, status) => ({ id, node: null, name, from: "ok", status });
+  assert.deepEqual([of(3, "disk", "warn"), of(4, "disk", "warn"), of(6, "disk", "ok"), of(5, "disk", "warn"), of(6, "disk", "ok"), of(5, "backup", "warn")].map(fresh), [false, false, true, false, false, true]);
 });
 
-test("a stream that opened again hands on every change kept, oldest first", async (t) => {
+test("a stream that opened again hands on every change kept, oldest first, and a failed read tries again until one succeeds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const real = globalThis.fetch;
   t.after(() => { globalThis.fetch = real; });
   const asked = [];
-  globalThis.fetch = async (path) => { asked.push(path); return { ok: true, text: async () => JSON.stringify([change("warn", "ok"), change("ok", "warn")].map((c, i) => ({ ...c, id: 9 - i }))) }; };
+  let down = 2;
+  globalThis.fetch = async (path) => {
+    asked.push(path);
+    if (down-- > 0) throw new Error("offline");
+    return { ok: true, text: async () => JSON.stringify([change("warn", "ok"), change("ok", "warn")].map((c, i) => ({ ...c, id: 9 - i }))) };
+  };
   const handed = [];
+  const settled = () => new Promise((resolve) => setImmediate(resolve));
   await caughtUp((c) => handed.push([c.id, c.status]));
-  assert.deepEqual([asked, handed], [["/v1/checks/changes"], [[8, "warn"], [9, "ok"]]]);
-  globalThis.fetch = async () => { throw new Error("offline"); };
-  await assert.doesNotReject(caughtUp(() => {}), "a failed read waits for the next reconnect");
+  assert.deepEqual([asked.length, handed], [1, []]);
+  t.mock.timers.tick(999);
+  await settled();
+  assert.equal(asked.length, 1);
+  t.mock.timers.tick(1);
+  await settled();
+  assert.equal(asked.length, 2, "again after 1 s");
+  t.mock.timers.tick(2000);
+  await settled();
+  assert.deepEqual([asked, handed], [["/v1/checks/changes", "/v1/checks/changes", "/v1/checks/changes"], [[8, "warn"], [9, "ok"]]], "and after 2 s more, which succeeds");
+  t.mock.timers.tick(60_000);
+  await settled();
+  assert.equal(asked.length, 3, "and stops");
 });

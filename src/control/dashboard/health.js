@@ -22,39 +22,29 @@ export function owedHealthSeen(page, marked) {
 }
 
 /**
- * Whether a change is news to a tab whose page showed every change up to `baseline`: newer than that, and not handed
- * on already, as a reconnect's catch-up and the stream may both hand on one.
+ * Whether a change is news to a tab whose page showed every change up to `baseline`: newer than that, and newer than
+ * the latest change of its check handed on, as a reconnect's catch-up may hand on a change the stream already passed.
  */
 export function newChanges(baseline) {
-  const handed = new Set();
-  return (change) => change.id > baseline && !handed.has(change.id) && Boolean(handed.add(change.id));
+  const latest = new Map();
+  return (change) => {
+    const key = healthNotice(change).key;
+    if (change.id <= Math.max(baseline, latest.get(key) ?? 0)) return false;
+    latest.set(key, change.id);
+    return true;
+  };
 }
 
-/** Hands on every change kept, oldest first, for a stream that opened again. A failed read waits for the next. */
-export async function caughtUp(hand) {
+/**
+ * Hands on every change kept, oldest first, for a stream that opened again. A failed read tries again, from 1 s and
+ * doubling up to 30 s, since an open stream gives no other chance to.
+ */
+export async function caughtUp(hand, wait = 1000) {
   try {
     for (const change of (await (await import("./request.js")).api("GET", "/v1/checks/changes", undefined, AbortSignal.timeout(10_000))).reverse()) hand(change);
-  } catch { /* The page's refresh reports connection failures. */ }
-}
-
-/** Shows a notice on the channel picked, and returns what closes it. */
-export async function notice(channel, title, body, url) {
-  if (channel === "system") {
-    const shown = new Notification(title, { body });
-    shown.onclick = () => { window.focus(); location.assign(url); shown.close(); };
-    return () => shown.close();
+  } catch {
+    setTimeout(() => void caughtUp(hand, Math.min(wait * 2, 30_000)), wait);
   }
-  if (channel !== "toast") return () => {};
-  const { el } = await import("./page.js");
-  const toast = el("div", { className: "attention-toast", role: "status" },
-    el("span", { textContent: `${title}: ${body}` }),
-    el("a", { href: url, textContent: "Open" }));
-  const dismiss = el("button", { textContent: "Dismiss", type: "button" });
-  dismiss.onclick = () => toast.remove();
-  toast.append(dismiss);
-  document.body.append(toast);
-  setTimeout(() => toast.remove(), 15000);
-  return () => toast.remove();
 }
 
 // Each check's notice, which its next change closes, so a recovery takes its alert away.
