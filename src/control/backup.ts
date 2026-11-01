@@ -15,6 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { readConfig, type ControlPlaneConfig } from "./main.ts";
+import { backupStatusFile, writeBackupStatus, type BackupStatus } from "./backup-status.ts";
 
 const exec = promisify(execFile);
 
@@ -178,7 +179,10 @@ export async function verify(dir: string): Promise<Verdict> {
   return { ok: true, manifest };
 }
 
-/** The newest complete backup under `root`, its age at `now`, and whether it verifies. What `nexus doctor` is to call. */
+/**
+ * The newest complete backup under `root`, its age at `now`, and whether it verifies. The control plane may not read the
+ * backups, so `nexus doctor` reads what each run wrote to backupStatusFile instead.
+ */
 export async function check(options: { root: string; now: Date }): Promise<BackupCheck> {
   const [name] = await completeBackups(options.root);
   if (name === undefined) return { verified: false, reason: `no complete backup in ${options.root}` };
@@ -186,6 +190,12 @@ export async function check(options: { root: string; now: Date }): Promise<Backu
   if (!verdict.ok) return { verified: false, name, reason: verdict.reason };
   const { createdAt } = verdict.manifest;
   return { verified: true, name, createdAt, ageMs: options.now.getTime() - Date.parse(createdAt) };
+}
+
+/** The status after a run that failed: the newest complete backup that remains, and whether it still verifies. */
+export async function failedRun(root: string, ranAt: Date): Promise<BackupStatus> {
+  const newest = await check({ root, now: ranAt });
+  return { ranAt: ranAt.toISOString(), succeeded: false, newest: newest.name === undefined ? null : { name: newest.name, verified: newest.verified, createdAt: newest.createdAt ?? null } };
 }
 
 /**
@@ -255,7 +265,14 @@ async function host(args: string[]) {
   }
   try {
     if (command === "backup") {
-      console.log(`backed up the control plane to ${await backup({ config: await readConfig(argument ?? join(etcDir, "control.json")), root: backupRoot, etc: etcDir, now: new Date(), keep: kept })}`);
+      const now = new Date();
+      const dir = await backup({ config: await readConfig(argument ?? join(etcDir, "control.json")), root: backupRoot, etc: etcDir, now, keep: kept })
+        .catch(async (err: unknown) => {
+          await writeBackupStatus(backupStatusFile, await failedRun(backupRoot, now)).catch((failed: unknown) => console.error(`backup: the status was not written: ${(failed as Error).message}`));
+          throw err;
+        });
+      await writeBackupStatus(backupStatusFile, { ranAt: now.toISOString(), succeeded: true, newest: { name: basename(dir), verified: true, createdAt: now.toISOString() } });
+      console.log(`backed up the control plane to ${dir}`);
     } else if (command === "check") {
       const result = await check({ root: backupRoot, now: new Date() });
       const { ageMs, ...facts } = result;

@@ -8,7 +8,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { tempDir } from "../test-kit.ts";
-import { backup, check, nameOf, restore, verify } from "./backup.ts";
+import { backup, check, failedRun, nameOf, restore, verify } from "./backup.ts";
 import { parseConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";
 
@@ -98,6 +98,15 @@ test("check reports the newest complete backup's age and whether it verifies, an
   const tampered = await check({ root: m.root, now });
   assert.equal(tampered.verified, false);
   assert.match(tampered.reason!, /harness-credentials\.json/);
+});
+
+test("a failed run's status names the newest backup that remains and whether it verifies, and no path, content or error text", async (t) => {
+  const m = await controlPlane(t);
+  assert.deepEqual(await failedRun(m.root, m.day(1)), { ranAt: m.day(1).toISOString(), succeeded: false, newest: null });
+  const kept = await m.run(m.day(1));
+  assert.deepEqual(await failedRun(m.root, m.day(2)), { ranAt: m.day(2).toISOString(), succeeded: false, newest: { name: nameOf(m.day(1)), verified: true, createdAt: m.day(1).toISOString() } });
+  await writeFile(join(kept, "harness-credentials.json"), '{"deviceId":"e","credentials":{"openai":{}}}\n');
+  assert.deepEqual(await failedRun(m.root, m.day(2)), { ranAt: m.day(2).toISOString(), succeeded: false, newest: { name: nameOf(m.day(1)), verified: false, createdAt: null } });
 });
 
 test("a new backup that verifies leaves the newest 7 and no leftover, and a failed one leaves the earlier ones and nothing of its own", async (t) => {
