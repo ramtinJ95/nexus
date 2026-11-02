@@ -15,7 +15,7 @@ import { pylonLive } from "./live.ts";
 import type { Registry } from "./registry.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 
-type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "node" | "nodes" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserve" | "reserved" | "saveTemplate" | "templates">;
+type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "latestHealthSample" | "node" | "nodes" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserve" | "reserved" | "saveTemplate" | "templates">;
 
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
