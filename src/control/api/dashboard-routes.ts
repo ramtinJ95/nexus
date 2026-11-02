@@ -58,6 +58,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, kit.row(t)).get(t.id)!;
     let needs: readonly Need[] | undefined;
     let threads: readonly Thread[] | undefined;
+    let reviews: readonly Review[] | undefined;
     // registry.threads() is in the order registry.threads(project) is, so each project's keeps its order.
     let byProject: Map<string, Thread[]> | undefined;
     let queued: Map<string, QueuedThread[]> | undefined;
@@ -66,6 +67,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       answerRefusal: (question) => kit.refusalOf(caller, question),
       threads: () => threads ??= registry.threads(),
       threadsIn: (project) => (byProject ??= Map.groupBy(c.threads(), (t) => t.project)).get(project) ?? [],
+      reviews: () => reviews ??= registry.reviews(),
       queuedIn: (project) => (queued ??= Map.groupBy(registry.queuedThreads().filter((q) => q.status === "queued").map((q) => queuedView(registry, q)), (q) => q.project)).get(project) ?? [],
       needs: () => needs ??= needsOf(c, detail),
     };

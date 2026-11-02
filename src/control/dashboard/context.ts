@@ -18,6 +18,8 @@ export interface Context {
   /** Every thread, oldest first, and a project's, read once per render however many parts show them. */
   threads(): readonly Thread[];
   threadsIn(project: string): readonly Thread[];
+  /** Every review, read once per render, as each thread's role reads them. */
+  reviews(): readonly Review[];
   /** A project's threads that wait in the queue, in the order they were queued. */
   queuedIn(project: string): readonly QueuedThread[];
   /** What waits on the person, which the sidebar and the phone's tab count and the home page lists. */

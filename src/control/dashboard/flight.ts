@@ -14,7 +14,7 @@ import type { Context, HeldWork } from "./context.ts";
 import { clock, span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
 import type { Item } from "./items.ts";
-import { itemsOf, lifeOfItem, lifeOfThread, needLabel, stages, type Life, type Stage } from "./lifecycle.ts";
+import { itemsOf, lifeOfItem, lifeOfThread, needLabel, roleLine, stages, threadRole, type Life, type Stage } from "./lifecycle.ts";
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook, threadTitle } from "./shell.ts";
 
@@ -45,15 +45,16 @@ const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.t
 export const deployedForMs = 24 * 60 * 60 * 1000;
 
 /**
- * Every piece of work once, at its stage: items not yet threads, queued threads, and open threads, and an archived
- * thread only once it landed, for `deployedForMs` after its archive.
+ * Every piece of work once, at its stage: items not yet threads, queued threads, and open builder threads, and an
+ * archived one only once it landed, for `deployedForMs` after its archive. A review's reviewer and check threads show
+ * on their builder's line.
  */
 export function flightLines(c: Context): Map<Stage, Line[]> {
   const recent = (t: Thread) => t.status === "active" || t.status === "idle" || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
   const lines = [
     ...itemsOf(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
     ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
-    ...c.threads().filter(recent).map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
+    ...c.threads().filter((t) => recent(t) && threadRole(c, t.id).kind === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
   ];
   const placed = Map.groupBy(lines.filter((l) => l.life.stage !== null), (l) => l.life.stage!);
   for (const stage of placed.values()) stage.sort((a, b) => a.order - b.order);
@@ -145,14 +146,15 @@ ${next(life, q.waits.every((w) => w.state === "landed") ? undefined : html`<ul c
   }
   const { d, items } = p;
   const t = d.thread;
-  const life = lifeOfThread(c, t.id);
+  const role = threadRole(c, t.id);
+  const life = role.kind === "builder" ? lifeOfThread(c, t.id) : null;
   const [label, tone] = threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now);
   const r = d.review;
   const pr = d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${t.id}">
 <header class="peek-head"><span class="peek-proj">${t.project}</span><h2 id="peek-h">${dot(tone, label)}<span>${t.title}</span></h2><a class="btn btn-xs btn-primary" href="/threads/${t.id}">Open thread</a>${close}</header>
-${lifeTrack(life, false)}
-${next(life)}
+${role.kind === "builder" ? html`${lifeTrack(life!, false)}
+${next(life!)}` : roleLine(c, t.id, role)}
 <dl class="peek-facts">
 <dt>State</dt><dd>${label}</dd>
 ${pr !== undefined && html`<dt>Pull request</dt><dd><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">round ${roundsSpent(r)} of ${r.maxRounds}</span>`}</dd>`}
