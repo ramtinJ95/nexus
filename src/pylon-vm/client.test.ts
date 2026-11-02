@@ -1,12 +1,15 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import fs, { chmod, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { run } from "./client.ts";
+import { run, scratchDirectory, sweepScratch } from "./client.ts";
+import { identityOf, publishIdentity } from "./identity.ts";
 import { saveJson } from "../json-file.ts";
 import { directory, privateDirectory } from "./storage.ts";
 
@@ -99,4 +102,166 @@ test("with no controller listening, an inspect reads the instance offline, a sto
 	await assert.rejects(run(c.root, { action: "services", name: c.name, op: "status" }), /^Error: pylon-t1 is not running\. Use start first$/);
 	assert.equal(((await run(c.root, { action: "stop", name: c.name })) as Inspection).status.state, "stopped");
 	assert.deepEqual(c.arrived, []);
+});
+
+test("the start sweep removes an old scratch directory no controller owns, and keeps a young one and one a running controller or a launch owns", async (t) => {
+	const c = await controller(t);
+	t.after(() => c.server.close());
+	await publishIdentity(join(c.dir, "controller.pid"));
+	const hour = 60 * 60_000;
+	const scratch = async (path: string, age: number) => {
+		await privateDirectory(path);
+		await writeFile(join(path, "overlay.qcow2"), "overlay");
+		const at = new Date(Date.now() - age);
+		await utimes(path, at, at);
+		return path;
+	};
+	const owned = await scratch(scratchDirectory(c.root, c.dir), 2 * hour);
+	const stoppedDir = directory(c.root, "instances", "pylon-t2");
+	await privateDirectory(stoppedDir);
+	const stopped = await scratch(scratchDirectory(c.root, stoppedDir), 2 * hour);
+	const launchingDir = directory(c.root, "instances", "pylon-t3");
+	await privateDirectory(join(launchingDir, "launch.lock"));
+	await publishIdentity(join(launchingDir, "launch.lock", "owner"));
+	const launching = await scratch(scratchDirectory(c.root, launchingDir), 2 * hour);
+	const destroyed = await scratch(join(c.root, "tmp", "f7352d554b6b"), 2 * hour);
+	const young = await scratch(join(c.root, "tmp", "0123456789ab"), 60_000);
+	assert.deepEqual((await sweepScratch(c.root)).sort(), [basename(destroyed), basename(stopped)].sort());
+	assert.deepEqual([owned, stopped, launching, destroyed, young].map((path) => existsSync(path)), [true, false, true, false, true]);
+	assert.equal(existsSync(join(stoppedDir, "launch.lock")), false, "the sweep left the launch lock it held");
+	assert.equal(existsSync(join(launchingDir, "launch.lock")), true, "the sweep removed a launch's lock");
+});
+
+test("the start sweep keeps a directory whose controller.pid it cannot read or whose lock it cannot take, logs it, and sweeps the rest", { skip: process.getuid?.() === 0 && "root writes to a read-only directory" }, async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(async () => {
+		await chmod(directory(root, "instances", "pylon-locked"), 0o700);
+		await rm(root, { recursive: true, force: true });
+	});
+	const errors = t.mock.method(console, "error", () => {});
+	const scratch = async (dir: string) => {
+		await privateDirectory(dir);
+		const path = scratchDirectory(root, dir);
+		await privateDirectory(path);
+		const at = new Date(Date.now() - 2 * 60 * 60_000);
+		await utimes(path, at, at);
+		return path;
+	};
+	const tornDir = directory(root, "instances", "pylon-torn");
+	const torn = await scratch(tornDir);
+	// What a power loss before saveJson's data reached the disk leaves.
+	await writeFile(join(tornDir, "controller.pid"), "");
+	const lockedDir = directory(root, "instances", "pylon-locked");
+	const locked = await scratch(lockedDir);
+	// Refuses the lock as a full disk would.
+	await chmod(lockedDir, 0o500);
+	const stopped = await scratch(directory(root, "instances", "pylon-stopped"));
+	assert.deepEqual(await sweepScratch(root), [basename(stopped)]);
+	assert.deepEqual([torn, locked, stopped].map((path) => existsSync(path)), [true, true, false]);
+	assert.equal(existsSync(join(tornDir, "launch.lock")), false, "the sweep left the launch lock it held");
+	const logged = errors.mock.calls.map((call) => String(call.arguments[0]));
+	assert.deepEqual(logged.sort(), [basename(locked), basename(torn)].sort().map((name) => `scratch sweep kept ${name}:`));
+});
+
+const spec = { resources: { cpus: 1, memoryGiB: 1 }, allowedHosts: [], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null };
+
+test("a launch lock that an interrupted sweep or launch left without an owner is taken by the next sweep and the next launch", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const interrupted = async (instance: string, age: number) => {
+		const dir = directory(root, "instances", instance);
+		await privateDirectory(dir);
+		await saveJson(join(dir, "record.json"), { version: 1, name: instance, config: {}, createdAt: new Date().toISOString(), labels: {} });
+		// What a probe killed between making the lock and publishing its identity in it left.
+		await privateDirectory(join(dir, "launch.lock"));
+		const scratch = scratchDirectory(root, dir);
+		await privateDirectory(scratch);
+		const at = new Date(Date.now() - age);
+		await utimes(scratch, at, at);
+		return { dir, scratch };
+	};
+	const dead = await interrupted("pylon-dead", 2 * 60 * 60_000);
+	const paused = await interrupted("pylon-paused", 60_000);
+	assert.deepEqual(await sweepScratch(root), [basename(dead.scratch)]);
+	assert.equal(existsSync(paused.scratch), true);
+	assert.deepEqual([dead, paused].map(({ dir }) => existsSync(join(dir, "launch.lock"))), [false, false], "the sweep left an ownerless lock");
+
+	const starting = await interrupted("pylon-starting", 60_000);
+	// Fails the launch at its first write after it holds the lock, so no controller is spawned.
+	await mkdir(join(starting.dir, "status.json"));
+	await assert.rejects(run(root, { action: "start", name: "pylon-starting", boot: spec }), /EISDIR/);
+	assert.equal(existsSync(join(starting.dir, "launch.lock")), false, "the launch left the lock it took");
+});
+
+for (const disk of ["free", "full"] as const)
+	test(`sweeps that race over the same instances never fail to take or release a launch lock, and leave none behind, on a ${disk} disk`, async (t) => {
+		const root = await mkdtemp(join(tmpdir(), "nxc-"));
+		t.after(() => rm(root, { recursive: true, force: true }));
+		const errors = t.mock.method(console, "error", () => {});
+		if (disk === "full") {
+			const { rename } = fs;
+			// A rename onto a new name needs a new directory entry, which a full disk may refuse. Onto an existing one it does not.
+			t.mock.method(fs, "rename", (from: string, to: string) =>
+				basename(from) === "launch.lock" && !existsSync(to)
+					? Promise.reject(Object.assign(new Error(`ENOSPC: no space left on device, rename '${from}' -> '${to}'`), { code: "ENOSPC" }))
+					: rename(from, to));
+			syncBuiltinESMExports();
+			t.after(() => {
+				t.mock.restoreAll();
+				syncBuiltinESMExports();
+			});
+		}
+		const dirs = await Promise.all(Array.from({ length: 20 }, async (_, i) => {
+			const dir = directory(root, "instances", `pylon-race${i}`);
+			await privateDirectory(dir);
+			await privateDirectory(scratchDirectory(root, dir));
+			return dir;
+		}));
+		for (let round = 0; round < 20; round++) await Promise.all(Array.from({ length: 4 }, () => sweepScratch(root)));
+		assert.deepEqual(errors.mock.calls.map((call) => call.arguments.map(String).join(" ")), []);
+		assert.deepEqual(dirs.filter((dir) => existsSync(join(dir, "launch.lock"))), []);
+	});
+
+test("a launch that ends on a full disk still releases its lock, so the next launch is not refused by the probe that is still running", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const dir = directory(root, "instances", "pylon-full");
+	await privateDirectory(dir);
+	await saveJson(join(dir, "record.json"), { version: 1, name: "pylon-full", config: {}, createdAt: new Date().toISOString(), labels: {} });
+	// Fails the launch at its first write after it holds the lock, so no controller is spawned.
+	await mkdir(join(dir, "status.json"));
+	const lock = join(dir, "launch.lock");
+	const full = (path: unknown) => Object.assign(new Error(`ENOSPC: no space left on device, '${String(path)}'`), { code: "ENOSPC" });
+	const { mkdtemp: original } = fs;
+	// The disk fills while the launch holds its lock.
+	t.mock.method(fs, "mkdtemp", (prefix: string, ...rest: unknown[]) =>
+		existsSync(lock) ? Promise.reject(full(prefix)) : (original as (...args: unknown[]) => Promise<string>)(prefix, ...rest));
+	syncBuiltinESMExports();
+	t.after(() => {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+	});
+	await assert.rejects(run(root, { action: "start", name: "pylon-full", boot: spec }), /EISDIR/);
+	assert.equal(existsSync(lock), false, "a launch on a full disk kept its lock");
+	t.mock.restoreAll();
+	syncBuiltinESMExports();
+	await assert.rejects(run(root, { action: "start", name: "pylon-full", boot: spec }), /EISDIR/);
+});
+
+test("a launch that recovers the lock of a launch that died releases it onto the dead launch's reserved directory, and leaves no directory beside the lock", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const dir = directory(root, "instances", "pylon-orphaned");
+	await privateDirectory(dir);
+	await saveJson(join(dir, "record.json"), { version: 1, name: "pylon-orphaned", config: {}, createdAt: new Date().toISOString(), labels: {} });
+	// What a launch killed while it held its lock left.
+	const lock = join(dir, "launch.lock");
+	await privateDirectory(lock);
+	await saveJson(join(lock, "owner"), { ...(await identityOf(process.pid))!, start: "an earlier process" });
+	await writeFile(join(lock, "release"), "launch.lock-dead01");
+	await privateDirectory(join(dir, "launch.lock-dead01"));
+	// Fails the launch at its first write after it holds the lock, so no controller is spawned.
+	await mkdir(join(dir, "status.json"));
+	await assert.rejects(run(root, { action: "start", name: "pylon-orphaned", boot: spec }), /EISDIR/);
+	assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), []);
 });

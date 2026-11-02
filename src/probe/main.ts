@@ -12,6 +12,7 @@
  */
 import { createDockerBackend } from "../docker-backend.ts";
 import { createPylonVmBackend } from "../pylon-vm-backend.ts";
+import { sweepScratch } from "../pylon-vm/client.ts";
 import { localApiWhois } from "../tailscale.ts";
 import { readControlPlane } from "../deploy/control-plane.ts";
 import { nodeSecrets, parseSelfDnsName, probeAuth, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
@@ -32,6 +33,15 @@ function pylonVm({ gitSsh, ...backend }: Extract<ProbeConfig["backend"], { kind:
 }
 function docker({ artifacts, ...backend }: Extract<ProbeConfig["backend"], { kind: "docker" }>) {
   return createDockerBackend({ ...backend, ...previewHost, ...(artifacts === undefined ? {} : { artifacts }) });
+}
+if (config.backend.kind === "pylon-vm") {
+  // A failed sweep must not keep the probe, and with it every pylon on the node, from starting.
+  await sweepScratch(config.backend.stateRoot).then(
+    (swept) => {
+      if (swept.length > 0) console.log(`removed ${swept.length} scratch directories no controller owns: ${swept.join(", ")}`);
+    },
+    (error: unknown) => console.error("scratch sweep failed:", error),
+  );
 }
 const probe = await startProbe({
   node: config.node,

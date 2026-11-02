@@ -1,6 +1,7 @@
 /**
  * Runs the real daemon.ts without a VM: `node --import ./fake-runtime.ts daemon.ts <dir>`. As a preload it points
- * daemon.ts's import of runtime.ts here, where SandboxRuntime boots, stops and inspects at once, a `services` action
+ * daemon.ts's import of runtime.ts here, where SandboxRuntime boots, stops and inspects at once, an instance named
+ * `*-broken` fails its boot, one named `*-unreported` fails its boot and the report of it, one named `*-interrupted` fails its stop and refuses every action after, one named `*-full` fails its shutdown and the report of it, a `services` action
  * never ends, so it holds the lifecycle queue for good, and every other export is runtime.ts's own. Each SIGUSR2 fails
  * one accept on the controller's server: Node's handler for its listening socket gets the error libuv passes it, and
  * the line `injected accept error <n>` goes to stderr after it.
@@ -20,18 +21,26 @@ export class SandboxRuntime {
 		this.name = record.name;
 	}
 	async boot(): Promise<void> {
+		if (this.name.endsWith("-broken") || this.name.endsWith("-unreported")) throw new Error("boot failed");
 		this.state = "running";
 	}
 	async fail(error: unknown): Promise<void> {
 		console.error(error);
+		if (this.name.endsWith("-unreported") || this.name.endsWith("-full")) throw new Error("ENOSPC: no space left on device");
 	}
 	async handle(action: Action): Promise<unknown> {
+		if (this.retired) throw new Error("the controller is retired");
+		if (action.action === "stop" && this.name.endsWith("-interrupted")) {
+			this.retired = true;
+			throw new Error("stop failed");
+		}
 		if (action.action === "services") return new Promise(() => {});
 		if (action.action === "stop") this.state = "stopped";
 		return { name: this.name, status: { name: this.name, state: this.state } };
 	}
 	beginShutdown(): void {}
 	async stop(): Promise<void> {
+		if (this.name.endsWith("-full")) throw new Error("stop failed");
 		this.state = "stopped";
 	}
 }
