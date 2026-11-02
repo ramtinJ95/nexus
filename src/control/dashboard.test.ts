@@ -2277,7 +2277,7 @@ test("a node's page shows its health as its probe reads it, unknown where the ho
   const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => health };
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
   const started = await s.start("acme", "Busy thread");
-  assert.match(await clusterNodes(s), /<a href="\/nodes\/rj-firebat" aria-current="page">rj-firebat<\/a>/, "Cluster's row links the node's page, picked as the first node");
+  assert.match(await clusterNodes(s), /<a href="\/nodes\/rj-firebat#node-rj-firebat" aria-current="page">rj-firebat<\/a>/, "Cluster's row links the node's page, picked as the first node");
   health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.46, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
   const page = await s.call("GET", `/nodes/${node}`);
   assert.equal(page.status, 200);

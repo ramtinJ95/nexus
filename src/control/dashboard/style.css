@@ -756,7 +756,7 @@ h4.md-h { font-size: 1.07em; }
 .need-sum > .i { color: var(--text-3); transition: transform 0.15s; }
 .need-fold[open] > .need-sum > .i { transform: rotate(90deg); }
 .need-fold[open] > .need-sum { background: color-mix(in srgb, var(--kind) 6%, transparent); }
-.need-held .need-sum { grid-template-columns: 8.5rem minmax(0, 16rem) minmax(0, 1fr) auto auto; cursor: default; }
+.need-held .need-sum { cursor: default; }
 .need-held .need-sum .need-thread a { color: inherit; }
 .need-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px/1.4 var(--sans); color: var(--kind); }
 .need-sum .need-thread { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }

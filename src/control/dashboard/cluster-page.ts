@@ -54,7 +54,7 @@ function nodesTable(c: Context, picked: NodeName | null, healths: ReadonlyMap<No
   const pylons = nodePylons(c.registry, n);
   const low = lowDisks(n);
   return html`<tr data-node="${n.name}"${n.name === picked && html` class="picked"`}>
-<td><span class="ov-title">${dot(n.state === "online" ? "ok" : "muted", n.state)}<a href="/nodes/${encodeURIComponent(n.name)}"${n.name === picked && html` aria-current="page"`}>${n.name}</a>${n.state === "offline" && html`<span class="tag">offline</span>`}${overcommitted(n.capacity) && html`<span class="tag tag-bad">overcommitted</span>`}${low.length > 0 && html`<span class="tag tag-bad" title="${low.map(diskText).join("; ")}">disk low</span>`}</span></td>
+<td><span class="ov-title">${dot(n.state === "online" ? "ok" : "muted", n.state)}<a href="/nodes/${encodeURIComponent(n.name)}#node-${n.name}"${n.name === picked && html` aria-current="page"`}>${n.name}</a>${n.state === "offline" && html`<span class="tag">offline</span>`}${overcommitted(n.capacity) && html`<span class="tag tag-bad">overcommitted</span>`}${low.length > 0 && html`<span class="tag tag-bad" title="${low.map(diskText).join("; ")}">disk low</span>`}</span></td>
 <td>${read?.load == null ? unknown : html`${(read.load.one / read.cpus).toFixed(2)}<small>per CPU, ${read.cpus} CPUs</small>`}</td>
 <td class="wide">${memoryCell(c, n)}</td>
 <td class="wide">${read === null ? unknown : html`${gib(read.disk.freeGiB)} of ${gib(read.disk.totalGiB)} GiB free`}</td>
