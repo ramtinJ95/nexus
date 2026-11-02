@@ -137,7 +137,7 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
       q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
       q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
     ])}
-<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(lifeOfThread(c, q.id))}</nav>
+<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(lifeOfThread(c, q.id), false)}</nav>
 <div class="scroll"><div class="page queued" id="queued" data-live>
 <section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
 <ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>

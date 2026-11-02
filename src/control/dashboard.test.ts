@@ -2441,6 +2441,17 @@ test("a queued thread's preview says once what it waits for", async (t) => {
   assert.equal(peek.split("Fix checkout").length - 1, 1, peek);
 });
 
+test("a queued thread's page shows its track of steps without links to a timeline it does not have", async (t) => {
+  const s = await seeded(t);
+  const first = await s.start("acme", "Fix checkout");
+  const queued = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Then the receipts", after: [first.id] })).text) as QueuedThread;
+  const page = (await s.call("GET", `/threads/${queued.id}`)).text;
+  const track = page.split('<nav class="life-bar" id="life"')[1]!.split("</nav>")[0]!;
+  assert.equal([...track.matchAll(/<span class="life-step">/g)].length, 6, "each step is a plain step");
+  assert.doesNotMatch(track, /data-tab-go|href="#tl-/);
+  assert.doesNotMatch(page, /id="timeline-view"/);
+});
+
 test("a queued thread whose waits all landed previews why it did not start yet", async (t) => {
   const s = await seeded(t);
   const first = await s.start("acme", "Fix checkout");
