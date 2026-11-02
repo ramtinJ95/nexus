@@ -2463,6 +2463,17 @@ test("Deployed lists a landed thread for a day after its archive, and the work i
   assert.doesNotMatch((await home()).deployed, new RegExp(landed.id), "a day after its archive it has left Deployed");
 });
 
+test("an archived thread whose review still holds for the person is not in Needs you", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Rolled back");
+  s.registry.saveReview(approvedReview(fix.id, personPhase("deploy", "The deploy of 4444 failed.", "Rolled back to the previous release."), { merged: "4".repeat(40), land: { requestedBy: laptop } }));
+  assert.equal(needsCount((await s.call("GET", "/")).text), "1");
+  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
+  const page = (await s.call("GET", "/")).text;
+  assert.equal(needsCount(page), "");
+  assert.equal(needsOf(page).text, "Needs you Nothing waits on you.");
+});
+
 test("a queued thread's page shows its track of steps without links to a timeline it does not have", async (t) => {
   const s = await seeded(t);
   const first = await s.start("acme", "Fix checkout");

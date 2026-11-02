@@ -118,7 +118,7 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
   const held = [
     ...itemsOf(c).filter((item) => item.thread === null && item.phase.kind === "held").map((item): Need => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
     ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): Need => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
-    ...c.threads().filter((t) => t.status !== "deleted" && !carded.has(t.id) && holds(t.id)).map((thread): Need => ({ kind: "held", work: { kind: "thread", thread }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
+    ...c.threads().filter((t) => (t.status === "active" || t.status === "idle") && !carded.has(t.id) && holds(t.id)).map((thread): Need => ({ kind: "held", work: { kind: "thread", thread }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
   ].sort((a, b) => a.since - b.since);
   return [...cards, ...held];
 }
