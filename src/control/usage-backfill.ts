@@ -148,6 +148,7 @@ export function usageBackfill(options: {
 
   /** When each archived pylon was first seen up while nothing held it, so one stuck up stops holding every settle back. */
   const upSince = new Map<PylonId, number>();
+  const loggedUp = new Set<PylonId>();
 
   /**
    * An archived pylon up while nothing holds it, as one a restart's lost hold or a released hold left booting, running
@@ -160,12 +161,18 @@ export function usageBackfill(options: {
       const o = p === undefined || p.failed !== null ? null : seen(p);
       return o !== null && o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || (o.phase === "running" && o.liveHash === null)) ? [p!] : [];
     });
-    for (const id of upSince.keys()) if (!up.some((p) => p.pylonId === id)) upSince.delete(id);
+    for (const id of upSince.keys()) {
+      if (up.some((p) => p.pylonId === id)) continue;
+      upSince.delete(id);
+      loggedUp.delete(id);
+    }
     for (const p of up) {
       const since = upSince.get(p.pylonId) ?? now;
       upSince.set(p.pylonId, since);
       if (now - since < pauseMs) return p;
-      if (now - since < pauseMs + intervalMs) log(`usage settle: ${p.pylonId} has been up for reading ${minutes(pauseMs)} with nothing holding it, so the settles go on without it`);
+      if (loggedUp.has(p.pylonId)) continue;
+      loggedUp.add(p.pylonId);
+      log(`usage settle: ${p.pylonId} has been up for reading ${minutes(pauseMs)} with nothing holding it, so the settles go on without it`);
     }
     return null;
   }

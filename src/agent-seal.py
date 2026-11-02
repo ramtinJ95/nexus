@@ -1,7 +1,8 @@
 """Seals the agents' transcripts in this pylon before a settle's final read. Runs as root.
 
-Takes {"claude": dir, "pi": dir, "user": name} on stdin, the user `user` unless it names another. It binds each dir read-only over itself, then stops every
-process of the pylon's user that is not this helper's ancestor until none runs, and kills them. A process started
+Takes {"claude": dir, "pi": dir, "user": name} on stdin, the user `user` unless it names another. It binds each dir
+read-only over itself, then stops every process of the pylon's user that is not this helper's ancestor until none
+runs, and kills them. A process started
 after the mounts cannot write to the dirs, and one started before them, which may hold a file open for writing, is
 gone, so no call reaches a transcript after the seal. The mounts are not on the disk, so the pause after the read
 drops them, and the control plane pauses this boot before it runs any work.
