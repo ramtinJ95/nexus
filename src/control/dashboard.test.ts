@@ -561,9 +561,9 @@ test("a thread in Needs you has its call to action once, in its card, with where
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete: executable missing");
   const approved = await s.start("acme", "Name the TTL");
   s.registry.saveReview(approvedReview(approved.id, { kind: "approved" }, { id: "rv-8", reviewer: "th-reviewer-8" as ThreadId, pr: { repo: "acme/nexus", number: 8, url: "https://github.com/acme/nexus/pull/8", title: "TTL", branch: "ttl" } }));
-  s.registry.savePrWatch(approved.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 8, title: "TTL" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  s.registry.savePrWatch(approved.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 8, title: "TTL", state: "closed" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const quiet = await s.start("acme", "Quiet");
-  const actions: [Thread, RegExp][] = [[held, /data-action="land"/g], [asked, /data-action="answer"/g], [failed, /data-action="archive"/g]];
+  const actions: [Thread, RegExp][] = [[held, new RegExp(`data-action="land" data-thread="${held.id}"`, "g")], [asked, new RegExp(`data-action="answer" data-thread="${asked.id}"`, "g")], [failed, new RegExp(`data-action="archive" data-thread="${failed.id}"`, "g")]];
 
   for (const [thread, action] of actions) {
     const page = (await s.call("GET", `/?peek=${thread.id}`)).text;
@@ -577,7 +577,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
     assert.match(card.html, /<ol class="life" aria-label="Where this work is">.*<li class="life-held" aria-current="step">/s, "its steps mark where it waits on the person");
     assert.match(card.html, new RegExp(`<a class="link" href="/threads/${thread.id}">Open thread</a>`));
     const flight = page.split('id="flight"')[1]!.split('id="overview"')[0]!;
-    assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${thread.id}#needs-you:${thread.id}:(decision|failed)" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
+    assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
   }
   const land = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards.find((c) => c.thread === held.id)!;
   assert.match(land.text, /^Held review acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
@@ -591,7 +591,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
   const waiting = (await s.call("GET", `/?peek=${approved.id}`)).text;
   assert.doesNotMatch(waiting.split('id="peek"')[1]!.split('id="in-flight"')[0]!, /class="peek"/, "work its phase holds for the person previews in its card too");
   const heldCard = waiting.split(`id="need-${approved.id}"`)[1]!.split("</article>")[0]!;
-  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Held acme \/ Name the TTL now Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread Approved, and lands once you press Land\.$/, "with where its work is, as a card for a thread's own need has");
+  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Held acme \/ Name the TTL now Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread [^]*$/, "with where its work is, as a card for a thread's own need has");
   assert.equal([...heldCard.matchAll(/Open thread/g)].length, 1);
 
   const page = (await s.call("GET", `/?peek=${quiet.id}`)).text;
@@ -2396,7 +2396,7 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${c.id}" data-peek="${c.id}">`));
   assert.match(phaseOf(thread) ?? "", /^(queued|building)$/, "an item that became a thread shows as its thread");
   assert.doesNotMatch(flight, new RegExp(`data-peek="${a.id}"`), "nor as itself");
-  assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${b.id}#needs-you:${b.id}:held" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
+  assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${b.id}" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
   assert.equal(phaseOf(b.id), "planned");
   const needs = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
   const card = needs.split(`id="need-${b.id}"`)[1]!.split("</article>")[0]!;

@@ -30,9 +30,9 @@ export const itemActions = (i: PipelineItem, p: Project): Part => i.thread === n
 
 /**
  * One line of the stack: what it is, the key its preview goes by, its life, and its state as the sidebar's dot says
- * it. Work in Needs you has the hash of its card there in place of a preview.
+ * it. Work with a card in Needs you previews in that card.
  */
-export interface Line { key: string; title: string; project: string; life: Life; state: readonly [string, Tone]; when: Part; dim: boolean; order: number; card?: string }
+export interface Line { key: string; title: string; project: string; life: Life; state: readonly [string, Tone]; when: Part; dim: boolean; order: number; carded?: true }
 
 const threadLine = (c: Context, t: Thread): Line => {
   const r = c.row(t);
@@ -67,11 +67,10 @@ export function flightLines(c: Context): Map<Stage, Line[]> {
  * The lines each step lists: its own, and the work held for the person at it that has a card in Needs you, which
  * leads to that card. The held phase has no section of its own.
  */
-export function flightRows(placed: Map<Stage, Line[]>, cards: ReadonlyMap<string, string>): Map<Stage, Line[]> {
+export function flightRows(placed: Map<Stage, Line[]>, cards: ReadonlySet<string>): Map<Stage, Line[]> {
   const rows = new Map([...placed].filter(([stage]) => stage !== "held"));
   for (const l of placed.get("held") ?? []) {
-    const card = cards.get(l.key);
-    if (card !== undefined) rows.set(l.life.at, [...rows.get(l.life.at) ?? [], { ...l, card }].sort((a, b) => a.order - b.order));
+    if (cards.has(l.key)) rows.set(l.life.at, [...rows.get(l.life.at) ?? [], { ...l, carded: true as const }].sort((a, b) => a.order - b.order));
   }
   return rows;
 }
@@ -81,10 +80,10 @@ export const heldLine = (c: Context, w: HeldWork): Line => w.kind === "item" ? i
 
 export const peekHref = (key: string) => `/?peek=${encodeURIComponent(key)}`;
 
-/** A line of the stack, a link to its preview, or to its card in Needs you. */
+/** A line of the stack, a link to its preview, which for work in Needs you is its card there. */
 function line(l: Line, peeked: string | null): Html {
   const [label, tone] = l.state;
-  return html`<li><a class="fl-row${l.dim && " dim"}${l.card !== undefined && " fl-needs"}" href="${peekHref(l.key)}${l.card ?? ""}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span><span class="fl-why">${l.life.why}</span><span class="fl-when">${l.card !== undefined ? html`<span class="tag tag-bad">needs you</span>` : l.when}</span></a></li>`;
+  return html`<li><a class="fl-row${l.dim && " dim"}${l.carded && " fl-needs"}" href="${peekHref(l.key)}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span><span class="fl-why">${l.life.why}</span><span class="fl-when">${l.carded ? html`<span class="tag tag-bad">needs you</span>` : l.when}</span></a></li>`;
 }
 
 /** The phases in order, each with its lines, as `flightRows` places them. */

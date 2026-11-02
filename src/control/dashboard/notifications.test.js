@@ -78,8 +78,8 @@ test("a notice opens the inbox's card for what its thread waits on, and a reply,
   assert.equal(noticeUrl({ id: "th-0123456789ab", attention: "failed" }), "/#needs-you:th-0123456789ab:failed");
   assert.equal(noticeUrl({ id: "th-0123456789ab", attention: "decision" }), "/#needs-you:th-0123456789ab:decision");
   assert.equal(noticeUrl({ id: "th-0123456789ab", attention: "reply" }), "/threads/th-0123456789ab");
-  assert.deepEqual(needSelectors("#needs-you:th-0123456789ab:waiting"), ['.need[data-thread="th-0123456789ab"][data-attention="waiting"]', '.need[data-thread="th-0123456789ab"]', '.need[data-peek-key="th-0123456789ab"]'],
-    "the thread's card for that attention, or else any of its cards, or else the card of the held work by its key");
+  assert.deepEqual(needSelectors("#needs-you:th-0123456789ab:waiting"), ['.need[data-thread="th-0123456789ab"][data-attention="waiting"]', '.need[data-thread="th-0123456789ab"]'],
+    "the thread's card for that attention, or else any of its cards");
   for (const hash of ["", "#needs-you", "#terminal", '#needs-you:th-1"],a:failed']) assert.equal(needSelectors(hash), null, hash);
 });
 

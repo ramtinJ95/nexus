@@ -139,17 +139,9 @@ function heldSince(registry: Registry, r: Review): number {
 
 /** The key of the work a card is for, as the work in flight and the preview name it. A node's cleanup is no work's. */
 const keyOf = (n: Need) => n.kind === "cleanup" ? null : n.kind === "held" ? heldKey(n.work) : n.d.thread.id;
-const attentionOf = (n: Need) => n.kind === "held" ? "held" : n.kind === "thread" ? n.attention : "decision";
 
-/** Each piece of work in Needs you, and the hash its first card goes by, which a notice's link names too. */
-function needCards(c: Context): Map<string, string> {
-  const cards = new Map<string, string>();
-  for (const n of c.needs()) {
-    const key = keyOf(n);
-    if (key !== null && !cards.has(key)) cards.set(key, `#needs-you:${key}:${attentionOf(n)}`);
-  }
-  return cards;
-}
+/** Each piece of work with a card in Needs you. */
+const needCards = (c: Context) => new Set(c.needs().map(keyOf).filter((key) => key !== null));
 
 const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}`
   : n.kind === "held" ? `need-${heldKey(n.work)}`
@@ -188,7 +180,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
   const [what, body] = needCard(c, n);
   const life = lifeOfThread(c, t.id);
   const why = needWhy(n, c.now) || life.why;
-  return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${attentionOf(n)}" tabindex="-1" aria-label="${what}: ${t.title}">
+  return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, itemsOf(t.id))}${body}`, why)}
 </article>`;
 })}</div>`}`;
