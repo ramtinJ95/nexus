@@ -199,7 +199,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
    * The pylon an archive's settle holds. It is held in memory, because a restart that loses it only lets the pylon pause,
    * and the settle is tried again from the start.
    */
-  let settling: UsageHold | null = null;
+  let settling: (UsageHold & { archivedAt: number }) | null = null;
 
   const backedUpAt = (): number | null => {
     const at = setting("backed-up-at");
@@ -528,14 +528,19 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
      * that failed, or failed for `failure`. A settled archive stays settled. A settle that holds the pylon now waits for its pause.
      */
     finishSettle(thread: ThreadId, failure: string | null, at: number) {
-      if (failure === null) sql("UPDATE thread_archives SET usage_settled_at = ?, settle_failures = 0, settle_failure = NULL, settle_failed_at = NULL WHERE thread = ? AND usage_settled_at IS NULL").run(at, thread);
-      else sql("UPDATE thread_archives SET settle_failures = settle_failures + 1, settle_failure = ?, settle_failed_at = ? WHERE thread = ? AND usage_settled_at IS NULL").run(failure, at, thread);
-      if (settling?.thread === thread) settling = { thread, phase: "pausing", since: at };
+      // A read the hold started before an unarchive and a new archive may have missed the turns between them.
+      const archive = settling?.thread === thread ? settling.archivedAt : null;
+      if (failure === null) sql("UPDATE thread_archives SET usage_settled_at = ?, settle_failures = 0, settle_failure = NULL, settle_failed_at = NULL WHERE thread = ? AND usage_settled_at IS NULL AND archived_at = coalesce(?, archived_at)").run(at, thread, archive);
+      else sql("UPDATE thread_archives SET settle_failures = settle_failures + 1, settle_failure = ?, settle_failed_at = ? WHERE thread = ? AND usage_settled_at IS NULL AND archived_at = coalesce(?, archived_at)").run(failure, at, thread, archive);
+      if (settling?.thread === thread) settling = { ...settling, phase: "pausing", since: at };
     },
     /** The pylon a settle holds, or null. */
-    settleHold: (): UsageHold | null => settling,
+    settleHold: (): UsageHold | null => settling && { thread: settling.thread, phase: settling.phase, since: settling.since },
     /** A settle holds the thread's pylon, which it wants woken to read. */
-    holdSettle(thread: ThreadId, now: number) { settling = { thread, phase: "reading", since: now }; },
+    holdSettle(thread: ThreadId, now: number) {
+      const archivedAt = sql("SELECT archived_at FROM thread_archives WHERE thread = ?").get(thread)?.archived_at as number | undefined;
+      if (archivedAt !== undefined) settling = { thread, phase: "reading", since: now, archivedAt };
+    },
     /** The settle lets go of the pylon it holds, once it is paused. */
     releaseSettle() { settling = null; },
     /** The newest verified backup began at `at`. A backup older than one recorded changes nothing. */

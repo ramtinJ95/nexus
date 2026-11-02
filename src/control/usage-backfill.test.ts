@@ -30,9 +30,11 @@ function addThread(registry: Registry, node: NodeName, title: string, status: Th
   return registry.thread(id)!;
 }
 
-function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, "stopped" | "running"][], over: Partial<NodeObservation> = {}, memory = { total: 64, committed: 0 }) {
+/** A pylon `running` booted after its archive, as a wake for reading boots it, and one running `since archive` before it. */
+function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, "stopped" | "running" | "since archive"][], over: Partial<NodeObservation> = {}, memory = { total: 64, committed: 0 }) {
   const capacity = testCapacity({ memoryGiB: memory.total, committedMemoryGiB: memory.committed });
-  const observed = pylons.map(([pylonId, phase]) => phase === "stopped" ? stoppedPylon(pylonId, { checkpoint: `ckpt-${pylonId}-1` }) : runningPylon(pylonId));
+  const observed = pylons.map(([pylonId, phase]) => phase === "stopped" ? stoppedPylon(pylonId, { checkpoint: `ckpt-${pylonId}-1` })
+    : runningPylon(pylonId, phase === "since archive" ? { bootedAt: "2020-01-01T00:00:00Z" } : {}));
   observeNode(registry, { node, probeBootId: "boot-1", capacity, artifacts: [image], pylons: observed, spawnsWithoutRelaunch: true, ...over });
 }
 
@@ -367,7 +369,7 @@ test("an archive whose last read was missed is woken for reading once its pylon 
   const registry = seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`), () => now), { nodes: [n1, n2] });
   const a = addThread(registry, n1, "missed", "archived", false);
   now = Date.now();
-  observe(registry, n1, [[a.pylonId, "running"]]);
+  observe(registry, n1, [[a.pylonId, "since archive"]]);
   const { woken, counter } = backfill(t, registry);
   await delay(50);
   assert.deepEqual([registry.settleHold(), woken, counter.reads], [null, [], []], "a pylon still running from before its archive's pause is not read, as a turn may still come");
@@ -446,15 +448,15 @@ test("one pylon is up at a time across the run and the settles, a settle goes fi
   const early = addThread(registry, n2, "not paused yet", "archived", false);
   const late = addThread(registry, n2, "archived later", "archived", false);
   observe(registry, n1, [[read.pylonId, "stopped"]]);
-  observe(registry, n2, [[early.pylonId, "running"], [late.pylonId, "stopped"]]);
+  observe(registry, n2, [[early.pylonId, "since archive"], [late.pylonId, "stopped"]]);
   const { job, counter } = backfill(t, registry);
   await settling(registry, late, "reading");
   job.start();
   await delay(50);
   assert.equal(current(registry), null, "the run waits while a settle holds a pylon");
-  observe(registry, n2, [[early.pylonId, "running"], [late.pylonId, "running"]]);
+  observe(registry, n2, [[early.pylonId, "since archive"], [late.pylonId, "running"]]);
   await settling(registry, late, "pausing");
-  observe(registry, n2, [[early.pylonId, "running"], [late.pylonId, "stopped"]]);
+  observe(registry, n2, [[early.pylonId, "since archive"], [late.pylonId, "stopped"]]);
   await held(registry, read, "reading");
   assert.equal(registry.settleHold(), null);
   observe(registry, n1, [[read.pylonId, "running"]]);
@@ -491,4 +493,54 @@ test("a control plane restarted while a settle holds a pylon lets it pause, and 
   observe(registry, n1, [[a.pylonId, "running"]]);
   await settling(registry, a, "pausing");
   assert.ok(registry.thread(a.id)!.usageSettledAt !== undefined);
+});
+
+test("a settle's read that an unarchive and a new archive overtook settles neither archive, and the new one is read again", async (t) => {
+  let now = 1_000;
+  const registry = seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`), () => now), { nodes: [n1, n2] });
+  const a = addThread(registry, n1, "rearchived", "archived", false);
+  observe(registry, n1, [[a.pylonId, "stopped"]]);
+  const counter = fakeCounter(registry);
+  const reading = Promise.withResolvers<void>();
+  counter.answer = async (id) => {
+    await reading.promise;
+    return recover(registry, id, 1, 10);
+  };
+  backfill(t, registry, counter);
+  await settling(registry, a, "reading");
+  observe(registry, n1, [[a.pylonId, "running"]]);
+  await until("the settle reads it", () => counter.reads.length, (n) => n === 1);
+  registry.setThreadStatus(a.id, "idle");
+  now = 2_000;
+  registry.setThreadStatus(a.id, "archived");
+  reading.resolve();
+  await settling(registry, a, "pausing");
+  assert.equal(registry.thread(a.id)!.usageSettledAt, undefined, "a turn may have run between the archives");
+  observe(registry, n1, [[a.pylonId, "stopped"]]);
+  await released(registry);
+  await settling(registry, a, "reading");
+  observe(registry, n1, [[a.pylonId, "running"]]);
+  await settling(registry, a, "pausing");
+  assert.notEqual(registry.thread(a.id)!.usageSettledAt, undefined, "a read after the new archive settles it");
+});
+
+test("after a restart lost a settle's hold, no other pylon is woken until the one it woke has paused", async (t) => {
+  const path = join(dir, `${randomUUID()}.db`);
+  const first = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
+  const a = addThread(first, n1, "held", "archived", false);
+  observe(first, n1, [[a.pylonId, "stopped"]]);
+  const before = usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} });
+  await settling(first, a, "reading");
+  await before.close();
+  first.close();
+
+  const registry = opened(t, path);
+  const b = addThread(registry, n2, "next", "archived", false);
+  observe(registry, n1, [[a.pylonId, "running"]]);
+  observe(registry, n2, [[b.pylonId, "stopped"]]);
+  const { woken } = backfill(t, registry);
+  await delay(50);
+  assert.deepEqual([registry.settleHold(), woken], [null, []], "the pylon the lost hold woke is still up");
+  observe(registry, n1, [[a.pylonId, "stopped"]]);
+  await settling(registry, a, "reading");
 });

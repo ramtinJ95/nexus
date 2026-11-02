@@ -144,10 +144,19 @@ export function usageBackfill(options: {
    * Holds the oldest archive not settled whose pylon can be woken now, and wakes it. A pylon that runs has not paused
    * since its archive yet, so it waits. One its online node does not have has no disk to lose, so it is settled as it
    * is, and one that failed or whose image no online node holds cannot be woken, which is a failed settle. A settle
-   * that failed is tried again `settleRetryMs` after.
+   * that failed is tried again `settleRetryMs` after. While a pylon woken for reading since its archive is still up, as
+   * one a restart's lost hold woke, no settle wakes another.
    */
   function nextSettle(now: number): boolean {
-    for (const t of registry.keptArchives()) {
+    const archives = registry.keptArchives();
+    const up = archives.some((t) => {
+      const p = registry.pylon(t.pylonId);
+      const o = p === undefined || p.failed !== null ? null : seen(p);
+      if (o === null || o === "absent") return false;
+      return o.phase === "booting" || o.phase === "stopping" || (o.phase === "running" && Date.parse(o.bootedAt) > t.archivedAt!);
+    });
+    if (up) return false;
+    for (const t of archives) {
       if (t.usageSettledAt !== undefined || (t.settleFailure !== undefined && now - t.settleFailure.at < settleRetryMs)) continue;
       const p = registry.pylon(t.pylonId);
       const o = p === undefined ? null : seen(p);
