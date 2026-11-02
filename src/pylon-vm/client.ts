@@ -130,6 +130,17 @@ async function takeLock(lock: string): Promise<boolean> {
 		throw error;
 	}
 }
+/** Renamed aside before it is removed, because takeLock would take the empty directory a removal in place passes through. */
+async function releaseLock(lock: string): Promise<void> {
+	const aside = await mkdtemp(`${lock}-`);
+	try {
+		await rename(lock, aside);
+	} catch (error) {
+		if (!existsError(error, "ENOENT")) throw error;
+	} finally {
+		await rm(aside, { recursive: true, force: true });
+	}
+}
 /** A missing identity file means the process has not published itself yet, or is gone. */
 async function published(file: string): Promise<boolean> {
 	const identity = await readIdentity(file);
@@ -193,7 +204,7 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 			await rm(path, { recursive: true, force: true });
 			return true;
 		} finally {
-			await rm(lock, { recursive: true, force: true });
+			await releaseLock(lock);
 		}
 	};
 	const swept: string[] = [];
@@ -257,7 +268,7 @@ async function launch(
 				throw new Error(
 					"Sandbox controller is still starting. Retry inspect shortly",
 				);
-			await rm(lock, { recursive: true });
+			await releaseLock(lock);
 			if (!(await takeLock(lock)))
 				throw new Error(
 					"Sandbox start is already in progress. Retry inspect shortly",
@@ -321,7 +332,7 @@ async function launch(
 			"Sandbox start has not completed. Use inspect or logs before retrying",
 		);
 	} finally {
-		await rm(lock, { recursive: true, force: true });
+		await releaseLock(lock);
 	}
 }
 async function create(

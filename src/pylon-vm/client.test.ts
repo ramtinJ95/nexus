@@ -191,3 +191,18 @@ test("a launch lock that an interrupted sweep or launch left without an owner is
 	await assert.rejects(run(root, { action: "start", name: "pylon-starting", boot: spec }), /EISDIR/);
 	assert.equal(existsSync(join(starting.dir, "launch.lock")), false, "the launch left the lock it took");
 });
+
+test("sweeps that race over the same instances never fail to take or release a launch lock, and leave none behind", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const errors = t.mock.method(console, "error", () => {});
+	const dirs = await Promise.all(Array.from({ length: 20 }, async (_, i) => {
+		const dir = directory(root, "instances", `pylon-race${i}`);
+		await privateDirectory(dir);
+		await privateDirectory(scratchDirectory(root, dir));
+		return dir;
+	}));
+	for (let round = 0; round < 20; round++) await Promise.all(Array.from({ length: 4 }, () => sweepScratch(root)));
+	assert.deepEqual(errors.mock.calls.map((call) => call.arguments.map(String).join(" ")), []);
+	assert.deepEqual(dirs.filter((dir) => existsSync(join(dir, "launch.lock"))), []);
+});
