@@ -132,7 +132,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
       registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node,
       recipe: noJobs, release: null, log: () => {},
     }),
-    usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")), unseal: () => Promise.reject(new Error("the CLI tests seal no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
+    usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
     ...setupOptions.reviews === undefined ? {} : { reviews: setupOptions.reviews },
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async () => "a".repeat(40) },
     ...certificate === null ? {} : { https: { port: 0, certificate: async () => certificate } },

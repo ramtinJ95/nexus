@@ -57,9 +57,9 @@ export async function readAgentUsage(open: OpenPipe, offsets: ReadonlyMap<string
 
 /**
  * Seals the pylon's transcripts, as root, so no agent, hook or service on it can add a call before its pause: a read
- * after the seal is the last of them. `false` unseals them, for a pylon that runs on.
+ * after the seal is the last of them. Only a pause undoes it, and the planner pauses a sealed boot before it runs work.
  */
-export async function sealAgentLogs(open: OpenPipe, seal: boolean, logs = agentLogs, deadlineMs = usageReadDeadlineMs): Promise<void> {
+export async function sealAgentLogs(open: OpenPipe, logs = agentLogs, deadlineMs = usageReadDeadlineMs): Promise<void> {
   const stream = await openPython((argv) => open(["sudo", "-n", ...argv]), sealHelper, [], "agent-seal.py");
-  await pipeOutput(stream, { deadlineMs, maxBytes: 4096, what: seal ? "the seal of its agents' transcripts" : "the unseal of its agents' transcripts", input: Buffer.from(JSON.stringify({ ...logs, seal })) });
+  await pipeOutput(stream, { deadlineMs, maxBytes: 4096, what: "the seal of its agents' transcripts", input: Buffer.from(JSON.stringify(logs)) });
 }

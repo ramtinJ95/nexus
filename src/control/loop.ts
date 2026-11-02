@@ -31,7 +31,7 @@ import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "cleanupRequestedAt" | "dropCleanup" | "finishCleanup" | "reportSession" | "requestCleanup" | "savePylon" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
+type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "cleanupRequestedAt" | "dropCleanup" | "finishCleanup" | "reportSession" | "requestCleanup" | "savePylon" | "sealedBoot" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -210,6 +210,7 @@ export function startLoop(options: LoopOptions): Loop {
           registry.savePylon(p);
         },
         desired: () => desiredPhase(registry.thread(found.thread)!, Date.now()),
+        sealedBoot: () => registry.sealedBoot(pylonId),
       };
       try {
         const launch = launches.step(thread, pylonId, nodeObservation, link);

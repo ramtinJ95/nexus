@@ -20,13 +20,14 @@ import type { StoredPylon, Thread, UsageHold } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
 import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 
-type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitSettle" | "waitUsageBackfill">;
+type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "sealBoot" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitSettle" | "waitUsageBackfill">;
 
 /**
  * What holds a pylon to read it whole: the run, whose hold the registry keeps, or a settle, whose hold it keeps in
  * memory. `finish` records the thread read, with a null reason, or given up on, and the hold then waits for the pause.
  * `seal` seals the pylon's transcripts before the read, as only a settle needs, since a reading wake still runs the
- * project's resume hook and services, which can start agents.
+ * project's resume hook and services, which can start agents. The boot it seals is recorded first, so the planner
+ * pauses it rather than run work on it, whatever comes after.
  */
 interface Holder {
   seal: boolean;
@@ -50,7 +51,7 @@ const minutes = (ms: number) => `${ms / 60_000} minutes`;
 
 export function usageBackfill(options: {
   registry: UsageBackfillRegistry;
-  counter: Pick<UsageCounter, "readWhole" | "unseal">;
+  counter: Pick<UsageCounter, "readWhole">;
   /** Asks the node's loop for a pass, so the wake or pause of a pylon goes out at once. */
   wake(node: NodeName): void;
   log?: (message: string) => void;
@@ -242,7 +243,7 @@ export function usageBackfill(options: {
     const o = seen(p);
     if (o !== null && o !== "absent" && o.phase === "running") {
       try {
-        await counter.readWhole(id, shutdown.signal, holder.seal);
+        await counter.readWhole(id, shutdown.signal, holder.seal ? () => sealing(id) : undefined);
       } catch (err) {
         // A stop or a shutdown cut the read short, so the thread waits for the next run or settle.
         if (shutdown.signal.aborted || !holder.holds(id)) return;
@@ -260,12 +261,18 @@ export function usageBackfill(options: {
     const paused = o === "absent" || o?.phase === "stopped";
     if (!paused && t.status === "archived" && now - since < pauseMs) return;
     if (!paused && t.status === "archived") log(`usage backfill: ${t.pylonId} did not pause within ${minutes(pauseMs)}, so the next pylon is woken without it`);
-    if (!paused && holder.seal && t.status !== "archived") void unseal(id);
     holder.release();
   }
 
-  /** A thread unarchived after its settle sealed its pylon runs on, so its agents need their transcripts back. */
-  const unseal = (id: ThreadId) => counter.unseal(id).catch((err: unknown) => log(`usage settle: ${id}'s transcripts stay sealed until its pylon pauses: ${(err as Error).message}`));
+  /** An unarchive before the seal wants the pylon's work back, so the seal kills none of it. */
+  function sealing(id: ThreadId) {
+    const t = registry.thread(id);
+    const p = t === undefined ? undefined : registry.pylon(t.pylonId);
+    const o = p === undefined ? null : seen(p);
+    if (t?.status !== "archived") throw new Error("it was unarchived before its transcripts were sealed");
+    if (o === null || o === "absent" || o.phase !== "running") throw new Error("its pylon is not running");
+    registry.sealBoot(p!.pylonId, o.bootedAt);
+  }
 
   const advance = (holder: Holder, hold: UsageHold, now: number) =>
     hold.phase === "reading" ? reading(holder, hold.thread, hold.since, now) : pausing(holder, hold.thread, hold.since, now);

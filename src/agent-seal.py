@@ -1,10 +1,10 @@
-"""Seals the agents' transcripts in this pylon before a settle's final read, or unseals them. Runs as root.
+"""Seals the agents' transcripts in this pylon before a settle's final read. Runs as root.
 
-Takes {"claude": dir, "pi": dir, "seal": bool, "user": name} on stdin, the user `user` unless it names another. A seal binds each dir read-only over itself, then stops every
+Takes {"claude": dir, "pi": dir, "user": name} on stdin, the user `user` unless it names another. It binds each dir read-only over itself, then stops every
 process of the pylon's user that is not this helper's ancestor until none runs, and kills them. A process started
 after the mounts cannot write to the dirs, and one started before them, which may hold a file open for writing, is
 gone, so no call reaches a transcript after the seal. The mounts are not on the disk, so the pause after the read
-drops them. An unseal unmounts them, for a pylon its thread wants running again before that pause.
+drops them, and the control plane pauses this boot before it runs any work.
 """
 import json
 import os
@@ -47,12 +47,6 @@ def users_processes(keep):
             found[int(entry)] = fields["State"].split()[0]
     return found
 
-
-if not state["seal"]:
-    for path in dirs:
-        if mounted(path):
-            subprocess.run(["umount", path], check=True)
-    sys.exit(0)
 
 for path in dirs:
     # A dir that does not exist yet is made as the user, so the mount covers it and no writer can make it.

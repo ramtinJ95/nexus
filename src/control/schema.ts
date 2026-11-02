@@ -287,11 +287,13 @@ export const migrations: readonly string[] = [
    ALTER TABLE questions_by_subject RENAME TO questions;`,
   // When each archive's settle read the token usage on its pylon's disk to the end, which that disk's delete waits on
   // with a backup begun after it, its settles that failed in a row, and why its usage cannot be read, as of a failed
-  // pylon, whose disk goes without it. A thread archived before has none, so its disk stays until a settle reads it.
+  // pylon, whose disk goes without it, and the boot of each pylon whose transcripts a settle sealed, which never runs
+  // active work. A thread archived before has none, so its disk stays until a settle reads it.
   `ALTER TABLE thread_archives ADD COLUMN usage_settled_at INTEGER;
    ALTER TABLE thread_archives ADD COLUMN settle_failures INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE thread_archives ADD COLUMN settle_failure TEXT;
    ALTER TABLE thread_archives ADD COLUMN settle_failed_at INTEGER
      CHECK ((settle_failures = 0) = (settle_failure IS NULL) AND (settle_failure IS NULL) = (settle_failed_at IS NULL) AND (usage_settled_at IS NULL OR settle_failures = 0));
-   ALTER TABLE thread_archives ADD COLUMN usage_unread TEXT CHECK (usage_unread IS NULL OR (usage_settled_at IS NULL AND settle_failures = 0));`,
+   ALTER TABLE thread_archives ADD COLUMN usage_unread TEXT CHECK (usage_unread IS NULL OR (usage_settled_at IS NULL AND settle_failures = 0));
+   ALTER TABLE pylons ADD COLUMN sealed_boot TEXT;`,
 ];

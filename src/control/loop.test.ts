@@ -393,7 +393,7 @@ test("a pylon whose archive's last read was missed is woken for reading once pau
     reads.push(`${id} ${fake.pylons.get(thread.pylonId)?.phase}`);
     return { calls: 0, tokens: 0 };
   };
-  const settler = usageBackfill({ registry, counter: { readWhole, unseal: async () => {} }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
+  const settler = usageBackfill({ registry, counter: { readWhole }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
   t.after(() => settler.close());
   await until("the settle lets go of the pylon it read", () => registry.thread(thread.id)?.usageSettledAt !== undefined && registry.settleHold() === null);
   await settler.close();
@@ -409,6 +409,33 @@ test("a pylon whose archive's last read was missed is woken for reading once pau
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause", "delete"]);
 });
 
+test("a boot a settle sealed is paused before an unarchive runs work on it, though a restart lost the settle's hold, and the next spawn boots its disk again", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  await archivedAgo(registry, shift, thread, 60_000, false);
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped" && registry.pylon(thread.pylonId)?.submitted === null);
+  registry.holdSettle(thread.id, Date.now());
+  void loop.wake(firebat);
+  await until("the pylon is woken for reading", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  const sealed = fake.pylons.get(thread.pylonId) as Extract<PylonObservation, { phase: "running" }>;
+  registry.sealBoot(thread.pylonId, sealed.bootedAt);
+  registry.releaseSettle();
+
+  registry.setThreadStatus(thread.id, "active");
+  registry.apply({ record: "activity", pylonId: thread.pylonId, human: Date.now(), agent: null });
+  void loop.wake(firebat);
+  await until("the pylon runs on a new boot", () => {
+    const o = fake.pylons.get(thread.pylonId);
+    return o?.phase === "running" && o.bootedAt !== sealed.bootedAt && registry.pylon(thread.pylonId)?.submitted === null;
+  });
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause", "spawn resume"], "the sealed boot pauses before any spawn brings work back");
+  const wake = fake.submitted[4]!;
+  assert.ok(wake.kind === "spawn" && wake.relaunch !== false, "and the spawn after brings the sessions back");
+});
+
 test("a failed archived pylon, whose usage cannot be read, is deleted 24 hours after its archive with no settle and no backup, its usage recorded unread", async (t) => {
   const { registry, shift } = shiftedRegistry();
   const thread = seed(registry);
@@ -422,7 +449,7 @@ test("a failed archived pylon, whose usage cannot be read, is deleted 24 hours a
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped", "until a settle finds its usage cannot be read, the disk stays");
 
   const reads: string[] = [];
-  const settler = usageBackfill({ registry, counter: { readWhole: async (id) => { reads.push(id); return { calls: 0, tokens: 0 }; }, unseal: async () => {} }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
+  const settler = usageBackfill({ registry, counter: { readWhole: async (id) => { reads.push(id); return { calls: 0, tokens: 0 }; } }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
   t.after(() => settler.close());
   await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "delete"]);

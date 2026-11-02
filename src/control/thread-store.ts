@@ -554,6 +554,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       sql("UPDATE thread_archives SET usage_unread = ?, settle_failures = 0, settle_failure = NULL, settle_failed_at = NULL WHERE thread = ? AND usage_settled_at IS NULL AND usage_unread IS NOT ?")
         .run(reason, thread, reason);
     },
+    /**
+     * The settle seals the transcripts of the pylon's boot `bootedAt`, as its node reports it, which the planner then
+     * pauses rather than runs work on. Recorded before the seal, so neither a restart nor an unarchive during it lets work
+     * run on that boot.
+     */
+    sealBoot(pylonId: PylonId, bootedAt: string) { sql("UPDATE pylons SET sealed_boot = ? WHERE id = ?").run(bootedAt, pylonId); },
+    sealedBoot: (pylonId: PylonId): string | undefined => (sql("SELECT sealed_boot FROM pylons WHERE id = ?").get(pylonId)?.sealed_boot ?? undefined) as string | undefined,
     /** Why the archive's next settle waits, or null once it does not. */
     waitSettle(thread: ThreadId, reason: string | null) {
       if (reason === null) settleWaits.delete(thread);

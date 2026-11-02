@@ -123,6 +123,8 @@ export interface PlanInput {
   attempts: Attempts;
   /** A human retried the pylon after the planner gave up, and no job has succeeded nor the planner finished or given up since. */
   retrying: boolean;
+  /** The boot, by its `bootedAt`, whose transcripts a settle sealed. */
+  sealedBoot?: string;
   /** Online nodes other than `node` that hold the artifact. */
   holders(artifact: ArtifactId): readonly NodeName[];
   /** The registry's recorded archive hash, which fetch-artifact verifies the copy against. */
@@ -175,6 +177,10 @@ const planRules: readonly Rule[] = [
   ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
   // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
+  // A sealed boot's transcripts are read-only and its user's processes were killed, so it runs no work: it pauses, and
+  // the spawn after boots the disk again, without the seal.
+  (i) => i.desired === "running" && i.observed !== "absent" && i.observed.phase === "running" && i.sealedBoot !== undefined && i.observed.bootedAt === i.sealedBoot
+    ? submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint }) : null,
   // 6. A broken pylon that retryRefusal refuses is never paused either, because the pause could save what broke it.
   (i) => {
     if (i.desired !== "paused") return null;

@@ -46,7 +46,7 @@ test("anyone allowed reads the usage backfill and its dry run, only a deployer s
   for (const method of ["GET", "POST", "DELETE"]) assert.deepEqual(await off.call(method, "/v1/usage/backfill"), { status: 409, body: { error: "the usage backfill is not configured" } });
   const s = await testApi(t, {
     deployment,
-    usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => assert.fail("nothing is read"), unseal: () => assert.fail("nothing is sealed") }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
+    usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => assert.fail("nothing is read") }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
   });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
