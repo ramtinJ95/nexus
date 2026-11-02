@@ -788,6 +788,17 @@ a.need-thread:hover { color: var(--accent); }
 .need .landing + .landing { padding-top: 8px; border-top: 1px solid var(--line-soft); border-radius: 0; }
 .need-act { display: flex; flex-wrap: wrap; gap: 6px; }
 .need-act .i { width: 14px; height: 14px; }
+/* where a card's work is: its steps, then one line of its pull request, pylon and thread, and its latest reply */
+.need-ctx { display: grid; gap: 6px; padding: 8px 10px; border-radius: 9px; background: var(--hover); }
+.need-ctx .life :is(a, .life-step) { font-size: 11px; }
+.need-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin: 0; font-size: 12px; color: var(--text-2); }
+.need-facts > .link:last-child { margin-left: auto; }
+.need-reply { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.need-reply code { background: var(--code-bg); padding: 0 3px; border-radius: 4px; }
+.need :is(.peek-reply, .peek-meta) { padding: 0; }
+.need .land-reasons { list-style: none; padding-left: 0; }
+.need .land-reasons summary { color: var(--text); font-size: 13px; }
+.need .land-reasons .dim { display: block; padding: 2px 0 0 14px; }
 @media (prefers-reduced-motion: reduce) { .need-sum .i-chevron { transition: none; } }
 
 /* the work in flight: the phases in order, each a quiet head and a line per piece of work */

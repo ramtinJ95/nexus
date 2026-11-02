@@ -3,10 +3,13 @@ import { attentions, needsPerson } from "../attention.ts";
 export const noticeText = (row) => attentions[row.attention].label;
 /** A notice opens the inbox's card for what the thread waits on. A reply waits on no one, so it opens the thread. */
 export const noticeUrl = (row) => row.attention === "reply" ? `/threads/${row.id}` : `/#needs-you:${row.id}:${row.attention}`;
-/** The cards a notice's hash names, best first: the thread's card for that attention, then any of the thread's. */
+/**
+ * The cards a notice's hash names, best first: the thread's card for that attention, then any of the thread's, then
+ * the card of held work, which a line of the work in flight names by its key.
+ */
 export function needSelectors(hash) {
   const m = /^#needs-you:([\w-]+):(\w+)$/.exec(hash);
-  return m === null ? null : [`.need[data-thread="${m[1]}"][data-attention="${m[2]}"]`, `.need[data-thread="${m[1]}"]`];
+  return m === null ? null : [`.need[data-thread="${m[1]}"][data-attention="${m[2]}"]`, `.need[data-thread="${m[1]}"]`, `.need[data-peek-key="${m[1]}"]`];
 }
 export function notificationChannel(focused, current, id, secure, permission) {
   if (focused) return current === id ? null : "toast";

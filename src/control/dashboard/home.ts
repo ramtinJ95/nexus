@@ -6,22 +6,28 @@ import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
-import { cannotLand, type Review } from "../review-model.ts";
+import { cannotLand, roundsSpent, type Review } from "../review-model.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
-import { lifeOfThread, needWhy, itemsOf } from "./lifecycle.ts";
-import { flightLines, flightStack, heldLine, inFlight, itemActions, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
+import { lifeOfThread, needWhy, itemsOf, type Life } from "./lifecycle.ts";
+import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
+import { lifeTrack } from "./timeline.ts";
+import type { Item } from "./items.ts";
 
 /**
  * Two columns: on the left what waits on the person, each a line that opens to its card, and on the right the work in
  * flight by phase, or by project as the full table of every thread, under the preview of the one the person picked.
+ * What waits on the person says so only in its card: its line in the work in flight leads there, and picking it
+ * marks the card and gives it the latest reply in place of a preview.
  */
 export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, peek: Peek | null = null): Html {
-  const placed = flightLines(c);
+  const cards = needCards(c);
+  const placed = flightRows(flightLines(c), cards);
   const peeked = peek === null ? null : peekKey(peek);
+  const carded = peeked !== null && cards.has(peeked);
   const flying = inFlight(placed);
   const waiting = c.needs().length;
   return layout(c, {
@@ -29,10 +35,10 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, p
     ...dialogs,
     main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
 <div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
-<div class="split${peek !== null && " peeking"}" id="split">
+<div class="split${peek !== null && !carded && " peeking"}" id="split">
 <p id="action-error" class="error split-error" role="alert" hidden></p>
-<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section>
-<div class="split-peek" id="peek" data-live>${peekView(c, peek)}</div>
+<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, carded ? peek : null)}</section>
+<div class="split-peek" id="peek" data-live>${peekView(c, carded ? null : peek)}</div>
 <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
 <div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${flying}</span>
 <div class="seg-bar flight-view" role="radiogroup" aria-label="List the work"><label class="seg-tab"><input type="radio" name="flight-view" value="phase" id="view-phase" checked>By phase</label><label class="seg-tab"><input type="radio" name="flight-view" value="project" id="view-project">By project</label></div></div>
@@ -130,6 +136,20 @@ function heldSince(registry: Registry, r: Review): number {
   return changes[at + 1]?.time ?? r.since;
 }
 
+/** The key of the work a card is for, as the work in flight and the preview name it. A node's cleanup is no work's. */
+const keyOf = (n: Need) => n.kind === "cleanup" ? null : n.kind === "held" ? heldKey(n.work) : n.d.thread.id;
+const attentionOf = (n: Need) => n.kind === "held" ? "held" : n.kind === "thread" ? n.attention : "decision";
+
+/** Each piece of work in Needs you, and the hash its first card goes by, which a notice's link names too. */
+function needCards(c: Context): Map<string, string> {
+  const cards = new Map<string, string>();
+  for (const n of c.needs()) {
+    const key = keyOf(n);
+    if (key !== null && !cards.has(key)) cards.set(key, `#needs-you:${key}:${attentionOf(n)}`);
+  }
+  return cards;
+}
+
 const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}`
   : n.kind === "held" ? `need-${heldKey(n.work)}`
   : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
@@ -137,10 +157,12 @@ const heldKey = (w: HeldWork) => w.kind === "item" ? w.item.id : w.kind === "que
 
 /**
  * Needs you: the inbox's cards, oldest first, each folded to one line of what it is, its thread and why it waits, and
- * opening in place to the card its thread's page shows where there is one, or for held work to what moves it on.
+ * opening in place to where its work is and the card its thread's page shows where there is one, or for held work to
+ * what moves it on. The work the person picked is marked, and its card has the latest reply `picked` read.
  */
-function needsList(c: Context): Html {
+function needsList(c: Context, picked: Peek | null): Html {
   const needs = c.needs();
+  const mark = (n: Need) => picked !== null && keyOf(n) === peekKey(picked) && " picked";
   const fold = (id: string, head: Html, body: Html, why: string) => html`<details class="need-fold" id="fold-${id}"><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
   return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
 ${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
@@ -155,18 +177,35 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">Cleanup</s
     const item = n.work.kind === "item" ? n.work.item : undefined;
     const project = item === undefined ? undefined : c.registry.project(item.project);
     const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
-    return html`<article class="need need-held" id="${needId(n)}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
+    return html`<article class="need need-held${mark(n)}" id="${needId(n)}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
-  html`<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && project !== undefined ? itemActions(item, project) : html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
+  html`<div class="need-ctx">${lifeTrack(l.life, false)}</div><p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(c, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
 </article>`;
   }
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
-  const why = needWhy(n, c.now) || lifeOfThread(c, t.id).why;
-  return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, body, why)}
+  const life = lifeOfThread(c, t.id);
+  const why = needWhy(n, c.now) || life.why;
+  const items = picked?.kind === "thread" && picked.d.thread.id === t.id ? picked.items : null;
+  return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${attentionOf(n)}" tabindex="-1" aria-label="${what}: ${t.title}">
+${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, items)}${body}`, why)}
 </article>`;
 })}</div>`}`;
+}
+
+/**
+ * Where a thread's work is, in a strip above its card: the steps it took and the one it waits on the person at, its
+ * pull request and round, its pylon, and the latest reply once the person picked it, as reading it costs a read of
+ * the conversation.
+ */
+function whereNow(c: Context, d: ThreadDetail, life: Life, items: readonly Item[] | null): Html {
+  const r = d.review;
+  const pr = d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
+  const reply = items?.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
+  return html`<div class="need-ctx">${lifeTrack(life, false)}
+<p class="need-facts">${pr !== undefined && html`<span><a class="link" href="${pr.url}" target="_blank" rel="noreferrer" title="${pr.title}">#${pr.number}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">round ${roundsSpent(r)} of ${r.maxRounds}</span>`}</span>`}<span>${state(...actualBadge[d.pylon.actualState])} <span class="dim">on</span> ${d.pylon.node}</span><a class="link" href="/threads/${d.thread.id}">Open thread</a></p>
+${reply?.kind === "agent" && html`<p class="need-reply"><span class="dim">Latest reply${d.thread.lastReplyAt !== null && html` ${ago(d.thread.lastReplyAt, c.now)}`}</span> ${inline(reply.text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim())}</p>`}
+</div>`;
 }
 
 /** What the card is, and what it shows: a review, question or nudge as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
@@ -177,13 +216,13 @@ function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
   const fix = (why: Part, act: Part) => html`<p class="land-note">${why}</p><div class="need-act">${act}</div>`;
   switch (n.kind) {
     case "review": {
-      const card = landing(c, d, (name) => `${name}-${t.id}`);
+      const card = landing(c, d, (name) => `${name}-${t.id}`, true);
       const pr = prOf(d);
       if (cannotLand(d.review!, t, pr) !== null) return ["Review needs you", html`${card}`];
       const summary = pr?.summary;
       const quote = d.review!.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
       return [d.review!.phase.kind === "needs-person" ? "Held review" : "Approved review", html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}
-<div class="need-unchecked"><h3>Not checked live</h3>${quote === null ? html`<p class="land-note">The reviewer quoted nothing.</p>` : prose(quote)}</div>
+<div class="need-unchecked"><h3>Not checked live</h3>${quote === null ? html`<p class="land-note">The reviewer quoted nothing.</p>` : prose(quote.replace(/^\s*(#{1,6}\s*)?not checked live:?\s*(\n|$)/i, ""))}</div>
 ${card}`];
     }
     case "nudge": return ["Stopped short", nudgeCard(c, t, (name) => `${name}-${t.id}`)!];

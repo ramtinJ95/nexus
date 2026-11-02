@@ -28,8 +28,11 @@ export const itemActions = (i: PipelineItem, p: Project): Part => i.thread === n
   html`<button type="button" class="btn btn-xs btn-ghost" data-action="cancel-item" data-item="${i.id}" data-confirm="Cancel ${i.title}? It never becomes a thread.">Cancel</button>`,
 ]}</div>`;
 
-/** One line of the stack: what it is, the key its preview goes by, its life, and its state as the sidebar's dot says it. */
-export interface Line { key: string; title: string; project: string; life: Life; state: readonly [string, Tone]; when: Part; dim: boolean; order: number }
+/**
+ * One line of the stack: what it is, the key its preview goes by, its life, and its state as the sidebar's dot says
+ * it. Work in Needs you has the hash of its card there in place of a preview.
+ */
+export interface Line { key: string; title: string; project: string; life: Life; state: readonly [string, Tone]; when: Part; dim: boolean; order: number; card?: string }
 
 const threadLine = (c: Context, t: Thread): Line => {
   const r = c.row(t);
@@ -60,18 +63,31 @@ export function flightLines(c: Context): Map<Stage, Line[]> {
   return placed;
 }
 
+/**
+ * The lines each step lists: its own, and the work held for the person at it that has a card in Needs you, which
+ * leads to that card. The held phase has no section of its own.
+ */
+export function flightRows(placed: Map<Stage, Line[]>, cards: ReadonlyMap<string, string>): Map<Stage, Line[]> {
+  const rows = new Map([...placed].filter(([stage]) => stage !== "held"));
+  for (const l of placed.get("held") ?? []) {
+    const card = cards.get(l.key);
+    if (card !== undefined) rows.set(l.life.at, [...rows.get(l.life.at) ?? [], { ...l, card }].sort((a, b) => a.order - b.order));
+  }
+  return rows;
+}
+
 /** Work held for the person, as a line of the stack would show it. */
 export const heldLine = (c: Context, w: HeldWork): Line => w.kind === "item" ? itemLine(c, w.item) : w.kind === "queued" ? queuedLine(c, w.q) : threadLine(c, w.thread);
 
 export const peekHref = (key: string) => `/?peek=${encodeURIComponent(key)}`;
 
-/** A line of the stack, a link to its preview. */
+/** A line of the stack, a link to its preview, or to its card in Needs you. */
 function line(l: Line, peeked: string | null): Html {
   const [label, tone] = l.state;
-  return html`<li><a class="fl-row${l.dim && " dim"}" href="${peekHref(l.key)}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span><span class="fl-why">${l.life.why}</span><span class="fl-when">${l.when}</span></a></li>`;
+  return html`<li><a class="fl-row${l.dim && " dim"}${l.card !== undefined && " fl-needs"}" href="${peekHref(l.key)}${l.card ?? ""}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span><span class="fl-why">${l.life.why}</span><span class="fl-when">${l.card !== undefined ? html`<span class="tag tag-bad">needs you</span>` : l.when}</span></a></li>`;
 }
 
-/** The phases in order, each with its lines. Held work is in Needs you, so the stack leaves it out. */
+/** The phases in order, each with its lines, as `flightRows` places them. */
 export function flightStack(placed: Map<Stage, Line[]>, peeked: string | null): Html {
   return html`${stages.filter((s) => s.stage !== "held").map((s) => {
     const lines = placed.get(s.stage) ?? [];
@@ -114,6 +130,13 @@ function latest(d: ThreadDetail, items: readonly Item[], now: number): Html {
   return html`<p class="empty">No conversation yet.</p>`;
 }
 
+/** What an item waits to start after and its brief, which its preview and its Needs you card show. */
+export function itemBrief(c: Context, i: PipelineItem): Html {
+  const titleOf = (id: string) => itemsOf(c).find((x) => x.id === id)?.title ?? id;
+  return html`${i.after.length > 0 && html`<p class="peek-meta">After ${i.after.map((id, n) => html`${n > 0 && ", "}<a class="link" href="${peekHref(id)}" data-peek="${id}">${titleOf(id)}</a>`)}</p>`}
+${i.brief === null ? html`<p class="empty">No brief.</p>` : html`<div class="peek-reply"><p class="peek-k">Brief</p><div class="peek-text">${prose(i.brief)}</div></div>`}`;
+}
+
 /** The preview: where the work is, what moves it on, its latest reply, and the way to its page. */
 export function peekView(c: Context, p: Peek | null): Html | false {
   if (p === null) return false;
@@ -121,13 +144,11 @@ export function peekView(c: Context, p: Peek | null): Html | false {
     const i = p.item;
     const project = c.registry.project(i.project);
     const life = lifeOfItem(c, i);
-    const titleOf = (id: string) => itemsOf(c).find((x) => x.id === id)?.title ?? id;
     return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${i.id}">
 <header class="peek-head"><span class="peek-proj">${i.project}<span class="dim"> item </span><code>${i.id}</code></span><h2 id="peek-h">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></h2>${i.thread !== null && html`<a class="btn btn-xs" href="/threads/${i.thread}">Open thread</a>`}${close}</header>
 ${lifeTrack(life, false)}
 ${next(life)}
-${i.after.length > 0 && html`<p class="peek-meta">After ${i.after.map((id, n) => html`${n > 0 && ", "}<a class="link" href="${peekHref(id)}" data-peek="${id}">${titleOf(id)}</a>`)}</p>`}
-${i.brief === null ? html`<p class="empty">No brief.</p>` : html`<div class="peek-reply"><p class="peek-k">Brief</p><div class="peek-text">${prose(i.brief)}</div></div>`}
+${itemBrief(c, i)}
 <p class="peek-meta">Added by ${i.addedBy} ${ago(i.addedAt, c.now)}, for ${i.worker === "claude" ? `Claude Code${i.model !== null ? `, ${i.model}` : ""}` : "the Nexus agent"}.</p>
 ${project !== undefined && itemActions(i, project)}
 </section>`;
