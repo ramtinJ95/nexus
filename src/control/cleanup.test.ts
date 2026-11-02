@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cleanupPass } from "./cleanup.ts";
-import { cleanupIntervalMs, cleanupQuestion } from "./cleanup-model.ts";
+import { cleanupQuestion } from "./cleanup-model.ts";
 import { addThread, observeNode, seedRegistry, testNode, testRegistry } from "./test-kit.ts";
 import { testCapacity, testImage } from "../test-kit.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
@@ -13,6 +13,7 @@ import type { TemplateRecord } from "./templates.ts";
 import type { Registry } from "./registry.ts";
 
 const hour = 3_600_000;
+const day = 24 * hour;
 const now = 1_800_000_000_000;
 const [older, previous, current] = ["img-000000000001", "img-000000000002", "img-000000000003"] as ImageId[] as [ImageId, ImageId, ImageId];
 const template = (id: string, builtAt: number): TemplateRecord =>
@@ -50,7 +51,7 @@ function setUp(t: import("node:test").TestContext) {
   const logs: string[] = [];
   let clock = now;
   const pass = cleanupPass({ registry, probes: new Map([[testNode, probe]]), log: (m) => logs.push(m), now: () => clock++ });
-  return { registry, pass, dropped, refuse, observe, onDrop: (next: () => void) => { dropping = next; }, later: (ms = cleanupIntervalMs) => { clock += ms; } };
+  return { registry, pass, dropped, refuse, observe, onDrop: (next: () => void) => { dropping = next; }, later: (ms = day) => { clock += ms; } };
 }
 
 const asked = (registry: Registry) => registry.nodeQuestions(testNode);
@@ -75,10 +76,10 @@ test("one question per node, asked again only once a new candidate joins, with e
   pass.releases(testNode, inventory({}, [r1, "4".repeat(40), r2, r3]));
   later();
   await pass.poll();
-  assert.deepEqual(registry.openNodeQuestions().map((o) => o.id), [q!.id], "a new release joined, but the open question stays as asked, even a week on");
+  assert.deepEqual(registry.openNodeQuestions().map((o) => o.id), [q!.id], "a new release joined, but the open question stays as asked, even a day on");
   answer(registry, "Keep");
   await pass.poll();
-  assert.deepEqual(keysOf(registry), [[oldTemplate.id, older, "1"], [older, "1", "4"]], "once answered and a week old, the person is asked about the new release");
+  assert.deepEqual(keysOf(registry), [[oldTemplate.id, older, "1"], [older, "1", "4"]], "once answered and a day old, the person is asked about the new release");
   assert.deepEqual(registry.openNodeQuestions().length, 1);
 });
 
@@ -246,24 +247,24 @@ test("a node never asked gets its first question at once", async (t) => {
   assert.deepEqual(keysOf(registry), [[oldTemplate.id, older]]);
 });
 
-test("a node is asked at most once a week, counted from its latest question, which then holds everything since", async (t) => {
+test("a node is asked at most once a day, counted from its latest question, which then holds everything since", async (t) => {
   const { registry, pass, observe, later } = setUp(t);
   observe([older, previous, current, newest.id], roomy);
   await pass.poll();
   answer(registry, "Keep");
   pass.releases(testNode, inventory());
-  later(cleanupIntervalMs - hour);
+  later(day - hour);
   await pass.poll();
-  assert.equal(asked(registry).length, 1, "a release joined within the week, so nothing is asked");
+  assert.equal(asked(registry).length, 1, "a release joined within the day, so nothing is asked");
   observe([older, previous, current, newest.id, oldTemplate.id], roomy);
   later(hour);
   await pass.poll();
-  assert.deepEqual(keysOf(registry), [[older], [oldTemplate.id, older, "1"]], "a week on, one question holds what joined since");
+  assert.deepEqual(keysOf(registry), [[older], [oldTemplate.id, older, "1"]], "a day on, one question holds what joined since");
   answer(registry, "Delete");
   pass.releases(testNode, inventory({}, [r1, "4".repeat(40), r2, r3]));
-  later(cleanupIntervalMs - hour);
+  later(day - hour);
   await pass.poll();
-  assert.equal(asked(registry).length, 2, "the week counts from the latest question, whether it was kept or deleted");
+  assert.equal(asked(registry).length, 2, "the day counts from the latest question, whether it was kept or deleted");
 });
 
 test("an open question is neither withdrawn nor asked again when candidates join", async (t) => {
@@ -273,15 +274,15 @@ test("an open question is neither withdrawn nor asked again when candidates join
   const [q] = asked(registry);
   pass.releases(testNode, inventory());
   observe([older, previous, current, newest.id, oldTemplate.id], low);
-  later(3 * cleanupIntervalMs);
+  later(3 * day);
   await pass.poll();
-  assert.deepEqual(asked(registry), [q], "even weeks on, with the disk low");
+  assert.deepEqual(asked(registry), [q], "even days on, with the disk low");
   answer(registry, "Delete");
   await pass.poll();
   assert.deepEqual(registry.nodeQuestions(testNode)[0]!.cleanup.items.map((i) => i.kind === "release" ? i.name : i.id), [older], "the answer covers only what it listed");
 });
 
-test("a low filesystem asks within the week, but not while a question is open", async (t) => {
+test("a low filesystem asks within the day, but not while a question is open", async (t) => {
   const { registry, pass, observe, later } = setUp(t);
   observe([older, previous, current, newest.id], roomy);
   await pass.poll();
