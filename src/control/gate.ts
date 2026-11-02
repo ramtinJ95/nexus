@@ -25,8 +25,8 @@ import type { StartRequest } from "./start-request.ts";
 
 type GateRegistry = Pick<Registry, "node" | "pylon" | "recordActivity" | "setThreadStatus" | "thread">;
 
-/** pylon-vm's 3 GiB floor for each of two inner pylons, and 2 GiB for the verify stack's control plane and probe. */
-export const verifyMemoryGiB = 8;
+/** The one pylon sized over the default: Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and has passed only at 4 CPUs and 8 GiB (nexus#388). */
+const verifySize = { cpus: 4, memoryGiB: 8 };
 const tailBytes = 6_000;
 /** The pipe's exit status when the pylon was not fit to run the check, which says nothing of the change. */
 const unfit = 125;
@@ -68,7 +68,7 @@ export const verifyGate: Gate = {
   caller: verifyCaller, pylon: "verify", script: scriptOf(".nexus/verify", "verify"), after: "archived",
   request: (builder, branch, head) => ({
     project: builder.project, title: `Live check of ${branch} at ${head.slice(0, 12)}`, node: "auto", branch, commit: head, bare: true,
-    resources: { memoryGiB: verifyMemoryGiB, nestedVirtualization: true },
+    resources: { ...verifySize, nestedVirtualization: true },
   }),
 };
 

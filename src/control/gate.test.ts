@@ -5,7 +5,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { checkCaller, verifyCaller } from "../agent-protocol.ts";
-import { checkRuns, imageEnv, verifyGate, verifyMemoryGiB, type CheckRuns, type CheckState } from "./gate.ts";
+import { checkRuns, imageEnv, verifyGate, type CheckRuns, type CheckState } from "./gate.ts";
 import type { Thread } from "./thread-store.ts";
 import { testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { processStream } from "../process-stream.ts";
@@ -95,13 +95,13 @@ test("a check runs in a fresh bare check thread at the commit, and its verdict i
   assert.equal(f.registry.thread(id)!.status, "deleted");
 });
 
-test("a live check runs .nexus/verify in a fresh verify pylon that asks for nested virtualization, which is archived afterwards", async (t) => {
+test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 GiB that asks for nested virtualization, which is archived afterwards", async (t) => {
   const f = await fixture(t, "echo tests ok", "echo fleet booted; exit 4");
   const runs = f.runs(verifyGate);
   const id = await runs.start(f.builder, "feature", f.head);
   assert.deepEqual(f.started, [{
     project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, near: node, node: "auto", branch: "feature", commit: f.head, bare: true,
-    resources: { memoryGiB: verifyMemoryGiB, nestedVirtualization: true },
+    resources: { cpus: 4, memoryGiB: 8, nestedVirtualization: true },
   }]);
   assert.equal(f.registry.thread(id)!.startedBy, verifyCaller);
   f.running(f.registry.thread(id)!);
