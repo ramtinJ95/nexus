@@ -87,6 +87,19 @@ export function artifactKept(node: NodeName, facts: NodeFacts, id: ImageId | Tem
   return isImageId(id) ? "a template or a template build on the node needs it" : "Nexus keeps it now";
 }
 
+export const cleanupIntervalMs = 7 * 24 * 3_600_000;
+
+/**
+ * Whether the node may be asked again: once it was never asked, and otherwise once its latest question is answered and
+ * a week old, or sooner when one of its filesystems is low. So a release a deploy leaves behind waits for the week.
+ */
+export function cleanupDue(asked: readonly { askedAt: number; answer: unknown }[], low: boolean, now: number): boolean {
+  const latest = asked.at(-1);
+  if (latest === undefined) return true;
+  if (asked.some((q) => q.answer === null)) return false;
+  return low || now - latest.askedAt >= cleanupIntervalMs;
+}
+
 /**
  * Whether the candidates hold one no question of the node asked about, which is when the person is asked again. So a
  * set the person kept is not asked again, even after a question about other items came between. An item a delete
