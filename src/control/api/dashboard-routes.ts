@@ -83,7 +83,9 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     }],
     // The pipeline's items are cards on the board now.
     ["GET", /^\/pipeline$/, () => ({ status: 302, headers: { location: "/#board" }, body: "" })],
-    ["GET", /^\/(?:cluster|health)$/, async (_, r) => cluster(context(r.caller), null)],
+    ["GET", /^\/cluster$/, async (_, r) => cluster(context(r.caller), null)],
+    // The checks are on Cluster, and a health notice links here.
+    ["GET", /^\/health$/, async (_, r) => cluster(context(r.caller), null)],
     ["GET", /^\/threads\/([^/]+)$/, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {
