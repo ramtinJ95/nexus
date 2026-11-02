@@ -2324,11 +2324,8 @@ test("a node's page frames its graphs outside the live region, with a range pick
   assert.doesNotMatch(failed, /data-sample=/);
 });
 
-test("the work in flight lists each item at its phase, an item held for the person is in Needs you with Approve and Cancel, its preview says what it is after, and /pipeline sends the reader there", async (t) => {
+test("the work in flight lists each item at its phase, an item held for the person is in Needs you with Approve and Cancel, its preview says what it is after, and no page links /pipeline", async (t) => {
   const s = await seeded(t, { deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } });
-  const gone = await s.call("GET", "/pipeline");
-  assert.equal(gone.status, 303, "the pipeline is no page of its own");
-  assert.equal(gone.headers.location, "/#in-flight");
   assert.doesNotMatch((await s.call("GET", "/")).text, /href="\/pipeline"/, "no page links it");
   s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
   const add = async (title: string, after: string[] = []) => {
@@ -2363,6 +2360,26 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.doesNotMatch(await peek("it-000000000000"), /class="peek"/, "an unknown key previews nothing");
 });
 
+test("/pipeline sends the reader to the home page's work in flight, where its items show", async (t) => {
+  const s = await seeded(t);
+  const gone = await s.call("GET", "/pipeline");
+  assert.equal(gone.status, 303);
+  assert.equal(gone.headers.location, "/#in-flight");
+  assert.match((await s.call("GET", "/")).text, /<section class="split-flight" id="in-flight" aria-labelledby="flight-h">/);
+});
+
+test("the home page holds two columns, Needs you before the work in flight by phase, and on a phone two tabs with Needs you picked first", async (t) => {
+  const s = await seeded(t);
+  const page = (await s.call("GET", "/")).text;
+  const split = page.split('<div class="split" id="split">')[1]!;
+  const needs = split.indexOf('<section class="split-needs" id="needs-you"');
+  const flight = split.indexOf('<section class="split-flight" id="in-flight"');
+  assert.ok(needs >= 0 && flight > needs, "Needs you comes first, the work in flight after it");
+  assert.deepEqual([...split.matchAll(/<section class="phase[^"]*" id="phase-(\w+)"/g)].map((m) => m[1]), ["planned", "queued", "building", "review", "landing", "deployed"], "held work is in Needs you, not a phase");
+  const tabs = [...page.matchAll(/<input type="radio" name="home-side" value="(\w+)" id="side-\w+"( checked)?>/g)].map((m) => `${m[1]}${m[2] ?? ""}`);
+  assert.deepEqual(tabs, ["needs checked", "flight"]);
+});
+
 test("the sidebar's Needs you count, the phone's tab and the list count the same things, work held for approval included", async (t) => {
   const s = await seeded(t);
   s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
@@ -2375,6 +2392,21 @@ test("the sidebar's Needs you count, the phone's tab and the list count the same
   assert.match(list, /<h2 id="needs-h">Needs you<\/h2><span class="count">2<\/span>/);
   assert.equal(/<span class="seg-n" id="seg-needs-n" data-live>([^<]*)<\/span>/.exec(page)![1], "2");
   for (const path of ["/", "/usage"]) assert.equal(needsCount((await s.call("GET", path)).text), "2", path);
+});
+
+test("/nodes/<name> is the Cluster page with that node picked, and /cluster picks the first", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const tower = "tower" as NodeName;
+  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  const picked = (page: string) => [...page.matchAll(/<article class="node-card( picked)?" data-node="([^"]+)"/g)].map((m) => `${m[2]}${m[1] ?? ""}`);
+  const page = await s.call("GET", `/nodes/${tower}`);
+  assert.equal(page.status, 200);
+  assert.deepEqual(picked(page.text), [node, `${tower} picked`], "every node has its card, and the one named is picked");
+  assert.match(page.text, /<h2 class="node-detail-h">tower<\/h2>/);
+  assert.match(page.text, /<title>Cluster: tower · Nexus<\/title>/);
+  assert.match(page.text, /<a class="side-link active" href="\/cluster" aria-current="page">/);
+  assert.deepEqual(picked((await s.call("GET", "/cluster")).text), [`${node} picked`, tower]);
+  assert.equal((await s.call("GET", "/nodes/nowhere")).status, 404);
 });
 
 test("a queued thread's preview says once what it waits for", async (t) => {
