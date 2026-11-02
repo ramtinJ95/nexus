@@ -7,14 +7,14 @@ A user finds threads and the state of their pylons from the terminal or the dash
 - `browse-threads` lists open threads with each pylon's desired and observed state.
 - `browse-project` narrows the list to one project.
 - `browse-meta` lists projects and nodes.
-- `browse-ui` shows the overview's project sections, the sidebar's project folders and its nodes, and filters the sidebar by title.
+- `browse-ui` shows the overview's project sections, the sidebar's project folders and the Cluster page's nodes, and filters the sidebar by title.
 - `browse-fold` folds a project in the sidebar, and a filter that matches opens it until the filter is cleared.
 - `browse-errors` maps an unknown thread to exit 4, bad arguments to exit 64, and an unreachable API to exit 2.
 
 ## How to get to it (user POV)
 
 - Run `nexus threads [--project P] [--all]`, `nexus show <thread>`, `nexus projects` and `nexus nodes` in a terminal.
-- Open the dashboard at `/`, type into `Filter threads` in the sidebar, and choose a thread's link to open its page. Each project in the sidebar is a folder with its default branch, which a click folds, and the sidebar lists the nodes below the projects.
+- Open the dashboard at `/`, type into `Filter threads` in the sidebar, and choose a thread's link to open its page. Each project in the sidebar is a folder with its default branch, which a click folds. The Cluster page, `/cluster`, has a card for each node.
 
 ## Driving it with verify-nexus
 
@@ -26,7 +26,7 @@ Preconditions:
 - **List threads.** Run `$V cli browse-threads -- threads --json`. It holds rows for `TA` and `TB`. Each row has `desired` `running` and `pylon.actualState` `running`, on node `verify-node`.
 - **One project.** Run `$V cli browse-project -- threads --project spoon --json`, which returns the same rows. Then run `$V cli browse-project-none -- threads --project nope --json`. Exit 0, and stdout is `[]`.
 - **Projects and nodes.** `$V cli browse-projects -- projects --json` returns one project, `spoon`, unless [Add a project](./add-project.md) ran earlier in this run. `$V cli browse-nodes -- nodes --json` returns `verify-node` with `state` `online` and a recent `observedAt`.
-- **Dashboard overview.** Run `$V browser browse-ui-open -- goto http://127.0.0.1:7470/`. The `spoon` section's header shows `https://github.com/octocat/Spoon-Knife.git` and `New thread`. Its table has the columns `Thread`, `Desired`, `Observed`, `Node`, `Human` and `Agent`, lists `browse: alpha` and `browse: beta`, and the observed column reads `running`. The sidebar's `Nodes` lists `verify-node`. Capture with `snapshot --filename browse-ui.md` and `screenshot --filename browse-ui.png`.
+- **Dashboard overview.** Run `$V browser browse-ui-open -- goto http://127.0.0.1:7470/`, then `click "label:has(#view-project)"`, which lists the work in flight by project. The `spoon` section's header shows `https://github.com/octocat/Spoon-Knife.git` and `New thread`. Its table has the columns `Thread`, `Desired`, `Observed`, `Node`, `Human` and `Agent`, lists `browse: alpha` and `browse: beta`, and the observed column reads `running`. `goto http://127.0.0.1:7470/cluster` shows a card for `verify-node`, then go back to `/`. Capture with `snapshot --filename browse-ui.md` and `screenshot --filename browse-ui.png`.
 - **Filter.** Run `$V browser browse-ui-filter -- fill "role=searchbox[name=\"Filter threads\"]" "alpha"`. The sidebar's `Threads by project` list shows `browse: alpha` and hides `browse: beta`. The overview still lists both, because the filter covers only the sidebar. Capture `snapshot --filename browse-filter.md`, and again after 6 s as `browse-filter-after-poll.md`, which shows the filter survived the page's 5 s poll.
 - **No match.** Run `$V browser browse-ui-none -- fill "#filter" "zzz"`. The sidebar hides the whole `spoon` folder, and `eval "() => document.getElementById('group-spoon').hidden"` prints `true`. Capture `snapshot --filename browse-no-match.md`.
 - **Fold.** Clear the filter with `fill "#filter" ""`, then `click "#group-spoon > summary"`, and `eval "() => document.getElementById('group-spoon').open"` prints `false`. `fill "#filter" "beta"` opens it with only `browse: beta` shown, and clearing the filter folds it again. Capture `snapshot --filename browse-fold-filter.md` while it is open. Click the summary once more to unfold it.
@@ -39,7 +39,7 @@ Preconditions:
 
 ## Gotchas
 
-- The overview and the sidebar both link each thread. The sidebar link's name adds its state and age, such as `running browse: alpha now`. The `role=link[name="<title>"]` selector above matched only the overview's link, but a looser match, such as Playwright's `getByRole` with that name, finds both. Scope it as `#overview >> role=link[name="…"]` if a click is ambiguous, from a page that shows the overview.
+- The overview and the sidebar both link each thread. The sidebar link's name adds its state and age, such as `running browse: alpha now`. The `role=link[name="<title>"]` selector above matched only the overview's link, but a looser match, such as Playwright's `getByRole` with that name, finds both. Scope it as `#overview >> role=link[name="…"]` if a click is ambiguous, from a page that shows the overview, with `By project` picked.
 - The browser remembers folded projects in `localStorage`, across pages and later features. Leave every folder open at the end, or a later recipe finds the sidebar's threads hidden.
 - The sidebar filter is client-side. It hides rows without a request, so prove it with a snapshot, not a network log.
 - The CLI's `threads` leaves out deleted threads unless `--all` is given. The dashboard keeps them: archived and deleted threads fold together under each project's closed summary on the overview and in the sidebar, such as `1 archived, 2 deleted`.
