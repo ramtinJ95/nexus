@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  actualState, archivedDiskMs, backoffMs, desiredPhase, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
+  actualState, archivedDiskMs, backoffMs, desiredPhase, diskKept, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "./ids.ts";
@@ -215,9 +215,9 @@ test("desiredPhase", () => {
   ];
   for (const [f, expected] of cases) assert.equal(desiredPhase(facts(f), now), expected, JSON.stringify(f));
 
-  const archived = facts({ status: "archived", archivedAt: 0, lastHumanActivityAt: 0, lastAgentActivityAt: 0 });
+  const archived = facts({ status: "archived", archivedAt: 0, lastHumanActivityAt: 0, lastAgentActivityAt: 0, usageSettledAt: 100, backedUpAt: 101 });
   assert.equal(desiredPhase(archived, archivedDiskMs - 60_000), "paused", "23h59m after the archive the disk stays");
-  assert.equal(desiredPhase(archived, archivedDiskMs), "deleted", "24 hours after it the pylon goes");
+  assert.equal(desiredPhase(archived, archivedDiskMs), "deleted", "24 hours after it, its usage read and backed up after, the pylon goes");
   assert.equal(desiredPhase({ ...archived, readingUsage: true }, archivedDiskMs - 60_000), "reading");
   assert.equal(desiredPhase({ ...archived, readingUsage: true }, archivedDiskMs), "deleted", "the usage backfill boots no expired disk");
   for (const status of ["active", "idle"] as const) {
@@ -225,6 +225,29 @@ test("desiredPhase", () => {
       assert.notEqual(desiredPhase({ ...archived, status, ...activity }, archivedDiskMs * 2), "deleted", `${status} ${JSON.stringify(activity)}`);
     }
   }
+});
+
+test("an archived disk outlives its 24 hours until its token usage is read to the end and a backup that began after that read verified", () => {
+  const archived: ActivityFacts = { status: "archived", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, archivedAt: 0 };
+  const read = { ...archived, usageSettledAt: archivedDiskMs + 5 };
+  const failed = { reason: "its pylon did not boot within 10 minutes", at: 7, count: 2 };
+  const cases: [string, ActivityFacts, DesiredPhase, RegExp | null][] = [
+    ["never read", archived, "paused", /^its token usage is not read to its end yet$/],
+    ["read twice in vain", { ...archived, settleFailure: failed }, "paused", /not read to its end yet, and reading it failed 2 times in a row, the last because its pylon did not boot within 10 minutes$/],
+    ["read once in vain", { ...archived, settleFailure: { ...failed, count: 1 } }, "paused", /reading it failed once, the last because/],
+    ["backed up but never read", { ...archived, backedUpAt: archivedDiskMs + 6 }, "paused", /not read to its end yet/],
+    ["read, with no backup", read, "paused", /^it waits for a backup that begins after its token usage was read$/],
+    ["read after the newest backup began", { ...read, backedUpAt: archivedDiskMs + 4 }, "paused", /waits for a backup/],
+    ["read as the newest backup began", { ...read, backedUpAt: archivedDiskMs + 5 }, "paused", /waits for a backup/],
+    ["read, then backed up", { ...read, backedUpAt: archivedDiskMs + 6 }, "deleted", null],
+  ];
+  for (const [name, facts, phase, why] of cases) {
+    assert.equal(desiredPhase(facts, 2 * archivedDiskMs), phase, name);
+    const kept = diskKept(facts);
+    if (why === null) assert.equal(kept, null, name);
+    else assert.match(kept ?? "", why, name);
+  }
+  assert.equal(desiredPhase({ ...archived, readingUsage: true }, 2 * archivedDiskMs), "reading", "a disk kept past its 24 hours can still be woken to be read");
 });
 
 test("requiredArtifacts lists the image first", () => {

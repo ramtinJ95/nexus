@@ -47,13 +47,25 @@ export interface ActivityFacts {
 
 /** Amp's numbers. */
 export const idlePolicy = { agentIdleMs: 5 * 60_000, humanIdleMs: 20 * 60_000 } as const;
-/** How long an archived thread keeps its pylon's disk. */
+/** How long an archived thread keeps its pylon's disk at least. */
 export const archivedDiskMs = 24 * 60 * 60_000;
+
+/**
+ * Why an archived thread's disk outlives its 24 hours, or null once it may go: the token usage on it was read to its
+ * end after its pylon last ran, and a backup that began after that read verified, so the numbers are in the registry
+ * and in a backup of it before the only copy of their transcripts goes.
+ */
+export function diskKept(a: ActivityFacts): string | null {
+  const f = a.settleFailure;
+  if (a.usageSettledAt === undefined) return `its token usage is not read to its end yet${f === undefined ? "" : `, and reading it failed ${f.count === 1 ? "once" : `${f.count} times in a row`}, the last because ${f.reason}`}`;
+  if (a.backedUpAt === undefined || a.backedUpAt <= a.usageSettledAt) return "it waits for a backup that begins after its token usage was read";
+  return null;
+}
 
 export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
   if (a.status === "archived") {
-    return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? "deleted"
+    return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs && diskKept(a) === null ? "deleted"
       : a.readingUsage === true ? "reading" : "paused";
   }
   // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.

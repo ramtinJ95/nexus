@@ -323,10 +323,17 @@ function shiftedRegistry(path = tempDb()) {
   return { registry: openRegistry(path, () => Date.now() + shift.ms), shift };
 }
 
-async function archivedAgo(registry: Registry, shift: { ms: number }, thread: Thread, ms: number) {
+/**
+ * Archives the thread `ms` ago. Unless `read` is false, its usage is read to the end then and a backup begins after,
+ * as the settle and the backup feed record them, so only the 24 hours decide whether its disk goes.
+ */
+async function archivedAgo(registry: Registry, shift: { ms: number }, thread: Thread, ms: number, read = true) {
   shift.ms = -ms;
   registry.setThreadStatus(thread.id, "archived");
   shift.ms = 0;
+  if (!read) return;
+  registry.finishSettle(thread.id, null, Date.now() - ms);
+  registry.recordBackedUp(Date.now() - ms + 1);
 }
 
 test("a pylon archived 23h59m ago only pauses, and no pass deletes it", async (t) => {
@@ -341,6 +348,32 @@ test("a pylon archived 23h59m ago only pauses, and no pass deletes it", async (t
   for (let i = 0; i < 5; i++) await settled(fake, loop);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"]);
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped");
+});
+
+test("a pylon archived 24 hours ago keeps its disk until its usage was read to the end and a backup that began after the read verified", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+
+  await archivedAgo(registry, shift, thread, archivedDiskMs, false);
+  registry.recordBackedUp(Date.now());
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
+  for (let i = 0; i < 5; i++) await settled(fake, loop);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"], "a backup of numbers never read from its disk keeps it");
+
+  const read = Date.now() + 10;
+  registry.finishSettle(thread.id, null, read);
+  registry.recordBackedUp(read);
+  for (let i = 0; i < 5; i++) await settled(fake, loop);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"], "a backup that began as the read ended may not hold its numbers");
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped");
+
+  registry.recordBackedUp(read + 1);
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "delete"]);
+  assert.equal(registry.thread(thread.id)?.status, "archived");
 });
 
 test("a pylon archived 24 hours ago is deleted, its thread and conversation kept, and an unarchive boots it fresh", async (t) => {

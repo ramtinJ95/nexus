@@ -22,9 +22,11 @@ function opened(t: TestContext, path = join(dir, `${randomUUID()}.db`)): Registr
 }
 
 let created = 0;
-function addThread(registry: Registry, node: NodeName, title: string, status: Thread["status"] = "archived"): Thread {
+/** An archived thread is settled unless `settled` is false, so only the run reads it. */
+function addThread(registry: Registry, node: NodeName, title: string, status: Thread["status"] = "archived", settled = true): Thread {
   const { id } = addTestThread(registry, { node, boot: { image }, thread: { title, createdAt: 1_000 + created++, lastHumanActivityAt: 0 } });
   if (status !== "active") registry.setThreadStatus(id, status);
+  if (status === "archived" && settled) registry.finishSettle(id, null, Date.now());
   return registry.thread(id)!;
 }
 
@@ -246,12 +248,13 @@ test("a thread whose pylon's image no online node holds is skipped, and woken on
   await held(registry, a, "reading");
 });
 
-test("a thread archived for a day is skipped, as its disk is deleted, though the node still holds it", async (t) => {
+test("a thread archived for a day, its usage read and backed up since, is skipped, as its disk is deleted, though the node still holds it", async (t) => {
   let now = Date.now() - archivedDiskMs;
   const registry = seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`), () => now), { nodes: [n1, n2] });
   const expired = addThread(registry, n1, "expired");
   now = Date.now();
   const kept = addThread(registry, n1, "kept");
+  registry.recordBackedUp(Date.now() + 1);
   observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "stopped"]]);
   const { job, counter } = backfill(t, registry);
   job.start();
@@ -260,7 +263,7 @@ test("a thread archived for a day is skipped, as its disk is deleted, though the
   await until("kept is read", () => counter.reads, (r) => r.includes(kept.id));
   observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "stopped"]]);
   await until("the run is done", () => registry.usageBackfill().state, (s) => s === "done");
-  assert.deepEqual([row(registry, expired)!.state, row(registry, expired)!.reason], ["skipped", "its disk was deleted 24 hours after it was archived"]);
+  assert.deepEqual([row(registry, expired)!.state, row(registry, expired)!.reason], ["skipped", "its disk was deleted 24 hours after it was archived, once its usage was read and backed up"]);
   assert.deepEqual(counter.reads, [kept.id]);
   assert.equal(desired(registry, expired), "deleted");
 });
