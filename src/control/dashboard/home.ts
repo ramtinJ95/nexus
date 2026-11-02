@@ -37,7 +37,7 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): 
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Board",
     ...dialogs,
-    main: html`<header class="bar">${menu}<div class="crumb"><h1>Board</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>Board</h1></div><div class="bar-end"><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
 <div class="scroll home"><p id="action-error" class="error" role="alert" hidden></p>
 ${fleetLine(c)}
 ${board(c)}
