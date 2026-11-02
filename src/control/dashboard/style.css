@@ -367,15 +367,14 @@ a.link:hover { text-decoration: underline; text-underline-offset: 2px; }
 .archived .row { color: var(--text-2); }
 .nodes { padding: var(--s3) 16px var(--s2); display: grid; gap: 2px; font-size: var(--t-s); color: var(--text-2); border-top: 1px solid var(--line-soft); }
 .nodes h2 { margin: 0 0 4px; font: 600 var(--t-l)/1.2 var(--display); color: var(--text); }
-.nodes > small:first-of-type { order: 99; }
 .nodes span { display: flex; align-items: center; gap: 7px; margin-top: 4px; }
 .nodes span .i { display: none; }
 .nodes span .link { color: var(--text); }
 .nodes em { font-style: normal; margin-left: auto; color: var(--bad); font-size: var(--t-xs); }
 .nodes small { font-size: var(--t-xs); color: var(--text-3); padding-left: 0; }
 /* the release lines read on demand, as the rest of the fleet does */
-.nodes small.rel { display: none; }
-.nodes:is(:hover, :focus-within) small.rel { display: block; }
+.nodes small[title], .nodes > h2 + small { display: none; }
+.nodes:is(:hover, :focus-within) :is(small[title], h2 + small) { display: block; }
 .side-add { margin: 2px 12px 12px; justify-content: center; }
 /* the theme needs the page's script, which names one on <html> before the first paint */
 .side-theme { margin: 0 12px 6px; display: flex; align-items: center; gap: 4px; }
@@ -920,16 +919,18 @@ form.ask, .ask-all, .ask-q { display: grid; gap: 8px; margin: 0; padding: 0; bor
 .need[data-attention="failed"], .need[data-attention="parked"], .need[data-attention="limited"] { --kind: var(--bad); }
 .need[data-attention="waiting"], .need-cleanup { --kind: var(--warn); }
 .need.picked, .need:focus-visible { outline: 2px solid var(--kind); outline-offset: 2px; }
-.need-sum { list-style: none; display: grid; grid-template-columns: 150px minmax(0, 1.1fr) minmax(0, 1.6fr) 60px 12px; align-items: baseline; gap: var(--s4); padding: 9px var(--s2) 9px 0; cursor: pointer; }
+.need-sum { list-style: none; display: grid; grid-template-columns: 150px minmax(0, 1.1fr) minmax(0, 1.6fr) 60px 12px; grid-template-areas: "what thread why at chev"; align-items: baseline; gap: var(--s4); padding: 9px var(--s2) 9px 0; cursor: pointer; }
 .need-sum::-webkit-details-marker { display: none; }
-.need-sum::after { content: ""; width: 6px; height: 6px; border: solid var(--text-3); border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); transition: transform 0.15s; justify-self: end; }
+.need-sum::after { grid-area: chev; content: ""; width: 6px; height: 6px; border: solid var(--text-3); border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); transition: transform 0.15s; justify-self: end; }
 .need-fold[open] > .need-sum::after { transform: translateY(1px) rotate(225deg); }
 .need-sum:hover { background: var(--hover); }
-.need-what { font-weight: 700; color: var(--kind); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: var(--s2); border-left: 3px solid var(--kind); }
-.need-thread { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.need-what { grid-area: what; font-weight: 700; color: var(--kind); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: var(--s2); border-left: 3px solid var(--kind); }
+.need-thread { grid-area: thread; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .need-thread:hover { color: var(--accent); }
-.need-why { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
-.need-at { justify-self: end; font-size: var(--t-xs); color: var(--text-3); white-space: nowrap; }
+/* The reason is the card's own first line, said again in short, so it is drawn from an attribute and read once. */
+.need-why { grid-area: why; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.need-why::before { content: attr(data-why); }
+.need-at { grid-area: at; justify-self: end; font-size: var(--t-xs); color: var(--text-3); white-space: nowrap; }
 .need-body { display: grid; gap: var(--s2); padding: var(--s1) var(--s2) var(--s4) calc(150px + var(--s4)); max-width: 900px; }
 .need-fold[open] > .need-body { animation: open-down 0.18s ease-out; }
 @keyframes open-down { from { opacity: 0; transform: translateY(-4px); } }
@@ -1083,11 +1084,8 @@ form.ask, .ask-all, .ask-q { display: grid; gap: 8px; margin: 0; padding: 0; bor
   .slip-why { grid-template-rows: 1fr; }
   .page-needs { padding-top: var(--s6); }
   .need-sum { grid-template-columns: minmax(0, 1fr) auto 12px; grid-template-areas: "what at chev" "thread thread thread" "why why why"; gap: 2px var(--s2); padding: 10px 4px 10px 0; }
-  .need-sum::after { grid-area: chev; }
-  .need-what { grid-area: what; }
-  .need-at { grid-area: at; }
-  .need-thread { grid-area: thread; padding-left: 11px; white-space: normal; }
-  .need-why { grid-area: why; padding-left: 11px; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .need-thread { padding-left: 11px; white-space: normal; }
+  .need-why { padding-left: 11px; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .need-body { padding: 4px 4px 16px 11px; }
 
   .modal { margin-top: 12px; max-height: calc(100% - 24px); }

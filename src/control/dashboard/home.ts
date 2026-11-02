@@ -114,9 +114,9 @@ const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.
  */
 function needsList(c: Context): Html {
   const needs = c.needs();
-  const fold = (n: Need, what: string, whose: Html, why: string, body: Html, track: Part = null) => html`<details class="need-fold" id="fold-${needId(n)}"><summary class="need-sum"><span class="need-what">${what}</span>${whose}<span class="need-why">${why}</span><span class="need-at">${ago(n.since, c.now)}</span></summary><div class="need-body">${track}${body}</div></details>`;
+  const fold = (n: Need, what: string, whose: Html, why: string, body: Html, track: Part = null) => html`<details class="need-fold" id="fold-${needId(n)}"><summary class="need-sum"><span class="need-what">${what}</span>${whose}<span class="need-at">${ago(n.since, c.now)}</span><span class="need-why" data-why="${why}"></span></summary><div class="need-body">${track}${body}</div></details>`;
   return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
-${needs.length === 0 ? html`<p class="empty">Nothing waits on you. Held work shows here and on the board.</p>` : html`<div class="need-list">${needs.map((n) => {
+${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
   if (n.kind === "cleanup") {
     const { node } = n.question;
     return html`<article class="need need-cleanup" id="${needId(n)}" data-node="${node}" tabindex="-1" aria-label="Cleanup: ${node}">
@@ -128,7 +128,7 @@ ${fold(n, "Cleanup", html`<a class="need-thread" href="/nodes/${node}">${node}</
   const life = lifeOfThread(c, t.id);
   const why = needWhy(n, c.now);
   return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-${fold(n, what, html`<a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project}</span> ${t.title}</a>`, why === "" ? life.why : why, body, miniTrack(life))}
+${fold(n, what, html`<a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a>`, why === "" ? life.why : why, body, miniTrack(life))}
 </article>`;
 })}</div>`}`;
 }
