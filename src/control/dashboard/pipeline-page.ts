@@ -5,7 +5,7 @@ import { Html, html, dot, state, menu, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { layout, threadTitle } from "./shell.ts";
 
-const phaseTone: Record<ItemPhase["kind"], Tone> = {
+export const phaseTone: Record<ItemPhase["kind"], Tone> = {
   planned: "idle", queued: "idle", building: "work", reviewing: "work", landing: "busy", landed: "ok", held: "bad", archived: "muted", cancelled: "muted",
 };
 const pipelineSetting = (p: Project) => p.pipeline == null ? "The pipeline is off for this project, so its items stay planned."

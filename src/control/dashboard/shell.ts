@@ -75,7 +75,7 @@ ${projectDialog(c, page.addProject === true)}
 
 /** How long an open thread whose pylon is down and whose agent is not working stays listed before it folds away as quiet. */
 export const quietAfterMs = 8 * 60 * 60 * 1000;
-const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
+export const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
 
 /**
  * A project's threads, newest first: the recent open ones, the open ones quiet for over `quietAfterMs` with their pylon
