@@ -12,8 +12,9 @@ import type { SecretGrant } from "../secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, reservedNames, type HoldCode } from "./holds.ts";
-import { carryWaiver, landingHolds } from "./policy.ts";
-import { changeOf, humanLabel, landable, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
+import { carryWaiver, landingHolds, landPress } from "./policy.ts";
+import { landing } from "./dashboard/cards.ts";
+import { changeOf, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
 import { reviewLoop, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
@@ -3132,4 +3133,26 @@ test("a press whose description still does not say what could not be checked liv
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
+});
+
+test("for every hold, the land route takes a press exactly when the dashboard offers Land", async (t) => {
+  const codes: HoldCode[] = [
+    "same-model", "not-approved", "open-findings", "unanswered", "check-failed", "live-failed", "github-checks", "not-approved-head", "conflict", "pr-not-open",
+    "not-checked-live", "claude-approved", "check-changed", "verify-changed", "reserved:auth", "reserved-path:secrets", "stale-head", "waiver-not-carried", "loop",
+  ];
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  const base = f.review();
+  const c = { deploys: () => false, landRefusal: null, caller: "nLAPTOP" } as never;
+  for (const code of codes) {
+    const review: Review = { ...base, land: { requestedBy: "nLAPTOP" }, phase: personPhase("policy", { code, text: `held by ${code}` }) };
+    f.registry.saveReview(review);
+    const card = landing(c, { thread: f.registry.thread(f.builder)!, review, pullRequests: [f.pr] } as never)?.text ?? "";
+    const offered = card.includes('data-action="land"');
+    const waive = /data-holds="([^"]*)"/.exec(card)?.[1];
+    let took = true;
+    try { loop.land(f.builder, "nLAPTOP", head1, waive === undefined ? undefined : JSON.parse(waive.replaceAll("&quot;", '"'))); } catch (err) { if ((err as HttpError).status !== 409) throw err; took = false; }
+    assert.equal(took, offered, `${code}: the route ${took ? "takes" : "refuses"} a press the dashboard ${offered ? "offers" : "does not offer"}`);
+    assert.equal(offered, landPress(review).kind === "lands", code);
+  }
 });

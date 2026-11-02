@@ -38,6 +38,8 @@ export const answersSchema = z.object({
   token: z.string(),
   answers: z.array(z.object({ id: z.string().max(40), action: z.enum(["fixed", "rejected"]), reason: z.string().max(4_000) })).max(60),
 });
+/** The reviewer's quote, asked for by a Land press at an approved head, of what the description now says could not be checked live. */
+export const quoteSchema = z.object({ token: z.string(), notCheckedLive: z.string().max(4_000).nullable() });
 export type Finding = z.output<typeof findingSchema>;
 export type Verdict = z.output<typeof verdictSchema>;
 export type Answer = z.infer<typeof answersSchema>["answers"][number];
@@ -81,6 +83,12 @@ export type Phase =
    * could take the verify pylon yet, which the loop tries again.
    */
   | { kind: "verifying"; startedAt: number; thread: ThreadId | null; refused?: string }
+  /**
+   * The person pressed Land at an approved head with no live check, and the reviewer owes its quote, from the
+   * description as it is now, of what could not be checked live. `asked` once the request, which carries that
+   * description, is saved to send. The landing's checks follow.
+   */
+  | { kind: "quoting"; asked: boolean; failing?: ModelFailure }
   | { kind: "approved" }
   /**
    * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
@@ -196,6 +204,8 @@ export const settledKinds = ["landed", "merged", "closed", "cancelled"] as const
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
+/** Whether the review waits on the person: held for them, or stopped at an approval that only their Land merges. */
+export const waitsOnPerson = (r: Review | null) => needsPerson(r) || r?.phase.kind === "approved";
 /** What a landing that authorized its merge, or is deploying or rolling back, does now, or null for any other review. */
 export const landingVerb = (r: Review): "deploys" | "rolls back" | "merges" | null =>
   r.phase.kind === "deploying" ? "deploys" : r.phase.kind === "rolling-back" ? "rolls back" : r.phase.kind === "merging" && r.phase.authorized !== null ? "merges" : null;
@@ -325,7 +335,7 @@ const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, la
 export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.who === "person" ? `, cancelled by ${r.phase.by}` : `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
   : r.phase.kind === "merging" && r.phase.waiting !== undefined ? `, waiting while ${r.phase.waiting}`
   : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state]
-  : (r.phase.kind === "reviewing" || r.phase.kind === "fixing") && r.phase.failing ? `, the ${r.phase.kind === "reviewing" ? "reviewer" : "builder"}'s model is failing (${r.phase.failing.count} in a row, last: ${r.phase.failing.last}), retrying at ${new Date(r.phase.failing.retryAt).toISOString().slice(11, 16)} UTC` : "";
+  : (r.phase.kind === "reviewing" || r.phase.kind === "fixing" || r.phase.kind === "quoting") && r.phase.failing ? `, the ${r.phase.kind === "fixing" ? "builder" : "reviewer"}'s model is failing (${r.phase.failing.count} in a row, last: ${r.phase.failing.last}), retrying at ${new Date(r.phase.failing.retryAt).toISOString().slice(11, 16)} UTC` : "";
 /** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
 export function liveNote(r: Review): string | null {
   const round = r.rounds.at(-1)!;

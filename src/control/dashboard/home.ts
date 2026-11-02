@@ -7,7 +7,6 @@ import type { ThreadDetail } from "../wire.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import { cannotLand, type Review } from "../review-model.ts";
-import { heldBy } from "../policy.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
@@ -99,13 +98,11 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
   const cleanups = c.registry.openNodeQuestions().map((question): Need => ({ kind: "cleanup", question, since: question.askedAt }));
   const cards = [...cleanups, ...c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): ThreadNeed[] => {
     const { attention } = c.row(t);
-    const review = c.registry.review(t.id);
-    const holds = review !== null && review.phase.kind === "approved" && heldBy(review).length > 0;
-    if (!holds && t.sessionWaiting !== true && (attention === "reply" || !needsPerson(attention))) return [];
+    if (t.sessionWaiting !== true && (attention === "reply" || !needsPerson(attention))) return [];
     const d = detail(t);
     const nudged = c.registry.nudge(t.id);
     const needs: ThreadNeed[] = [
-      ...d.review?.phase.kind === "needs-person" || (holds && cannotLand(d.review!, d.thread, prOf(d)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
+      ...d.review?.phase.kind === "needs-person" || (d.review?.phase.kind === "approved" && cannotLand(d.review, d.thread, prOf(d)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
       ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
       ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
     ];

@@ -12,8 +12,8 @@
  * is one no person can waive: it clears only when what failed changes.
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
-import { personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, changedPaths, findingsOf, type Change, type Review } from "./review-model.ts";
+import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
+import { answered, blocks, changedPaths, findingsOf, type Change, type Review, type Round } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;
@@ -52,6 +52,27 @@ export const recordedHolds = (review: Review): Hold[] => [
 export const heldBy = (review: Review): Hold[] => review.phase.kind === "needs-person" ? review.phase.holds : recordedHolds(review);
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
+/** The reviewer's quote of what could not be checked live at the round, or null when it quoted nothing long enough to count. */
+const quoteOf = (round: Round) => {
+  const quoted = round.verdict?.notCheckedLive ?? null;
+  return quoted === null || squash(quoted).length < 20 ? null : quoted;
+};
+
+/**
+ * What the person's Land press does now, the one rule the land route and the dashboard both follow. It is `stuck` on
+ * the holds that meet every landing of the approved head again and that the person may not waive, which no press gets
+ * past. Otherwise it lands past the holds it `waives`, and `quotes` first when no live check ran and the landing needs
+ * the reviewer's quote of what could not be checked live, which only a description the reviewer reads again can give.
+ */
+export type LandPress = { kind: "stuck"; holds: Hold[] } | { kind: "lands"; waives: Hold[]; quotes: boolean };
+export function landPress(review: Review): LandPress {
+  const holds = heldBy(review);
+  const stuck = holds.filter((h) => holdRule(h.code).holdsAgain && !holdRule(h.code).waivable);
+  if (stuck.length) return { kind: "stuck", holds: stuck };
+  const round = review.rounds.at(-1)!;
+  const quotes = round.live?.kind === "absent" && (quoteOf(round) === null || holds.some((h) => h.code === "not-checked-live"));
+  return { kind: "lands", waives: holds.filter((h) => waivable(h.code)), quotes };
+}
 
 const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
   ({ review }) => review.models.reviewer === review.models.builder ? [hold("same-model", `The reviewer ran the builder's own model, ${review.models.builder}.`)] : [],
@@ -85,8 +106,8 @@ const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
     const round = review.rounds.at(-1)!;
     if (round.live === undefined) return [hold("live-failed", `The live check has not run at ${round.head}.`)];
     if (round.live.kind === "ran") return round.live.passed ? [] : [hold("live-failed", `The live check failed at ${round.head}.`)];
-    const quoted = round.verdict?.notCheckedLive ?? null;
-    if (quoted === null || squash(quoted).length < 20) return [hold("not-checked-live", "No live check ran, and the pull request does not say what could not be checked live.")];
+    const quoted = quoteOf(round);
+    if (quoted === null) return [hold("not-checked-live", "No live check ran, and the pull request does not say what could not be checked live.")];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : [hold("not-checked-live", "The reviewer's quote of what could not be checked live is not in the pull request's description.")];
   },
   ({ review }) => recordedHolds(review),
