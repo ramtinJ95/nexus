@@ -33,9 +33,9 @@ ${projects.length === 0 ? html`<p class="empty">No project runs the pipeline. <c
 ${own.length === 0 ? html`<p class="empty">No items. <code>nexus item add --project ${p.id}</code> lines one up.</p>` : html`<table class="ov rg ov-items">
 <thead><tr><th>Item</th><th class="rg-route">${routeHead}</th><th>Phase</th><th class="wide">After</th><th class="wide">Thread</th><th class="ov-act"></th></tr></thead>
 <tbody>${own.map((i) => html`<tr data-item="${i.id}" data-phase="${i.phase.kind}">
-<td><span class="ov-title">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></span><code class="dim">${i.id}</code></td>
+<td class="rg-work"><span class="ov-title">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></span><span class="rg-why"><code>${i.id}</code> ${i.phase.why}</span></td>
 <td class="rg-route">${route(lifeOfItem(c, i))}</td>
-<td>${state(i.phase.kind, phaseTone[i.phase.kind])}<span class="ov-why">${i.phase.why}</span></td>
+<td>${state(i.phase.kind, phaseTone[i.phase.kind])}</td>
 <td class="wide">${i.after.length === 0 ? html`<span class="dim">nothing</span>` : i.after.map((id) => html`<span class="ov-wait">${title(id)}</span>`)}</td>
 <td class="wide">${i.thread === null ? html`<span class="dim">none yet</span>` : html`<a class="link" href="/threads/${i.thread}">${threadTitle(c, i.thread)}</a>`}</td>
 <td>${actions(i, p)}</td>

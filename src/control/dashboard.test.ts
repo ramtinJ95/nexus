@@ -2343,8 +2343,8 @@ test("the pipeline page lists each project's items with the phase their records 
   const section = sectionOf(page, "pipeline-acme");
   assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Planned Queued Building In review Landing Deployed Phase After Thread/);
   const row = (id: string) => textOf(section.split(`<tr data-item="${id}"`)[1]!.split("</tr>")[0]!.replace(/^[^>]*>/, ""));
-  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ nothing Greet by name$`));
-  assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} Greet by name none yet Approve Cancel`);
+  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} .+ (queued|building) nothing Greet by name$`));
+  assert.equal(row(b.id), `Greet in French ${b.id} project acme waits for the person to approve each item: nexus item approve ${b.id} held Greet by name none yet Approve Cancel`);
   assert.match(section, new RegExp(`<a class="link" href="/threads/${thread}">Greet by name</a>`));
   assert.match(section, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
   assert.doesNotMatch(section, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");

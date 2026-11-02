@@ -313,6 +313,13 @@ a.link:hover { text-decoration-color: currentColor; }
 .btn-abort { margin-left: auto; color: var(--del-text); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .icon-btn { background: none; border: 0; color: var(--text-2); font-size: 15px; width: 30px; height: 30px; border-radius: var(--r); cursor: pointer; flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .icon-btn:hover { background: var(--hover); color: var(--text); }
+/* The menu, more and close glyphs are drawn, since a symbol font is not on every device. */
+.icon-btn:is(.menu, .more, [data-close]) { font-size: 0; position: relative; }
+.icon-btn:is(.menu, .more, [data-close])::before { content: ""; position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
+.icon-btn.menu::before { width: 15px; height: 1.5px; background: currentColor; box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor; }
+.icon-btn.more::before { width: 3px; height: 3px; border-radius: 50%; background: currentColor; box-shadow: -6px 0 0 currentColor, 6px 0 0 currentColor; }
+.icon-btn[data-close]::before, .icon-btn[data-close]::after { width: 14px; height: 1.5px; background: currentColor; rotate: 45deg; }
+.icon-btn[data-close]::after { content: ""; position: absolute; left: 50%; top: 50%; translate: -50% -50%; rotate: -45deg; }
 
 .chip { display: inline-flex; align-items: center; gap: var(--s2); font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .chip-ok { color: var(--ok); }
@@ -599,6 +606,7 @@ h4.md-h { font-size: 1.05em; }
 /* a Claude worker's AskUserQuestion: a form in the dock while it waits, and a card in the conversation. A fieldset is as wide as its content unless told, so a long preview scrolls inside its block. */
 .ask, .ask-all, .ask-q { display: grid; gap: var(--s2); margin: 0; padding: 0; border: 0; min-width: 0; }
 .ask-all:disabled { opacity: 0.6; }
+.landing.ask { padding: var(--s3) var(--s4); gap: var(--s3); }
 .ask-q { gap: var(--s1); }
 .ask-q legend { padding: 0; margin-bottom: var(--s1); overflow-wrap: anywhere; }
 .ask-opt { display: grid; gap: 2px; min-width: 0; }
@@ -955,8 +963,8 @@ h4.md-h { font-size: 1.05em; }
 .need-mark { width: 8px; height: 8px; border-radius: 1px; transform: rotate(45deg) translateY(-1px); background: var(--kind); justify-self: start; margin-left: 1px; }
 .need[data-attention="failed"] .need-mark { border-radius: 50%; transform: none; }
 .need-what { color: var(--kind); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.need-thread { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.need-thread:hover { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+a.need-thread { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
 .need-at { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .need-why { grid-column: 3 / -1; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .need-fold[open] .need-why { display: none; }
@@ -1051,11 +1059,14 @@ h4.md-h { font-size: 1.05em; }
 .scrim { display: none; }
 .attention-toast { position: fixed; bottom: var(--s5); right: var(--s5); z-index: 100; display: flex; gap: var(--s4); padding: var(--s4); background: var(--card); color: var(--text); border-radius: var(--r-box); box-shadow: var(--pop); }
 .attention-toast a { text-decoration: underline; text-underline-offset: 3px; }
+.ov-items th.rg-route { width: 312px; }
+.ov-items th:nth-child(3) { width: 110px; }
+.ov-items th:nth-child(4) { width: 130px; }
+.ov-items th:nth-child(5) { width: 170px; }
 .ov-items .ov-act { width: 150px; }
-.ov-items th:nth-child(3) { width: 220px; }
-.ov-why { display: block; color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
-.ov-items td { white-space: normal; overflow-wrap: anywhere; }
-.ov-items td.rg-route { padding-top: var(--s3); }
+.ov-items .rg-why { white-space: normal; }
+.ov-items .rg-why code { color: var(--text-3); margin-right: var(--s1); }
+.ov-items td:not(.rg-work) .link { display: block; overflow: hidden; text-overflow: ellipsis; }
 
 /* A wide window shows the conversation beside an open diff or the terminal, split where the reader drags. */
 @media (min-width: 1200px) {
@@ -1102,6 +1113,7 @@ h4.md-h { font-size: 1.05em; }
   .crumb-p, .crumb .sep { display: none; }
   .crumb h1 { font-size: var(--t1); }
   .bar > .chip { margin-left: 0; }
+  .bar-end .btn-ghost { display: none; }
   .bar .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .bar-actions { display: none; }
   body[data-open="actions"] .bar-actions { display: grid; position: absolute; right: var(--s2); top: 48px; z-index: 30; min-width: 170px; padding: var(--s1); background: var(--card); border-radius: var(--r-box); box-shadow: var(--pop); }
@@ -1168,7 +1180,7 @@ h4.md-h { font-size: 1.05em; }
   .need-fold > summary { grid-template-columns: 15px minmax(0, 1fr) auto; row-gap: 2px; }
   .need-what { grid-column: 2; grid-row: 1; }
   .need-at { grid-column: 3; grid-row: 1; }
-  .need-thread { grid-column: 2 / -1; grid-row: 2; }
+  a.need-thread { grid-column: 2 / -1; grid-row: 2; }
   .need-why { grid-column: 2 / -1; grid-row: 3; white-space: normal; }
   .need-body { margin-left: 23px; }
 
