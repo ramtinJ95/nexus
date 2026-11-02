@@ -20,7 +20,7 @@ export const themeScript = `{ let theme = null; try { theme = localStorage.getIt
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
   "cache-control": "no-store",
-  "content-security-policy": `default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(themeScript).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+  "content-security-policy": `default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(themeScript).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
 };
@@ -44,7 +44,7 @@ export function html(strings: TemplateStringsArray, ...parts: Part[]): Html {
 }
 
 /** The colour of a status dot. `work` is an agent mid-turn, `busy` a pylon changing phase, `reply` a reply the person has not read. */
-export type Tone = "ok" | "work" | "reply" | "busy" | "idle" | "bad" | "muted";
+export type Tone = "ok" | "work" | "reply" | "review" | "busy" | "idle" | "bad" | "muted";
 export const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   running: ["running", "ok"], spawning: ["spawning", "busy"], pausing: ["pausing", "busy"], deleting: ["deleting", "busy"],
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],

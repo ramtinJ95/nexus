@@ -22,6 +22,7 @@ import { runOf, stateBar, composer } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
+import { lifeLine, lifeOfThread } from "./lifecycle.ts";
 import { usageColumns, exact } from "./usage-page.ts";
 
 const waitTone: Record<Wait["state"], Tone> = { waiting: "idle", landed: "ok", blocked: "bad" };
@@ -70,6 +71,7 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
     active: t.id,
     ...(open ? { activity: t.id } : {}),
     main: html`${bar}
+<div class="life" id="life" data-live>${lifeLine(lifeOfThread(c, t.id))}</div>
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
@@ -132,6 +134,7 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
       q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
       q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
     ])}
+<div class="life" id="life" data-live>${lifeLine(lifeOfThread(c, q.id))}</div>
 <div class="scroll"><div class="page queued" id="queued" data-live>
 <section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
 <ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>

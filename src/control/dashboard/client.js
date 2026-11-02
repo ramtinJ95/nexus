@@ -33,6 +33,8 @@ if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')
 if (document.getElementById("node-graphs") !== null) void import("./node-graphs.js");
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
+// The board's held strips step out of line once, as the page first shows, and never again on a poll's swap.
+setTimeout(() => document.documentElement.classList.add("settled"), 1200);
 setInterval(tick, 1000);
 if (pollMs > 0) {
   setInterval(() => { if (document.visibilityState === "visible") void refreshNow(); }, pollMs);
@@ -64,6 +66,9 @@ async function showNeed() {
   const card = find() ?? document.getElementById("needs-you");
   for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
   card?.classList.add("picked");
+  // Opened as the reader's own toggle is, so a poll's swap keeps it open.
+  const fold = card?.querySelector(".need-fold");
+  if (fold) toggled.set(fold.id, fold.open = true);
   card?.scrollIntoView({ block: "start" });
   card?.focus({ preventScroll: true });
 }

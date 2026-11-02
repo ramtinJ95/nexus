@@ -10,6 +10,8 @@ import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText
 import type { Context, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
+import { board, fleetLine } from "./board.ts";
+import { lifeOfThread, miniTrack, needWhy } from "./lifecycle.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
 
 /** Every open thread with what its pylon is asked to be and is, for the desk and for the phone's thread list. */
@@ -33,11 +35,15 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): 
 })}</tbody>
 </table>`;
   return layout(c, {
-    title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
+    title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Board",
     ...dialogs,
-    main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
-<div class="page" id="overview" data-live>
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>Board</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
+<div class="scroll home"><p id="action-error" class="error" role="alert" hidden></p>
+${fleetLine(c)}
+${board(c)}
+<div class="page page-needs"><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
+<details class="page ov-all" id="ov-all"><summary class="ov-all-h"><h2>Every thread, by project</h2><span class="dim">with each pylon's node and state</span></summary>
+<div class="overview" id="overview" data-live>
 ${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
@@ -59,7 +65,7 @@ ${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summar
 ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
 </section>`;
 })}
-</div></div>`,
+</div></details></div>`,
   });
 }
 
@@ -102,23 +108,27 @@ function heldSince(registry: Registry, r: Review): number {
 
 const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}` : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
 
-/** The inbox's cards, each the card its thread's page shows where there is one, under a line that links the thread. */
+/**
+ * The inbox: a line for each thing that waits on the person, oldest first, which opens to the card its thread's page
+ * shows where there is one. The line says what it is, whose it is, why in a few words, and how long it has waited.
+ */
 function needsList(c: Context): Html {
   const needs = c.needs();
+  const fold = (n: Need, what: string, whose: Html, why: string, body: Html, track: Part = null) => html`<details class="need-fold" id="fold-${needId(n)}"><summary class="need-sum"><span class="need-what">${what}</span>${whose}<span class="need-why">${why}</span><span class="need-at">${ago(n.since, c.now)}</span></summary><div class="need-body">${track}${body}</div></details>`;
   return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
-${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
+${needs.length === 0 ? html`<p class="empty">Nothing waits on you. Held work shows here and on the board.</p>` : html`<div class="need-list">${needs.map((n) => {
   if (n.kind === "cleanup") {
     const { node } = n.question;
     return html`<article class="need need-cleanup" id="${needId(n)}" data-node="${node}" tabindex="-1" aria-label="Cleanup: ${node}">
-<div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
-${cleanupCard(c, n.question)}
+${fold(n, "Cleanup", html`<a class="need-thread" href="/nodes/${node}">${node}</a>`, "Frees space once you confirm what to delete", cleanupCard(c, n.question))}
 </article>`;
   }
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
+  const life = lifeOfThread(c, t.id);
+  const why = needWhy(n, c.now);
   return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
-${body}
+${fold(n, what, html`<a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project}</span> ${t.title}</a>`, why === "" ? life.why : why, body, miniTrack(life))}
 </article>`;
 })}</div>`}`;
 }
