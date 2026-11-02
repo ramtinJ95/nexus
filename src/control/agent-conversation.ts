@@ -11,7 +11,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 
-type AgentConversationRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "setClaudeMessage">;
+type AgentConversationRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage">;
 
 /** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
 export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };

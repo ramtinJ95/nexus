@@ -23,7 +23,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { StartRequest } from "./start-request.ts";
 
-type GateRegistry = Pick<Registry, "node" | "pylon" | "recordActivity" | "setThreadStatus" | "thread">;
+type GateRegistry = Pick<Registry, "node" | "pylon" | "recordActivity" | "sealedBoot" | "setThreadStatus" | "thread">;
 
 /** The one pylon sized over the default: Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and has passed only at 4 CPUs and 8 GiB (nexus#388). */
 const verifySize = { cpus: 4, memoryGiB: 8 };

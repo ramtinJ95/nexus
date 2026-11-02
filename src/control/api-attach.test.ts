@@ -10,7 +10,7 @@ import { processStream } from "../process-stream.ts";
 import { attachScript } from "../sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import { until } from "../test-kit.ts";
+import { runningPylon, testObservation, until } from "../test-kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
 import { node, laptop, claudeSession, withThread, observeRunning, attachTo, attachPathOf } from "./api-test-kit.ts";
@@ -75,6 +75,22 @@ test("the attach route refuses before the 101 with the API's JSON errors, and a 
 
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
   await refused(409, new RegExp(`^thread ${s.thread.id} is archived, so its pylon stays paused$`), attachTo(s.port, path));
+});
+
+test("an attach to a pylon running on the boot a settle sealed waits, opening nothing, until another boot runs", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const pipe = fakePipe();
+  s.probePipes(async () => pipe.stream);
+  observeRunning(s, {});
+  s.registry.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
+  const a = await attachTo(s.port, attachPathOf(s.thread.id, "cols=100&rows=30"));
+  assert.ok("ws" in a);
+  await sleep(200);
+  assert.deepEqual([a.received.some((m) => (m as { type: string }).type === "attached"), s.streams.length], [false, 0], "no terminal opens on the sealed boot");
+  s.registry.ingested(testObservation(node, { pylons: [runningPylon(s.thread.pylonId, { bootedAt: "2027-01-01T00:05:00Z" })] }), []);
+  await until("the attached message", () => a.received.some((m) => (m as { type: string }).type === "attached"));
+  assert.equal(s.streams.length, 1);
+  a.ws.close();
 });
 
 test("an attach wakes the pylon, waits for it, and carries keys, resizes and output until Herdr exits", async (t) => {

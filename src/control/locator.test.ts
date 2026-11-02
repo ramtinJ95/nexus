@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { registryLocator } from "./locator.ts";
+import { readableProbe, runningProbe } from "./observed.ts";
 import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { probePort } from "../protocol/routes.ts";
@@ -43,4 +44,21 @@ test("the wait for a deleted thread's pylon ends at once", async (t) => {
   const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 60_000);
   registry.setThreadStatus(threadId, "deleted");
   await assert.rejects(located, /is deleted/);
+});
+
+test("a boot a settle sealed is neither located nor handed out for work until its node reports another boot, though its usage is still read", async (t) => {
+  const registry = seeded(t);
+  const probes = new Map([[node, "probe"]]);
+  observeNode(registry, { node, capacity, pylons: [running] });
+  registry.sealBoot(pylonId, running.bootedAt);
+  registry.setThreadStatus(threadId, "active");
+  const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 60_000);
+  let found = false;
+  void located.then(() => { found = true; });
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  assert.deepEqual([found, runningProbe(registry, probes, { pylonId }), readableProbe(registry, probes, { pylonId })], [false, null, "probe"],
+    "no tool, message or launch reaches the sealed boot, and the settle's read still does");
+  observeNode(registry, { node, capacity, pylons: [runningPylon(pylonId, { bootedAt: "2027-01-01T00:05:00Z" })] });
+  assert.deepEqual(await located, { node, host: "infra-testbench.tail.ts.net", port: probePort, nodeId: "nTESTBENCH" });
+  assert.equal(runningProbe(registry, probes, { pylonId }), "probe");
 });

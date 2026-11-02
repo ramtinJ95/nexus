@@ -10,7 +10,7 @@ import type { Registry } from "../registry.ts";
 import type { StoredPylon, Thread } from "../thread-store.ts";
 import { CheckoutRefused, type RefusalKind } from "../../checkout-files.ts";
 import { HttpError } from "../http-error.ts";
-import { listsRunning } from "../observed.ts";
+import { listsRunning, runsSealed } from "../observed.ts";
 import type { Access } from "./access.ts";
 
 /** What each refusal of a checkout read answers. A missing base is a 422, not a 409, because waiting cannot change it. */
@@ -34,6 +34,8 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
       registry.recordActivity(t.id, { human: Date.now() });
       wake(pylon.node);
     } else if (!running(pylon)) throw new HttpError(409, notRunning(pylon.pylonId, false), "not-running");
+    // A sealed boot runs no work, and the wake pauses it for the next.
+    if (runsSealed(registry, pylon)) throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
     let result: T;
     try {
       result = await act(probe, pylon.pylonId);
@@ -61,7 +63,7 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
   /** Whether the node, online, reports the pylon running, as a Claude transcript's reads ask. */
   function running(pylon: StoredPylon): boolean {
     const node = registry.node(pylon.node);
-    return node?.state === "online" && listsRunning(node.observation, pylon.pylonId);
+    return node?.state === "online" && listsRunning(node.observation, pylon.pylonId, registry.sealedBoot(pylon.pylonId));
   }
 
   /** Runs `argv` in the thread's pylon as a command whose answer the API waits for, at most 15 s. */

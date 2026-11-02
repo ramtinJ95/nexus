@@ -10,7 +10,7 @@ import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { focusScript } from "../sessions.ts";
 import { checkoutDir } from "../session-harness.ts";
-import { stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { PausedSession, ServiceFact } from "../protocol/observations.ts";
 import { node, laptop, withThread, observeRunning, git, localCheckout, pngBytes } from "./api-test-kit.ts";
@@ -93,6 +93,20 @@ test("linking a port of a pylon that is not running, or of an archived or delete
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 409);
   assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
   assert.deepEqual(s.registry.previews(s.thread.pylonId), []);
+});
+
+test("a command for a pylon its node lists running on the boot a settle sealed is refused with 409 and never reaches the probe, until another boot runs", async (t) => {
+  const s = await withThread(t);
+  observeRunning(s, {});
+  s.registry.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
+  s.commands.length = 0;
+  const sealed = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
+  assert.equal(sealed.status, 409);
+  assert.match(sealed.body.error, /is not running yet. This request wakes it/);
+  assert.deepEqual(s.commands, [], "the sealed boot's probe is never asked");
+  s.registry.ingested(testObservation(node, { pylons: [runningPylon(s.thread.pylonId, { bootedAt: "2027-01-01T00:05:00Z", liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash })] }), []);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 200);
+  assert.equal(s.commands.length, 1);
 });
 
 test("unpublishing a linked port goes through the node's probe, drops its preview at once, counts as human activity, and is safe to repeat", async (t) => {

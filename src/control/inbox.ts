@@ -15,7 +15,7 @@ import { runningProbe } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 import type { ClaudeSent, Thread } from "./thread-store.ts";
 
-type InboxRegistry = Pick<Registry, "agent" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "setClaudeMessage">;
+type InboxRegistry = Pick<Registry, "agent" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage">;
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
 export interface AutomatedMessage { id: string; text: string; sender: Sender }

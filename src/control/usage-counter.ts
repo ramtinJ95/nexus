@@ -14,7 +14,7 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { EventKind } from "../events.ts";
 import { followEvents } from "./follow-events.ts";
-import { runningProbe } from "./observed.ts";
+import { readableProbe } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 
 type UsageCounterRegistry = Pick<Registry, "agent" | "eventBatch" | "newestEvent" | "node" | "pylon" | "recordUsage" | "storedThreads" | "thread" | "usageCursor" | "usageCursors">;
@@ -88,7 +88,7 @@ export function usageCounter(options: {
   async function readOn(id: ThreadId, cursors: (pylon: PylonId) => ReadonlyMap<string, FileCursor>, backfill = false) {
     const t = registry.thread(id);
     if (t === undefined || t.status === "deleted") return null;
-    const probe = runningProbe(registry, probes, t);
+    const probe = readableProbe(registry, probes, t);
     if (probe === null) return null;
     const read = await readAgentUsage((argv) => probe.stream(t.pylonId, argv), cursors(t.pylonId), logs);
     const added = registry.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })), backfill);
@@ -104,7 +104,7 @@ export function usageCounter(options: {
 
   async function sealing(id: ThreadId, seal: () => void) {
     const t = registry.thread(id);
-    const probe = t === undefined ? null : runningProbe(registry, probes, t);
+    const probe = t === undefined ? null : readableProbe(registry, probes, t);
     if (probe === null) throw new Error("its pylon is not running");
     seal();
     await sealAgentLogs((argv) => probe.stream(t!.pylonId, argv), logs);
