@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync } from "node:fs";
 import {
 	constants,
@@ -115,36 +115,36 @@ const controllerAlive = (dir: string) => published(join(dir, "controller.pid"));
 const launching = (dir: string) => published(join(dir, "launch.lock", "owner"));
 /**
  * Takes a lock directory with this process's identity already in it, so no one finds it without an owner. A rename
- * replaces only an empty directory, which is all a taker that died before publishing its identity left. False when
- * another process holds it.
+ * replaces only an empty directory, which is all a taker that died before publishing its identity left. Returns the
+ * empty directory its release renames the lock onto, made now so a release needs no new space, or null when another
+ * process holds the lock.
  */
-async function takeLock(lock: string): Promise<boolean> {
-	const aside = await mkdtemp(`${lock}-`);
+async function takeLock(lock: string): Promise<string | null> {
+	const release = await mkdtemp(`${lock}-`);
+	let aside: string | undefined;
 	try {
+		aside = await mkdtemp(`${lock}-`);
 		await publishIdentity(join(aside, "owner"));
 		await rename(aside, lock);
-		return true;
+		return release;
 	} catch (error) {
-		await rm(aside, { recursive: true, force: true });
-		if (existsError(error, "ENOTEMPTY") || existsError(error, "EEXIST")) return false;
+		await rm(release, { recursive: true, force: true });
+		if (aside !== undefined) await rm(aside, { recursive: true, force: true });
+		if (existsError(error, "ENOTEMPTY") || existsError(error, "EEXIST")) return null;
 		throw error;
 	}
 }
 /**
- * Renamed aside before it is removed, because takeLock would take the empty directory a removal in place passes
- * through. The aside path is not made first, so a full disk does not keep the lock, and if even the rename fails the
- * lock is removed in place.
+ * Renamed onto the empty directory made for it in one step, because a removal in place passes through the empty
+ * directory takeLock would take. A rename onto an existing name needs no new space, so a full disk keeps no lock.
  */
-async function releaseLock(lock: string): Promise<void> {
-	const aside = `${lock}-${randomUUID()}`;
+async function releaseLock(lock: string, release: string): Promise<void> {
 	try {
-		await rename(lock, aside);
+		await rename(lock, release);
 	} catch (error) {
-		if (existsError(error, "ENOENT")) return;
-		await rm(lock, { recursive: true, force: true });
-		return;
+		if (!existsError(error, "ENOENT")) throw error;
 	}
-	await rm(aside, { recursive: true, force: true });
+	await rm(release, { recursive: true, force: true });
 }
 /** A missing identity file means the process has not published itself yet, or is gone. */
 async function published(file: string): Promise<boolean> {
@@ -196,20 +196,19 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 			return true;
 		}
 		const lock = join(owner, "launch.lock");
-		try {
-			// A launch holds it, or one that died left it, which the next launch recovers.
-			if (!(await takeLock(lock))) return false;
-		} catch (error) {
+		const release = await takeLock(lock).catch((error: unknown) => {
 			// Its instance is gone.
-			if (existsError(error, "ENOENT")) return false;
+			if (existsError(error, "ENOENT")) return null;
 			throw error;
-		}
+		});
+		// A launch holds it, or one that died left it, which the next launch recovers.
+		if (release === null) return false;
 		try {
 			if (await controllerAlive(owner) || !(await old(path))) return false;
 			await rm(path, { recursive: true, force: true });
 			return true;
 		} finally {
-			await releaseLock(lock);
+			await releaseLock(lock, release);
 		}
 	};
 	const swept: string[] = [];
@@ -250,7 +249,8 @@ async function launch(
 			`Sandbox controller ${daemonPath} is missing`,
 		);
 	const lock = join(dir, "launch.lock");
-	if (!(await takeLock(lock))) {
+	let release = await takeLock(lock);
+	if (release === null) {
 		const recovery = join(lock, "recovery");
 		try {
 			await mkdir(recovery, { mode: 0o700 });
@@ -273,8 +273,9 @@ async function launch(
 				throw new Error(
 					"Sandbox controller is still starting. Retry inspect shortly",
 				);
-			await releaseLock(lock);
-			if (!(await takeLock(lock)))
+			await releaseLock(lock, await mkdtemp(`${lock}-`));
+			release = await takeLock(lock);
+			if (release === null)
 				throw new Error(
 					"Sandbox start is already in progress. Retry inspect shortly",
 				);
@@ -337,7 +338,7 @@ async function launch(
 			"Sandbox start has not completed. Use inspect or logs before retrying",
 		);
 	} finally {
-		await releaseLock(lock);
+		await releaseLock(lock, release);
 	}
 }
 async function create(

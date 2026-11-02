@@ -193,20 +193,34 @@ test("a launch lock that an interrupted sweep or launch left without an owner is
 	assert.equal(existsSync(join(starting.dir, "launch.lock")), false, "the launch left the lock it took");
 });
 
-test("sweeps that race over the same instances never fail to take or release a launch lock, and leave none behind", async (t) => {
-	const root = await mkdtemp(join(tmpdir(), "nxc-"));
-	t.after(() => rm(root, { recursive: true, force: true }));
-	const errors = t.mock.method(console, "error", () => {});
-	const dirs = await Promise.all(Array.from({ length: 20 }, async (_, i) => {
-		const dir = directory(root, "instances", `pylon-race${i}`);
-		await privateDirectory(dir);
-		await privateDirectory(scratchDirectory(root, dir));
-		return dir;
-	}));
-	for (let round = 0; round < 20; round++) await Promise.all(Array.from({ length: 4 }, () => sweepScratch(root)));
-	assert.deepEqual(errors.mock.calls.map((call) => call.arguments.map(String).join(" ")), []);
-	assert.deepEqual(dirs.filter((dir) => existsSync(join(dir, "launch.lock"))), []);
-});
+for (const disk of ["free", "full"] as const)
+	test(`sweeps that race over the same instances never fail to take or release a launch lock, and leave none behind, on a ${disk} disk`, async (t) => {
+		const root = await mkdtemp(join(tmpdir(), "nxc-"));
+		t.after(() => rm(root, { recursive: true, force: true }));
+		const errors = t.mock.method(console, "error", () => {});
+		if (disk === "full") {
+			const { rename } = fs;
+			// A rename onto a new name needs a new directory entry, which a full disk may refuse. Onto an existing one it does not.
+			t.mock.method(fs, "rename", (from: string, to: string) =>
+				basename(from) === "launch.lock" && !existsSync(to)
+					? Promise.reject(Object.assign(new Error(`ENOSPC: no space left on device, rename '${from}' -> '${to}'`), { code: "ENOSPC" }))
+					: rename(from, to));
+			syncBuiltinESMExports();
+			t.after(() => {
+				t.mock.restoreAll();
+				syncBuiltinESMExports();
+			});
+		}
+		const dirs = await Promise.all(Array.from({ length: 20 }, async (_, i) => {
+			const dir = directory(root, "instances", `pylon-race${i}`);
+			await privateDirectory(dir);
+			await privateDirectory(scratchDirectory(root, dir));
+			return dir;
+		}));
+		for (let round = 0; round < 20; round++) await Promise.all(Array.from({ length: 4 }, () => sweepScratch(root)));
+		assert.deepEqual(errors.mock.calls.map((call) => call.arguments.map(String).join(" ")), []);
+		assert.deepEqual(dirs.filter((dir) => existsSync(join(dir, "launch.lock"))), []);
+	});
 
 test("a launch that ends on a full disk still releases its lock, so the next launch is not refused by the probe that is still running", async (t) => {
 	const root = await mkdtemp(join(tmpdir(), "nxc-"));
@@ -218,12 +232,10 @@ test("a launch that ends on a full disk still releases its lock, so the next lau
 	await mkdir(join(dir, "status.json"));
 	const lock = join(dir, "launch.lock");
 	const full = (path: unknown) => Object.assign(new Error(`ENOSPC: no space left on device, '${String(path)}'`), { code: "ENOSPC" });
-	const { mkdtemp: original, rename } = fs;
-	let made = 0;
-	// The disk fills while the launch holds its lock: only its taking of the lock gets space.
+	const { mkdtemp: original } = fs;
+	// The disk fills while the launch holds its lock.
 	t.mock.method(fs, "mkdtemp", (prefix: string, ...rest: unknown[]) =>
-		prefix === `${lock}-` && made++ > 0 ? Promise.reject(full(prefix)) : (original as (...args: unknown[]) => Promise<string>)(prefix, ...rest));
-	t.mock.method(fs, "rename", (from: string, to: string) => (from === lock ? Promise.reject(full(to)) : rename(from, to)));
+		existsSync(lock) ? Promise.reject(full(prefix)) : (original as (...args: unknown[]) => Promise<string>)(prefix, ...rest));
 	syncBuiltinESMExports();
 	t.after(() => {
 		t.mock.restoreAll();
