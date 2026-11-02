@@ -135,6 +135,15 @@ test("a controller removes its scratch directory before its controller.pid when 
 	assert.equal(existsSync(join(unreported.dir, "controller.pid")), false);
 });
 
+test("a controller whose shutdown fails, and the report of it too, still closes and removes its scratch directory and controller.pid", async (t) => {
+	const c = await controller(t, "pylon-full");
+	c.child.kill("SIGTERM");
+	await c.exited;
+	assert.match(c.log(), /ENOSPC/);
+	assert.equal(existsSync(c.scratch), false, "a controller that could not record its failed shutdown left its scratch directory");
+	assert.equal(existsSync(join(c.dir, "controller.pid")), false);
+});
+
 test("a controller retired by a failed stop leaves the scratch directory and controller.pid of the controller launched after it", async (t) => {
 	const instance = "pylon-interrupted";
 	const c = await controller(t, instance);

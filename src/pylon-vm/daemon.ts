@@ -118,9 +118,13 @@ async function main(): Promise<void> {
 				await closeServer();
 			})
 			.catch(async (error: unknown) => {
-				await runtime.fail(error);
-				server.close();
-			});
+				try {
+					await runtime.fail(error);
+				} finally {
+					server.close();
+				}
+			})
+			.catch((error: unknown) => console.error(error));
 	};
 	process.on("SIGTERM", shutdown);
 	process.on("SIGINT", shutdown);
