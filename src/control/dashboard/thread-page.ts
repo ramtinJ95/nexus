@@ -17,12 +17,14 @@ import { tokenCount, type UsageTotals } from "../usage.ts";
 import { Html, html, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
-import { itemsOf, modelOf } from "./items.ts";
+import { itemsOf, modelOf, type Item } from "./items.ts";
 import { runOf, stateBar, composer } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
 import { usageColumns, exact } from "./usage-page.ts";
+import { lifeOfThread, type Life } from "./lifecycle.ts";
+import { lifeTrack, timeline } from "./timeline.ts";
 
 const waitTone: Record<Wait["state"], Tone> = { waiting: "idle", landed: "ok", blocked: "bad" };
 
@@ -61,6 +63,7 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = t.status === "active" || t.status === "idle";
+  const life = lifeOfThread(c, t.id);
   const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
@@ -70,12 +73,14 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
     active: t.id,
     ...(open ? { activity: t.id } : {}),
     main: html`${bar}
+<nav class="route-bar" id="life" data-live aria-label="Where this work is">${lifeTrack(life)}</nav>
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
+<div class="resizer ws-sep" role="separator" aria-orientation="vertical" aria-label="Resize the conversation and the open pane" tabindex="0" data-resize="work"></div>
 <div class="dock">
 <p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
@@ -86,7 +91,7 @@ ${t.status !== "deleted" && termView(t)}
 <div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, agent, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
 </div>`,
-    inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total, workerSession(c.registry.agent(t))),
+    inspector: inspector(c, d, items, life, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total, workerSession(c.registry.agent(t))),
   });
 }
 
@@ -132,6 +137,7 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
       q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
       q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
     ])}
+<nav class="route-bar" id="life" data-live aria-label="Where this work is">${lifeTrack(lifeOfThread(c, q.id))}</nav>
 <div class="scroll"><div class="page queued" id="queued" data-live>
 <section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
 <ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>
@@ -181,22 +187,24 @@ ${d.previews.map((p) => {
     ? html`<a class="mini mini-${look.tone}" href="${p.url}" target="_blank" rel="noopener">${p.service}${look.label !== null && `, ${look.label}`} ↗</a>`
     : html`<span class="mini mini-${look.tone}">${p.service}, ${look.label}</span>`;
 })}
+<button type="button" class="mini" data-open="inspect" data-pane="timeline">Timeline</button>
 <button type="button" class="mini" data-open="inspect" data-pane="changes">Changes</button>
 <button type="button" class="mini" data-open="inspect" data-pane="pylon">${outputs} ${outputs === 1 ? "output" : "outputs"}</button>`;
 }
 
-const panes = [["changes", "Changes", "changes"], ["previews", "Previews", "globe"], ["pylon", "Pylon", "server"]] as const;
+const panes = [["timeline", "Timeline", "timeline"], ["changes", "Changes", "changes"], ["previews", "Previews", "globe"], ["pylon", "Pylon", "server"]] as const;
 
 /**
  * The inspector's tabs are radios, so the one picked stays picked while the regions under it are swapped, and
  * shows its pane without a script. The Changes pane is filled by client.js, so it is outside every live region.
  */
-function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
+function inspector(c: Context, d: ThreadDetail, items: readonly Item[], life: Life, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
   // The Previews tab counts what its pane lists: the previews and the ports without one.
   const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
   return html`<aside class="inspect" aria-label="Thread details">
 <button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
-<div class="seg-bar" role="radiogroup" aria-label="Inspector">${panes.map(([pane, label, glyph]) => html`<label class="seg-tab"><input type="radio" name="pane" value="${pane}"${pane === "changes" && " checked"}>${icon(glyph)}<span class="seg-label">${label}</span>${pane === "previews" && html`<span class="count" id="count-previews" data-live>${listed}</span>`}</label>`)}</div>
+<div class="seg-bar" role="radiogroup" aria-label="Inspector">${panes.map(([pane, label, glyph]) => html`<label class="seg-tab"><input type="radio" name="pane" value="${pane}"${pane === "timeline" && " checked"}>${icon(glyph)}<span class="seg-label">${label}</span>${pane === "previews" && html`<span class="count" id="count-previews" data-live>${listed}</span>`}</label>`)}</div>
+<section class="ipane" id="pane-timeline" aria-labelledby="timeline-h"><h2 id="timeline-h" class="vh">Timeline</h2><div id="timeline" data-live>${timeline(c, d, items, life)}</div></section>
 <section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${d.thread.id}">
 <h2 id="changes-h" class="vh">Changes</h2>
 <div class="ch-head"><label class="switch"><input type="checkbox" id="changes-head"><span class="switch-label">Only uncommitted</span></label><label class="switch"><input type="checkbox" id="changes-turn"><span class="switch-label">Latest turn</span></label><button type="button" class="icon-btn" id="changes-reload" aria-label="Read the changes again" title="Read the changes again">↻</button></div>

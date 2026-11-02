@@ -139,7 +139,7 @@ test("the overview's quiet fold counts its threads, lists them in its own table,
   assert.doesNotMatch(overview.text, /No open threads/, "the project does not claim it has no open threads");
   assert.equal(overview.summary, "2 quiet for over 8 hours");
   assert.equal(overview.tag, '<details class="ov-closed" id="quiet-acme">', "the fold starts closed");
-  assert.match(overview.text, /2 quiet for over 8 hours Thread Desired Observed Node Human Agent (Old spike|Older spike) .* (Old spike|Older spike) /);
+  assert.match(overview.text, /2 quiet for over 8 hours Thread Planned Queued Building In review Landing Deployed Phase Pylon (Old spike|Older spike) .* (Old spike|Older spike) /);
   assert.deepEqual(overview.folded, ["Old spike", "Older spike"]);
 });
 

@@ -12,10 +12,11 @@ import { agoText, clock } from "./elapsed.ts";
 export interface Page { status: number; headers: Record<string, string>; body: string }
 
 /**
- * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
- * that refuses the page its storage throws on reading it, and the device's theme stands.
+ * Sets the stored theme, or the device's light or dark, and the pane widths the reader dragged, before the first
+ * paint, as theme.js and panes.js do after it. A browser that refuses the page its storage throws on reading it, and
+ * the device's theme and the default widths stand.
  */
-export const themeScript = `{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
+export const themeScript = `{ const root = document.documentElement; let theme = null; try { theme = localStorage.getItem("nexus.theme"); const widths = JSON.parse(localStorage.getItem("nexus.panes") ?? "{}"); for (const pane of ["side", "inspect", "work"]) if (Number.isFinite(widths?.[pane])) root.style.setProperty("--" + pane + "-w", widths[pane] + "px"); } catch {} root.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
@@ -44,7 +45,12 @@ export function html(strings: TemplateStringsArray, ...parts: Part[]): Html {
 }
 
 /** The colour of a status dot. `work` is an agent mid-turn, `busy` a pylon changing phase, `reply` a reply the person has not read. */
-export type Tone = "ok" | "work" | "reply" | "busy" | "idle" | "bad" | "muted";
+export type Tone = "ok" | "work" | "reply" | "busy" | "idle" | "held" | "bad" | "muted";
+/**
+ * The console's colour for each attention: red only for a failure, amber for anything else held for the person, as a
+ * cockpit sets caution apart from a warning.
+ */
+const attentionTone: Record<NonNullable<ThreadRow["attention"]>, Tone> = { failed: "bad", decision: "held", parked: "held", limited: "held", waiting: "held", reply: "reply", working: "work" };
 export const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   running: ["running", "ok"], spawning: ["spawning", "busy"], pausing: ["pausing", "busy"], deleting: ["deleting", "busy"],
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],
@@ -78,6 +84,7 @@ const iconPaths = {
   check: "M3.5 8.5l3 3 6-7",
   cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   dash: "M5 8h6",
+  timeline: "M4.5 2.5v11M3.3 4.5a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M3.3 11.5a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M7.5 4.5h6M7.5 8h4.5M7.5 11.5h5.5",
   inbox: "M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z",
 } as const;
 type IconName = keyof typeof iconPaths;
@@ -95,9 +102,9 @@ export const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLi
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
 export function threadState(t: ThreadRow, now: number): [label: string, tone: Tone] {
   const { attention, pylon } = t;
-  if (attention === "limited") return [limitText(t, now), attentions.limited.tone];
-  if (attention === "waiting") return [t.sessionWaitingMessage ?? attentions.waiting.label, attentions.waiting.tone];
-  if (attention !== null) return [attentions[attention].label, attentions[attention].tone];
+  if (attention === "limited") return [limitText(t, now), attentionTone.limited];
+  if (attention === "waiting") return [t.sessionWaitingMessage ?? attentions.waiting.label, attentionTone.waiting];
+  if (attention !== null) return [attentions[attention].label, attentionTone[attention]];
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
   return actualBadge[pylon.actualState];
 }

@@ -171,10 +171,10 @@ test("the overview lists each project's open threads with their phases, node and
   const [acme, beta] = ["project-acme", "project-beta"].map((id) => sectionOf(res.text, id));
   assert.ok(acme!.includes(fix.id) && !acme!.includes(docs.id), "each thread is listed under its own project");
   assert.ok(beta!.includes(docs.id));
-  assert.equal(overviewRow(res.text, fix), "Fix checkout running running rj-firebat just now never");
-  assert.match(overviewRow(res.text, docs), /^Write docs running not on its node rj-firebat just now working 1m 03s$/);
-  assert.match(beta!, new RegExp(`<td class="wide">working <time data-since="${started}">1m 03s</time></td>`), "the client ticks the turn's clock from its start");
-  assert.match(textOf(acme!), /Thread Desired Observed Node Human Agent Fix checkout .* 1 archived Thread .* Old spike archived paused not on its node/);
+  assert.equal(overviewRow(res.text, fix), "Fix checkout never no pull request yet running on rj-firebat");
+  assert.match(overviewRow(res.text, docs), /^Write docs working 1m 03s its agent is working, with no pull request yet not on its node on rj-firebat , asked to be running$/);
+  assert.match(beta!, new RegExp(`<span class="rg-at">working <time data-since="${started}">1m 03s</time></span>`), "the client ticks the turn's clock from its start");
+  assert.match(textOf(acme!), /Thread Planned Queued Building In review Landing Deployed Phase Pylon Fix checkout .* 1 archived Thread .* Old spike archived .* not on its node on rj-firebat , asked to be paused/);
   assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
 });
 
@@ -728,7 +728,7 @@ test("rows of threads that need the person stay bright, and the rest dim unless 
   const bright = { [failed!.id]: false, [parked!.id]: false, [reply!.id]: false, [waiting!.id]: false, [working!.id]: true, [idle!.id]: true };
 
   const home = (await s.call("GET", "/")).text;
-  assert.deepEqual(dimmed(home.split('id="overview"')[1]!, /<tr( class="dim")?>\s*<td><span class="ov-title">.*?href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
+  assert.deepEqual(dimmed(home.split('id="overview"')[1]!, /<tr( class="dim")?>\s*<td class="rg-work"><span class="ov-title">.*?href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
   assert.deepEqual(dimmed(home.split('id="side-threads"')[1]!, /<a class="row( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
   const page = (await s.call("GET", `/threads/${open!.id}`)).text;
   assert.deepEqual(dimmed(page.split('id="side-threads"')[1]!, /<a class="row(?: active)?( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: false }, "the open thread's row stays bright");
@@ -743,7 +743,7 @@ test("a new thread whose node does not have its pylon yet reads as absent, not d
   assert.equal(JSON.parse(detail.text).pylon.actualState, "absent");
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.match(textOf(sectionOf(page, "pylon-h")), /Observed not on its node Node rj-firebat Last seen just now/);
-  assert.equal(overviewRow((await s.call("GET", "/")).text, fix), "Fix checkout running not on its node rj-firebat just now never");
+  assert.equal(overviewRow((await s.call("GET", "/")).text, fix), "Fix checkout never no pull request yet not on its node on rj-firebat , asked to be running");
 });
 
 test("a paused thread's unread reply has a dot of its own, so it never looks like a running pylon", async (t) => {
@@ -800,7 +800,7 @@ test("an offline node shows its pylons as unknown, and the last observation as s
   s.registry.markOffline(node);
 
   const list = (await s.call("GET", "/")).text;
-  assert.equal(overviewRow(list, fix), "Fix checkout running unknown rj-firebat offline just now never");
+  assert.equal(overviewRow(list, fix), "Fix checkout never no pull request yet unknown on rj-firebat , asked to be running , offline");
   assert.match(textOf(list.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat offline/);
   const pylon = textOf(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "pylon-h"));
   assert.match(pylon, /Observed unknown Node rj-firebat offline Last seen just now \(stale\)/);
@@ -910,7 +910,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.equal(textOf(outputs), "Outputs 3 PR watch: off (no control-plane GitHub token configured). branch nexus/fix-checkout diff abc1234 file out-1", "web's preview is listed once, under Previews");
 
   const strip = textOf(res.text.split('id="strip"')[1]!.split("</div>")[0]!.replace(/^[^>]*>/, ""));
-  assert.equal(strip, "running · rj-firebat api, starting web ↗ Changes 3 outputs", "the phone's strip names the pylon, each preview, the changes and the outputs");
+  assert.equal(strip, "running · rj-firebat api, starting web ↗ Timeline Changes 3 outputs", "the phone's strip names the pylon, each preview, the timeline, the changes and the outputs");
 
 
   assert.match(res.text, new RegExp(`<main[^>]* data-activity="${fix.id}"`), "an open thread page records the visit as human activity");
@@ -925,7 +925,7 @@ test("the inspector's tabs pick the changes, the previews or the pylon, and the 
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
-  assert.deepEqual([...page.matchAll(/<input type="radio" name="pane" value="([a-z]+)"( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["changes", true], ["previews", false], ["pylon", false]], "the changes are picked first");
+  assert.deepEqual([...page.matchAll(/<input type="radio" name="pane" value="([a-z]+)"( checked)?>/g)].map((m) => [m[1], m[2] !== undefined]), [["timeline", true], ["changes", false], ["previews", false], ["pylon", false]], "the timeline is picked first");
   const regions = page.split('<div class="pane-live" id="inspect" data-live>')[1]!.split("</aside>")[0]!;
   assert.ok(regions.includes('id="pane-previews"') && regions.includes('id="pane-pylon"'), "the previews and the pylon refresh with the page");
   assert.match(page, /id="changes-turn"><span class="switch-label">Latest turn<\/span>/);
@@ -1004,15 +1004,15 @@ test("a published preview whose service is starting shows starting and one whose
     return { previews: textOf(section), strip, linked: section.includes(`href="${url}"`) };
   };
   s.observeWith({ services: [web("ready")], listening: [8003] }, fix);
-  assert.deepEqual(await page(), { previews: "Previews 1 web Open ↗ rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web ↗ Changes 0 outputs", linked: true });
+  assert.deepEqual(await page(), { previews: "Previews 1 web Open ↗ rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web ↗ Timeline Changes 0 outputs", linked: true });
 
   s.observeWith({ services: [web("starting")] }, fix);
-  assert.deepEqual(await page(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web, starting Changes 0 outputs", linked: false }, "its URL answers 502 until the service is ready");
+  assert.deepEqual(await page(), { previews: "Previews 1 web starting rj-firebat.tail.ts.net:8443", strip: "running · rj-firebat web, starting Timeline Changes 0 outputs", linked: false }, "its URL answers 502 until the service is ready");
 
   s.observeWith({ services: [web("failed")] }, fix);
   assert.deepEqual(await page(), {
     previews: "Previews 1 web failed rj-firebat.tail.ts.net:8443 the service web failed. `nexus service logs web` in the pylon shows why",
-    strip: "running · rj-firebat web, failed Changes 0 outputs",
+    strip: "running · rj-firebat web, failed Timeline Changes 0 outputs",
     linked: false,
   }, "the gateway can only answer 502 for it");
 });
@@ -1510,7 +1510,7 @@ test("with no projects, the overview, the sidebar and the start dialog each offe
   const s = await setup(t);
   const page = (await s.call("GET", "/")).text;
   const offers = (html: string) => [...html.matchAll(/<a class="[^"]*" href="\/projects\/new" data-new-project>([^<]*)<\/a>/g)].map((m) => m[1]);
-  const overview = page.split('id="overview"')[1]!.split("</main>")[0]!;
+  const overview = page.split('id="overview"')[1]!.split('<aside class="fleet"')[0]!;
   assert.match(textOf(overview.replace(/^[^>]*>/, "")), /^No projects yet\. A project names the repository its threads clone and the node they run on\. New project$/);
   assert.deepEqual(offers(overview), ["New project"]);
   assert.deepEqual(offers(page.split('<header class="bar">')[1]!.split("</header>")[0]!), ["New project"], "the overview's bar offers one");
@@ -1812,7 +1812,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
   assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
     "the turn is timed from when control heard it start, and Interrupt stops it");
   const since = s.registry.thread(thread.id)!.workingSince;
-  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
+  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 4, "the run bar, the sidebar row, the inspector and the timeline tick the same clock");
   assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's pane");
   assert.match(html, /placeholder="Steer the run…"/);
   assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
@@ -1897,7 +1897,7 @@ test("pages link their assets by hash, and a hashed asset is cached for good", a
     assert.ok(versioned.text.length > 0);
     assert.equal((await s.call("GET", `/assets/${file}?v=stale`)).headers["cache-control"], "no-cache");
   }
-  for (const file of ["b612-400.woff2", "b612-700.woff2", "b612-mono-400.woff2"]) {
+  for (const file of ["b612-400.woff2", "b612-700.woff2", "red-hat-mono-400.woff2"]) {
     const font = await s.call("GET", `/assets/${file}`);
     assert.deepEqual([font.status, font.headers["content-type"]], [200, "font/woff2"], `the stylesheet's face ${file} is served as a font`);
   }
@@ -2041,7 +2041,7 @@ test("a queued and a blocked thread show in the sidebar and the overview as queu
   assert.ok(rows.includes("queued Next step queued"), rows.join(" | "));
   assert.ok(rows.includes("blocked Stuck step blocked"), rows.join(" | "));
   assert.doesNotMatch(home, new RegExp(`class="row dim" href="/threads/${stuck.id}"`), "a blocked row is never dimmed");
-  assert.match(textOf(sectionOf(home, "project-acme")), new RegExp(`Queued Thread Waits for Node Next step queued Fix checkout: PR #3 is open ${node} Stuck step blocked Spike: is archived and its pull request did not merge auto`));
+  assert.match(textOf(sectionOf(home, "project-acme")), new RegExp(`Queued Thread Phase Waits for Next step queued Fix checkout: PR #3 is open on ${node} Stuck step blocked Spike: is archived and its pull request did not merge on auto`));
 
   const page = await s.call("GET", `/threads/${stuck.id}`);
   assert.equal(page.status, 200);
@@ -2341,7 +2341,7 @@ test("the pipeline page lists each project's items with the phase their records 
   const page = (await s.call("GET", "/pipeline")).text;
   assert.match(page, /<a class="side-link active" href="\/pipeline" aria-current="page">/);
   const section = sectionOf(page, "pipeline-acme");
-  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Phase After Thread/);
+  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Planned Queued Building In review Landing Deployed Phase After Thread/);
   const row = (id: string) => textOf(section.split(`<tr data-item="${id}"`)[1]!.split("</tr>")[0]!.replace(/^[^>]*>/, ""));
   assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ nothing Greet by name$`));
   assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} Greet by name none yet Approve Cancel`);

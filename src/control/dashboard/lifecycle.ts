@@ -132,9 +132,20 @@ export function stepStates(life: Life): Record<Step, StepState> {
     : life.stage === "held" ? "held" : life.stage === null ? "done" : "now"])) as Record<Step, StepState>;
 }
 
-/** A card's small track: one segment per step, said once in words for a screen reader. */
-export function miniTrack(life: Life): Html {
-  const states = stepStates(life);
-  const said = life.stage === "held" ? `held for you at ${stageLabel[life.at].toLowerCase()}` : life.stage === null ? `ended at ${stageLabel[life.at].toLowerCase()}` : `at ${stageLabel[life.at].toLowerCase()}`;
-  return html`<span class="trk" role="img" aria-label="${said}">${steps.map((step) => html`<i class="trk-${states[step]}"></i>`)}</span>`;
+/** What a route says to a screen reader, which sees no marks. */
+export function routeSaid(life: Life): string {
+  const at = stageLabel[life.at].toLowerCase();
+  return life.stage === "held" ? `Held for you at ${at}` : life.stage === null ? `Ended at ${at}` : life.stage === "deployed" ? "Deployed" : `At ${at}`;
 }
+
+/**
+ * A piece of work's route: one waypoint per step, passed, current, held or ahead, joined by the legs between them. Every
+ * route has the same six waypoints, so routes stacked in a register line up and the phase reads as a position.
+ */
+export function route(life: Life): Html {
+  const states = stepStates(life);
+  return html`<span class="route" role="img" aria-label="${routeSaid(life)}">${steps.map((step) => html`<i class="wp wp-${states[step]}"></i>`)}</span>`;
+}
+
+/** The waypoints' names, set over a register's routes in the same columns. */
+export const routeHead = html`<span class="route route-head" aria-hidden="true">${steps.map((step) => html`<span>${stageLabel[step]}</span>`)}</span>`;

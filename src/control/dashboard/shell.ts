@@ -57,10 +57,11 @@ export function layout(c: Context, page: Shell): Html {
 <body>
 <div class="app${page.inspector !== undefined && " has-inspect"}">
 ${sidebar(c, page.active, page.nav)}
+<div class="resizer side-sep" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" tabindex="0" data-resize="side"></div>
 <main class="main" data-poll-ms="${pollMs}"${page.activity !== undefined && html` data-activity="${page.activity}"`}>
 ${page.main}
 </main>
-${page.inspector}
+${page.inspector !== undefined && html`<div class="resizer inspect-sep" role="separator" aria-orientation="vertical" aria-label="Resize the inspector" tabindex="0" data-resize="inspect"></div>`}${page.inspector}
 </div>
 <p id="refresh-state" class="refresh-state" role="status"></p>
 <div class="scrim" data-close aria-hidden="true"></div>

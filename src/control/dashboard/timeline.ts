@@ -43,16 +43,16 @@ function turnsOf(items: readonly Item[]): Turn[] {
 function step(id: Step | "archived", label: string, state: StepState, when: Part, body: Part, tone?: Tone): Html {
   return html`<li class="tl-step tl-${state}" id="tl-${id}" data-step="${id}"${tone !== undefined && html` data-tone="${tone}"`}>
 <div class="tl-mark" aria-hidden="true">${state === "done" ? icon("check") : state === "held" ? "!" : ""}</div>
-<div class="tl-body"><h3 class="tl-h"><span>${label}</span><span class="tl-state">${stateWord[state]}</span>${when !== null && when !== false && html`<span class="tl-when">${when}</span>`}</h3>
+<div class="tl-body"><h3 class="tl-h"><span>${label}</span>${stateWord[state] !== "" && html`<span class="tl-state">${stateWord[state]}</span>`}${when !== null && when !== false && html`<span class="tl-when">${when}</span>`}</h3>
 ${body}</div>
 </li>`;
 }
-const stateWord: Record<StepState, string> = { done: "done", now: "now", held: "held for you", todo: "ahead", skipped: "not reached" };
+const stateWord: Record<StepState, string> = { done: "", now: "now", held: "held for you", todo: "", skipped: "not reached" };
 
 function turnsList(turns: readonly Turn[], now: number): Html {
   const row = (t: Turn, i: number) => html`<li class="tl-turn${t.queued && " queued"}"><span class="tl-n">${i + 1}</span><div class="tl-turn-b">
 <p class="tl-ask"><b>${t.from}</b>${t.at > 0 && html` <span class="dim">${ago(t.at, now)}</span>`}${t.queued && html` <span class="tag">queued</span>`}<span class="tl-quote">${t.text || "(no text)"}</span></p>
-${(t.tools > 0 || t.took !== null || t.running) && html`<p class="tl-tools">${t.tools > 0 && `${t.tools} ${t.tools === 1 ? "tool call" : "tool calls"}`}${t.failed > 0 && html` · <span class="del">${t.failed} failed</span>`}${t.took !== null && ` · worked for ${t.took}`}${t.running && html` · <span class="s-run"><span class="spin" aria-hidden="true"></span>running</span>`}</p>`}
+${(t.tools > 0 || t.took !== null || t.running) && html`<p class="tl-tools">${[t.tools > 0 && `${t.tools} ${t.tools === 1 ? "tool call" : "tool calls"}`, t.failed > 0 && html`<span class="del">${t.failed} failed</span>`, t.took !== null && `worked for ${t.took}`].filter((x) => x !== false).map((x, i) => html`${i > 0 && ", "}${x}`)}${t.running && html` <span class="s-run"><span class="spin" aria-hidden="true"></span>running</span>`}</p>`}
 ${t.reply !== null && html`<p class="tl-reply">${t.reply}</p>`}
 </div></li>`;
   if (turns.length === 0) return html`<p class="empty">No turns yet.</p>`;
@@ -68,10 +68,10 @@ function roundView(r: Review, round: Round, i: number, last: boolean): Html {
   const findings = findingsOf(round);
   const verdict = round.carried !== undefined ? "approval carried over" : round.verdict === null ? (last ? "the reviewer is reading it" : "no verdict") : round.verdict.verdict === "approve" ? "approved" : "changes asked";
   const tone: Tone = round.verdict === null ? "work" : round.verdict.verdict === "approve" ? "ok" : "bad";
-  return html`<li class="tl-round"><p class="tl-round-h">${dot(tone)}<b>Round ${i + 1}</b> at ${short(round.head)}<span class="tl-verdict tl-${tone}">${verdict}</span>${round.check !== null && html`<span class="tag ${round.check.passed ? "tag-ok" : "tag-bad"}">check ${round.check.passed ? "passed" : "failed"}</span>`}${round.live?.kind === "ran" && html`<span class="tag ${round.live.passed ? "tag-ok" : "tag-bad"}">live ${round.live.passed ? "passed" : "failed"}</span>`}</p>
+  return html`<li class="tl-round"><p class="tl-round-h">${dot(tone)}<b>Round ${i + 1}</b> at ${short(round.head)}<span class="tl-verdict tl-${tone}">${verdict}</span>${round.check !== null && html`<span class="tl-check tl-${round.check.passed ? "ok" : "bad"}">check ${round.check.passed ? "passed" : "failed"}</span>`}${round.live?.kind === "ran" && html`<span class="tl-check tl-${round.live.passed ? "ok" : "bad"}">live ${round.live.passed ? "passed" : "failed"}</span>`}</p>
 ${findings.length > 0 && html`<ul class="tl-findings">${findings.map((f) => {
   const answer = (round.answers ?? []).find((a) => a.id === f.id) ?? r.rounds.slice(i + 1).flatMap((rd) => rd.answers ?? []).find((a) => a.id === f.id);
-  return html`<li><span class="tag ${priorityTone(f.priority)}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`} ${f.summary}${answer !== undefined ? html`<span class="tl-answer tl-${answer.action}">${answer.action}${answer.reason !== "" && html`: ${answer.reason}`}</span>` : blocks(f) && html`<span class="tl-answer tl-open">open</span>`}</li>`;
+  return html`<li><span class="tl-pri ${priorityTone(f.priority)}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`} ${f.summary}${answer !== undefined ? html`<span class="tl-answer tl-${answer.action}">${answer.action}${answer.reason !== "" && html`: ${answer.reason}`}</span>` : blocks(f) && html`<span class="tl-answer tl-open">open</span>`}</li>`;
 })}</ul>`}
 </li>`;
 }
@@ -114,7 +114,7 @@ export function timeline(c: Context, d: ThreadDetail, items: readonly Item[], li
 
   const body: Record<Step, Part> = {
     planned: html`${brief.text === null ? html`<p class="empty">It started without a brief.</p>` : html`<div class="tl-brief">${prose(brief.text)}</div>`}
-<p class="tl-meta">${brief.item !== null && html`Item <a class="link" href="/pipeline#item-${brief.item}"><code>${brief.item}</code></a> on the pipeline · `}Started by ${t.startedBy} · ${agent.kind === "claude" ? `Claude Code${agent.worker.model !== null ? `, ${agent.worker.model}` : ""}` : agent.kind === "harness" ? "Nexus agent" : "no agent"}${d.planning && " · planning thread"}</p>
+<p class="tl-meta">Started by ${t.startedBy}, for ${agent.kind === "claude" ? `Claude Code${agent.worker.model !== null ? ` on ${agent.worker.model}` : ""}` : agent.kind === "harness" ? "the Nexus agent" : "no agent"}${d.planning && ", as a planning thread"}.${brief.item !== null && html` Item <a class="link" href="/pipeline#item-${brief.item}">${brief.item}</a> on the pipeline.`}</p>
 ${heldAt("planned")}`,
     queued: html`<p class="tl-meta">${queued === undefined ? "Started at once, with nothing ahead of it in the queue." : html`Queued after ${queued.after.length === 0 ? "nothing" : queued.after.map((id, i) => html`${i > 0 && ", "}<a class="link" href="/threads/${id}">${c.registry.thread(id)?.title ?? id}</a>`)}.`} Its pylon runs on <a class="link" href="/nodes/${encodeURIComponent(d.pylon.node)}">${d.pylon.node}</a> with ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk.</p>${heldAt("queued")}`,
     building: html`${turnsList(turns, c.now)}
@@ -123,11 +123,10 @@ ${t.usageLimit !== undefined && html`<p class="tl-event tl-bad">${dot("bad")}<sp
 ${d.pylon.failed !== null && html`<p class="tl-event tl-bad">${dot("bad")}<span>Its pylon failed: ${d.pylon.failed.split("\n")[0]}</span></p>`}
 ${judgments.map((j) => html`<p class="tl-event">${dot(j.verdict === null ? "work" : "bad")}<span>Judged a failure on ${j.node} ${ago(j.startedAt, c.now)}: ${j.verdict === null ? "no answer yet" : html`<b>${j.verdict.answer}</b>, ${j.verdict.why}`}</span></p>`)}
 ${asked.map((q) => html`<p class="tl-event">${dot(q.answer === null ? "bad" : "ok")}<span class="tl-quote">Asked ${ago(q.askedAt, c.now)}: ${firstLine(q.text || (q.ask?.questions[0]?.question ?? ""))}${q.answer !== null && html` Answered <b>${q.answer.option}</b> ${ago(q.answer.at, c.now)}.`}</span></p>`)}
-${outputs.length > 0 && html`<p class="tl-meta">${outputs.map((o, i) => html`${i > 0 && " · "}${o.kind} <code>${o.ref}</code>`)}</p>`}
-<p class="tl-go"><button type="button" class="btn btn-xs" data-tab-go="convo">${icon("chat")}Open the conversation</button></p>
+${outputs.length > 0 && html`<p class="tl-meta">${outputs.map((o, i) => html`${i > 0 && ", "}${o.kind} <code>${o.ref}</code>`)}</p>`}
 ${heldAt("building")}`,
-    review: html`${d.pullRequests.length === 0 && r === null ? html`<p class="empty">No pull request yet.</p>` : html`<ul class="tl-prs">${d.pullRequests.map((pr) => html`<li><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title} ↗</a> <span class="tag">${pr.state}</span> <span class="dim">checks ${pr.checks}${pr.review !== "" && ` · ${pr.review}`}</span></li>`)}</ul>`}
-${r !== null && html`<p class="tl-meta">Reviewed by <a class="link" href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind}) · round ${roundsSpent(r)} of ${r.maxRounds}${r.land !== null && " · lands once approved"} · ${r.phase.kind.replace("-", " ")}${phaseNote(r)}</p>
+    review: html`${d.pullRequests.length === 0 && r === null ? html`<p class="empty">No pull request yet.</p>` : html`<ul class="tl-prs">${d.pullRequests.map((pr) => html`<li><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title}</a> <span class="dim">is ${pr.state}, checks ${pr.checks}${pr.review !== "" && `, ${pr.review}`}</span></li>`)}</ul>`}
+${r !== null && html`<p class="tl-meta">Round ${roundsSpent(r)} of ${r.maxRounds}, ${r.phase.kind.replace("-", " ")}${phaseNote(r)}. Reviewed by <a class="link" href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})${r.land !== null && ", and lands once approved"}.</p>
 ${r.rounds.length > 0 && html`<ol class="tl-rounds">${r.rounds.map((round, i) => roundView(r, round, i, i === r.rounds.length - 1))}</ol>`}`}
 ${heldAt("review")}`,
     landing: html`${r === null ? html`<p class="empty">It lands once its review approves it.</p>` : landingView(c, r) || html`<p class="empty">${r.land === null ? "It lands once you press Land." : "It lands once its review approves it."}</p>`}
@@ -148,8 +147,11 @@ ${closed && step("archived", t.status === "archived" ? "Archived" : "Deleted", "
 </ol>`;
 }
 
-/** The thread page's track over its tabs: each step's name and state, a link to its place in the timeline. */
+/**
+ * The thread page's route across its head: each waypoint's name, the one it is at marked, held or not, each a link to
+ * its step in the timeline, which the inspector's first pane shows.
+ */
 export function lifeTrack(life: Life): Html {
   const states = stepStates(life);
-  return html`<ol class="life" aria-label="Where this work is">${steps.map((s) => html`<li class="life-${states[s]}"${(states[s] === "now" || states[s] === "held") && html` aria-current="step"`}><a href="#tl-${s}" data-tab-go="timeline"><span class="life-dot" aria-hidden="true"></span><span class="life-name">${stageLabel[s]}</span>${states[s] === "held" && html`<span class="life-tag">held for you</span>`}</a></li>`)}</ol>`;
+  return html`<ol class="life">${steps.map((s) => html`<li class="life-${states[s]}"${(states[s] === "now" || states[s] === "held") && html` aria-current="step"`}><a href="#tl-${s}" data-open="inspect" data-pane="timeline"><span class="life-mark" aria-hidden="true"></span><span class="life-name">${stageLabel[s]}</span>${states[s] === "held" && html`<span class="life-tag">held for you</span>`}</a></li>`)}</ol>`;
 }

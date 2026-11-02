@@ -9,7 +9,7 @@ if (!existsSync(new URL("client.js", bundle))) throw new Error("The dashboard cl
  * The stylesheet, icon and fonts as they are in src, and the client as src/control/dashboard/build.ts bundled it. A
  * font is bytes, and the rest text.
  */
-export const fonts = ["b612-400.woff2", "b612-700.woff2", "b612-mono-400.woff2"];
+export const fonts = ["b612-400.woff2", "b612-700.woff2", "red-hat-mono-400.woff2"];
 export const assets = new Map([
   ...["style.css", "favicon.svg", ...fonts].map((file) => [file, new URL(`./${file}`, import.meta.url)] as const),
   ...readdirSync(bundle).map((file) => [file, new URL(file, bundle)] as const),

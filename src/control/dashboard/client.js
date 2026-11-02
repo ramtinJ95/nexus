@@ -29,6 +29,10 @@ const writeTo = () => { if (location.hash === "#write") document.getElementById(
 writeTo();
 addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
+// The routes ink out once per visit, not again on each poll's swap.
+setTimeout(() => { document.documentElement.dataset.settled = ""; }, 1500);
+// Dragging the panes waits until the page is up.
+void import("./panes.js");
 // A node's graphs bring uPlot, which no other page needs.
 if (document.getElementById("node-graphs") !== null) void import("./node-graphs.js");
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
@@ -64,6 +68,9 @@ async function showNeed() {
   const card = find() ?? document.getElementById("needs-you");
   for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
   card?.classList.add("picked");
+  // Opened as the reader's own toggle is, so a poll's swap keeps it open.
+  const fold = card?.querySelector(".need-fold");
+  if (fold) toggled.set(fold.id, fold.open = true);
   card?.scrollIntoView({ block: "start" });
   card?.focus({ preventScroll: true });
 }

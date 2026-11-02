@@ -4,9 +4,10 @@ import { itemView, type ItemPhase, type PipelineItem } from "../pipeline.ts";
 import { Html, html, dot, state, menu, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { layout, threadTitle } from "./shell.ts";
+import { lifeOfItem, route, routeHead } from "./lifecycle.ts";
 
 export const phaseTone: Record<ItemPhase["kind"], Tone> = {
-  planned: "idle", queued: "idle", building: "work", reviewing: "work", landing: "busy", landed: "ok", held: "bad", archived: "muted", cancelled: "muted",
+  planned: "idle", queued: "idle", building: "work", reviewing: "work", landing: "busy", landed: "ok", held: "held", archived: "muted", cancelled: "muted",
 };
 const pipelineSetting = (p: Project) => p.pipeline == null ? "The pipeline is off for this project, so its items stay planned."
   : p.pipeline.autoStart ? "Each item becomes a queued thread on its own once the items it is after are queued." : "Each item waits for the person to approve it before it becomes a queued thread.";
@@ -29,10 +30,11 @@ ${projects.length === 0 ? html`<p class="empty">No project runs the pipeline. <c
   const own = items.filter((i) => i.project === p.id);
   return html`<section aria-labelledby="pipeline-${p.id}">
 <div class="ov-head"><h2 id="pipeline-${p.id}">${p.id}</h2><span class="dim">${pipelineSetting(p)}</span></div>
-${own.length === 0 ? html`<p class="empty">No items. <code>nexus item add --project ${p.id}</code> lines one up.</p>` : html`<table class="ov ov-items">
-<thead><tr><th>Item</th><th>Phase</th><th class="wide">After</th><th class="wide">Thread</th><th class="ov-act"></th></tr></thead>
+${own.length === 0 ? html`<p class="empty">No items. <code>nexus item add --project ${p.id}</code> lines one up.</p>` : html`<table class="ov rg ov-items">
+<thead><tr><th>Item</th><th class="rg-route">${routeHead}</th><th>Phase</th><th class="wide">After</th><th class="wide">Thread</th><th class="ov-act"></th></tr></thead>
 <tbody>${own.map((i) => html`<tr data-item="${i.id}" data-phase="${i.phase.kind}">
 <td><span class="ov-title">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></span><code class="dim">${i.id}</code></td>
+<td class="rg-route">${route(lifeOfItem(c, i))}</td>
 <td>${state(i.phase.kind, phaseTone[i.phase.kind])}<span class="ov-why">${i.phase.why}</span></td>
 <td class="wide">${i.after.length === 0 ? html`<span class="dim">nothing</span>` : i.after.map((id) => html`<span class="ov-wait">${title(id)}</span>`)}</td>
 <td class="wide">${i.thread === null ? html`<span class="dim">none yet</span>` : html`<a class="link" href="/threads/${i.thread}">${threadTitle(c, i.thread)}</a>`}</td>
