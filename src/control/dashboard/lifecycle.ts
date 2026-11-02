@@ -1,5 +1,5 @@
 /**
- * The life of a piece of work, as the board's columns and a thread's timeline show it. Nothing here is stored: each
+ * The life of a piece of work, as the home page's phases and a thread's timeline show it. Nothing here is stored: each
  * card's place is read from what the registry already says, the pipeline's phase of an item or a thread, its review
  * and what waits on the person.
  */
@@ -15,7 +15,7 @@ export const steps = ["planned", "queued", "building", "review", "landing", "dep
 export type Step = typeof steps[number];
 export type Stage = Step | "held";
 
-/** Each column of the board, in the order work moves through them, with the tone of its marker. */
+/** Each phase of the work in flight, in the order work moves through them, with the tone of its marker. */
 export const stages: readonly { stage: Stage; label: string; tone: Tone; means: string }[] = [
   { stage: "planned", label: "Planned", tone: "idle", means: "Items lined up, not queued yet" },
   { stage: "queued", label: "Queued", tone: "idle", means: "Threads that start once the work they wait on merges" },
@@ -28,7 +28,7 @@ export const stages: readonly { stage: Stage; label: string; tone: Tone; means: 
 export const stageLabel = Object.fromEntries(stages.map((s) => [s.stage, s.label])) as Record<Stage, string>;
 
 /**
- * Where a piece of work is: the column it shows in, or null once it was archived or cancelled short of landing, the
+ * Where a piece of work is: the phase it shows in, or null once it was archived or cancelled short of landing, the
  * step it reached, held or not, what moves it on, and what of it waits on the person.
  */
 export interface Life { stage: Stage | null; at: Step; why: string; needs: readonly ThreadNeed[] }

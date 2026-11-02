@@ -18,7 +18,7 @@ import { itemsOf, lifeOfItem, lifeOfThread, needLabel, stages, type Life, type S
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook, threadTitle } from "./shell.ts";
 
-export const phaseTone: Record<ItemPhase["kind"], Tone> = {
+const phaseTone: Record<ItemPhase["kind"], Tone> = {
   planned: "idle", queued: "idle", building: "work", reviewing: "work", landing: "busy", landed: "ok", held: "bad", archived: "muted", cancelled: "muted",
 };
 

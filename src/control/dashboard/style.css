@@ -850,7 +850,7 @@ a.need-thread:hover { color: var(--accent); }
 .peek > .need-act { padding: 0 10px; }
 .peek .life { padding: 2px 0 0; }
 
-/* the track of a piece of work's steps: Pipeline board's, in the accent and the status colours */
+/* the track of a piece of work's steps, in the accent and the status colours */
 .life { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .life li { position: relative; min-width: 0; }
 .life li::before { content: ""; position: absolute; top: 6px; left: 0; right: 0; height: 2px; background: var(--line); }

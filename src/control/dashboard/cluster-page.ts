@@ -107,7 +107,6 @@ export function clusterPage(c: Context, name: NodeName, healths: ReadonlyMap<Nod
   const health = healths.get(name) ?? new Error(`${name} was not read`);
   const releases = Map.groupBy(releaseLines(c), (r) => r.node);
   const nodes = c.registry.nodes();
-/** What the node's probe reads of its host when the page loads, and its cleanup, which acts on the node only once the person answers. */
   const pylonOf = new Map(c.registry.pylonsOn(name).map((p) => [p.pylonId, p.thread]));
   const reading = html`<section aria-labelledby="node-health-h"><div class="ov-head"><h2 id="node-health-h">Health</h2></div>
 ${health instanceof Error ? html`<p class="error" role="alert">${health.message}</p>` : html`<dl class="kv node-health"${sampleAttribute(c, name)}>

@@ -1,5 +1,5 @@
 /**
- * A thread's timeline: the life of its work, one step of the board's track after another, each with what the
+ * A thread's timeline: the life of its work, one step of its track after another, each with what the
  * registry and the conversation record of it. The brief it started from, its turns, what it was asked, its pull
  * requests, each review round with its findings, its landing and deploy, and its archive.
  */
