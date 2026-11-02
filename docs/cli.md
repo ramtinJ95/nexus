@@ -104,7 +104,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `image current` | `GET /v1/images/current` | `{ current: ImageEntry \| null, previous: ImageEntry \| null }` |
 | `threads [--project P] [--all]` | `GET /v1/threads[?project=P]`, and `GET /v1/queued[?project=P]` for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given. Queued threads are never in it |
 | `threads --queued [--project P] [--all]` | `GET /v1/queued[?project=P]` | `QueuedThread[]`, the threads that have not started. Cancelled and deleted ones are left out unless `--all` is given |
-| `show <thread>` | `GET /v1/threads/<thread>`, then `GET /v1/queued/<thread>` when that answers 409 | `ThreadDetail`. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is the command that attaches to the pylon's Herdr sessions from a shell in the pylon. Without `--json`, it prints `attach: nexus attach <thread>`, the command that attaches from this Mac, unless the thread is archived or deleted. For a thread that has not started, `QueuedThread` |
+| `show <thread>` | `GET /v1/threads/<thread>`, then `GET /v1/queued/<thread>` when that answers 409 | `ThreadDetail`. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is the command that attaches to the pylon's Herdr sessions from a shell in the pylon. Without `--json`, it prints `attach: nexus attach <thread>`, the command that attaches from this Mac, unless the thread is archived or deleted, and `disk: kept past its 24 hours, as ...` with why for an archived thread whose disk is kept. For a thread that has not started, `QueuedThread` |
 | `ports <thread>` | `GET /v1/threads/<thread>` | `ListeningPort[] \| null`, the detail's `ports` |
 | `preview <thread> <port> [--wait]` | `POST /v1/threads/<thread>/previews` with `{"port": number}`, then with `--wait` polls `GET /v1/threads/<thread>` | `Preview`, the port's preview |
 | `unpreview <thread> <port>` | `DELETE /v1/threads/<thread>/previews/<port>` with `{}` and its `content-length`, which answers 204. Node's `http` module frames a DELETE's body only with an explicit length. While the pylon is not running, it tries again once a second | `null` |
@@ -132,7 +132,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `seen <thread> [--unread \| --last-reply-at MS]` | `POST /v1/threads/<thread>/seen` with `{}`, or `{"lastReplyAt": MS}` with `--last-reply-at`, or `/unseen` with `--unread` | `null` |
 | `wake <thread>` | `POST /v1/threads/<thread>/activity` with `{"kind":"human"}` | `null` |
 | `archive <thread>` | `POST /v1/threads/<thread>/archive` | `Thread`, or `QueuedThread` with status `archived` for a thread that has not started, which cancels it |
-| `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread`, or `QueuedThread` with status `queued` for a cancelled one, which queues it again. A thread archived 24 hours or more has no disk left, so its pylon boots fresh from the thread's recorded image and commit |
+| `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread`, or `QueuedThread` with status `queued` for a cancelled one, which queues it again. A thread whose disk the cleanup deleted, once it had been archived 24 hours and its usage was read and backed up, has no disk left, so its pylon boots fresh from the thread's recorded image and commit |
 | `delete <thread>` | `DELETE /v1/threads/<thread>` | `Thread`, with status `deleted`, or `QueuedThread` with status `deleted` |
 | `projects` | `GET /v1/projects` | `Project[]`. A scratch project's `repoUrl` is null |
 | `project add <id> (<repo-url> \| --scratch) [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]...` | `POST /v1/projects` | `Project`, the project that was added |
@@ -200,8 +200,11 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `placement` | optional `Placement` | Which node the pylon boots on and why, as [Placement](#placement-0250) describes. Left out for a thread started before 0.20.0 |
 | `usageLimit` | optional `{ stoppedAt: number, resetsAt: number \| null }` | The Claude worker's session stopped on its usage limit at `stoppedAt`, and nothing has run since. `resetsAt` is when the limit resets, null when Claude Code did not say. [Usage-limit stops](#usage-limit-stops-0210) describes it |
 | `setup` | optional `ThreadSetup` | Whether the pylon boots from a template or fresh, and why, as [Templates at thread start](#templates-at-thread-start-0230) describes. Left out for a thread started before 0.23.0 |
-| `readingUsage` | optional `true` | The usage backfill reads this archived thread's pylon now, so its `desired` is `reading`, as [Usage backfill](#usage-backfill-0330) describes |
-| `archivedAt` | optional number | When the thread was archived, in milliseconds, while it is. 24 hours later its `desired` is `deleted` and its pylon goes, while the thread stays |
+| `readingUsage` | optional `true` | The usage backfill, or the settle of its archive, reads this archived thread's pylon now, so its `desired` is `reading`, as [Usage backfill](#usage-backfill-0330) describes |
+| `archivedAt` | optional number | When the thread was archived, in milliseconds, while it is. Once it is 24 hours old, its usage is settled and a backup began after that, its `desired` is `deleted` and its pylon goes, while the thread stays |
+| `usageSettledAt` | optional number | When a read of the archived pylon's disk after its pause reached the end of every transcript, in milliseconds. Left out until one did |
+| `settleFailure` | optional `{ reason: string, at: number, count: number }` | The archive's last failed settle, why, and how many failed in a row. Left out once a settle read the disk, or while none failed |
+| `backedUpAt` | optional number | On an archived thread only: when the newest backup the control plane has seen verify began, in milliseconds. Its disk waits for one that began after `usageSettledAt` |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
 
 `ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `questions` (every question the thread asked, answered or not, as [Questions](#questions-0350) describes), `judgments` (every judgment of its failed pylon, as [Failure judgments](#failure-judgments-0390) describes), `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`).
@@ -1381,16 +1384,17 @@ A pylon's key ends with an empty thread when no thread had the pylon. A sensor n
 
 ```text
 control plane
-  ok    release      control on rj-firebat runs the desired 0123456789ab and is healthy
-  fail  backup       the newest backup, 2026-10-30T00-23-41Z, is 2 days old, and the run at 2026-11-01T00:41:02.000Z failed. sudo systemctl status nexus-backup and journalctl -u nexus-backup on the control plane's machine say why
-  ok    login        signed in to openai with ChatGPT, which offers gpt-6-astra
-  ok    certificate  the dashboard's certificate for rj-firebat.example.ts.net is valid for 62 days
+  ok    release         control on rj-firebat runs the desired 0123456789ab and is healthy
+  fail  backup          the newest backup, 2026-10-30T00-23-41Z, is 2 days old, and the run at 2026-11-01T00:41:02.000Z failed. sudo systemctl status nexus-backup and journalctl -u nexus-backup on the control plane's machine say why
+  ok    login           signed in to openai with ChatGPT, which offers gpt-6-astra
+  ok    certificate     the dashboard's certificate for rj-firebat.example.ts.net is valid for 62 days
+  ok    archived-disks  no archived disk is kept past its 24 hours
 rj-firebat
-  ok    online       online and observed in the last 5 min
-  ok    release      probe on rj-firebat runs the desired 0123456789ab and is healthy
-  warn  disk         12.4 of 98.0 GiB free at /var/lib/nexus-control, low. Free space there, or delete archived threads
-  ok    pylons       3 up, 2 paused, none crashed or orphaned
-1 failed, 1 warned, 6 ok
+  ok    online          online and observed in the last 5 min
+  ok    release         probe on rj-firebat runs the desired 0123456789ab and is healthy
+  warn  disk            12.4 of 98.0 GiB free at /var/lib/nexus-control, low. Free space there, or delete archived threads
+  ok    pylons          3 up, 2 paused, none crashed or orphaned
+1 failed, 1 warned, 7 ok
 ```
 
 `--json` prints the report:
@@ -1401,7 +1405,7 @@ interface DoctorReport {
   status: "ok" | "warn" | "fail";     // the worst check's
   checks: Array<{
     node: string | null;              // null for the control plane
-    name: "online" | "release" | "disk" | "pylons" | "backup" | "login" | "certificate";
+    name: "online" | "release" | "disk" | "pylons" | "backup" | "login" | "certificate" | "archived-disks";
     status: "ok" | "warn" | "fail";
     text: string;                     // one line: what is wrong and what to do
   }>;
@@ -1443,7 +1447,9 @@ An archived thread's pylon is paused, and counting reads a pylon only while it r
 
 `usage backfill` starts a run, which needs a deployer, as `deploy` does: any other caller fails with exit code 3, the API's 403. The run lists every archived thread with a pylon that no run has read, and a thread a run skipped is read again. A start while one runs changes nothing. `--stop` stops the run, which needs a deployer too, and the pylon it holds pauses. A thread whose read the stop cut short is read by the next start. `--dry-run` prints the threads a start would read, one line each with the thread, its project, its node and its title, and under one a run skipped, `skipped before:` and why. Each prints the run's state as `usage` does. `--dry-run` with `--stop` fails with exit code 64. The run lives in the registry, so a control plane that restarts or deploys mid-run goes on with the pylon it held. A control plane older than 0.33.0 has no such route, and `usage backfill` fails with exit code 4. Its `usage` report has no `backfill`, and `usage` prints no backfill line.
 
-A thread is skipped, with the reason, when it was unarchived or deleted before or while it was read, its pylon failed or its node holds no disk for it, its wake failed, which never fails the pylon, its pylon did not run within 10 minutes, or the read failed. The run waits up to 10 minutes for each pylon it read to pause.
+A thread is skipped, with the reason, when it was unarchived or deleted before or while it was read, its disk was deleted once its usage was read and backed up, its pylon failed or its node holds no disk for it, its wake failed, which never fails the pylon, its pylon did not run within 10 minutes, or the read failed. The run waits up to 10 minutes for each pylon it read to pause.
+
+The same job settles each archive with no run: once an archived thread's pylon has paused, it wakes the pylon for reading and reads it the same way, and the archive's disk goes only once that read reached the end and a backup that began after it verified. A settle goes before the run's next thread, and only one pylon is up at a time across both. `nexus show` says why an archived disk is kept past its 24 hours, and `nexus doctor`'s `archived-disks` check names the disks whose reads keep failing. [Settling an archive](data-model.md#settling-an-archive) has the steps.
 
 The backfill's line in `usage`, and what `usage backfill` prints:
 
