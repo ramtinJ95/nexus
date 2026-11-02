@@ -103,7 +103,7 @@ test("with no controller listening, an inspect reads the instance offline, a sto
 	assert.deepEqual(c.arrived, []);
 });
 
-test("the start sweep removes an old scratch directory no controller owns, and keeps a young one and one a running controller owns", async (t) => {
+test("the start sweep removes an old scratch directory no controller owns, and keeps a young one and one a running controller or a launch owns", async (t) => {
 	const c = await controller(t);
 	t.after(() => c.server.close());
 	await publishIdentity(join(c.dir, "controller.pid"));
@@ -119,8 +119,13 @@ test("the start sweep removes an old scratch directory no controller owns, and k
 	const stoppedDir = directory(c.root, "instances", "pylon-t2");
 	await privateDirectory(stoppedDir);
 	const stopped = await scratch(scratchDirectory(c.root, stoppedDir), 2 * hour);
+	const launchingDir = directory(c.root, "instances", "pylon-t3");
+	await privateDirectory(join(launchingDir, "launch.lock"));
+	const launching = await scratch(scratchDirectory(c.root, launchingDir), 2 * hour);
 	const destroyed = await scratch(join(c.root, "tmp", "f7352d554b6b"), 2 * hour);
 	const young = await scratch(join(c.root, "tmp", "0123456789ab"), 60_000);
 	assert.deepEqual((await sweepScratch(c.root)).sort(), [basename(destroyed), basename(stopped)].sort());
-	assert.deepEqual([owned, stopped, destroyed, young].map((path) => existsSync(path)), [true, false, false, true]);
+	assert.deepEqual([owned, stopped, launching, destroyed, young].map((path) => existsSync(path)), [true, false, true, false, true]);
+	assert.equal(existsSync(join(stoppedDir, "launch.lock")), false, "the sweep left the launch lock it held");
+	assert.equal(existsSync(join(launchingDir, "launch.lock")), true, "the sweep removed a launch's lock");
 });

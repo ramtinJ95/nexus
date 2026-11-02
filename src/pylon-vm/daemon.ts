@@ -18,11 +18,14 @@ async function main(): Promise<void> {
 	const record = await readRecord(dir);
 	const pidFile = join(dir, "controller.pid");
 	await publishIdentity(pidFile);
-	// The scratch directory goes first: once controller.pid is gone, a launch may make it again for its own controller.
-	const retire = async () => {
-		await rm(scratchDirectory(dirname(dirname(dir)), dir), { recursive: true, force: true });
-		await rm(pidFile, { force: true });
-	};
+	// The scratch directory goes first: once controller.pid is gone, a launch may make both again for its own controller,
+	// so this runs once however many paths end the controller.
+	let retiring: Promise<void> | undefined;
+	const retire = () =>
+		(retiring ??= (async () => {
+			await rm(scratchDirectory(dirname(dirname(dir)), dir), { recursive: true, force: true });
+			await rm(pidFile, { force: true });
+		})());
 	const log = join(dir, "controller.log");
 	setInterval(() => void rotateLog(log, controllerLogLimit).catch((error: unknown) => console.error(error)), 60_000).unref();
 	// The launching client writes the boot spec, secrets included, to stdin and closes it.

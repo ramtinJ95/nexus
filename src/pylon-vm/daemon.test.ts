@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { saveJson } from "../json-file.ts";
+import { publishIdentity, readIdentity } from "./identity.ts";
 import { scratchDirectory } from "./client.ts";
 import { directory, existsError, privateDirectory } from "./storage.ts";
 
@@ -41,8 +42,8 @@ async function launched(t: TestContext, instance = name) {
 	return { dir, scratch, child, exited, log: () => log };
 }
 
-async function controller(t: TestContext) {
-	const { dir, scratch, child, exited, log } = await launched(t);
+async function controller(t: TestContext, instance = name) {
+	const { dir, scratch, child, exited, log } = await launched(t, instance);
 	const post = (body: string) =>
 		new Promise<{ ok: boolean; error?: string; result?: { status: { state: string } } }>((accept, reject) => {
 			const req = http.request({ socketPath: join(dir, "control.sock"), agent: false, method: "POST", path: "/" }, (res) => {
@@ -127,4 +128,32 @@ test("a controller removes its scratch directory before its controller.pid when 
 	assert.match(broken.log(), /boot failed/);
 	assert.equal(existsSync(broken.scratch), false, "a controller whose boot failed left its scratch directory");
 	assert.equal(existsSync(join(broken.dir, "controller.pid")), false);
+});
+
+test("a controller retired by a failed stop leaves the scratch directory and controller.pid of the controller launched after it", async (t) => {
+	const instance = "pylon-interrupted";
+	const c = await controller(t, instance);
+	// Accepted before the stop, so the old controller handles it after its retirement.
+	let late!: Promise<string>;
+	const sent = new Promise<void>((accept, reject) => {
+		const req = http.request({ socketPath: join(c.dir, "control.sock"), agent: false, method: "POST", path: "/" }, (res) => {
+			let reply = "";
+			res.setEncoding("utf8").on("data", (chunk: string) => (reply += chunk));
+			late = once(res, "end").then(() => reply);
+			accept();
+		});
+		req.on("error", reject);
+		req.flushHeaders();
+		void delay(100).then(async () => {
+			assert.equal((await c.post(JSON.stringify({ action: "stop", name: instance }))).error, "stop failed");
+			assert.equal(existsSync(c.scratch), false, "the retired controller left its scratch directory");
+			await privateDirectory(c.scratch);
+			await publishIdentity(join(c.dir, "controller.pid"));
+			req.end(JSON.stringify({ action: "logs", name: instance, lines: 1 }));
+		});
+	});
+	await sent;
+	assert.match(await late, /the controller is retired/);
+	assert.equal(existsSync(c.scratch), true, "the retired controller removed the scratch directory of the controller after it");
+	assert.equal((await readIdentity(join(c.dir, "controller.pid")))?.pid, process.pid, "the retired controller removed the controller.pid of the controller after it");
 });
