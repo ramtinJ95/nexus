@@ -19,7 +19,9 @@ const need = (memoryGiB = 4) => ({
 interface FakeNode {
   name: string; total: number; committed: number; free?: number | "unread"; readAgoMs?: number; reserved?: number | undefined;
   /** A pylon-vm probe, which reports its pylons' filesystem and names their processes in a health read. */
-  pylonVm?: true;
+  pylonVm?: true | undefined;
+  /** VMs the probe reports and commits but the registry has not placed, as the health read names them. */
+  orphans?: { id: string; residentGiB: number }[];
   pylons?: { id: string; memoryGiB: number; residentGiB: number; observed?: false; read?: false }[];
 }
 
@@ -29,11 +31,12 @@ function fakeRegistry(nodes: FakeNode[]) {
     const capacity = testCapacity({ memoryGiB: n.total, committedMemoryGiB: n.committed, diskFreeGiB: 200,
       ...n.pylonVm && { disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 200, pylons: true }] } });
     return { name: n.name as NodeName, tailnetHost: `${n.name}.ts.net`, tailnetNodeId: `n${n.name}`, state: "online", capacity,
-      observation: testObservation(n.name as NodeName, { capacity, artifacts: [image], pylons: (n.pylons ?? []).filter((p) => p.observed !== false).map((p) => ({ pylonId: `pylon-${p.id}` as PylonId, phase: "booting" })) }) } as NodeRecord;
+      observation: testObservation(n.name as NodeName, { capacity, artifacts: [image], pylons: [...(n.pylons ?? []).filter((p) => p.observed !== false), ...n.orphans ?? []].map((p) => ({ pylonId: `pylon-${p.id}` as PylonId, phase: "booting" })) }) } as NodeRecord;
   };
   const sample = (n: FakeNode): HealthSample | null => n.free === undefined ? null : {
     at: now - (n.readAgoMs ?? 0),
-    values: { ...n.free === "unread" ? {} : { memAvailable: n.free }, ...Object.fromEntries((n.pylons ?? []).filter((p) => p.read !== false).map((p) => [`pylonResident:pylon-${p.id}:${p.id}`, p.residentGiB])) },
+    values: { ...n.free === "unread" ? {} : { memAvailable: n.free }, ...Object.fromEntries((n.pylons ?? []).filter((p) => p.read !== false).map((p) => [`pylonResident:pylon-${p.id}:${p.id}`, p.residentGiB])),
+      ...Object.fromEntries((n.orphans ?? []).map((p) => [`pylonResident:pylon-${p.id}:`, p.residentGiB])) },
   };
   const byName = new Map(nodes.map((n) => [n.name, n]));
   return {
@@ -108,6 +111,18 @@ test("a pylon the node reports that booted after its health read holds all its m
   }], "a read after its boot counts what it has yet to touch");
   assert.deepEqual(weighNodes(fakeRegistry([node({}, false)]), need(8)).weighed, [{ node: "a", left: { cpus: 14, memoryGiB: 6, diskGiB: 190 } }],
     "a probe that cannot name its pylons, as Docker's, leaves no read to tell, so the pylon counts as all touched");
+});
+
+test("orphaned VMs on a node whose probe names its pylons are yet to take what the probe commits for them", () => {
+  const orphan = (residentGiB: number | null): FakeNode => ({ name: "a", total: 32, committed: 8, free: 10, pylonVm: true, orphans: residentGiB === null ? [] : [{ id: "th-orphanorphan", residentGiB }] });
+  assert.deepEqual(weighNodes(fakeRegistry([orphan(1)]), need()).weighed, [{
+    node: "a", refused: "has 10 GiB of memory free, less 7 GiB its pylons have yet to touch, and the pylon needs 4 GiB with 1 GiB to spare",
+  }], "an 8 GiB orphan holding 1 GiB will take 7 more");
+  assert.deepEqual(weighNodes(fakeRegistry([orphan(null)]), need()).weighed, [{
+    node: "a", refused: "has 10 GiB of memory free, less 8 GiB its pylons have yet to touch, and the pylon needs 4 GiB with 1 GiB to spare",
+  }], "one the read did not name booted since it");
+  assert.deepEqual(weighNodes(fakeRegistry([{ ...orphan(1), pylonVm: undefined }]), need()).weighed, [{ node: "a", left: { cpus: 14, memoryGiB: 6, diskGiB: 190 } }],
+    "a probe that cannot name its pylons leaves no read to tell");
 });
 
 test("a node with no fresh reading of its free memory is weighed by its commitments alone", () => {

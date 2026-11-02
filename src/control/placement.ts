@@ -86,7 +86,9 @@ const freshReadMs = 2 * backgroundReadMs;
  * takes its memory from the host only as it touches it, so a pylon whose processes hold less than its size will take
  * the rest. An up pylon the read did not name booted since the read, so it is yet to take all of it, on a node whose
  * probe names its pylons' processes. Only pylon-vm's does, and only its probe reports a filesystem of pylons' disks. On
- * any other node, such as a Docker node, such a pylon counts as all touched, since no read could say. One the
+ * any other node, such as a Docker node, such a pylon counts as all touched, since no read could say. On a pylon-vm
+ * node, orphaned VMs, which the registry has not placed there, are yet to take what the probe commits beyond the placed
+ * up pylons, less what the read found their processes hold. One the
  * observation does not count yet is left out, since `roomLeft` counts all it asked for. Null without a read in the
  * last `freshReadMs`, or from a host that reports no memory.
  */
@@ -100,14 +102,22 @@ function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservati
   }));
   const namesProcesses = c.disks?.some((d) => d.pylons === true) === true;
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
-  const untouchedGiB = registry.pylonsWithStatusOn(node).reduce((sum, { pylon }) => {
+  const placed = registry.pylonsWithStatusOn(node).map(({ pylon }) => pylon);
+  let placedUpGiB = 0;
+  let untouchedGiB = 0;
+  for (const pylon of placed) {
     const p = seen.get(pylon.pylonId);
     const up = p !== undefined && p.phase !== "stopped" && !(p.phase === "broken" && p.cause === "controller");
-    if (!up || uncounted(pylon, p).memoryGiB > 0) return sum;
+    if (!up || uncounted(pylon, p).memoryGiB > 0) continue;
     const size = pylon.boot.resources.memoryGiB;
     const held = resident.get(pylon.pylonId);
-    return sum + (held !== undefined ? Math.max(0, size - held) : namesProcesses ? size : 0);
-  }, 0);
+    placedUpGiB += size;
+    untouchedGiB += held !== undefined ? Math.max(0, size - held) : namesProcesses ? size : 0;
+  }
+  // The probe commits an orphaned VM's memory, but the registry does not know its size, so the orphans count together.
+  const ids = new Set(placed.map((p) => p.pylonId));
+  const orphansHeldGiB = [...resident].reduce((sum, [id, held]) => ids.has(id) ? sum : sum + held, 0);
+  if (namesProcesses) untouchedGiB += Math.max(0, c.committedMemoryGiB - placedUpGiB - orphansHeldGiB);
   return { availableGiB, untouchedGiB };
 }
 
