@@ -37,9 +37,12 @@ async function main(): Promise<void> {
 		prepare = intent.prepare;
 		await runtime.boot(intent.prepare);
 	} catch (error) {
-		await runtime.fail(error);
-		await retire();
 		process.exitCode = 1;
+		try {
+			await runtime.fail(error);
+		} finally {
+			await retire();
+		}
 		return;
 	}
 	if (prepare) {

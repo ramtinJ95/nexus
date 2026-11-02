@@ -111,7 +111,7 @@ test("a body that is no action is answered without waiting behind the lifecycle 
 	assert.match((answered as { error: string }).error, /^action\.action: /);
 });
 
-test("a controller removes its scratch directory before its controller.pid when it stops, and when its boot fails", async (t) => {
+test("a controller removes its scratch directory before its controller.pid when it stops, and when its boot fails, even if it cannot record the failure", async (t) => {
 	const stopped = await controller(t);
 	assert.equal((await stopped.post(JSON.stringify({ action: "stop", name }))).ok, true);
 	assert.equal(await stopped.exited, 0);
@@ -128,6 +128,11 @@ test("a controller removes its scratch directory before its controller.pid when 
 	assert.match(broken.log(), /boot failed/);
 	assert.equal(existsSync(broken.scratch), false, "a controller whose boot failed left its scratch directory");
 	assert.equal(existsSync(join(broken.dir, "controller.pid")), false);
+
+	const unreported = await launched(t, "pylon-unreported");
+	assert.equal(await unreported.exited, 1);
+	assert.equal(existsSync(unreported.scratch), false, "a controller that could not record its failed boot left its scratch directory");
+	assert.equal(existsSync(join(unreported.dir, "controller.pid")), false);
 });
 
 test("a controller retired by a failed stop leaves the scratch directory and controller.pid of the controller launched after it", async (t) => {
