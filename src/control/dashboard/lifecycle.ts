@@ -4,9 +4,10 @@
  * and what waits on the person.
  */
 import type { ThreadId } from "../../ids.ts";
+import { roleOf } from "../../agent-protocol.ts";
 import { keptPastDay } from "../../reconcile.ts";
 import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pipeline.ts";
-import { liveNote, type Review } from "../review-model.ts";
+import { liveNote, roundsSpent, type PhaseKind, type Review } from "../review-model.ts";
 import { html, limitText, type Html, type Tone } from "./view.ts";
 import { landingAt } from "./cards.ts";
 import type { Context, ThreadNeed } from "./context.ts";
@@ -96,6 +97,52 @@ export function needWhy(n: ThreadNeed, now: number): string {
       case "failed": return firstLine(d.pylon.failed ?? d.claudeWorker?.message ?? "It failed");
     }
   }
+}
+
+/**
+ * What a thread is to the work. A builder's work becomes a pull request, so only a builder has a life on the track. The
+ * rest serve one: a review's reviewer, a check or verify thread a review started, and a planning thread. `review` is
+ * the review it serves, null once its builder's next review replaced it or its check is over.
+ */
+export type Role = { kind: "builder" } | { kind: "planning" } | { kind: "reviewer" | "check" | "verify"; review: Review | null };
+
+/** A queued thread has not started, and only a builder is ever queued. */
+export function threadRole(c: Pick<Context, "registry" | "reviews">, id: ThreadId): Role {
+  const t = c.registry.thread(id);
+  if (t === undefined) return { kind: "builder" };
+  const role = roleOf(t.startedBy);
+  const reviews = c.reviews().find((r) => r.reviewer === id);
+  if (role === "reviewer" || reviews !== undefined) return { kind: "reviewer", review: reviews ?? null };
+  if (role === "check" || role === "verify") return { kind: role, review: c.reviews().find((r) => ranIn(r, id)) ?? null };
+  return c.registry.planning(id) === null ? { kind: "builder" } : { kind: "planning" };
+}
+const ranIn = (r: Review, id: ThreadId) => ((r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread === id)
+  || r.rounds.some((round) => round.live?.kind === "ran" && round.live.thread === id);
+
+/** Where a review is, in a word or two after the thread it serves. */
+const reviewAt: Record<PhaseKind, (r: Review) => string> = {
+  reviewing: (r) => `reviewing round ${roundsSpent(r)}`, fixing: (r) => `the builder answers round ${roundsSpent(r)}`,
+  checking: () => "running the checks", quoting: () => "quoting what could not be checked live", verifying: () => "running the live check", approved: (r) => r.land === null ? "approved, yours to land" : "approved, landing next",
+  merging: () => "merging", deploying: () => "deploying", "rolling-back": () => "rolling back", landed: () => "landed", "needs-person": () => "needs you",
+  merged: () => "merged outside its review", closed: () => "its pull request closed", cancelled: () => "cancelled",
+};
+
+/** What a check or verify thread did, from its own run when the review records it. */
+function runAt(r: Review, id: ThreadId): string {
+  if ((r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread === id) return "running";
+  const live = r.rounds.find((round) => round.live?.kind === "ran" && round.live.thread === id)?.live;
+  return live?.kind === "ran" ? live.passed ? "passed" : "failed" : reviewAt[r.phase.kind](r);
+}
+
+/** A thread that is not a builder says in one line what it is, in place of the track. */
+export function roleLine(c: Pick<Context, "registry">, id: ThreadId, role: Exclude<Role, { kind: "builder" }>): Html {
+  if (role.kind === "planning") return html`<p class="role-line">Planning thread. Each item it proposes waits for you to accept it.</p>`;
+  const r = role.review;
+  const what = { reviewer: "Reviewer", check: "Check", verify: "Live check" }[role.kind];
+  if (r === null) return html`<p class="role-line">${what} for a review that has moved on.</p>`;
+  const builder = html`<a class="link" href="/threads/${r.builder}">${c.registry.thread(r.builder)?.title ?? r.builder}</a>`;
+  const at = role.kind === "reviewer" ? reviewAt[r.phase.kind](r) : runAt(r, id);
+  return html`<p class="role-line">${what} of <a class="link" href="${r.pr.url}" target="_blank" rel="noreferrer">PR #${r.pr.number}</a> for ${builder}<span class="role-at">${at}</span></p>`;
 }
 
 /** A started or queued thread's life, from its pipeline phase and what of it waits on the person. */

@@ -17,7 +17,7 @@ import { shotsView, stepsView } from "./tools.ts";
  * asked is open, a Claude worker's dialog waits in its terminal, or a usage limit stopped it. A dialog stops the turn
  * it is in, so it outranks working. A question that does not stop the run, as a planning thread's proposal, does not.
  */
-type Run =
+export type Run =
   | { kind: "idle"; paused: boolean; repliedAt: number | null }
   | { kind: "working"; since: number | null; tools: number; claude: boolean }
   | { kind: "waiting"; why: string; inTerminal: boolean }

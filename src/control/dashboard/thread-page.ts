@@ -14,15 +14,16 @@ import type { AgentView } from "../conversation-view.ts";
 import { liveNote, phaseNote, roundNote, roundsSpent } from "../review-model.ts";
 import type { QueuedThread, Wait } from "../queue.ts";
 import { tokenCount, type UsageTotals } from "../usage.ts";
+import { attentions } from "../attention.ts";
 import { Html, html, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { itemsOf, modelOf } from "./items.ts";
-import { runOf, stateBar, composer } from "./conversation.ts";
+import { runOf, stateBar, composer, type Run } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
-import { lifeOfThread } from "./lifecycle.ts";
+import { lifeOfThread, roleLine, threadRole } from "./lifecycle.ts";
 import { lifeTrack, timeline } from "./timeline.ts";
 import { usageColumns, exact } from "./usage-page.ts";
 
@@ -63,8 +64,9 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = t.status === "active" || t.status === "idle";
-  const life = lifeOfThread(c, t.id);
-  const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), [
+  const role = threadRole(c, t.id);
+  const life = role.kind === "builder" ? lifeOfThread(c, t.id) : null;
+  const bar = threadBar(t, headState(d, run, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
@@ -73,11 +75,11 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
     active: t.id,
     ...(open ? { activity: t.id } : {}),
     main: html`${bar}
-<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(life)}</nav>
-<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button><button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">${icon("timeline")}<span class="tab-name">Timeline</span></button>${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
+${role.kind === "builder" ? html`<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(life!)}</nav>` : html`<div class="life-bar" id="life" data-live>${roleLine(c, t.id, role)}</div>`}
+<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${life !== null && html`<button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">${icon("timeline")}<span class="tab-name">Timeline</span></button>`}${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
-<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline" hidden><div class="tl-wrap" id="timeline" data-live>${timeline(c, d, items, life)}</div></section>
+${life !== null && html`<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline" hidden><div class="tl-wrap" id="timeline" data-live>${timeline(c, d, items, life)}</div></section>`}
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
@@ -106,6 +108,18 @@ function termView(t: Thread): Html {
 <div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
 <div class="tv-host" id="term-host"></div>
 </section>`;
+}
+
+/**
+ * The header's state never contradicts the dock's. While the pylon runs and nothing outranks the agent, it is the
+ * agent's state, in the dock's words, since a running pylon above an idle agent reads as a contradiction. Otherwise it
+ * is the thread's attention, its archive or its pylon's state, which the dock either agrees with or does not say.
+ */
+function headState(d: ThreadDetail, run: Run, now: number): readonly [string, Tone] {
+  const own = threadState({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon }, now);
+  const open = d.thread.status === "active" || d.thread.status === "idle";
+  if (!open || d.pylon.actualState !== "running" || (d.attention !== null && d.attention !== "working")) return own;
+  return run.kind === "working" ? [attentions.working.label, attentions.working.tone] : run.kind === "idle" ? ["agent idle", "idle"] : own;
 }
 
 /** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */

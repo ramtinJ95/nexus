@@ -25,7 +25,7 @@ import { itemRequestId } from "../pipeline.ts";
 import { startKey } from "../threads.ts";
 import { claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { transcriptStart, type ClaudeEntry } from "../../claude-transcript.ts";
-import { usageLimitPrefix } from "../../agent-protocol.ts";
+import { checkCaller, reviewPrefix, reviewerCaller, usageLimitPrefix, verifyCaller } from "../../agent-protocol.ts";
 import type { AgentCall } from "../../agent-usage.ts";
 import type { ImageId, NodeName, ProjectId, PylonId, ThreadId } from "../../ids.ts";
 import type { ItemId, ItemRecord } from "../pipeline-store.ts";
@@ -85,6 +85,8 @@ interface ThreadSpec {
   archived?: boolean;
   /** The pipeline item it was started for. */
   item?: string;
+  /** The review loop's caller, for a reviewer thread, or a check or verify thread, which starts bare. */
+  by?: typeof reviewerCaller | typeof checkCaller | typeof verifyCaller;
   /** Fills in its conversation, reviews and the rest once it exists. */
   extra?: (d: Demo, t: Thread, w: World) => void | Promise<void>;
 }
@@ -335,11 +337,21 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
           round("d1", { verdict: changes(finding("F1", "P1", "src/checkout/PaymentStep.tsx:31", "canMakePayment() can reject in Safari private mode; the button then never hides."), finding("F2", "P2", "src/checkout/PaymentStep.tsx:12", "The amount is sent in dollars, Stripe wants cents.")), answers: [{ id: "F1", action: "fixed", reason: "Caught, treated as unavailable." }, { id: "F2", action: "fixed", reason: "Uses cart.totalCents." }] }),
           round("d2"),
         ],
+        reviewer: w.threads.get("applepay-review")!.id,
         phase: { kind: "reviewing" },
       }));
       d.registry.allocatePreviews(t.pylonId, ["web"], { first: 10200, last: 10299 });
       d.registry.apply({ record: "preview", pylonId: t.pylonId, service: "web", httpsPort: 10201, ready: true });
       w.live.working.push(t);
+    },
+  },
+  {
+    key: "applepay-review", by: reviewerCaller, project: "storefront", title: "Review of #88: feat(checkout): Apple Pay via the Payment Request Button", ago: 5 * hour, worker: "harness", pylon: "running", replied: 10 * minute, seen: true,
+    extra(d, t) {
+      talk(d, t, harnessTalk(t.createdAt)
+        .person(`${reviewPrefix} Review round 2 of #88 at dddddddddddd.`)
+        .bash("git diff main...HEAD --stat", " src/checkout/PaymentStep.tsx | 14 ++++++++++----\n 1 file changed, 10 insertions(+), 4 deletions(-)")
+        .say("Round 2 is under review: F1's fallback is in place, and I am checking F2's test.").messages);
     },
   },
   {
@@ -366,12 +378,15 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
   },
   {
     key: "refunds", project: "storefront", title: "End-to-end tests for the refund flow", ago: 8 * hour, worker: "harness", pylon: "running", replied: 2 * hour, seen: true,
-    extra(d, t) {
+    extra(d, t, w) {
       talk(d, t, harnessTalk(t.createdAt).person("Write Playwright tests for full and partial refunds.").say("Opened #90 with 6 tests. Review approved; the checks are running now.").messages);
       const p = pr("storefront", 90, "test: end-to-end refund flow");
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, { rounds: [round("f1", { verdict: approve(finding("N1", "P3", "e2e/refund.spec.ts", "The fixtures could share a factory.")) })], phase: { kind: "checking", startedAt: now() - 4 * minute, thread: null } }));
+      d.registry.saveReview(review(t, p, { rounds: [round("f1", { verdict: approve(finding("N1", "P3", "e2e/refund.spec.ts", "The fixtures could share a factory.")) })], phase: { kind: "checking", startedAt: now() - 4 * minute, thread: w.threads.get("refunds-check")!.id } }));
     },
+  },
+  {
+    key: "refunds-check", by: checkCaller, project: "storefront", title: "Check of nexus/90 at ffffffffffff", ago: 5 * minute, worker: "harness", pylon: "running",
   },
   {
     key: "lighthouse", project: "storefront", title: "Product page Lighthouse pass", ago: 7 * hour, worker: "harness", pylon: "paused", replied: 5 * hour, seen: true,
@@ -411,12 +426,15 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
   },
   {
     key: "sync", project: "field-notes", title: "Offline sync conflict resolver", ago: 10 * hour, worker: "harness", pylon: "running", replied: 3 * hour, seen: true,
-    extra(d, t) {
+    extra(d, t, w) {
       talk(d, t, harnessTalk(t.createdAt).person("When two devices edit one note offline, merge by paragraph instead of last-write-wins.").say("Opened #57. Approved; the live check is running in a verify pylon.").messages);
       const p = pr("field-notes", 57, "feat(sync): merge offline edits by paragraph");
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, { rounds: [round("g1", { verdict: approve(), check: { passed: true, output: testOutput } })], phase: { kind: "verifying", startedAt: now() - 6 * minute, thread: null } }));
+      d.registry.saveReview(review(t, p, { rounds: [round("g1", { verdict: approve(), check: { passed: true, output: testOutput } })], phase: { kind: "verifying", startedAt: now() - 6 * minute, thread: w.threads.get("sync-verify")!.id } }));
     },
+  },
+  {
+    key: "sync-verify", by: verifyCaller, project: "field-notes", title: "Live check of nexus/57 at gggggggggggg", ago: 7 * minute, worker: "harness", pylon: "running",
   },
   {
     key: "dark", project: "field-notes", title: "Dark mode for the reader", ago: 5 * hour, worker: "harness", pylon: "running", replied: 15 * minute,
@@ -734,6 +752,7 @@ export async function seedDemo(d: Demo) {
         const request = { project: spec.project, title: spec.title };
         return d.startThread(request, laptop, undefined, startKey(itemRequestId(spec.item as ItemId), { request, message: null, after: [] }));
       }
+      if (spec.by !== undefined) return d.startThread({ project: spec.project, title: spec.title, ...(spec.by !== reviewerCaller ? { bare: true } : {}) }, spec.by);
       const res = await d.call("POST", "/v1/threads", {
         project: spec.project, title: spec.title, ...(spec.worker === "claude" ? { claude: spec.title } : {}), ...(spec.worker === "planning" ? { planning: true } : {}),
       });
