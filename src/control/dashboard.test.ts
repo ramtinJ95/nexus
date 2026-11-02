@@ -2409,6 +2409,30 @@ test("/nodes/<name> is the Cluster page with that node picked, and /cluster pick
   assert.equal((await s.call("GET", "/nodes/nowhere")).status, 404);
 });
 
+test("the Cluster page asks no offline node, and waits for no node but the one it shows", async (t) => {
+  const health: NodeHealth = {
+    node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },
+    memory: { totalGiB: 62.8, availableGiB: 40.24, swapTotalGiB: 0, swapFreeGiB: 0 }, disk: { path: "/var/lib/nexus", totalGiB: 457.1, freeGiB: 180.33 },
+    temperatures: null, pylons: [],
+  };
+  const unused = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")) };
+  let asked = 0;
+  const tower = "tower" as NodeName;
+  const attic = "attic" as NodeName;
+  const probes = new Map([[node, { ...unused, health: async () => health }], [tower, { ...unused, health: () => new Promise<never>(() => {}) }], [attic, { ...unused, health: async () => { asked++; return health; } }]]);
+  const s = await seeded(t, { ...landingOptions(), probes });
+  for (const [name, id] of [[tower, "nTOWER"], [attic, "nATTIC"]] as const) s.registry.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: id as TailnetNodeId });
+  for (const name of [node, tower]) s.registry.apply({ record: "node", node: name, state: "online", capacity });
+  s.registry.apply({ record: "node", node: attic, state: "offline", capacity });
+  const page = await s.call("GET", `/nodes/${node}`);
+  assert.equal(page.status, 200);
+  const card = (name: string) => textOf(page.text.split(`data-node="${name}"`)[1]!.split("</article>")[0]!);
+  assert.match(card(node), /Load 2\.50 on 16 CPUs/);
+  assert.match(card(tower), /Load not read/, "a probe that does not answer leaves its card unread");
+  assert.match(card(attic), /Load not read/);
+  assert.equal(asked, 0, "an offline node is not asked");
+});
+
 test("a queued thread's preview says once what it waits for", async (t) => {
   const s = await seeded(t);
   const first = await s.start("acme", "Fix checkout");
