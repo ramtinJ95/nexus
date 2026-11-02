@@ -9,6 +9,7 @@ import type { Review } from "../control/review-model.ts";
 import type { Question } from "../control/questions.ts";
 import { reservedNames } from "../control/holds.ts";
 import { usageLimitText } from "../claude-transcript.ts";
+import { keptPastDay } from "../reconcile.ts";
 import { liveNote, phaseNote, roundNote, roundsSpent } from "../control/review-model.ts";
 import type { Changes, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../control/templates.ts";
@@ -73,6 +74,8 @@ function judgmentText(j: ThreadDetail["judgments"][number]): string {
 
 export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions, judgments, planning }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
+  // A pylon its node does not list has no disk left to keep.
+  const kept = p.actualState === "absent" ? null : keptPastDay(t, Date.now());
   return [
     `${t.id}  ${t.title}`,
     `project: ${t.project}`,
@@ -82,6 +85,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    ...kept === null ? [] : [`disk: kept past its 24 hours, as ${kept}`],
     ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],
     `size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`,
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],

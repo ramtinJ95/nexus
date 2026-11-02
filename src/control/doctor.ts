@@ -5,7 +5,7 @@
  */
 import type { NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
-import { archivedDiskMs, diskKept, type ActivityFacts } from "../reconcile.ts";
+import { keptPastDay, type ActivityFacts } from "../reconcile.ts";
 import { countedCapacity } from "../protocol/observations.ts";
 import type { ReleaseReport, ReleaseView } from "../deploy/model.ts";
 import type { LoginState } from "../harness/credentials.ts";
@@ -145,7 +145,7 @@ function certificate(f: DoctorFacts): Verdict {
 }
 
 function archivedDisks(f: DoctorFacts): Verdict {
-  const kept = f.keptArchives.filter((t) => t.archivedAt !== undefined && f.now - t.archivedAt >= archivedDiskMs && diskKept(t) !== null);
+  const kept = f.keptArchives.filter((t) => keptPastDay(t, f.now) !== null);
   if (kept.length === 0) return ok("no archived disk is kept past its 24 hours");
   const named = (ts: typeof kept) => ts.map((t) => `${t.id} (${t.title})`).join(", ");
   const lastFailure = (ts: typeof kept) => ts.flatMap((t) => t.settleFailure ?? []).toSorted((a, b) => b.at - a.at)[0]?.reason;
@@ -161,7 +161,7 @@ function archivedDisks(f: DoctorFacts): Verdict {
   const unread = kept.filter((t) => t.usageSettledAt === undefined);
   if (unread.length > 0) {
     const failed = unread.filter((t) => t.settleFailure !== undefined);
-    const what = unread.length === 1 ? `${named(unread)} is kept past its 24 hours, as ${diskKept(unread[0]!)}`
+    const what = unread.length === 1 ? `${named(unread)} is kept past its 24 hours, as ${keptPastDay(unread[0]!, f.now)}`
       : `${unread.length} archived disks wait past the 24 hours for the token usage on them to be read to its end${failed.length === 0 ? "" : `, ${failed.length} after a failed read, the last because ${lastFailure(failed)}`}`;
     return warn(`${what}. Each is read once its pylon paused, while its node is online with a current probe and room for it`);
   }

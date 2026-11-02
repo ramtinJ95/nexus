@@ -22,6 +22,8 @@ import type { PipelineItem } from "../control/pipeline.ts";
 import { planningPrefix } from "../agent-protocol.ts";
 import type { QueuedThread } from "../control/queue.ts";
 import type { Thread } from "../control/thread-store.ts";
+import type { ThreadDetail } from "../control/wire.ts";
+import { detailText } from "./thread-text.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
 import { testPr, testReview } from "../control/test-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
@@ -260,6 +262,22 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   assert.ok(s.proxy.connects.length > 0, "a command does send its request through the proxy");
   assert.equal((await s.nexus(["send", thread.id, "--", "--help"])).code, 0);
   assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "--help"], "after -- it is text to send");
+});
+
+test("show says why an archived thread's disk is kept past its 24 hours, and nothing under them, once it may go, or when its node has no disk", async (t) => {
+  const s = await setup(t);
+  const { id } = await s.json(["start", "--project", "acme", "--title", "Old spike"]);
+  await s.json(["archive", id]);
+  s.registry.finishSettle(id, "its pylon did not boot within 10 minutes", Date.now());
+  const detail: ThreadDetail = await s.json(["show", id]);
+  assert.equal(detail.thread.settleFailure?.count, 1, "show --json carries the archive's settle");
+  const disk = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("disk:"));
+  const dayOld = { ...detail, thread: { ...detail.thread, archivedAt: Date.now() - 25 * 60 * 60_000 } };
+  assert.deepEqual(disk(detail), []);
+  assert.deepEqual(disk(dayOld), ["disk: kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed once, the last because its pylon did not boot within 10 minutes"]);
+  assert.deepEqual(disk({ ...dayOld, pylon: { ...dayOld.pylon, actualState: "absent" } }), []);
+  const { settleFailure: _, ...unfailed } = dayOld.thread;
+  assert.deepEqual(disk({ ...dayOld, thread: { ...unfailed, usageSettledAt: 1, backedUpAt: 2 } }), []);
 });
 
 test("each failure has its own exit code, and with --json its error is one JSON line on stderr", async (t) => {

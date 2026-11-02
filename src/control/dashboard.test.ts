@@ -178,6 +178,25 @@ test("the overview lists each project's open threads with their phases, node and
   assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
 });
 
+test("an archived thread's timeline says why its disk is kept past its 24 hours, until its usage was read and backed up", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const old = await s.start("acme", "Old spike");
+  assert.equal((await s.call("POST", `/v1/threads/${old.id}/archive`)).status, 200);
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested(testObservation(node, { pylons: [stoppedPylon(old.pylonId)] }), []);
+  const archived = async () => textOf((await s.call("GET", `/threads/${old.id}`)).text.split('id="tl-archived"')[1]!.split("</li>")[0]!);
+  t.mock.timers.setTime(Date.now() + 23 * 60 * 60_000);
+  assert.doesNotMatch(await archived(), /kept/, "under its 24 hours");
+  t.mock.timers.setTime(Date.now() + 2 * 60 * 60_000);
+  s.registry.finishSettle(old.id, "its pylon did not boot within 10 minutes", Date.now());
+  assert.match(await archived(), /Its pylon is paused\. Unarchive it to pick the work up again\. Its disk is kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed once, the last because its pylon did not boot within 10 minutes\.$/);
+  s.registry.finishSettle(old.id, null, Date.now());
+  assert.match(await archived(), /Its disk is kept past its 24 hours, as it waits for a backup that begins after its token usage was read\.$/);
+  s.registry.recordBackedUp(Date.now() + 1);
+  assert.doesNotMatch(await archived(), /kept/);
+});
+
 test("the sidebar lists every project's threads with their state, folds the archived and marks the open one", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);

@@ -62,6 +62,11 @@ export function diskKept(a: ActivityFacts): string | null {
   return null;
 }
 
+/** Why the archived thread's disk is kept past its 24 hours at `now`, or null while it is under them or may go. */
+export function keptPastDay(a: ActivityFacts, now: number): string | null {
+  return a.status === "archived" && a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? diskKept(a) : null;
+}
+
 export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
   if (a.status === "archived") {
