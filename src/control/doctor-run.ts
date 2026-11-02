@@ -11,12 +11,13 @@ import type { BackupStatusRead } from "./backup-status.ts";
 import { doctorReport, type CertificateFact } from "./doctor.ts";
 import { checkKey, statuses, type Check, type DoctorReport, type HealthChange } from "./doctor-model.ts";
 import { nodeSummary } from "./api/node-routes.ts";
+import { observedPylon } from "./observed.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry } from "./registry.ts";
 import type { NewHealthChange } from "./report-store.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
+  registry: Pick<Registry, "nodes" | "node" | "pylon" | "keptArchives" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
@@ -45,6 +46,11 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
     release: releaseView(s.registry, s.self, now),
     controlNode: s.registry.nodeByTailnetId(s.self)?.name ?? null,
     backup, login, certificate,
+    // A pylon its node does not list has no disk to keep, as one the cleanup deleted before disks waited for their usage.
+    keptArchives: s.registry.keptArchives().filter((t) => {
+      const p = s.registry.pylon(t.pylonId);
+      return p !== undefined && observedPylon(s.registry, p) !== "absent";
+    }),
   });
 }
 

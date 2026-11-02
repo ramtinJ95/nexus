@@ -31,7 +31,8 @@ import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
-import type { ProbeError } from "../protocol/http.ts";
+import { probeError, type ProbeError } from "../protocol/http.ts";
+import { runsSealed } from "./observed.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import type { Whois, WhoisNode } from "../tailscale.ts";
 import { joinNode, joinRequestSchema } from "./join.ts";
@@ -301,6 +302,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       open({ size, term, pane }) {
         registry.recordActivity(t.id, { human: Date.now() });
         wake(node);
+        // A sealed boot runs no work, so the attach waits for the boot after its pause.
+        if (runsSealed(registry, { node, pylonId })) return Promise.reject(probeError("not-running", `pylon ${pylonId} is pausing a boot that ran no work, and opens on the next`));
         return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", pane ?? agentPane(t) ?? ""]);
       },
     };

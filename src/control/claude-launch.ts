@@ -18,7 +18,7 @@ import { listsRunning } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 import type { ClaudeWorker, Thread } from "./thread-store.ts";
 
-type ClaudeLaunchRegistry = Pick<Registry, "appendEvent" | "claudeWorker" | "setClaudeWorker">;
+type ClaudeLaunchRegistry = Pick<Registry, "appendEvent" | "claudeWorker" | "sealedBoot" | "setClaudeWorker">;
 
 /** What the launch reads of the node's observe link, live: loop.ts's `Link` satisfies it. */
 export interface LaunchLink {
@@ -38,7 +38,7 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
 
   function step(thread: Thread, pylonId: PylonId, nodeObservation: NodeObservation | null, link: LaunchLink): "tick" | Promise<"tick" | "skip"> {
     const worker = registry.claudeWorker(thread.id);
-    const running = listsRunning(nodeObservation, pylonId);
+    const running = listsRunning(nodeObservation, pylonId, registry.sealedBoot(pylonId));
     // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
     // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
     if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {

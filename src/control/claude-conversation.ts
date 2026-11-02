@@ -21,7 +21,7 @@ import { followEvents } from "./follow-events.ts";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { runningProbe } from "./observed.ts";
+import { readableProbe } from "./observed.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
@@ -139,7 +139,7 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       const t = registry.thread(id);
       const session = registry.claudeWorker(id)?.session ?? null;
       if (t === undefined || t.status === "deleted" || session === null) return;
-      const probe = runningProbe(registry, probes, t);
+      const probe = readableProbe(registry, probes, t);
       if (probe === null) return;
       const stored = registry.claudeTranscript(id);
       const startedAt = Date.now();

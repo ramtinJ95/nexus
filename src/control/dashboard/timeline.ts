@@ -5,6 +5,7 @@
  */
 import type { ThreadDetail } from "../wire.ts";
 import type { ThreadId } from "../../ids.ts";
+import { keptPastDay } from "../../reconcile.ts";
 import { blocks, findingsOf, phaseNote, roundsSpent, type Review, type Round } from "../review-model.ts";
 import { Html, html, ago, short, dot, icon, limitText, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
@@ -143,8 +144,12 @@ ${heldAt("landing")}`,
   };
   const label: Record<Step, string> = { planned: "Brief", queued: "Queued", building: "Building", review: "Pull request and review", landing: "Landing", deployed: "Deployed" };
   const closed = t.status === "archived" || t.status === "deleted";
+  // A pylon its node does not list has no disk left to keep.
+  const kept = d.pylon.actualState === "absent" ? null : keptPastDay(t, c.now);
   return html`<ol class="tl">${steps.map((s) => step(s, label[s], states[s], when[s], body[s]))}
-${closed && step("archived", t.status === "archived" ? "Archived" : "Deleted", "done", t.archivedAt === undefined ? null : ago(t.archivedAt, c.now), html`<p class="tl-meta">${t.status === "archived" ? "Its pylon is paused. Unarchive it to pick the work up again." : "Its pylon and disk are gone."}</p>`)}
+${closed && step("archived", t.status === "archived" ? "Archived" : "Deleted", "done", t.archivedAt === undefined ? null : ago(t.archivedAt, c.now), html`<p class="tl-meta">${t.status === "archived" ? "Its pylon is paused. Unarchive it to pick the work up again." : "Its pylon and disk are gone."}</p>
+${kept !== null && html`<p class="tl-meta">Its disk is kept past its 24 hours, as ${kept}.</p>`}
+${t.status === "archived" && t.usageUnread !== undefined && html`<p class="tl-meta">Usage unread: ${d.pylon.actualState === "absent" ? "its disk went" : "its disk goes 24 hours after the archive"} with the token usage on it unread, as ${t.usageUnread}.</p>`}`)}
 </ol>`;
 }
 

@@ -33,21 +33,62 @@ export interface ActivityFacts {
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
   lastAgentActivityAt: number; // pi-durable turns, Claude hooks and other observed sessions in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
-  /** The usage backfill reads this archived thread's pylon now. */
+  /** The usage backfill, or the settle of this archive, reads this archived thread's pylon now. */
   readingUsage?: boolean;
   /** When the thread was archived, present only while it is. */
   archivedAt?: number;
+  /** When this archive's settle read every transcript on its pylon to the end, in a wake for reading after its pause. */
+  usageSettledAt?: number;
+  /** This archive's last settle that failed, why, and how many failed in a row. Present only while it is unsettled. */
+  settleFailure?: { reason: string; at: number; count: number };
+  /** When the newest backup the control plane has seen verify began, for an archived thread, whose disk waits on one. */
+  backedUpAt?: number;
+  /** Why this archive's next settle waits, such as no room on its node, while it is unsettled and waits. */
+  settleWaiting?: string;
+  /** Why this archive's usage cannot be read, as of a failed pylon, so its disk goes at its 24 hours with it unread. */
+  usageUnread?: string;
 }
 
 /** Amp's numbers. */
 export const idlePolicy = { agentIdleMs: 5 * 60_000, humanIdleMs: 20 * 60_000 } as const;
-/** How long an archived thread keeps its pylon's disk. */
+/** How long an archived thread keeps its pylon's disk at least. */
 export const archivedDiskMs = 24 * 60 * 60_000;
+/** An archive's usage not read this long after its archive, a day past its disk's 24 hours, will not be read on its own. */
+export const settleOverdueMs = 2 * archivedDiskMs;
+/** Settles of one archive that failed this many times in a row will not succeed on their own: its pylon failed, or its disk does not boot or read. */
+export const settleFailuresFail = 3;
+
+/**
+ * Why an archived thread's disk outlives its 24 hours, or null once it may go: the token usage on it was read to its
+ * end after its pylon last ran, and a backup that began after that read verified, so the numbers are in the registry
+ * and in a backup of it before the only copy of their transcripts goes. A disk whose usage cannot be read, as a failed
+ * pylon's, is not kept for it, as the person decided on 2026-11-02.
+ */
+export function diskKept(a: ActivityFacts): string | null {
+  if (a.usageUnread !== undefined) return null;
+  const f = a.settleFailure;
+  if (a.usageSettledAt === undefined) {
+    return `its token usage is not read to its end yet${f === undefined ? "" : `, and reading it failed ${f.count === 1 ? "once" : `${f.count} times in a row`}, the last because ${f.reason}`}${a.settleWaiting === undefined ? "" : `. Its next read waits, as ${a.settleWaiting}`}`;
+  }
+  if (a.backedUpAt === undefined || a.backedUpAt <= a.usageSettledAt) return "it waits for a backup that begins after its token usage was read";
+  return null;
+}
+
+/** Why the archived thread's disk is kept past its 24 hours at `now`, or null while it is under them or may go. */
+export function keptPastDay(a: ActivityFacts, now: number): string | null {
+  return a.status === "archived" && a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? diskKept(a) : null;
+}
+
+/** Whether the archive's usage will not be read without the person: its settles keep failing, or it is overdue. */
+export function settleStuck(a: ActivityFacts, now: number): boolean {
+  return keptPastDay(a, now) !== null && a.usageSettledAt === undefined
+    && ((a.settleFailure?.count ?? 0) >= settleFailuresFail || now - a.archivedAt! >= settleOverdueMs);
+}
 
 export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
   if (a.status === "archived") {
-    return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? "deleted"
+    return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs && diskKept(a) === null ? "deleted"
       : a.readingUsage === true ? "reading" : "paused";
   }
   // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.
@@ -82,6 +123,8 @@ export interface PlanInput {
   attempts: Attempts;
   /** A human retried the pylon after the planner gave up, and no job has succeeded nor the planner finished or given up since. */
   retrying: boolean;
+  /** The boot, by its `bootedAt`, whose transcripts a settle sealed. */
+  sealedBoot?: string;
   /** Online nodes other than `node` that hold the artifact. */
   holders(artifact: ArtifactId): readonly NodeName[];
   /** The registry's recorded archive hash, which fetch-artifact verifies the copy against. */
@@ -134,6 +177,10 @@ const planRules: readonly Rule[] = [
   ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
   // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
+  // A sealed boot's transcripts are read-only and its user's processes were killed, so it runs no work: it pauses, and
+  // the spawn after boots the disk again, without the seal.
+  (i) => i.desired === "running" && i.observed !== "absent" && i.observed.phase === "running" && i.sealedBoot !== undefined && i.observed.bootedAt === i.sealedBoot
+    ? submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint }) : null,
   // 6. A broken pylon that retryRefusal refuses is never paused either, because the pause could save what broke it.
   (i) => {
     if (i.desired !== "paused") return null;

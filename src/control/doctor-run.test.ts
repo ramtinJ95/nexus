@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { lstat, mkdir, symlink, writeFile } from "node:fs/promises";
 import { createServer, TLSSocket } from "node:tls";
 import { join } from "node:path";
-import type { NodeName, TailnetNodeId } from "../ids.ts";
-import { tempDir, testCapacity, testObservation } from "../test-kit.ts";
+import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
+import { stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { ModelsError, type Models } from "@earendil-works/pi-ai/models";
 import { harnessModels, loginState, openCredentials } from "../harness/credentials.ts";
 import { readBackupStatus, writeBackupStatus } from "./backup-status.ts";
 import { changesKeptMs, checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { healthView, type Check, type DoctorReport, type Status } from "./doctor-model.ts";
-import { testRegistry } from "./test-kit.ts";
+import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 
 const day = 24 * 60 * 60_000;
 const start = Date.parse("2026-11-01T00:00:00Z");
@@ -178,10 +178,31 @@ test("the doctor reads each node, the release and the control node from the regi
   });
   const status = Object.fromEntries(r.checks.map((c) => [`${c.node ?? "control"} ${c.name}`, c.status]));
   assert.deepEqual(status, {
-    "control release": "warn", "control backup": "fail", "control login": "fail", "control certificate": "ok",
+    "control release": "warn", "control backup": "fail", "control login": "fail", "control certificate": "ok", "control archived-disks": "ok",
     "rj-firebat online": "ok", "rj-firebat release": "warn", "rj-firebat disk": "fail", "rj-firebat pylons": "ok",
   }, "no deployer has reported, so both roles are pending, and the pylons' filesystem is under its reserve");
   assert.match(r.checks.find((c) => c.node === null && c.name === "release")!.text, /control on rj-firebat .* no deployer report/);
+});
+
+test("the doctor counts each archived disk kept past its 24 hours for its usage that its node still has", async (t) => {
+  let clock = Date.now() - 25 * 60 * minute;
+  const registry = seedRegistry(testRegistry(t, ":memory:", () => clock), { nodes: ["rj-firebat" as NodeName] });
+  const [kept, gone, young] = ["th-kept", "th-gone", "th-young"].map((id) => addThread(registry, { node: "rj-firebat" as NodeName, thread: { id: id as ThreadId, title: id } }));
+  registry.setThreadStatus(kept!.id, "archived");
+  registry.setThreadStatus(gone!.id, "archived");
+  clock = Date.now();
+  registry.setThreadStatus(young!.id, "archived");
+  observeNode(registry, { node: "rj-firebat" as NodeName, pylons: [stoppedPylon(kept!.pylonId), stoppedPylon(young!.pylonId)] });
+  const doctor = () => runDoctor({
+    registry, self: "nFIREBAT" as TailnetNodeId, startedAt: clock - 3 * day,
+    backupStatus: async () => "missing", certificate: async () => ({ kind: "none" }),
+    login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: "oauth", offered: ["gpt-6-astra"], refresh: { ok: true } }),
+  });
+  const verdict = async () => (await doctor()).checks.find((c) => c.node === null && c.name === "archived-disks")!;
+  assert.deepEqual(await verdict(), { node: null, name: "archived-disks", status: "warn", text: "th-kept (th-kept) is kept past its 24 hours, as its token usage is not read to its end yet. Each is read once its pylon paused, while its node is online with a current probe and room for it" },
+    "a disk its node no longer has is kept nowhere, and one archived under 24 hours ago not yet");
+  registry.finishSettle(kept!.id, null, Date.now());
+  assert.match((await verdict()).text, /^1 archived disk waits past the 24 hours for the next backup/);
 });
 
 test("the dashboard's certificate is read as a browser gets it, an expiring one included, and a port that does not answer says so", async (t) => {

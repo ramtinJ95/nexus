@@ -178,6 +178,49 @@ test("the overview lists each project's open threads with their phases, node and
   assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
 });
 
+test("an archived thread's timeline says why its disk is kept past its 24 hours, until its usage was read and backed up", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const old = await s.start("acme", "Old spike");
+  assert.equal((await s.call("POST", `/v1/threads/${old.id}/archive`)).status, 200);
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested(testObservation(node, { pylons: [stoppedPylon(old.pylonId)] }), []);
+  const archived = async () => textOf((await s.call("GET", `/threads/${old.id}`)).text.split('id="tl-archived"')[1]!.split("</li>")[0]!);
+  t.mock.timers.setTime(Date.now() + 23 * 60 * 60_000);
+  assert.doesNotMatch(await archived(), /kept/, "under its 24 hours");
+  t.mock.timers.setTime(Date.now() + 2 * 60 * 60_000);
+  s.registry.finishSettle(old.id, "its pylon did not boot within 10 minutes", Date.now());
+  assert.match(await archived(), /Its pylon is paused\. Unarchive it to pick the work up again\. Its disk is kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed once, the last because its pylon did not boot within 10 minutes\.$/);
+  s.registry.finishSettle(old.id, null, Date.now());
+  assert.match(await archived(), /Its disk is kept past its 24 hours, as it waits for a backup that begins after its token usage was read\.$/);
+  s.registry.recordBackedUp(Date.now() + 1);
+  assert.doesNotMatch(await archived(), /kept/);
+});
+
+test("an archive whose usage will not be read without the person needs them, as its reads keep failing, with a delete that loses the unread usage, and a pylon that cannot be read is shown as usage unread", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const old = await s.start("acme", "Old spike");
+  assert.equal((await s.call("POST", `/v1/threads/${old.id}/archive`)).status, 200);
+  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.ingested(testObservation(node, { pylons: [stoppedPylon(old.pylonId)] }), []);
+  const card = async () => (await s.call("GET", "/")).text.split(`id="need-${old.id}-disk"`)[1]?.split("</article>")[0];
+  const archived = async () => textOf((await s.call("GET", `/threads/${old.id}`)).text.split('id="tl-archived"')[1]!.split("</li>")[0]!);
+  t.mock.timers.setTime(Date.now() + 25 * 60 * 60_000);
+  for (let i = 0; i < 2; i++) s.registry.finishSettle(old.id, "its pylon did not boot within 10 minutes", Date.now());
+  assert.equal(await card(), undefined, "two failed reads are tried again on their own");
+  s.registry.finishSettle(old.id, "its pylon did not boot within 10 minutes", Date.now());
+  const kept = (await card())!;
+  assert.match(textOf(kept), /Disk kept/);
+  assert.match(textOf(kept), /Its disk is kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed 3 times in a row, the last because its pylon did not boot within 10 minutes\. Nexus tries the read again on its own, or delete the thread, which deletes the disk with the token usage on it unread\./);
+  assert.match(kept, /data-action="delete"[^>]*data-confirm="Delete &quot;Old spike&quot;\? Its disk goes with the token usage on it unread\."/);
+
+  s.registry.markUnread(old.id, "its pylon failed: gave up after 5 failed attempts");
+  assert.equal(await card(), undefined, "a disk whose usage cannot be read is not kept for it");
+  assert.match(await archived(), /Usage unread: its disk goes 24 hours after the archive with the token usage on it unread, as its pylon failed: gave up after 5 failed attempts\.$/);
+  assert.doesNotMatch(await archived(), /kept/);
+});
+
 test("the sidebar lists every project's threads with their state, folds the archived and marks the open one", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);

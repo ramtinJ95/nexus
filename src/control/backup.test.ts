@@ -9,7 +9,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import type { NodeName, ProjectId } from "../ids.ts";
 import { tempDir } from "../test-kit.ts";
 import { backup, check, failedRun, nameOf, restore, runBackup, verify } from "./backup.ts";
-import { readBackupStatus } from "./backup-status.ts";
+import { backedUpAt, readBackupStatus } from "./backup-status.ts";
 import { parseConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";
 
@@ -126,6 +126,22 @@ test("a backup run's own result decides the unit's: a status not written is logg
   assert.deepEqual(await readBackupStatus(statusFile), { ranAt: m.day(2).toISOString(), succeeded: true, newest: { name: nameOf(m.day(2)), verified: true, createdAt: m.day(2).toISOString() } });
   await assert.rejects(run({ configPath: join(m.dir, "missing.json"), now: m.day(3) }), /missing\.json/);
   assert.deepEqual(await readBackupStatus(statusFile), { ranAt: m.day(3).toISOString(), succeeded: false, newest: { name: nameOf(m.day(2)), verified: true, createdAt: m.day(2).toISOString() } });
+});
+
+test("the backup a kept disk waits on is the newest that verified, from when its run began: a failed run keeps the one before, and a status with none gives none", async (t) => {
+  const m = await controlPlane(t);
+  const configPath = join(m.dir, "control.json");
+  await writeFile(configPath, JSON.stringify(m.config));
+  const statusFile = join(m.dir, "status", "status.json");
+  const run = (now: Date, path = configPath) => runBackup({ configPath: path, root: m.root, etc: m.etc, statusFile, keep: 7, log: () => {}, now });
+  assert.equal(backedUpAt(await readBackupStatus(statusFile)), null, "no run yet");
+  await run(m.day(1));
+  assert.equal(backedUpAt(await readBackupStatus(statusFile)), m.day(1).getTime());
+  await assert.rejects(run(m.day(2), join(m.dir, "missing.json")));
+  assert.equal(backedUpAt(await readBackupStatus(statusFile)), m.day(1).getTime(), "a failed run leaves the backup before it");
+  assert.equal(backedUpAt({ ranAt: m.day(3).toISOString(), succeeded: false, newest: { name: nameOf(m.day(1)), verified: false, createdAt: null } }), null, "one that no longer verifies counts for nothing");
+  assert.equal(backedUpAt({ ranAt: m.day(3).toISOString(), succeeded: false, newest: null }), null);
+  assert.equal(backedUpAt({ unreadable: "EACCES" }), null);
 });
 
 test("a new backup that verifies leaves the newest 7 and no leftover, and a failed one leaves the earlier ones and nothing of its own", async (t) => {

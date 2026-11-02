@@ -53,6 +53,8 @@ export interface TickContext {
   save(pylon: PylonRecord): void;
   /** The desired phase as it stands now, read again after the waits on the probe, so no plan acts on one they overturned. */
   desired?: () => DesiredPhase;
+  /** The boot whose transcripts a settle sealed, read again with the desired phase. */
+  sealedBoot?: () => string | undefined;
 }
 
 export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanStep> {
@@ -100,6 +102,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     inFlight,
     attempts: pylon.attempts,
     retrying: pylon.retrying,
+    ...(ctx.sealedBoot?.() === undefined ? {} : { sealedBoot: ctx.sealedBoot()! }),
     holders: ctx.holders,
     artifactSha256: ctx.artifactSha256,
   }, Date.now());

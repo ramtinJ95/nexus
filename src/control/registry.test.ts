@@ -11,6 +11,7 @@ import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { reviewPrefix } from "../agent-protocol.ts";
 import { seedRegistry, testPylon, testProject, testRegistry, testReview, testThread } from "./test-kit.ts";
 import { rewindTo, versionBefore } from "./schema-kit.ts";
+import { migrations } from "./schema.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { PullRequest } from "./github.ts";
 import type { PylonRecord } from "../tick.ts";
@@ -1495,13 +1496,78 @@ test("the migration that records archive times stamps each thread archived befor
   registry.createThread({ ...thread, id: "th-2" as ThreadId, pylonId: "pylon-th-2" as PylonId }, { ...pylon, pylonId: "pylon-th-2" as PylonId, thread: "th-2" as ThreadId });
   registry.setThreadStatus(threadId, "archived");
   registry.close();
-  rewindTo(path, versionBefore(/thread_archives/));
+  rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS thread_archives\b/));
   const before = Date.now();
   const upgraded = testRegistry(t, path);
   const after = Date.now();
   const stamp = upgraded.thread(threadId)?.archivedAt;
   assert.ok(stamp !== undefined && stamp >= Math.floor(before / 1000) * 1000 && stamp <= after, `the stamp ${stamp} is the migration's time`);
   assert.equal(upgraded.thread("th-2" as ThreadId)?.archivedAt, undefined, "an active thread gets none");
+});
+
+test("an archive's settle records when its usage was read and forgets the failed ones, which count in a row, and only an unarchive unsettles it", (t) => {
+  const registry = seeded(t, tempDb(), () => 1_000);
+  const archived = () => registry.thread(threadId)!;
+  const kept = () => registry.keptArchives().map((k) => k.id);
+  assert.deepEqual(kept(), [], "an active thread keeps no disk for its usage");
+  registry.setThreadStatus(threadId, "archived");
+  assert.deepEqual([archived().usageSettledAt, archived().settleFailure, archived().backedUpAt, kept()], [undefined, undefined, undefined, [threadId]]);
+
+  registry.finishSettle(threadId, "its pylon did not boot within 10 minutes", 2_000);
+  registry.finishSettle(threadId, "reading it failed: the pipe to the pylon was lost", 3_000);
+  assert.deepEqual(archived().settleFailure, { reason: "reading it failed: the pipe to the pylon was lost", at: 3_000, count: 2 });
+  registry.finishSettle(threadId, null, 4_000);
+  assert.deepEqual([archived().usageSettledAt, archived().settleFailure], [4_000, undefined]);
+  registry.finishSettle(threadId, "a late failure", 5_000);
+  registry.finishSettle(threadId, null, 6_000);
+  assert.deepEqual([archived().usageSettledAt, archived().settleFailure], [4_000, undefined], "a settled archive stays as it was settled");
+  registry.setThreadStatus(threadId, "archived");
+  assert.equal(archived().usageSettledAt, 4_000, "archiving it again keeps its settle, as it keeps its archive time");
+
+  assert.deepEqual(kept(), [threadId], "no backup began after the settle yet");
+  registry.recordBackedUp(4_000);
+  assert.deepEqual([archived().backedUpAt, kept()], [4_000, [threadId]], "a backup that began as the read ended may have missed it");
+  registry.recordBackedUp(4_001);
+  registry.recordBackedUp(3_000);
+  assert.deepEqual([archived().backedUpAt, kept()], [4_001, []], "an older backup never moves the newest back");
+
+  registry.setThreadStatus(threadId, "idle");
+  const { usageSettledAt, settleFailure, backedUpAt } = archived();
+  assert.deepEqual([usageSettledAt, settleFailure, backedUpAt], [undefined, undefined, undefined], "only an archived thread has them");
+  registry.setThreadStatus(threadId, "archived");
+  assert.deepEqual([archived().usageSettledAt, kept()], [undefined, [threadId]], "the next archive has its own usage to read");
+});
+
+test("a settle's hold wakes its pylon for reading until the read is done, and is held in memory only", (t) => {
+  const path = tempDb();
+  const registry = seed(openRegistry(path));
+  registry.setThreadStatus(threadId, "archived");
+  assert.equal(registry.settleHold(), null);
+  registry.holdSettle(threadId, 10);
+  assert.deepEqual([registry.settleHold(), registry.thread(threadId)!.readingUsage], [{ thread: threadId, phase: "reading", since: 10 }, true]);
+  registry.finishSettle(threadId, null, 20);
+  assert.deepEqual([registry.settleHold(), registry.thread(threadId)!.readingUsage], [{ thread: threadId, phase: "pausing", since: 20 }, undefined]);
+  registry.holdSettle(threadId, 30);
+  registry.close();
+  const reopened = testRegistry(t, path);
+  assert.deepEqual([reopened.settleHold(), reopened.thread(threadId)!.readingUsage], [null, undefined], "a restart lets the pylon pause");
+  assert.equal(reopened.thread(threadId)!.usageSettledAt, 20);
+});
+
+test("the migration that records settles leaves every archive before it unsettled, and its failures none", (t) => {
+  const path = tempDb();
+  const registry = seed(openRegistry(path, () => 1_000));
+  registry.setThreadStatus(threadId, "archived");
+  registry.finishSettle(threadId, null, 2_000);
+  registry.recordBackedUp(3_000);
+  registry.close();
+  rewindTo(path, versionBefore(/ADD COLUMN usage_settled_at\b/));
+  const upgraded = testRegistry(t, path);
+  const { archivedAt, usageSettledAt, settleFailure, backedUpAt } = upgraded.thread(threadId)!;
+  assert.deepEqual([archivedAt, usageSettledAt, settleFailure, backedUpAt], [1_000, undefined, undefined, 3_000], "the backup's time is a setting, which the migration keeps");
+  assert.deepEqual(upgraded.keptArchives().map((k) => k.id), [threadId], "its disk stays until a settle reads it");
+  upgraded.finishSettle(threadId, "its pylon failed: boom", 4_000);
+  assert.deepEqual(upgraded.thread(threadId)!.settleFailure, { reason: "its pylon failed: boom", at: 4_000, count: 1 });
 });
 
 test("judgments begin at the newest event, so failures from before are never judged, and a rewound registry keeps that watermark", (t) => {
@@ -1520,7 +1586,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   upgraded.savePylon({ ...upgraded.pylon(pylonId)!, failed: "gave up again" });
   upgraded.close();
   const db = new DatabaseSync(path);
-  db.exec(`PRAGMA user_version = ${versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/)}`);
+  db.exec(migrations[versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/)]!);
   db.close();
   const again = testRegistry(t, path);
   assert.equal(again.judgmentSince(), before, "applied again, the migration keeps the first watermark");

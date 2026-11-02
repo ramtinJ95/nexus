@@ -1,5 +1,5 @@
 /** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
-import { desiredPhase } from "../../reconcile.ts";
+import { archivedDiskMs, desiredPhase, keptPastDay, settleStuck } from "../../reconcile.ts";
 import type { ThreadId } from "../../ids.ts";
 import { threadPhase } from "../pipeline.ts";
 import { needsPerson } from "../attention.ts";
@@ -98,8 +98,8 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
  * person works down the list and the one that has waited longest is first. Each source of a thread's `decision` gets
  * its card, and any other attention that needs the person one for the thread. A new reply does not wait on the person,
  * so it has none, but it outranks a dialog in the terminal, which the session's own state says waits. Each node's open
- * cleanup question gets its card too. After the cards, oldest first too, comes the work its pipeline phase holds for
- * the person that no card acts on.
+ * cleanup question gets its card too, and each archive whose disk is kept for usage that will not be read without the
+ * person. After the cards, oldest first too, comes the work its pipeline phase holds for the person that no card acts on.
  */
 export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queuedIn">, detail: (thread: Thread) => ThreadDetail): Need[] {
   const cleanups = c.registry.openNodeQuestions().map((question): Need => ({ kind: "cleanup", question, since: question.askedAt }));
@@ -116,7 +116,8 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
     const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
     if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
     return needs;
-  })].sort((a, b) => a.since - b.since);
+  }), ...c.threads().filter((t) => t.status === "archived" && settleStuck(t, Date.now())).map((t): ThreadNeed => ({ kind: "disk", d: detail(t), since: t.archivedAt! + archivedDiskMs }))]
+    .sort((a, b) => a.since - b.since);
   const carded = new Set(cards.flatMap((n) => n.kind === "cleanup" || n.kind === "held" ? [] : [n.d.thread.id]));
   const holds = (id: ThreadId) => threadPhase(c.registry, id).kind === "held";
   const held = [
@@ -220,6 +221,8 @@ function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
 ${card}`];
     }
     case "nudge": return ["Stopped short", nudgeCard(c, t, (name) => `${name}-${t.id}`)!];
+    case "disk": return ["Disk kept", fix(`Its disk is kept past its 24 hours, as ${keptPastDay(t, c.now)}. Nexus tries the read again on its own, or delete the thread, which deletes the disk with the token usage on it unread.`,
+      html`<button type="button" class="btn btn-xs danger" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its disk goes with the token usage on it unread.">Delete</button>`)];
     case "question": {
       const q = n.question;
       const judgment = (d.judgments ?? []).filter((j) => j.question === q.id);
