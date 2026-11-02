@@ -97,7 +97,7 @@ export function needWhy(n: ThreadNeed, now: number): string {
 /** A started or queued thread's life, from its pipeline phase and what of it waits on the person. */
 export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id: ThreadId): Life {
   const phase = threadPhase(c.registry, id);
-  const needs = c.needs().filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.d.thread.id === id);
+  const needs = c.needs().filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.kind !== "held" && n.d.thread.id === id);
   const review = c.registry.review(id);
   const started = c.registry.thread(id) !== undefined;
   // A review's checks run as the first steps of its landing once it was asked to land, as the landing card shows them.

@@ -1,5 +1,7 @@
 /** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
 import { desiredPhase } from "../../reconcile.ts";
+import type { ThreadId } from "../../ids.ts";
+import { threadPhase } from "../pipeline.ts";
 import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { Registry } from "../registry.ts";
@@ -7,12 +9,12 @@ import type { Thread } from "../thread-store.ts";
 import { cannotLand, type Review } from "../review-model.ts";
 import { heldBy } from "../policy.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
-import type { Context, Need, ThreadNeed } from "./context.ts";
+import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
 import { lifeOfThread, needWhy, itemsOf } from "./lifecycle.ts";
-import { flightLines, flightStack, inFlight, itemActions, peekHref, peekKey, peekView, type Line, type Peek } from "./flight.ts";
+import { flightLines, flightStack, heldLine, inFlight, itemActions, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
 
 /**
  * Two columns: on the left what waits on the person, each a line that opens to its card, and on the right the work in
@@ -20,11 +22,9 @@ import { flightLines, flightStack, inFlight, itemActions, peekHref, peekKey, pee
  */
 export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, peek: Peek | null = null): Html {
   const placed = flightLines(c);
-  // A held thread with a card in Needs you shows as that card, once.
-  const held = (placed.get("held") ?? []).filter((l) => l.life.needs.length === 0);
   const peeked = peek === null ? null : peekKey(peek);
   const flying = inFlight(placed);
-  const waiting = c.needs().length + held.length;
+  const waiting = c.needs().length;
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
@@ -32,7 +32,7 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, p
 <div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
 <div class="split${peek !== null && " peeking"}" id="split">
 <p id="action-error" class="error split-error" role="alert" hidden></p>
-<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, held)}</section>
+<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section>
 <div class="split-peek" id="peek" data-live>${peekView(c, peek)}</div>
 <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
 <div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${flying}</span>
@@ -92,11 +92,12 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
  * person works down the list and the one that has waited longest is first. Each source of a thread's `decision` gets
  * its card, and any other attention that needs the person one for the thread. A new reply does not wait on the person,
  * so it has none, but it outranks a dialog in the terminal, which the session's own state says waits. Each node's open
- * cleanup question gets its card too.
+ * cleanup question gets its card too. After the cards, oldest first too, comes the work its pipeline phase holds for
+ * the person that no card acts on.
  */
-export function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail: (thread: Thread) => ThreadDetail): Need[] {
+export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queuedIn">, detail: (thread: Thread) => ThreadDetail): Need[] {
   const cleanups = c.registry.openNodeQuestions().map((question): Need => ({ kind: "cleanup", question, since: question.askedAt }));
-  return [...cleanups, ...c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): ThreadNeed[] => {
+  const cards = [...cleanups, ...c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): ThreadNeed[] => {
     const { attention } = c.row(t);
     const review = c.registry.review(t.id);
     const holds = review !== null && review.phase.kind === "approved" && heldBy(review).length > 0;
@@ -112,6 +113,14 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads">, detail
     if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
     return needs;
   })].sort((a, b) => a.since - b.since);
+  const carded = new Set(cards.flatMap((n) => n.kind === "cleanup" || n.kind === "held" ? [] : [n.d.thread.id]));
+  const holds = (id: ThreadId) => threadPhase(c.registry, id).kind === "held";
+  const held = [
+    ...itemsOf(c).filter((item) => item.thread === null && item.phase.kind === "held").map((item): Need => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
+    ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): Need => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
+    ...c.threads().filter((t) => t.status !== "deleted" && !carded.has(t.id) && holds(t.id)).map((thread): Need => ({ kind: "held", work: { kind: "thread", thread }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
+  ].sort((a, b) => a.since - b.since);
+  return [...cards, ...held];
 }
 
 /**
@@ -124,37 +133,41 @@ function heldSince(registry: Registry, r: Review): number {
   return changes[at + 1]?.time ?? r.since;
 }
 
-const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}` : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
+const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}`
+  : n.kind === "held" ? `need-${heldKey(n.work)}`
+  : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
+const heldKey = (w: HeldWork) => w.kind === "item" ? w.item.id : w.kind === "queued" ? w.q.id : w.thread.id;
 
 /**
  * Needs you: the inbox's cards, oldest first, each folded to one line of what it is, its thread and why it waits, and
- * opening in place to the card its thread's page shows where there is one. Then the work held for the person that no
- * card acts on, such as an item to approve or a blocked queued thread.
+ * opening in place to the card its thread's page shows where there is one, or for held work to what moves it on.
  */
-function needsList(c: Context, held: readonly Line[]): Html {
+function needsList(c: Context): Html {
   const needs = c.needs();
-  const fold = (n: Need | Line, id: string, head: Html, body: Html, why: string) => html`<details class="need-fold" id="fold-${id}"><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
-  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length + held.length > 0 && html`<span class="count">${needs.length + held.length}</span>`}</div>
-${needs.length + held.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
+  const fold = (id: string, head: Html, body: Html, why: string) => html`<details class="need-fold" id="fold-${id}"><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
+  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
+${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
   if (n.kind === "cleanup") {
     const { node } = n.question;
     return html`<article class="need need-cleanup" id="${needId(n)}" data-node="${node}" tabindex="-1" aria-label="Cleanup: ${node}">
-${fold(n, needId(n), html`<div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, cleanupCard(c, n.question), `Frees space on ${node} once you confirm what to delete`)}
+${fold(needId(n), html`<div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, cleanupCard(c, n.question), `Frees space on ${node} once you confirm what to delete`)}
+</article>`;
+  }
+  if (n.kind === "held") {
+    const l = heldLine(c, n.work);
+    const item = n.work.kind === "item" ? n.work.item : undefined;
+    const project = item === undefined ? undefined : c.registry.project(item.project);
+    const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
+    return html`<article class="need need-held" id="${needId(n)}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
+${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
+  html`<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && project !== undefined ? itemActions(item, project) : html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
 </article>`;
   }
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
   const why = needWhy(n, c.now) || lifeOfThread(c, t.id).why;
   return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-${fold(n, needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, body, why)}
-</article>`;
-})}${held.map((l) => {
-  const item = itemsOf(c).find((i) => i.id === l.key);
-  const project = item === undefined ? undefined : c.registry.project(item.project);
-  const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
-  return html`<article class="need need-held" id="need-${l.key}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
-${fold(l, `need-${l.key}`, html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
-  html`<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && project !== undefined ? itemActions(item, project) : html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
+${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, body, why)}
 </article>`;
 })}</div>`}`;
 }

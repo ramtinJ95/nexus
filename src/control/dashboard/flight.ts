@@ -10,7 +10,7 @@ import type { ThreadDetail } from "../wire.ts";
 import type { PipelineItem, ItemPhase } from "../pipeline.ts";
 import { roundsSpent } from "../review-model.ts";
 import { Html, html, dot, icon, ago, state, actualBadge, threadState, dims, type Part, type Tone } from "./view.ts";
-import type { Context } from "./context.ts";
+import type { Context, HeldWork } from "./context.ts";
 import { clock, span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
 import type { Item } from "./items.ts";
@@ -52,6 +52,9 @@ export function flightLines(c: Context): Map<Stage, Line[]> {
   for (const stage of placed.values()) stage.sort((a, b) => a.order - b.order);
   return placed;
 }
+
+/** Work held for the person, as a line of the stack would show it. */
+export const heldLine = (c: Context, w: HeldWork): Line => w.kind === "item" ? itemLine(c, w.item) : w.kind === "queued" ? queuedLine(c, w.q) : threadLine(c, w.thread);
 
 export const peekHref = (key: string) => `/?peek=${encodeURIComponent(key)}`;
 

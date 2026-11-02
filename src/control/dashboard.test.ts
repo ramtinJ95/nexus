@@ -2363,6 +2363,20 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.doesNotMatch(await peek("it-000000000000"), /class="peek"/, "an unknown key previews nothing");
 });
 
+test("the sidebar's Needs you count, the phone's tab and the list count the same things, work held for approval included", async (t) => {
+  const s = await seeded(t);
+  s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "Greet by name", message: "Build it.", after: [] })).status, 201);
+  const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
+  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
+  const page = (await s.call("GET", "/")).text;
+  const list = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
+  assert.deepEqual([...list.matchAll(/<article class="need need-(\w+)"/g)].map((m) => m[1]), ["thread", "held"]);
+  assert.match(list, /<h2 id="needs-h">Needs you<\/h2><span class="count">2<\/span>/);
+  assert.equal(/<span class="seg-n" id="seg-needs-n" data-live>([^<]*)<\/span>/.exec(page)![1], "2");
+  for (const path of ["/", "/usage"]) assert.equal(needsCount((await s.call("GET", path)).text), "2", path);
+});
+
 /** The images a page shows, as each link and image name them, with any caption. */
 const shotsOf = (html: string) => [...html.matchAll(/<a class="shot" href="([^"]*)" target="_blank" rel="noopener"><img src="([^"]*)" alt="([^"]*)" loading="lazy">(?:<span class="shot-cap">([^<]*)<\/span>)?<\/a>/g)]
   .map(([, href, src, alt, caption]) => {
