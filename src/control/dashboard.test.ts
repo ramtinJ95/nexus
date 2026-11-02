@@ -2377,6 +2377,14 @@ test("the sidebar's Needs you count, the phone's tab and the list count the same
   for (const path of ["/", "/usage"]) assert.equal(needsCount((await s.call("GET", path)).text), "2", path);
 });
 
+test("a queued thread's preview says once what it waits for", async (t) => {
+  const s = await seeded(t);
+  const first = await s.start("acme", "Fix checkout");
+  const queued = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Then the receipts", after: [first.id] })).text) as QueuedThread;
+  const peek = textOf((await s.call("GET", `/?peek=${queued.id}`)).text.split('id="peek"')[1]!.split('id="in-flight"')[0]!);
+  assert.equal(peek.split("Fix checkout").length - 1, 1, peek);
+});
+
 /** The images a page shows, as each link and image name them, with any caption. */
 const shotsOf = (html: string) => [...html.matchAll(/<a class="shot" href="([^"]*)" target="_blank" rel="noopener"><img src="([^"]*)" alt="([^"]*)" loading="lazy">(?:<span class="shot-cap">([^<]*)<\/span>)?<\/a>/g)]
   .map(([, href, src, alt, caption]) => {

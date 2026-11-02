@@ -846,7 +846,7 @@ a.need-thread:hover { color: var(--accent); }
 .peek-text pre { white-space: pre-wrap; font-size: 12px; background: var(--code-bg); border-radius: 6px; padding: 6px 8px; }
 .peek-text code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
 .peek-meta { margin: 0; padding: 0 10px; font-size: 12.5px; color: var(--text-2); }
-.peek-waits { list-style: none; margin: 0; padding: 0 10px; display: grid; gap: 4px; font-size: 12.5px; color: var(--text-2); }
+.peek-waits { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; color: var(--text); overflow-wrap: anywhere; }
 .peek > .need-act { padding: 0 10px; }
 .peek .life { padding: 2px 0 0; }
 

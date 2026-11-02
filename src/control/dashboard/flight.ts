@@ -89,11 +89,11 @@ export const peekKey = (p: Peek) => p.kind === "thread" ? p.d.thread.id : p.kind
 
 const close = html`<a class="icon-btn peek-close" href="/" data-peek="" aria-label="Close the preview" title="Close (Esc)">${icon("cross")}</a>`;
 
-/** What moves the work on next, said once: what of it waits on the person, or what the step it is on does next. */
-function next(life: Life): Html {
+/** What moves the work on next, said once: what of it waits on the person, or what the step it is on does next, or what is given in its place. */
+function next(life: Life, said?: Html): Html {
   const held = life.stage === "held";
   const labels = [...new Set(life.needs.map(needLabel))];
-  return html`<div class="peek-next${held && " held"}"><span class="peek-k">${held ? "Waits on you" : "Next"}</span><p>${held && labels.length > 0 && html`<b>${labels.join(", ")}.</b> `}${life.why.replace(/\.$/, "")}.</p></div>`;
+  return html`<div class="peek-next${held && " held"}"><span class="peek-k">${held ? "Waits on you" : "Next"}</span>${said ?? html`<p>${held && labels.length > 0 && html`<b>${labels.join(", ")}.</b> `}${life.why.replace(/\.$/, "")}.</p>`}</div>`;
 }
 
 /** The latest reply of the thread's agent, or what it was last asked when it has not answered. */
@@ -132,8 +132,7 @@ ${project !== undefined && itemActions(i, project)}
     return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${q.id}">
 <header class="peek-head"><span class="peek-proj">${q.project}</span><h2 id="peek-h">${dot(tone, label)}<span>${q.title}</span></h2><a class="btn btn-xs" href="/threads/${q.id}">Open thread</a>${close}</header>
 ${lifeTrack(life, false)}
-${next(life)}
-${q.waits.length > 0 && html`<ul class="peek-waits">${q.waits.map((w) => html`<li>${state(w.state, w.state === "landed" ? "ok" : w.state === "blocked" ? "bad" : "idle")} <a class="link" href="${peekHref(w.thread)}" data-peek="${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>`}
+${next(life, q.waits.length === 0 ? undefined : html`<ul class="peek-waits">${q.waits.map((w) => html`<li>${state(w.state, w.state === "landed" ? "ok" : w.state === "blocked" ? "bad" : "idle")} <a class="link" href="${peekHref(w.thread)}" data-peek="${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>`)}
 <p class="peek-meta">Starts on ${q.node} with ${q.resources.cpus} CPUs, ${q.resources.memoryGiB} GiB of memory and ${q.resources.diskGiB} GiB of disk.</p>
 </section>`;
   }
