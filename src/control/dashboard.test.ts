@@ -1897,6 +1897,10 @@ test("pages link their assets by hash, and a hashed asset is cached for good", a
     assert.ok(versioned.text.length > 0);
     assert.equal((await s.call("GET", `/assets/${file}?v=stale`)).headers["cache-control"], "no-cache");
   }
+  for (const file of ["b612-400.woff2", "b612-700.woff2", "b612-mono-400.woff2"]) {
+    const font = await s.call("GET", `/assets/${file}`);
+    assert.deepEqual([font.status, font.headers["content-type"]], [200, "font/woff2"], `the stylesheet's face ${file} is served as a font`);
+  }
   const chunk = (await readdir(new URL("../../dist/dashboard/", import.meta.url))).find((file) => file !== "client.js");
   assert.ok(chunk !== undefined, "the bundle has a chunk besides client.js");
   const served = await s.call("GET", `/assets/${chunk}`);
@@ -1912,7 +1916,7 @@ test("pages are served under a content security policy that allows only the dash
   const inline = [...page.text.matchAll(/<script>([^<]*)<\/script>/g)].map(([, script]) => script!);
   assert.equal(inline.length, 1, "the head script that applies the theme is the page's one inline script");
   assert.equal(page.headers["content-security-policy"],
-    `default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(inline[0]!).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
+    `default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self' 'sha256-${createHash("sha256").update(inline[0]!).digest("base64")}'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
 });
 
 test("dashboard pages answer only allowed callers under the API's own names", async (t) => {

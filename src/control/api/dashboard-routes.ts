@@ -107,6 +107,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       // Pages link each asset with its hash, and a chunk's name has its hash, so neither URL ever changes and the
       // phone keeps it.
       const cache = asset.version === null || r.query.get("v") === asset.version ? "public, max-age=31536000, immutable" : "no-cache";
+      if (typeof asset.body !== "string") return { status: 200, file: asset.body, type: asset.type, cache };
       return { status: 200, headers: { "content-type": asset.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: asset.body };
     }],
   ];
