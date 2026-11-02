@@ -651,10 +651,11 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           sql("DELETE FROM session_activity WHERE thread = ? AND session NOT IN (SELECT session FROM session_activity WHERE thread = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?)").run(thread, thread, maxActiveSessions);
         }
         if (event.kind !== "session.waiting") agentActivity(clock(), thread);
-        // A Claude worker's thread replies only when the worker's own session ends its turn, so a side session that
-        // finishes never makes the thread wait on the person while the builder works. A thread with no such session
-        // replies when any of its sessions ends a turn, as those are its only work.
-        const side = sql("SELECT 1 FROM claude_workers WHERE thread = ? AND session IS NOT NULL AND session != ?").get(thread, session) !== undefined;
+        // A side session that finishes while the Claude worker's own session still has a turn is no reply, so the thread
+        // never waits on the person while the builder works. Any other session's turn end is one, as Claude gives the
+        // worker's pane a new session after /clear and a person may run Claude by hand after a failed launch.
+        const side = sql(`SELECT 1 FROM claude_workers w JOIN session_activity a ON a.thread = w.thread AND a.session = w.session
+          WHERE w.thread = ? AND w.session != ? AND (a.state = 'session.waiting' OR a.updated_at > ?)`).get(thread, session, clock() - sessionActivityTtlMs) !== undefined;
         if (event.kind === "session.turn-ended" && !side) recordReply(clock(), thread);
         appendEvent(event.kind, thread, { at, ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
         updateAttention(thread);
