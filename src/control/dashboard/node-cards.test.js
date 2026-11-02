@@ -42,6 +42,14 @@ test("a click on another node's card body opens that card's name link", () => {
   assert.equal(opened(firebat, testbench), "1,0,1,0", "a click on the card's padding");
 });
 
+test("a click on the picked card opens nothing, so a double-click there selects a word rather than reloading the page", () => {
+  const picked = card("infra-testbench", true);
+  click(picked.meter);
+  click(picked.meter);
+  click(picked.card);
+  assert.equal(opened(picked), "0,0");
+});
+
 test("a link or button on a card keeps doing its own thing, and is not opened twice", () => {
   const { link, checks, ...rest } = card("rj-firebat");
   click(checks);
