@@ -2,7 +2,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -128,4 +128,35 @@ test("the start sweep removes an old scratch directory no controller owns, and k
 	assert.deepEqual([owned, stopped, launching, destroyed, young].map((path) => existsSync(path)), [true, false, true, false, true]);
 	assert.equal(existsSync(join(stoppedDir, "launch.lock")), false, "the sweep left the launch lock it held");
 	assert.equal(existsSync(join(launchingDir, "launch.lock")), true, "the sweep removed a launch's lock");
+});
+
+test("the start sweep keeps a directory whose controller.pid it cannot read or whose lock it cannot take, logs it, and sweeps the rest", { skip: process.getuid?.() === 0 && "root writes to a read-only directory" }, async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(async () => {
+		await chmod(directory(root, "instances", "pylon-locked"), 0o700);
+		await rm(root, { recursive: true, force: true });
+	});
+	const errors = t.mock.method(console, "error", () => {});
+	const scratch = async (dir: string) => {
+		await privateDirectory(dir);
+		const path = scratchDirectory(root, dir);
+		await privateDirectory(path);
+		const at = new Date(Date.now() - 2 * 60 * 60_000);
+		await utimes(path, at, at);
+		return path;
+	};
+	const tornDir = directory(root, "instances", "pylon-torn");
+	const torn = await scratch(tornDir);
+	// What a power loss before saveJson's data reached the disk leaves.
+	await writeFile(join(tornDir, "controller.pid"), "");
+	const lockedDir = directory(root, "instances", "pylon-locked");
+	const locked = await scratch(lockedDir);
+	// Refuses the lock as a full disk would.
+	await chmod(lockedDir, 0o500);
+	const stopped = await scratch(directory(root, "instances", "pylon-stopped"));
+	assert.deepEqual(await sweepScratch(root), [basename(stopped)]);
+	assert.deepEqual([torn, locked, stopped].map((path) => existsSync(path)), [true, true, false]);
+	assert.equal(existsSync(join(tornDir, "launch.lock")), false, "the sweep left the launch lock it held");
+	const logged = errors.mock.calls.map((call) => String(call.arguments[0]));
+	assert.deepEqual(logged.sort(), [basename(locked), basename(torn)].sort().map((name) => `scratch sweep kept ${name}:`));
 });

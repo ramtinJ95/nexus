@@ -35,8 +35,13 @@ function docker({ artifacts, ...backend }: Extract<ProbeConfig["backend"], { kin
   return createDockerBackend({ ...backend, ...previewHost, ...(artifacts === undefined ? {} : { artifacts }) });
 }
 if (config.backend.kind === "pylon-vm") {
-  const swept = await sweepScratch(config.backend.stateRoot);
-  if (swept.length > 0) console.log(`removed ${swept.length} scratch directories no controller owns: ${swept.join(", ")}`);
+  // A failed sweep must not keep the probe, and with it every pylon on the node, from starting.
+  await sweepScratch(config.backend.stateRoot).then(
+    (swept) => {
+      if (swept.length > 0) console.log(`removed ${swept.length} scratch directories no controller owns: ${swept.join(", ")}`);
+    },
+    (error: unknown) => console.error("scratch sweep failed:", error),
+  );
 }
 const probe = await startProbe({
   node: config.node,

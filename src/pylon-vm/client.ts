@@ -129,7 +129,7 @@ export const scratchSweepAgeMs = 60 * 60_000;
  * Removes the scratch directories older than scratchSweepAgeMs that no running controller owns: those a controller
  * killed outright left, and those of instances destroyed or controllers stopped before a controller removed its own.
  * It holds an instance's launch lock while it checks and removes that instance's directory, so no launch remakes the
- * directory in between. Returns the names it removed.
+ * directory in between. A directory it cannot check or remove is logged and kept. Returns the names it removed.
  */
 export async function sweepScratch(root: string, now = Date.now()): Promise<string[]> {
 	const names = async (path: string) => {
@@ -153,36 +153,40 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		});
 		return modified !== null && now - modified >= scratchSweepAgeMs;
 	};
-	const swept: string[] = [];
-	for (const name of await names(join(root, "tmp"))) {
+	const sweep = async (name: string) => {
 		const path = join(root, "tmp", name);
 		const owner = owners.get(path);
 		if (owner === undefined) {
-			if (await old(path)) {
-				await rm(path, { recursive: true, force: true });
-				swept.push(name);
-			}
-			continue;
+			if (!(await old(path))) return false;
+			await rm(path, { recursive: true, force: true });
+			return true;
 		}
 		const lock = join(owner, "launch.lock");
 		try {
 			await mkdir(lock, { mode: 0o700 });
 		} catch (error) {
 			// A launch holds it, or one that died left it, which the next launch recovers. Its instance may also be gone.
-			if (existsError(error, "EEXIST") || existsError(error, "ENOENT")) continue;
+			if (existsError(error, "EEXIST") || existsError(error, "ENOENT")) return false;
 			throw error;
 		}
 		try {
 			// So a launch that meets the lock waits on a live owner, and one after a crash here recovers it.
 			await publishIdentity(join(lock, "owner"));
-			if (!(await controllerAlive(owner)) && (await old(path))) {
-				await rm(path, { recursive: true, force: true });
-				swept.push(name);
-			}
+			if (await controllerAlive(owner) || !(await old(path))) return false;
+			await rm(path, { recursive: true, force: true });
+			return true;
 		} finally {
 			await rm(lock, { recursive: true, force: true });
 		}
-	}
+	};
+	const swept: string[] = [];
+	for (const name of await names(join(root, "tmp")))
+		try {
+			if (await sweep(name)) swept.push(name);
+		} catch (error) {
+			// One unreadable controller.pid, or a full disk refusing the lock, keeps only that directory.
+			console.error(`scratch sweep kept ${name}:`, error);
+		}
 	return swept;
 }
 /**
