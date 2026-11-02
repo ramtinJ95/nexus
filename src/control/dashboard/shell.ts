@@ -2,17 +2,13 @@
  * Renders the console every page shares: the layout, the sidebar of threads by project, the start and add-project
  * dialogs, and the not-found page.
  */
-import { diskText, lowDisk } from "../../disk-space.ts";
-import { countedCapacity } from "../../protocol/observations.ts";
 import { defaultProjectResources } from "../project.ts";
 import { githubTokenGrant } from "../../secret-grants.ts";
 import { defaultClaudeModel } from "../../claude-state.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import { gib, nodePylons, overcommitted } from "../placement.ts";
 import type { QueuedThread } from "../queue.ts";
-import { releaseView } from "../releases.ts";
 import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
@@ -30,7 +26,7 @@ export interface Shell {
   /** The thread the sidebar marks as open. */
   active?: ThreadId;
   /** The sidebar's link to mark as the open page. */
-  nav?: "usage" | "pipeline" | "health";
+  nav?: "usage" | "cluster" | "health";
   main: Html;
   inspector?: Html;
   /** The thread whose visits count as human activity: an open thread's page. */
@@ -75,7 +71,7 @@ ${projectDialog(c, page.addProject === true)}
 
 /** How long an open thread whose pylon is down and whose agent is not working stays listed before it folds away as quiet. */
 export const quietAfterMs = 8 * 60 * 60 * 1000;
-const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
+export const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
 
 /**
  * A project's threads, newest first: the recent open ones, the open ones quiet for over `quietAfterMs` with their pylon
@@ -109,7 +105,6 @@ export function closedLabel(threads: readonly Thread[]): string {
 
 function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
   const projects = c.registry.projects();
-  const releases = Map.groupBy(releaseLines(c), (r) => r.node);
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
     const r = c.row(t);
@@ -124,7 +119,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["pipeline", "Pipeline", "list"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
+<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["cluster", "Cluster", "server"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
@@ -139,7 +134,6 @@ ${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${clo
 </details>`;
 })}
 </nav>
-<div class="nodes" id="side-nodes" data-live aria-label="Nodes"><h2>Nodes</h2><small>Desired release: ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</small>${c.registry.nodes().map((n) => html`<span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}${lowDisks(n).length > 0 && html`<em title="${lowDisks(n).map(diskText).join("; ")}">disk low</em>`}</span>${memoryLine(c, n)}${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}`)}</div>
 <div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
@@ -153,26 +147,6 @@ function healthLink(c: Context, open: boolean): Html {
   const unseen = problems.filter((p) => p.seenAt === null).length;
   const title = problems.length === 0 ? "Every check is ok" : `${problems.length} open ${problems.length === 1 ? "problem" : "problems"}, ${unseen} not seen`;
   return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}" data-change="${Math.max(0, ...c.registry.healthChanges().map((h) => h.id))}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
-}
-
-/**
- * Each node's release as `GET /v1/release` reports it. The dashboard is not told which node is the control node, but
- * the API takes a control report only from the control node, so the node that holds one is it, and the view gives a
- * control line to that node alone, as it does to the control node.
- */
-function releaseLines(c: Context) {
-  const control = c.registry.releaseReports().find((r) => r.role === "control")?.node;
-  return releaseView(c.registry, c.registry.nodes().find((n) => n.name === control)?.tailnetNodeId, c.now).nodes;
-}
-
-const lowDisks = (n: NodeRecord) => countedCapacity(n.capacity)?.disks?.filter(lowDisk) ?? [];
-
-/** A node's committed and total memory, and what its paused pylons need to wake. */
-function memoryLine(c: Context, n: NodeRecord): Html | false {
-  const capacity = countedCapacity(n.capacity);
-  if (capacity === null) return false;
-  const paused = nodePylons(c.registry, n)?.paused.memoryGiB ?? 0;
-  return html`<small>${gib(capacity.committedMemoryGiB)}/${gib(capacity.memoryGiB)} GiB memory${paused > 0 && ` · ${gib(paused)} GiB to wake paused`}</small>`;
 }
 
 /**

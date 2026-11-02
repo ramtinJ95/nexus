@@ -1,4 +1,4 @@
-/** Renders the home page: the inbox of what waits on the person, and every open thread. */
+/** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
 import { desiredPhase } from "../../reconcile.ts";
 import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
@@ -11,9 +11,41 @@ import type { Context, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
+import { lifeOfThread, needWhy, itemsOf } from "./lifecycle.ts";
+import { flightLines, flightStack, inFlight, itemActions, peekHref, peekKey, peekView, type Line, type Peek } from "./flight.ts";
 
-/** Every open thread with what its pylon is asked to be and is, for the desk and for the phone's thread list. */
-export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
+/**
+ * Two columns: on the left what waits on the person, each a line that opens to its card, and on the right the work in
+ * flight by phase, or by project as the full table of every thread, under the preview of the one the person picked.
+ */
+export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, peek: Peek | null = null): Html {
+  const placed = flightLines(c);
+  // A held thread with a card in Needs you shows as that card, once.
+  const held = (placed.get("held") ?? []).filter((l) => l.life.needs.length === 0);
+  const peeked = peek === null ? null : peekKey(peek);
+  const flying = inFlight(placed);
+  const waiting = c.needs().length + held.length;
+  return layout(c, {
+    title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
+    ...dialogs,
+    main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
+<div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
+<div class="split${peek !== null && " peeking"}" id="split">
+<p id="action-error" class="error split-error" role="alert" hidden></p>
+<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, held)}</section>
+<div class="split-peek" id="peek" data-live>${peekView(c, peek)}</div>
+<section class="split-flight" id="in-flight" aria-labelledby="flight-h">
+<div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${flying}</span>
+<div class="seg-bar flight-view" role="radiogroup" aria-label="List the work"><label class="seg-tab"><input type="radio" name="flight-view" value="phase" id="view-phase" checked>By phase</label><label class="seg-tab"><input type="radio" name="flight-view" value="project" id="view-project">By project</label></div></div>
+<div class="flight" id="flight" data-live>${flightStack(placed, peeked)}</div>
+<div class="flight-projects" id="overview" data-live>${overview(c)}</div>
+</section>
+</div>`,
+  });
+}
+
+/** Each project's threads as a table of what each pylon is asked to be and is, with its queued threads and its quiet and closed folds. */
+function overview(c: Context): Html {
   const projects = c.registry.projects();
   const nodes = new Map(c.registry.nodes().map((n) => [n.name, n]));
   const table = (threads: readonly Thread[]) => html`<table class="ov">
@@ -32,13 +64,7 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): 
 </tr>`;
 })}</tbody>
 </table>`;
-  return layout(c, {
-    title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
-    ...dialogs,
-    main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
-<div class="page" id="overview" data-live>
-${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
+  return html`${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
   return html`<section aria-labelledby="project-${p.id}">
@@ -58,9 +84,7 @@ ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-qu
 ${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)}</summary>${table(quiet)}</details>`}
 ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
 </section>`;
-})}
-</div></div>`,
-  });
+})}`;
 }
 
 /**
@@ -102,23 +126,35 @@ function heldSince(registry: Registry, r: Review): number {
 
 const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}` : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
 
-/** The inbox's cards, each the card its thread's page shows where there is one, under a line that links the thread. */
-function needsList(c: Context): Html {
+/**
+ * Needs you: the inbox's cards, oldest first, each folded to one line of what it is, its thread and why it waits, and
+ * opening in place to the card its thread's page shows where there is one. Then the work held for the person that no
+ * card acts on, such as an item to approve or a blocked queued thread.
+ */
+function needsList(c: Context, held: readonly Line[]): Html {
   const needs = c.needs();
-  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
-${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
+  const fold = (n: Need | Line, id: string, head: Html, body: Html, why: string) => html`<details class="need-fold" id="fold-${id}"><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
+  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length + held.length > 0 && html`<span class="count">${needs.length + held.length}</span>`}</div>
+${needs.length + held.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
   if (n.kind === "cleanup") {
     const { node } = n.question;
     return html`<article class="need need-cleanup" id="${needId(n)}" data-node="${node}" tabindex="-1" aria-label="Cleanup: ${node}">
-<div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
-${cleanupCard(c, n.question)}
+${fold(n, needId(n), html`<div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, cleanupCard(c, n.question), `Frees space on ${node} once you confirm what to delete`)}
 </article>`;
   }
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
+  const why = needWhy(n, c.now) || lifeOfThread(c, t.id).why;
   return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
-${body}
+${fold(n, needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, body, why)}
+</article>`;
+})}${held.map((l) => {
+  const item = itemsOf(c).find((i) => i.id === l.key);
+  const project = item === undefined ? undefined : c.registry.project(item.project);
+  const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
+  return html`<article class="need need-held" id="need-${l.key}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
+${fold(l, `need-${l.key}`, html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
+  html`<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && project !== undefined ? itemActions(item, project) : html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
 </article>`;
 })}</div>`}`;
 }

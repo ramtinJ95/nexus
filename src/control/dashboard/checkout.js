@@ -210,11 +210,16 @@ if (changesPane !== null) {
 }
 
 // The tabs beside the conversation: the terminal, and one per changed file the reader opened, kept for the tab's
-// session. `activeTab` is the open file's path, `terminalTab` for the terminal, or null for the conversation.
+// session. `activeTab` is the open file's path, `terminalTab` for the terminal, `timelineTab` for the timeline, or null
+// for the conversation.
 export const tabsBar = document.getElementById("tabs");
 const fileView = document.getElementById("file-view");
 const termView = document.getElementById("term-view");
 export const terminalTab = Symbol("terminal");
+export const timelineTab = Symbol("timeline");
+const timelineView = document.getElementById("timeline-view");
+/** The tabs every thread page has, in their order, by their key, and what each shows: the conversation, the timeline or the terminal. */
+const fixedTabs = { convo: null, timeline: timelineTab, term: terminalTab };
 const tabsKey = `nexus.tabs.${thread}`;
 const maxTabs = 8;
 let openTabs = JSON.parse(sessionStorage.getItem(tabsKey) ?? "[]");
@@ -228,14 +233,14 @@ function saveTabs() {
 export function renderTabs() {
   if (tabsBar === null) return;
   const focused = tabsBar.contains(document.activeElement) ? document.activeElement.dataset.key : undefined;
-  const convoTab = tabsBar.querySelector('[data-tab="convo"]');
-  convoTab.classList.toggle("active", activeTab === null);
-  convoTab.setAttribute("aria-selected", String(activeTab === null));
-  convoTab.dataset.key = "convo";
-  const termTab = tabsBar.querySelector('[data-tab="term"]');
-  termTab?.classList.toggle("active", activeTab === terminalTab);
-  termTab?.setAttribute("aria-selected", String(activeTab === terminalTab));
-  if (termTab !== null) termTab.dataset.key = "term";
+  const fixed = Object.entries(fixedTabs).flatMap(([key, tab]) => {
+    const button = tabsBar.querySelector(`[data-tab="${key}"]`);
+    if (button === null) return [];
+    button.classList.toggle("active", activeTab === tab);
+    button.setAttribute("aria-selected", String(activeTab === tab));
+    button.dataset.key = key;
+    return [button];
+  });
   const fileTabs = openTabs.map((file) => {
     const active = activeTab === file.path;
     const pick = el("button", { type: "button", className: "tab-pick", title: file.path }, badge(file.status), el("span", { className: "tab-name", textContent: file.path.split("/").at(-1) }));
@@ -250,19 +255,20 @@ export function renderTabs() {
     close.addEventListener("click", () => closeTab(file.path));
     return el("div", { className: `tab tab-file${active ? " active" : ""}` }, pick, close);
   });
-  tabsBar.replaceChildren(...[convoTab, termTab].filter((tab) => tab !== null), ...fileTabs);
+  tabsBar.replaceChildren(...fixed, ...fileTabs);
   tabsBar.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   for (const button of document.querySelectorAll(".tree-file")) button.classList.toggle("active", button.dataset.path === activeTab);
   if (focused === undefined) return;
   const controls = [...tabsBar.querySelectorAll("[data-key]")];
-  const replacement = activeTab === null ? "convo" : activeTab === terminalTab ? "term" : `pick:${activeTab}`;
+  const replacement = typeof activeTab === "string" ? `pick:${activeTab}` : Object.keys(fixedTabs).find((key) => fixedTabs[key] === activeTab);
   (controls.find((b) => b.dataset.key === focused) ?? controls.find((b) => b.dataset.key === replacement))?.focus();
 }
 
 export function showTab(path) {
   activeTab = path;
-  main.dataset.view = path === null ? "convo" : path === terminalTab ? "term" : "file";
+  main.dataset.view = typeof path === "string" ? "file" : Object.keys(fixedTabs).find((key) => fixedTabs[key] === path);
   scroller.hidden = path !== null;
+  if (timelineView !== null) timelineView.hidden = path !== timelineTab;
   fileView.hidden = typeof path !== "string";
   if (termView !== null) termView.hidden = path !== terminalTab;
   if (path === null) end.settle();
@@ -286,9 +292,10 @@ function closeTab(path) {
   else renderTabs();
 }
 
-tabsBar?.querySelector('[data-tab="convo"]').addEventListener("click", () => showTab(null));
-tabsBar?.querySelector('[data-tab="term"]')?.addEventListener("click", () => showTab(terminalTab));
+// The fixed tabs, and the timeline's and the track's links to the conversation or to a step of the timeline.
 document.addEventListener("click", (event) => {
+  const go = tabsBar === null || !(event.target instanceof Element) ? null : event.target.closest("#tabs > [data-tab], [data-tab-go]");
+  if (go !== null) showTab(fixedTabs[go.dataset.tabGo ?? go.dataset.tab]);
   if (termView !== null && event.target instanceof Element && event.target.closest("[data-terminal]") !== null) showTab(terminalTab);
 });
 

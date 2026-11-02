@@ -64,7 +64,7 @@ function unqueued(registry: PipelineRegistry, item: ItemRecord): ItemPhase | nul
   return null;
 }
 
-function threadPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase {
+export function threadPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase {
   const t = registry.thread(id);
   if (t === undefined) {
     const queued = registry.queuedThread(id)!;
