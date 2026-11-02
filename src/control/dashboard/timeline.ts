@@ -118,11 +118,11 @@ export function timeline(c: Context, d: ThreadDetail, items: readonly Item[], li
 ${heldAt("planned")}`,
     queued: html`<p class="tl-meta">${queued === undefined ? "Started at once, with nothing ahead of it in the queue." : html`Queued after ${queued.after.length === 0 ? "nothing" : queued.after.map((id, i) => html`${i > 0 && ", "}<a class="link" href="/threads/${id}">${c.registry.thread(id)?.title ?? id}</a>`)}.`} Its pylon runs on <a class="link" href="/nodes/${encodeURIComponent(d.pylon.node)}">${d.pylon.node}</a> with ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk.</p>${heldAt("queued")}`,
     building: html`${turnsList(turns, c.now)}
-${t.working && html`<p class="tl-event tl-work">${dot("work")}Its agent is working${t.workingSince !== undefined && html` for <time data-since="${t.workingSince}">${clock(c.now - t.workingSince)}</time>`}.</p>`}
-${t.usageLimit !== undefined && html`<p class="tl-event tl-bad">${dot("bad")}It ${limitText(t, c.now)}, ${ago(t.usageLimit.stoppedAt, c.now)}.</p>`}
-${d.pylon.failed !== null && html`<p class="tl-event tl-bad">${dot("bad")}Its pylon failed: ${d.pylon.failed.split("\n")[0]}</p>`}
-${judgments.map((j) => html`<p class="tl-event">${dot(j.verdict === null ? "work" : "bad")}Judged a failure on ${j.node} ${ago(j.startedAt, c.now)}: ${j.verdict === null ? "no answer yet" : html`<b>${j.verdict.answer}</b>, ${j.verdict.why}`}</p>`)}
-${asked.map((q) => html`<p class="tl-event">${dot(q.answer === null ? "bad" : "ok")}Asked ${ago(q.askedAt, c.now)}: <span class="tl-quote">${firstLine(q.text || (q.ask?.questions[0]?.question ?? ""))}</span>${q.answer !== null && html` Answered <b>${q.answer.option}</b> ${ago(q.answer.at, c.now)}.`}</p>`)}
+${t.working && html`<p class="tl-event tl-work">${dot("work")}<span>Its agent is working${t.workingSince !== undefined && html` for <time data-since="${t.workingSince}">${clock(c.now - t.workingSince)}</time>`}.</span></p>`}
+${t.usageLimit !== undefined && html`<p class="tl-event tl-bad">${dot("bad")}<span>It ${limitText(t, c.now)}, ${ago(t.usageLimit.stoppedAt, c.now)}.</span></p>`}
+${d.pylon.failed !== null && html`<p class="tl-event tl-bad">${dot("bad")}<span>Its pylon failed: ${d.pylon.failed.split("\n")[0]}</span></p>`}
+${judgments.map((j) => html`<p class="tl-event">${dot(j.verdict === null ? "work" : "bad")}<span>Judged a failure on ${j.node} ${ago(j.startedAt, c.now)}: ${j.verdict === null ? "no answer yet" : html`<b>${j.verdict.answer}</b>, ${j.verdict.why}`}</span></p>`)}
+${asked.map((q) => html`<p class="tl-event">${dot(q.answer === null ? "bad" : "ok")}<span class="tl-quote">Asked ${ago(q.askedAt, c.now)}: ${firstLine(q.text || (q.ask?.questions[0]?.question ?? ""))}${q.answer !== null && html` Answered <b>${q.answer.option}</b> ${ago(q.answer.at, c.now)}.`}</span></p>`)}
 ${outputs.length > 0 && html`<p class="tl-meta">${outputs.map((o, i) => html`${i > 0 && " · "}${o.kind} <code>${o.ref}</code>`)}</p>`}
 <p class="tl-go"><button type="button" class="btn btn-xs" data-tab-go="convo">${icon("chat")}Open the conversation</button></p>
 ${heldAt("building")}`,

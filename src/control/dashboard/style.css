@@ -973,7 +973,8 @@ a.card-main:focus-visible { outline-offset: -2px; }
 .tl-reply { font-size: 12.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-event { margin: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); }
 .tl-event .dot { transform: translateY(-1px); }
-.tl-event .tl-quote { flex: 1 1 12em; }
+.tl-event > span:not(.dot) { flex: 1 1 12em; min-width: 0; }
+.tl-event .tl-quote { white-space: normal; }
 .tl-go { margin: 0; }
 .tl-prs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
 .tl-rounds { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
