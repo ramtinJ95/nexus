@@ -30,7 +30,15 @@ if (split !== null) {
   addEventListener("change", ({ target }) => { if (target.name === "flight-view") localStorage.setItem(viewKey, target.value); });
 
   split.addEventListener("click", (event) => {
-    const link = event.target instanceof Element ? event.target.closest("a[data-peek]") : null;
+    if (!(event.target instanceof Element)) return;
+    const link = event.target.closest("a[data-peek]");
+    const opening = event.target.closest(".need-sum");
+    // Only the reader's opening of a card previews it on a desk: a poll's swap reopens folds too, and picks nothing.
+    if (link === null && opening !== null && desk.matches && !opening.parentElement.open) {
+      const need = opening.closest(".need");
+      const key = need.dataset.thread ?? need.dataset.peekKey;
+      if (key !== undefined) peek(key);
+    }
     if (link === null || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     // On a phone a Needs you card's thread link opens the thread, as the card it heads is the preview there.
     const head = link.closest(".need-sum");
@@ -42,13 +50,6 @@ if (split !== null) {
     }
     peek(link.dataset.peek);
   });
-  split.addEventListener("toggle", (event) => {
-    const fold = event.target;
-    if (!(fold instanceof HTMLDetailsElement) || !fold.classList.contains("need-fold") || !fold.open || !desk.matches) return;
-    const need = fold.closest(".need");
-    const key = need?.dataset.thread ?? need?.dataset.peekKey;
-    if (key !== undefined) peek(key);
-  }, true);
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !split.classList.contains("peeking") || document.querySelector("dialog[open]") !== null) return;
     peek("");
