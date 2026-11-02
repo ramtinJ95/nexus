@@ -327,11 +327,6 @@ a.link { color: var(--accent); }
 .archived > summary::-webkit-details-marker { display: none; }
 .archived > summary:hover { color: var(--text-2); }
 .archived .row { color: var(--text-3); }
-.nodes { padding: 8px 16px 10px; display: grid; gap: 5px; font-size: 12.5px; color: var(--text-2); }
-.nodes h2 { margin: 0 0 2px; font: 500 12px/1.4 var(--sans); color: var(--text-3); }
-.nodes span { display: flex; align-items: center; gap: 8px; }
-.nodes .i { color: var(--text-3); }
-.nodes em { font-style: normal; margin-left: auto; color: var(--text-3); }
 .side-add { margin: 2px 12px 14px; justify-content: center; }
 /* the theme needs the page's script, which names one on <html> before the first paint */
 .side-theme { margin: 0 12px 6px; display: flex; align-items: center; gap: 4px; }
@@ -877,13 +872,161 @@ h4.md-h { font-size: 1.07em; }
 .attention-toast a { color: #9dcaff; }
 .ov-sub { margin: 14px 0 6px; font: 500 12px var(--sans); color: var(--text-3); }
 .ov-wait { display: block; overflow: hidden; text-overflow: ellipsis; }
-.ov-items th:first-child { width: 26%; }
-.ov-items th:nth-child(2) { width: 34%; }
-.ov-items .ov-act { width: 150px; }
 .ov-why { display: block; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
-.ov-items td { white-space: normal; overflow-wrap: anywhere; }
-@media (max-width: 760px) {
-  .ov-items th:first-child { width: auto; }
-  .ov-items .ov-act { width: 84px; }
-}
 .queued section h2 { margin: 0 0 10px; font: 600 13px/1.4 var(--sans); color: var(--text); }
+
+/*
+ * The board. Work moves left to right through the same six steps wherever it shows: a column on the board, a track on
+ * each card, the bar over a thread's page. Above the columns runs the lane of what waits on the person, as wide as the
+ * board, so a card opened in it has room for its whole review or cleanup.
+ */
+.home-scroll { --gutter: 28px; }
+.home-scroll > .error { margin: 12px var(--gutter) 0; }
+.col-mark { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--text-3); }
+.mark-planned, .mark-queued { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.mark-building { background: var(--work); }
+.mark-review { background: transparent; box-shadow: inset 0 0 0 2px var(--work); }
+.mark-landing { background: var(--warn); }
+.mark-deployed { background: var(--ok); }
+.mark-held { background: var(--bad); }
+
+.lane { padding: 18px var(--gutter) 22px; border-bottom: 1px solid var(--line-soft); scroll-margin-top: 0; }
+.lane-h { align-items: center; margin-bottom: 10px; }
+.lane .need-list { grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); grid-auto-flow: row dense; gap: 8px; }
+/* A card opened in place takes the lane's whole width, and the folded ones close up around it. */
+.lane .need:has(> .need-fold[open]) { grid-column: 1 / -1; }
+.lane .need { padding: 0; gap: 0; border-radius: 10px; }
+.need-fold { display: grid; min-width: 0; }
+.need-fold > summary { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; padding: 9px 12px 10px; cursor: pointer; border-radius: 9px; min-width: 0; }
+.need-fold > summary::-webkit-details-marker { display: none; }
+.need-fold > summary:hover { background: var(--hover); }
+.need-fold[open] > summary { border-bottom: 1px solid var(--line-soft); border-radius: 9px 9px 0 0; }
+/* folded, a card says what it is and when on its first line, and its thread in full on the next */
+.need-fold .need-head { flex-wrap: wrap; row-gap: 2px; min-width: 0; }
+.need-fold .need-thread { order: 3; flex-basis: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.need-fold .trk { --stage: var(--kind); }
+.need-why { font-size: 12.5px; line-height: 1.4; color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.need-fold[open] .need-why { display: none; }
+.need-body { display: grid; gap: 8px; padding: 10px 12px 12px; min-width: 0; }
+.lane-held { display: contents; list-style: none; }
+.lane-held .card { --stage: var(--bad); }
+.lane-held .card { border-left: 3px solid var(--bad); }
+
+.board-nav { display: none; }
+.board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; padding: 18px var(--gutter) 32px; align-items: start; }
+.col { display: grid; gap: 8px; min-width: 0; scroll-margin-top: 8px; }
+.col-h { display: flex; align-items: center; gap: 7px; padding: 0 2px 8px; border-bottom: 1px solid var(--line-soft); }
+.col-h h2 { margin: 0; font: 600 13px/1.3 var(--sans); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.col-n { margin-left: auto; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.col-empty { margin: 0; padding: 4px 2px; font-size: 12px; color: var(--text-3); }
+.col-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+
+.card { --stage: var(--text-3); display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: var(--shadow); }
+.card[data-at="building"], .card[data-at="review"] { --stage: var(--work); }
+.card[data-at="landing"] { --stage: var(--warn); }
+.card[data-at="deployed"] { --stage: var(--ok); }
+.card[data-stage="held"] { --stage: var(--bad); }
+.card.dim { opacity: 0.6; }
+.card.dim:hover, .card.dim:focus-within { opacity: 1; }
+.card-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 9px 11px 10px; min-width: 0; border-radius: 9px; color: var(--text); }
+a.card-main:hover { background: var(--hover); }
+a.card-main:focus-visible { outline-offset: -2px; }
+.card-top { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11.5px; color: var(--text-3); }
+.card-proj { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-when { margin-left: auto; flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.card-title { display: flex; align-items: baseline; gap: 7px; min-width: 0; font-size: 13px; line-height: 1.35; }
+.card-title .dot { transform: translateY(-1px); }
+.card-title > span:last-child { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.card-why { font-size: 12px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.card-meta { display: flex; flex-wrap: wrap; gap: 4px; font-size: 11px; color: var(--text-2); }
+.card-meta > span { padding: 1px 6px; border-radius: 4px; background: var(--raised); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.card-pr { font-family: var(--mono); }
+.card-act { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 11px 10px; }
+
+/* the six steps as a track of segments: those done in the step's colour, faint; the one it is at, full */
+.trk { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; height: 3px; }
+.trk i { border-radius: 2px; background: var(--line); }
+.trk .trk-done { background: color-mix(in srgb, var(--stage, var(--text-2)) 45%, var(--line)); }
+.trk .trk-now { background: var(--stage, var(--accent)); }
+.trk .trk-held { background: var(--bad); }
+.trk .trk-skipped { background: none; box-shadow: inset 0 0 0 1px var(--line); }
+#node-pylons .trk { width: 72px; margin-top: 5px; }
+
+/* the switch between the board and the Original's table of every thread; Needs you shows over both */
+.views { padding: 2px; border-radius: 8px; }
+.views .seg-tab { height: 26px; padding: 0 10px; flex: none; font-size: 12.5px; }
+.views .seg-tab .i { width: 13px; height: 13px; }
+.main:has(#view-board:checked) #overview { display: none; }
+.main:has(#view-table:checked) :is(.board, .board-nav) { display: none; }
+.main:has(#view-table:checked) .lane { border-bottom: 0; padding-bottom: 0; }
+
+/* a thread's place among the steps, one quiet line under its header */
+.life-bar { flex: none; padding: 0 22px 8px; overflow-x: auto; scrollbar-width: none; }
+.life { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 0; font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.life li { display: inline-flex; align-items: center; gap: 6px; }
+.life li + li::before { content: ""; width: 22px; height: 1px; margin: 0 8px; background: var(--line); }
+.life-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.life-done { color: var(--text-2); }
+.life-done .life-dot { background: var(--text-3); box-shadow: none; }
+.life-done + li::before { background: var(--text-3); }
+.life-now { color: var(--text); font-weight: 600; }
+.life-now .life-dot { background: var(--work); box-shadow: 0 0 0 3px color-mix(in srgb, var(--work) 22%, transparent); }
+.life-held { color: var(--bad); font-weight: 600; }
+.life-held .life-dot { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
+.life-tag { font-weight: 500; color: var(--bad); text-decoration: underline; text-underline-offset: 2px; }
+.life-skipped { text-decoration: line-through; }
+
+/* the Cluster page: a tile for each node, the checks, and the picked node in full */
+.cluster { max-width: 1120px; }
+.tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.tile { display: grid; gap: 7px; padding: 11px 14px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 12.5px; color: var(--text-2); }
+.tile:hover { background: var(--hover); }
+.tile.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tile-h { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 2px; }
+.tile-h .i { color: var(--text-3); }
+.tile-name { font: 600 14px/1.3 var(--sans); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-h em { font-style: normal; font-size: 11.5px; color: var(--warn); }
+.tile-bad { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--bad); white-space: nowrap; }
+.tile-row { display: grid; grid-template-columns: 56px 64px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.tile-row > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-row small { font-size: inherit; }
+.tile-row > .tile-k + span:not(.meter), .tile-rel .tile-lines { grid-column: 2 / -1; }
+.tile-k { color: var(--text-3); }
+.tile-lines { display: grid; gap: 1px; font-family: var(--mono); font-size: 11px; }
+.tile-lines small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-rel { align-items: start; }
+.meter { height: 5px; border-radius: 3px; background: var(--raised-2); overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 3px; background: var(--text-3); }
+.meter-low i { background: var(--bad); }
+.report > p { margin: 0 0 6px; }
+.check-group + .check-group { margin-top: 4px; }
+.check-group .ov-sub { margin-top: 10px; }
+.node-detail { display: grid; gap: 22px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
+.node-title { display: flex; align-items: center; gap: 8px; margin: 0; font: 600 17px/1.3 var(--sans); }
+.node-title .i { width: 17px; height: 17px; color: var(--text-3); }
+
+@media (max-width: 1180px) {
+  .board { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 22px; }
+}
+@media (max-width: 760px) {
+  .home-scroll { --gutter: 12px; }
+  .lane { padding-top: 12px; }
+  .lane .need-list { grid-template-columns: minmax(0, 1fr); }
+  /* on a phone the steps' chips lead the page, a glance at the board before the lane and a jump to each column */
+  .home-scroll { display: flex; flex-direction: column; }
+  .board-nav { order: -1; flex: none; display: flex; gap: 6px; overflow-x: auto; padding: 10px var(--gutter) 2px; scrollbar-width: none; }
+  .bn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
+  .bn b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .bn-empty { opacity: 0.55; }
+  .board { grid-template-columns: minmax(0, 1fr); row-gap: 20px; padding-top: 14px; }
+  .card-title { font-size: 14px; }
+  .views .seg-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .views .seg-tab { padding: 0 9px; }
+  .bar .views { margin-left: auto; }
+  .bar .views + .bar-end { margin-left: 0; }
+  .bar-end .btn-ghost { display: none; }
+  .life-bar { padding: 0 12px 6px; }
+  .life li + li::before { width: 10px; margin: 0 5px; }
+  .life-done .life-name, .life-todo .life-name, .life-skipped .life-name { display: none; }
+  .tiles { grid-template-columns: minmax(0, 1fr); }
+}

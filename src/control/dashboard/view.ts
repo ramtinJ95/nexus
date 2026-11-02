@@ -78,6 +78,7 @@ const iconPaths = {
   check: "M3.5 8.5l3 3 6-7",
   cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   dash: "M5 8h6",
+  board: "M2.5 3h3v10h-3zM6.5 3h3v6.5h-3zM10.5 3h3v8.5h-3z",
   inbox: "M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z",
 } as const;
 type IconName = keyof typeof iconPaths;

@@ -75,7 +75,8 @@ export function showHealth(change, notificationChannel, refreshed = refresh) {
   if (!fresh(change)) return;
   const n = healthNotice(change);
   void shown.get(n.key)?.then((close) => close());
-  const page = location.pathname === "/health" ? "health" : null;
+  // The Cluster page, which /health and each node's page are too, shows the checks.
+  const page = /^\/(cluster|health|nodes\/[^/]+)$/.test(location.pathname) ? "health" : null;
   const secure = window.isSecureContext && "Notification" in window;
   const channel = n.quiet ? (focused() && page === null ? "toast" : null) : notificationChannel(focused(), page, "health", secure, secure ? Notification.permission : "unavailable");
   shown.set(n.key, notice(channel, n.title, n.body, n.url));

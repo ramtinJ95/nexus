@@ -64,6 +64,9 @@ async function showNeed() {
   const card = find() ?? document.getElementById("needs-you");
   for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
   card?.classList.add("picked");
+  // Opened as the reader's own toggle is, so a poll's swap keeps it open.
+  const fold = card?.querySelector(".need-fold");
+  if (fold) toggled.set(fold.id, fold.open = true);
   card?.scrollIntoView({ block: "start" });
   card?.focus({ preventScroll: true });
 }
@@ -84,7 +87,7 @@ const notifications = coordinator((row) => {
 });
 const health = (change) => void checks.then((m) => m.showHealth(change, notificationChannel));
 const caughtUp = (hand) => void checks.then((m) => m.caughtUp(hand));
-if (location.pathname === "/health") void checks.then((m) => m.markHealthSeen());
+if (document.querySelector("[data-health-through]") !== null) void checks.then((m) => m.markHealthSeen());
 const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
 if (window.isSecureContext && "Notification" in window) {
   permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };

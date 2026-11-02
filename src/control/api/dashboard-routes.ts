@@ -31,9 +31,7 @@ import { assets } from "../dashboard/assets.ts";
 import { notFound } from "../dashboard/shell.ts";
 import { home, needsOf } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
-import { pipelinePage } from "../dashboard/pipeline-page.ts";
-import { nodePage } from "../dashboard/node-page.ts";
-import { healthPage } from "../dashboard/health-page.ts";
+import { clusterPage } from "../dashboard/cluster-page.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
@@ -69,6 +67,12 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     return c;
   };
 
+  /** Every node's health, read at once, for its tile, and the picked node's in full. */
+  async function cluster(c: Context, picked: NodeName | null) {
+    const healths = new Map(await Promise.all(c.registry.nodes().map(async (n) => [n.name, await nodeHealth(c.caller, n.name).catch((err: unknown) => err as Error)] as const)));
+    return ok(clusterPage(c, picked, healths, options.health?.() ?? null));
+  }
+
   return [
     ["GET", /^\/$/, (_, r) => ok(home(context(r.caller), {}))],
     ["GET", /^\/threads\/new$/, (_, r) => ok(home(context(r.caller), { start: { project: r.query.get("project") } }))],
@@ -77,8 +81,9 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const period = r.query.get("period") ?? "";
       return ok(usagePage(context(r.caller), Object.hasOwn(periods, period) ? period as Period : "7d", (r.query.get("project") || null) as ProjectId | null));
     }],
-    ["GET", /^\/pipeline$/, (_, r) => ok(pipelinePage(context(r.caller)))],
-    ["GET", /^\/health$/, (_, r) => ok(healthPage(context(r.caller), options.health?.() ?? null))],
+    // The pipeline's items are cards on the board now.
+    ["GET", /^\/pipeline$/, () => ({ status: 302, headers: { location: "/#board" }, body: "" })],
+    ["GET", /^\/(?:cluster|health)$/, async (_, r) => cluster(context(r.caller), null)],
     ["GET", /^\/threads\/([^/]+)$/, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {
@@ -99,7 +104,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const c = context(r.caller);
       const name = m[1]! as NodeName;
       if (c.registry.node(name) === undefined) return { ...ok(notFound(c, `No node ${name}.`)), status: 404 };
-      return ok(nodePage(c, name, await nodeHealth(c.caller, name).catch((err: unknown) => err as Error)));
+      return cluster(c, name);
     }],
     ["GET", /^\/assets\/([\w.-]+)$/, (m, r) => {
       const asset = assets.get(m[1]!);
