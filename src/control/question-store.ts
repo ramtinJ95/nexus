@@ -89,8 +89,6 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
     nodeQuestions: (node: NodeName): NodeQuestion[] => sql("SELECT record FROM questions WHERE node = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(node).map((r) => json<NodeQuestion>(r.record)),
     /** Every node's open questions, which wait on the person as a thread's do. */
     openNodeQuestions: (): NodeQuestion[] => sql("SELECT record FROM questions WHERE node IS NOT NULL AND json_extract(record, '$.answer') IS NULL ORDER BY json_extract(record, '$.askedAt'), rowid").all().map((r) => json<NodeQuestion>(r.record)),
-    /** Withdraws an open node question that a later one replaces. An answered one stays, with its answer. */
-    withdrawNodeQuestion(id: string) { sql("DELETE FROM questions WHERE id = ? AND node IS NOT NULL AND json_extract(record, '$.answer') IS NULL").run(id); },
     /** Records what each delete of an answered cleanup did, beside what earlier deletes reported. The first report of an item stands. */
     recordCleanup(id: string, outcomes: Readonly<Record<string, DeleteOutcome>>): NodeQuestion {
       return transaction(() => {
