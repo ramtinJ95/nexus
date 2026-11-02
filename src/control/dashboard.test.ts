@@ -2691,3 +2691,36 @@ test("a page's icon template holds only the icons client.js clones", async (t) =
   const client = (await Promise.all(scripts.map((name) => readFile(new URL(name, dir), "utf8")))).join("\n");
   assert.deepEqual([...new Set([...client.matchAll(/iconOf\("([a-z]+)"\)/g)].map((m) => m[1]))].sort(), ["chevron", "folder"]);
 });
+
+test("Needs you lists an approval the project leaves to the person to land, with the Land button, until it lands", async (t) => {
+  const s = await seeded(t, landingOptions());
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } })).status, 200);
+  const fix = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }, { auto: true }));
+  const { cards } = needsOf((await s.call("GET", "/")).text);
+  assert.deepEqual(cards.map((c) => [c.kind, c.thread, c.attention]), [["review", fix.id, "decision"]], "the approval waits on the person");
+  assert.match(cards[0]!.text, /^Approved review acme \/ Cache the list /);
+  assert.match(cards[0]!.html, new RegExp(`data-action="land" data-thread="${fix.id}" data-head="${head}"`));
+
+  s.registry.saveReview(approvedReview(fix.id, { kind: "landed", commit: "m".repeat(40) }, { auto: true, merged: "m".repeat(40) }));
+  assert.equal(needsOf((await s.call("GET", "/")).text).text, "Needs you Nothing waits on you.", "a landed review waits on no one");
+});
+
+test("a held review offers Land only where a press can land, and shows a hold no press gets past with what clears it", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const reserved = { code: "reserved:auth", text: "Always needs the person: changes to login or auth, by the reviewer's reading (it changes the login)." } as const;
+  const unchecked = { code: "not-checked-live", text: "No live check ran, and the pull request does not say what could not be checked live." } as const;
+  const save = (...holds: Parameters<typeof personPhase>[1][]) => s.registry.saveReview(approvedReview(fix.id, personPhase("policy", ...holds), { land: { requestedBy: laptop } }));
+  const card = async () => landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+
+  save({ code: "same-model", text: "The reviewer ran the builder's own model, gpt-6-astra." });
+  assert.ok(!(await card()).includes('data-action="land"'), "the builder's own model as reviewer holds every press");
+
+  save(unchecked, reserved);
+  const page = await card();
+  assert.match(textOf(page), /could not be checked live\. not waivable A live check that passed at this commit clears it, or a description that says what could not be checked live: add that section to the pull request's description, then press Land, and Nexus asks the reviewer to quote it at this commit\./);
+  const button = /<button [^>]*data-action="land"[^>]*>/.exec(page)![0];
+  assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button)![1]!)), [reserved.text]);
+  assert.match(textOf(/data-confirm="([^"]*)"/.exec(button)![1]!), /Nexus first asks the reviewer to quote, from the description as it is now, what could not be checked live/);
+});
