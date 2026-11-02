@@ -285,4 +285,12 @@ export const migrations: readonly string[] = [
    INSERT INTO questions_by_subject (rowid, id, thread, record) SELECT rowid, id, thread, record FROM questions;
    DROP TABLE questions;
    ALTER TABLE questions_by_subject RENAME TO questions;`,
+  // When each archive's settle read the token usage on its pylon's disk to the end, which that disk's delete waits on
+  // with a backup begun after it, and its settles that failed in a row. A thread archived before has none, so its disk
+  // stays until a settle reads it.
+  `ALTER TABLE thread_archives ADD COLUMN usage_settled_at INTEGER;
+   ALTER TABLE thread_archives ADD COLUMN settle_failures INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE thread_archives ADD COLUMN settle_failure TEXT;
+   ALTER TABLE thread_archives ADD COLUMN settle_failed_at INTEGER
+     CHECK ((settle_failures = 0) = (settle_failure IS NULL) AND (settle_failure IS NULL) = (settle_failed_at IS NULL) AND (usage_settled_at IS NULL OR settle_failures = 0));`,
 ];

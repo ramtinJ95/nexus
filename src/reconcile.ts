@@ -33,10 +33,16 @@ export interface ActivityFacts {
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
   lastAgentActivityAt: number; // pi-durable turns, Claude hooks and other observed sessions in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
-  /** The usage backfill reads this archived thread's pylon now. */
+  /** The usage backfill, or the settle of this archive, reads this archived thread's pylon now. */
   readingUsage?: boolean;
   /** When the thread was archived, present only while it is. */
   archivedAt?: number;
+  /** When this archive's settle read every transcript on its pylon to the end, in a wake for reading after its pause. */
+  usageSettledAt?: number;
+  /** This archive's last settle that failed, why, and how many failed in a row. Present only while it is unsettled. */
+  settleFailure?: { reason: string; at: number; count: number };
+  /** When the newest backup the control plane has seen verify began, for an archived thread, whose disk waits on one. */
+  backedUpAt?: number;
 }
 
 /** Amp's numbers. */
