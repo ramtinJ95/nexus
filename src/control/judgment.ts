@@ -31,7 +31,7 @@ import type { StoredPylon, Thread, Weighed } from "./thread-store.ts";
 import type { Registry } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
-type JudgmentRegistry = Pick<Registry, "agent" | "askQuestion" | "failure" | "judgment" | "judgmentSince" | "judgments" | "movePylon" | "node" | "nodes" | "previews" | "project" | "pylon" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "question" | "recordActivity" | "recordUsage" | "reserved" | "retryPylon" | "saveJudgment" | "storedThreads" | "thread" | "unfinishedJudgments">;
+type JudgmentRegistry = Pick<Registry, "agent" | "askQuestion" | "failure" | "judgment" | "judgmentSince" | "judgments" | "latestHealthSample" | "movePylon" | "node" | "nodes" | "previews" | "project" | "pylon" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "question" | "recordActivity" | "recordUsage" | "reserved" | "retryPylon" | "saveJudgment" | "storedThreads" | "thread" | "unfinishedJudgments">;
 
 /** A judgment as `nexus show` and the thread page show it. */
 export interface JudgmentView {

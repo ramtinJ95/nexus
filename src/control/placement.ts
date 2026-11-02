@@ -4,15 +4,17 @@ import { diskRefusal } from "../disk-space.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
+import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { Placement, Room, StoredPylon, Weighed } from "./thread-store.ts";
 
 type PlacementRegistry = Pick<Registry, "nodes" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved">;
+type WeighingRegistry = PlacementRegistry & Pick<Registry, "latestHealthSample">;
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
-export function placeAuto(registry: PlacementRegistry, need: Need): Placement {
+export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
   const { best, weighed } = weighNodes(registry, need);
   if (best === null) throw new HttpError(409, `no node can run this pylon: ${refusals(weighed)}`);
   return { how: "auto", node: best, weighed };
@@ -22,14 +24,14 @@ export function placeAuto(registry: PlacementRegistry, need: Need): Placement {
  * On `near` while it can run the pylon, as the review loop starts a builder's reviewer and checks beside it. Otherwise on
  * the node with the most room left, and on `near` all the same when no node has room, so a review never waits for one.
  */
-export function placeNear(registry: PlacementRegistry, need: Need, near: NodeName): Placement {
+export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName): Placement {
   const { best, weighed } = weighNodes(registry, need);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
 
 /** Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run it. */
-export function weighNodes(registry: PlacementRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
+export function weighNodes(registry: WeighingRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
   const weighed = registry.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
   const fits = weighed.flatMap((w) => "left" in w ? [w] : [])
     .sort((a, b) => b.left.memoryGiB - a.left.memoryGiB || b.left.cpus - a.left.cpus || b.left.diskGiB - a.left.diskGiB);
@@ -38,7 +40,7 @@ export function weighNodes(registry: PlacementRegistry, need: Need, except?: Nod
 
 export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
 
-function weigh(registry: PlacementRegistry, node: NodeRecord, need: Need): Weighed {
+function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighed {
   const refused = (why: string): Weighed => ({ node: node.name, refused: why });
   const o = node.observation;
   if (node.state !== "online" || o === null) return refused("is offline");
@@ -56,9 +58,45 @@ function weigh(registry: PlacementRegistry, node: NodeRecord, need: Need): Weigh
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
+  const free = freeMemory(registry, node, Date.now());
+  // With no fresh reading of its free memory, the node is weighed by its commitments alone.
+  if (free !== null) {
+    const freeLeft = free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB;
+    if (freeLeft < memoryHeadroomGiB) {
+      const less = [free.untouchedGiB > 0 && `${gib(free.untouchedGiB)} GiB its pylons have yet to touch`, pending.memoryGiB > 0 && `${gib(pending.memoryGiB)} GiB for pylons about to boot there`].filter((s) => s !== false);
+      return refused(`has ${gib(free.availableGiB)} GiB of memory free${less.length > 0 ? `, less ${less.join(" and ")}` : ""}, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
+    }
+    left.memoryGiB = Math.min(left.memoryGiB, freeLeft);
+  }
   const short = diskShort(c, left, need.resources);
   if (short !== null) return refused(short);
   return { node: node.name, left };
+}
+
+/**
+ * What a node keeps free past the pylon's memory. The new VM's controller and QEMU hold a few hundred MiB over its guest
+ * memory, MemAvailable moves between reads a minute apart, and a host left no page cache stalls every VM on it.
+ */
+const memoryHeadroomGiB = 1;
+/** A health read older than this, as when a node's reads keep failing, no longer says what it has free. */
+const freshReadMs = 2 * backgroundReadMs;
+
+/**
+ * The node's MemAvailable in its newest health read, and how much of it the pylons that read named are yet to take: a
+ * guest takes its memory from the host only as it touches it, so a pylon whose processes hold less than its size will
+ * take the rest. A pylon the read did not name, on a backend that cannot name its processes or booted since the read,
+ * counts as all touched. Null without a read in the last `freshReadMs`, or from a host that reports no memory.
+ */
+function freeMemory(registry: WeighingRegistry, node: NodeRecord, now: number): { availableGiB: number; untouchedGiB: number } | null {
+  const read = registry.latestHealthSample(node.name);
+  const availableGiB = read?.values.memAvailable;
+  if (read == null || now - read.at > freshReadMs || availableGiB === undefined) return null;
+  const size = new Map(registry.pylonsWithStatusOn(node.name).map(({ pylon }) => [pylon.pylonId, pylon.boot.resources.memoryGiB]));
+  const untouchedGiB = Object.entries(read.values).reduce((sum, [key, resident]) => {
+    const s = seriesOf(key);
+    return s?.kind === "pylonResident" ? sum + Math.max(0, (size.get(s.pylon) ?? 0) - resident) : sum;
+  }, 0);
+  return { availableGiB, untouchedGiB };
 }
 
 /** A probe from before filesystems were reported is held only to the disk fitting. */

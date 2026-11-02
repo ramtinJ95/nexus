@@ -20,7 +20,7 @@ import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
 import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 
-type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
+type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
 
 export const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
 

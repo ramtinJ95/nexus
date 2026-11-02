@@ -20,7 +20,7 @@ import { checkStart, newThreadId, resourcesOf } from "./threads.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 
-type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
+type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
 /** What one predecessor means for the queued thread. */
 export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
