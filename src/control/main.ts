@@ -47,7 +47,7 @@ import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";
 import { checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
-import { backupStatusFile, readBackupStatus } from "./backup-status.ts";
+import { backedUpAt, backupStatusFile, readBackupStatus } from "./backup-status.ts";
 import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";
@@ -252,6 +252,11 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     // The API listens on one address, or on every one, where the loopback reaches it too.
     certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, dashboardPort, config.https.hostname) : { kind: "none" },
   });
+  // An archived disk kept for its usage goes once a backup that began after its read verified.
+  every(60_000, () => readBackupStatus(backupStatusFile).then((s) => {
+    const at = backedUpAt(s);
+    if (at !== null) registry.recordBackedUp(at);
+  }).catch((err: unknown) => log(`recording the newest backup failed: ${(err as Error).message}`)));
   const health = healthPasses({ registry, run: doctor, startedAt });
   every(checkEveryMs, () => health.poll());
   const sampling = healthSampling({ registry, probes: probeMap, log });

@@ -49,3 +49,12 @@ export async function readBackupStatus(path: string): Promise<BackupStatusRead> 
     return { unreadable: `${path} does not parse: ${(err as Error).message}` };
   }
 }
+
+/**
+ * When the newest backup that verified began, or null when the status names none. A run's backup copies the
+ * databases after it begins, so it holds every record written before then.
+ */
+export function backedUpAt(s: BackupStatusRead): number | null {
+  if (s === "missing" || "unreadable" in s || s.newest === null || !s.newest.verified || s.newest.createdAt === null) return null;
+  return Date.parse(s.newest.createdAt);
+}
