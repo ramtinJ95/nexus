@@ -2,13 +2,17 @@
 // work, and the preview, which the page renders from `?peek=` so a poll keeps it fresh. Picking a line swaps the
 // preview in place without leaving home. Work in Needs you previews in its card instead: picking its line brings the
 // card into view, and opening the card reads its latest reply into it.
-import { refreshAfter } from "./page.js";
+import { afterSwap, refreshAfter } from "./page.js";
 
 const split = document.getElementById("split");
 const desk = matchMedia("(min-width: 761px)");
 const viewKey = "nexus.flight-view";
 
-const carded = (key) => [...document.querySelectorAll(".need")].some((n) => (n.dataset.thread ?? n.dataset.peekKey) === key);
+const cardOf = (key) => [...document.querySelectorAll(".need")].find((n) => (n.dataset.thread ?? n.dataset.peekKey) === key);
+const cardHash = (key) => {
+  const card = cardOf(key);
+  return card === undefined ? "" : `#needs-you:${key}:${card.dataset.attention ?? "held"}`;
+};
 
 function peek(key, hash = "") {
   const url = new URL(location.href);
@@ -20,7 +24,7 @@ function peek(key, hash = "") {
   // A replaced hash fires no hashchange, which brings the card into view.
   if (hash !== "") dispatchEvent(new HashChangeEvent("hashchange"));
   if (!moved) return;
-  split.classList.toggle("peeking", key !== "" && !carded(key));
+  split.classList.toggle("peeking", key !== "" && cardOf(key) === undefined);
   for (const row of document.querySelectorAll(".fl-row")) {
     if (row.dataset.peek === key) row.setAttribute("aria-current", "true");
     else row.removeAttribute("aria-current");
@@ -34,6 +38,9 @@ if (split !== null) {
   const showSide = () => {
     const side = location.hash === "#in-flight" ? "flight" : location.hash.startsWith("#needs-you") ? "needs" : null;
     if (side !== null) document.getElementById(`side-${side}`).checked = true;
+    // A notice opens its card by this hash, and picking the card is what reads its latest reply into it.
+    const picked = /^#needs-you:([\w-]+):/.exec(location.hash)?.[1];
+    if (picked !== undefined && cardOf(picked) !== undefined) peek(picked);
   };
   showSide();
   addEventListener("hashchange", showSide);
@@ -62,10 +69,13 @@ if (split !== null) {
       const fold = head.parentElement;
       if (!fold.open) head.click();
     }
+    const hash = head !== null ? "" : link.hash || cardHash(link.dataset.peek);
     // The card comes into view only once its side shows.
-    if (link.hash.startsWith("#needs-you")) document.getElementById("side-needs").checked = true;
-    peek(link.dataset.peek, link.hash);
+    if (hash.startsWith("#needs-you")) document.getElementById("side-needs").checked = true;
+    peek(link.dataset.peek, hash);
   });
+  // A card that goes, as its answer takes it off, leaves its work's preview to show.
+  afterSwap(() => split.classList.toggle("peeking", document.getElementById("peek").childElementCount > 0));
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !split.classList.contains("peeking") || document.querySelector("dialog[open]") !== null) return;
     peek("");

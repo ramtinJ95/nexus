@@ -132,8 +132,12 @@ function latest(d: ThreadDetail, items: readonly Item[], now: number): Html {
 
 /** What an item waits to start after and its brief, which its preview and its Needs you card show. */
 export function itemBrief(c: Context, i: PipelineItem): Html {
-  const titleOf = (id: string) => itemsOf(c).find((x) => x.id === id)?.title ?? id;
-  return html`${i.after.length > 0 && html`<p class="peek-meta">After ${i.after.map((id, n) => html`${n > 0 && ", "}<a class="link" href="${peekHref(id)}" data-peek="${id}">${titleOf(id)}</a>`)}</p>`}
+  // An item that became a thread previews as that thread, so one that waits on the person leads to its card.
+  const after = i.after.map((id) => {
+    const x = itemsOf(c).find((y) => y.id === id);
+    return { key: x?.thread ?? id, title: x?.title ?? id };
+  });
+  return html`${after.length > 0 && html`<p class="peek-meta">After ${after.map((x, n) => html`${n > 0 && ", "}<a class="link" href="${peekHref(x.key)}" data-peek="${x.key}">${x.title}</a>`)}</p>`}
 ${i.brief === null ? html`<p class="empty">No brief.</p>` : html`<div class="peek-reply"><p class="peek-k">Brief</p><div class="peek-text">${prose(i.brief)}</div></div>`}`;
 }
 

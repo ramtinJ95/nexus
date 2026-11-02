@@ -26,7 +26,8 @@ import type { Item } from "./items.ts";
 export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, peek: Peek | null = null): Html {
   const cards = needCards(c);
   const placed = flightRows(flightLines(c), cards);
-  const peeked = peek === null ? null : peekKey(peek);
+  // An item that became a thread is that thread's work, and its card is the thread's.
+  const peeked = peek === null ? null : peek.kind === "item" && peek.item.thread !== null ? peek.item.thread : peekKey(peek);
   const carded = peeked !== null && cards.has(peeked);
   const flying = inFlight(placed);
   const waiting = c.needs().length;
@@ -37,7 +38,7 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, p
 <div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
 <div class="split${peek !== null && !carded && " peeking"}" id="split">
 <p id="action-error" class="error split-error" role="alert" hidden></p>
-<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, carded ? peek : null)}</section>
+<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, carded ? { key: peeked, items: peek?.kind === "thread" ? peek.items : null } : null)}</section>
 <div class="split-peek" id="peek" data-live>${peekView(c, carded ? null : peek)}</div>
 <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
 <div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${flying}</span>
@@ -121,7 +122,7 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
   const held = [
     ...itemsOf(c).filter((item) => item.thread === null && item.phase.kind === "held").map((item): Need => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
     ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): Need => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
-    ...c.threads().filter((t) => (t.status === "active" || t.status === "idle") && !carded.has(t.id) && holds(t.id)).map((thread): Need => ({ kind: "held", work: { kind: "thread", thread }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
+    ...c.threads().filter((t) => (t.status === "active" || t.status === "idle") && !carded.has(t.id) && holds(t.id)).map((thread): Need => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
   ].sort((a, b) => a.since - b.since);
   return [...cards, ...held];
 }
@@ -160,9 +161,10 @@ const heldKey = (w: HeldWork) => w.kind === "item" ? w.item.id : w.kind === "que
  * opening in place to where its work is and the card its thread's page shows where there is one, or for held work to
  * what moves it on. The work the person picked is marked, and its card has the latest reply `picked` read.
  */
-function needsList(c: Context, picked: Peek | null): Html {
+function needsList(c: Context, picked: { key: string; items: readonly Item[] | null } | null): Html {
   const needs = c.needs();
-  const mark = (n: Need) => picked !== null && keyOf(n) === peekKey(picked) && " picked";
+  const mark = (n: Need) => keyOf(n) === picked?.key && " picked";
+  const itemsOf = (key: string) => key === picked?.key ? picked.items : null;
   const fold = (id: string, head: Html, body: Html, why: string) => html`<details class="need-fold" id="fold-${id}"><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
   return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
 ${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
@@ -179,16 +181,15 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">Cleanup</s
     const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
     return html`<article class="need need-held${mark(n)}" id="${needId(n)}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
-  html`<div class="need-ctx">${lifeTrack(l.life, false)}</div><p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(c, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
+  html`${n.work.kind === "thread" ? whereNow(c, n.work.d, l.life, itemsOf(l.key)) : html`<div class="need-ctx">${lifeTrack(l.life, false)}</div>`}<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(c, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : n.work.kind === "queued" && html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
 </article>`;
   }
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
   const life = lifeOfThread(c, t.id);
   const why = needWhy(n, c.now) || life.why;
-  const items = picked?.kind === "thread" && picked.d.thread.id === t.id ? picked.items : null;
   return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${attentionOf(n)}" tabindex="-1" aria-label="${what}: ${t.title}">
-${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, items)}${body}`, why)}
+${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, itemsOf(t.id))}${body}`, why)}
 </article>`;
 })}</div>`}`;
 }

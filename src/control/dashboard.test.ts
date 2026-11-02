@@ -559,6 +559,9 @@ test("a thread in Needs you has its call to action once, in its card, with where
   s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "beta", title: "Port the CLI", claude: "port it" })).text) as Thread;
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete: executable missing");
+  const approved = await s.start("acme", "Name the TTL");
+  s.registry.saveReview(approvedReview(approved.id, { kind: "approved" }, { id: "rv-8", reviewer: "th-reviewer-8" as ThreadId, pr: { repo: "acme/nexus", number: 8, url: "https://github.com/acme/nexus/pull/8", title: "TTL", branch: "ttl" } }));
+  s.registry.savePrWatch(approved.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 8, title: "TTL" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const quiet = await s.start("acme", "Quiet");
   const actions: [Thread, RegExp][] = [[held, /data-action="land"/g], [asked, /data-action="answer"/g], [failed, /data-action="archive"/g]];
 
@@ -584,6 +587,12 @@ test("a thread in Needs you has its call to action once, in its card, with where
   assert.match(land.html, /<li><details id="land-hold-0-[^"]+"><summary>Always needs the person: .*you may waive<\/span><\/summary><span class="dim">The policy reserves this for you/, "each hold says what it is, and folds why it is waivable");
   assert.match(land.html, /<div class="land-act"><button type="button" class="btn btn-primary" id="land-[^"]+" data-action="land"/, "and Land is outside every fold");
   assert.doesNotMatch(needsOf((await s.call("GET", `/?peek=${asked.id}`)).text).cards.find((c) => c.thread === held.id)!.html, /Latest reply/, "a card the person did not pick reads no conversation");
+
+  const waiting = (await s.call("GET", `/?peek=${approved.id}`)).text;
+  assert.doesNotMatch(waiting.split('id="peek"')[1]!.split('id="in-flight"')[0]!, /class="peek"/, "work its phase holds for the person previews in its card too");
+  const heldCard = waiting.split(`id="need-${approved.id}"`)[1]!.split("</article>")[0]!;
+  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Held acme \/ Name the TTL now Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread Approved, and lands once you press Land\.$/, "with where its work is, as a card for a thread's own need has");
+  assert.equal([...heldCard.matchAll(/Open thread/g)].length, 1);
 
   const page = (await s.call("GET", `/?peek=${quiet.id}`)).text;
   assert.match(page, /<div class="split peeking" id="split">/);
@@ -2392,7 +2401,7 @@ test("the work in flight lists each item at its phase, an item held for the pers
   const needs = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
   const card = needs.split(`id="need-${b.id}"`)[1]!.split("</article>")[0]!;
   assert.equal(textOf(card.replace(/^[^>]*>/, "")), `Approve item acme / Greet in French item Planned held for you Queued Building In review Landing Deployed project acme waits for the person to approve each item: nexus item approve ${b.id}. After Greet by name Brief Build Greet in French. Approve Cancel`);
-  assert.match(card, new RegExp(`<a class="link" href="/\\?peek=${a.id}" data-peek="${a.id}">Greet by name</a>`), "what it is after links its preview");
+  assert.match(card, new RegExp(`<a class="link" href="/\\?peek=${thread}" data-peek="${thread}">Greet by name</a>`), "what it is after links its preview, as the thread it became");
   assert.match(card, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
   assert.match(card, new RegExp(`data-action="cancel-item" data-item="${b.id}"`));
   const peek = async (key: string) => (await s.call("GET", `/?peek=${key}`)).text.split('id="peek"')[1]!.split('id="in-flight"')[0]!;
@@ -2401,6 +2410,9 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.match(await peek(thread), new RegExp(`<a class="btn btn-xs[^"]*" href="/threads/${thread}">Open thread</a>`), "the preview of the item's thread opens its page");
   assert.doesNotMatch(await peek(thread), /data-action="(approve|cancel)-item"/, "an item that is a thread has no item actions");
   assert.doesNotMatch(await peek("it-000000000000"), /class="peek"/, "an unknown key previews nothing");
+  assert.match(await peek(a.id), /class="peek"/, "an item that became a thread previews as it");
+  s.registry.askQuestion({ id: "qn-greet", thread, text: "Greet in Welsh too?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  assert.doesNotMatch(await peek(a.id), /class="peek"/, "until that thread waits on the person, whose card says so instead");
 });
 
 test("/pipeline sends the reader to the home page's work in flight, where its items show", async (t) => {
