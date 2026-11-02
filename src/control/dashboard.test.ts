@@ -2441,6 +2441,16 @@ test("a queued thread's preview says once what it waits for", async (t) => {
   assert.equal(peek.split("Fix checkout").length - 1, 1, peek);
 });
 
+test("a queued thread whose waits all landed previews why it did not start yet", async (t) => {
+  const s = await seeded(t);
+  const first = await s.start("acme", "Fix checkout");
+  const queued = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Then the receipts", after: [first.id] })).text) as QueuedThread;
+  s.registry.saveReview(approvedReview(first.id, { kind: "landed", commit: "c".repeat(40) }, { merged: "c".repeat(40) }));
+  s.registry.saveQueued({ ...s.registry.queuedThread(queued.id)!, lastError: "not enough memory on rj-firebat" });
+  const peek = textOf((await s.call("GET", `/?peek=${queued.id}`)).text.split('id="peek"')[1]!.split('id="in-flight"')[0]!);
+  assert.match(peek, /Next did not start yet: not enough memory on rj-firebat\. Starts on rj-firebat/);
+});
+
 /** The images a page shows, as each link and image name them, with any caption. */
 const shotsOf = (html: string) => [...html.matchAll(/<a class="shot" href="([^"]*)" target="_blank" rel="noopener"><img src="([^"]*)" alt="([^"]*)" loading="lazy">(?:<span class="shot-cap">([^<]*)<\/span>)?<\/a>/g)]
   .map(([, href, src, alt, caption]) => {

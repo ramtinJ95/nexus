@@ -132,7 +132,7 @@ ${project !== undefined && itemActions(i, project)}
     return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${q.id}">
 <header class="peek-head"><span class="peek-proj">${q.project}</span><h2 id="peek-h">${dot(tone, label)}<span>${q.title}</span></h2><a class="btn btn-xs" href="/threads/${q.id}">Open thread</a>${close}</header>
 ${lifeTrack(life, false)}
-${next(life, q.waits.length === 0 ? undefined : html`<ul class="peek-waits">${q.waits.map((w) => html`<li>${state(w.state, w.state === "landed" ? "ok" : w.state === "blocked" ? "bad" : "idle")} <a class="link" href="${peekHref(w.thread)}" data-peek="${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>`)}
+${next(life, q.waits.every((w) => w.state === "landed") ? undefined : html`<ul class="peek-waits">${q.waits.map((w) => html`<li>${state(w.state, w.state === "landed" ? "ok" : w.state === "blocked" ? "bad" : "idle")} <a class="link" href="${peekHref(w.thread)}" data-peek="${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>`)}
 <p class="peek-meta">Starts on ${q.node} with ${q.resources.cpus} CPUs, ${q.resources.memoryGiB} GiB of memory and ${q.resources.diskGiB} GiB of disk.</p>
 </section>`;
   }
