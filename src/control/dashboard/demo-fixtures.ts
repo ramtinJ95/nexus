@@ -19,6 +19,7 @@ import { observeNode, image, laptop, type testApi } from "../api-test-kit.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../test-kit.ts";
 import { sampleOf } from "../node-metrics.ts";
 import { personPhase, type Review, type Round } from "../review-model.ts";
+import { personOnly, reservedNames } from "../holds.ts";
 import { proposalQuestion } from "../planning.ts";
 import { itemRequestId } from "../pipeline.ts";
 import { startKey } from "../threads.ts";
@@ -203,6 +204,26 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
           { code: "open-findings", text: "Finding F3 (P2) is still open after the last round." },
           { code: "unanswered", text: "The builder has not answered F3 in round 3." },
           { code: "github-checks", text: "The pull request's GitHub checks are pending." }), label: { state: "added" } },
+      }));
+    },
+  },
+  {
+    key: "tokens", project: "nexus", title: "Rotate the pylon's GitHub token on wake", ago: 5 * hour, worker: "harness", pylon: "running", replied: 40 * minute,
+    extra(d, t) {
+      talk(d, t, harnessTalk(t.createdAt)
+        .person("A pylon that wakes after a day keeps yesterday's GitHub token. Rotate it on wake.")
+        .bash("npm test -- src/control/secrets.test.ts", testOutput)
+        .say("Opened #408. The reviewer approved round 2 and the checks passed; it touches the token broker, so it's held for you to land.").messages);
+      const p = pr("nexus", 408, "fix: a pylon gets a fresh GitHub token on wake", { checks: "passing", summary: "A waking pylon asks the broker for a fresh GitHub token before its agent resumes, so pushes after a long sleep stop failing with 401." });
+      linkPr(d, t, p);
+      d.registry.saveReview(review(t, p, {
+        rounds: [
+          round("d1", { verdict: changes(finding("F1", "P1", "src/control/secrets.ts:88", "The old token stays valid until it expires, so a leaked one outlives the rotation.")), answers: [{ id: "F1", action: "fixed", reason: "The broker revokes the old token once the new one is in place." }] }),
+          round("282d29de", { verdict: { ...approve(finding("N1", "P3", "src/control/secrets.ts:120", "The retry count could be a named constant.")), notCheckedLive: "## Not checked live\n\nA real wake after the token expired: the demo pylons never sleep a day." }, check: { passed: true, output: testOutput }, live: { kind: "ran", thread: `${t.id}-verify` as ThreadId, passed: true, output: "ok wake: fresh token in 1.4 s" } }),
+        ],
+        phase: personPhase("policy",
+          { code: "reserved-path:secrets", text: `${personOnly}${reservedNames.secrets}, as it changes src/control/secrets.ts.` },
+          { code: "waiver-not-carried", text: "The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1." }),
       }));
     },
   },
