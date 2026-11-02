@@ -25,7 +25,7 @@ import type { StartRequest } from "./start-request.ts";
 
 type GateRegistry = Pick<Registry, "node" | "pylon" | "recordActivity" | "setThreadStatus" | "thread">;
 
-/** pylon-vm's 3 GiB floor for each of two inner pylons, and 2 GiB for the verify stack's control plane and probe. */
+/** The one pylon sized over the default: Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and passed at 8 GiB (nexus#388). */
 export const verifyMemoryGiB = 8;
 const tailBytes = 6_000;
 /** The pipe's exit status when the pylon was not fit to run the check, which says nothing of the change. */
