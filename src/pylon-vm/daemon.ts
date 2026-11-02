@@ -1,9 +1,9 @@
 import { once } from "node:events";
 import { chmod, rm } from "node:fs/promises";
 import http from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { text } from "node:stream/consumers";
-import { controlSocket } from "./client.ts";
+import { controlSocket, scratchDirectory } from "./client.ts";
 import { type Action, actionSchema, bootSchema } from "./contracts.ts";
 import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
@@ -18,6 +18,11 @@ async function main(): Promise<void> {
 	const record = await readRecord(dir);
 	const pidFile = join(dir, "controller.pid");
 	await publishIdentity(pidFile);
+	// The scratch directory goes first: once controller.pid is gone, a launch may make it again for its own controller.
+	const retire = async () => {
+		await rm(scratchDirectory(dirname(dirname(dir)), dir), { recursive: true, force: true });
+		await rm(pidFile, { force: true });
+	};
 	const log = join(dir, "controller.log");
 	setInterval(() => void rotateLog(log, controllerLogLimit).catch((error: unknown) => console.error(error)), 60_000).unref();
 	// The launching client writes the boot spec, secrets included, to stdin and closes it.
@@ -30,12 +35,12 @@ async function main(): Promise<void> {
 		await runtime.boot(intent.prepare);
 	} catch (error) {
 		await runtime.fail(error);
-		await rm(pidFile, { force: true });
+		await retire();
 		process.exitCode = 1;
 		return;
 	}
 	if (prepare) {
-		await rm(pidFile, { force: true });
+		await retire();
 		return;
 	}
 	const queue = lifecycleQueue();
@@ -68,7 +73,7 @@ async function main(): Promise<void> {
 			else console.error(error);
 			if (runtime.retired) {
 				await closeServer();
-				await rm(pidFile, { force: true });
+				await retire();
 			}
 			refuse(res, error);
 		}
@@ -92,7 +97,7 @@ async function main(): Promise<void> {
 	server.once("close", () => {
 		void readIdentity(pidFile)
 			.then(async (identity) => {
-				if (identity?.pid === process.pid) await rm(pidFile, { force: true });
+				if (identity?.pid === process.pid) await retire();
 			})
 			.catch((error: unknown) => console.error(error));
 	});

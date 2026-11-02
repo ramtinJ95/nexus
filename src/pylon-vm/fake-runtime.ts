@@ -1,7 +1,8 @@
 /**
  * Runs the real daemon.ts without a VM: `node --import ./fake-runtime.ts daemon.ts <dir>`. As a preload it points
- * daemon.ts's import of runtime.ts here, where SandboxRuntime boots, stops and inspects at once, a `services` action
- * never ends, so it holds the lifecycle queue for good, and every other export is runtime.ts's own. Each SIGUSR2 fails
+ * daemon.ts's import of runtime.ts here, where SandboxRuntime boots, stops and inspects at once, an instance named
+ * `*-broken` fails its boot, a `services` action never ends, so it holds the lifecycle queue for good, and every other
+ * export is runtime.ts's own. Each SIGUSR2 fails
  * one accept on the controller's server: Node's handler for its listening socket gets the error libuv passes it, and
  * the line `injected accept error <n>` goes to stderr after it.
  */
@@ -20,6 +21,7 @@ export class SandboxRuntime {
 		this.name = record.name;
 	}
 	async boot(): Promise<void> {
+		if (this.name.endsWith("-broken")) throw new Error("boot failed");
 		this.state = "running";
 	}
 	async fail(error: unknown): Promise<void> {
