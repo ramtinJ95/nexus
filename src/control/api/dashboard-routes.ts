@@ -31,8 +31,11 @@ import { assets } from "../dashboard/assets.ts";
 import { notFound } from "../dashboard/shell.ts";
 import { home, needsOf } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
-import { pipelinePage } from "../dashboard/pipeline-page.ts";
-import { nodePage } from "../dashboard/node-page.ts";
+import { clusterPage } from "../dashboard/cluster-page.ts";
+import { itemView } from "../pipeline.ts";
+import { promptSenders } from "../inbox.ts";
+import { itemsOf } from "../dashboard/items.ts";
+import type { Peek } from "../dashboard/flight.ts";
 import { healthPage } from "../dashboard/health-page.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
@@ -69,15 +72,45 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     return c;
   };
 
+  /** The Cluster page with this node picked: what its probe reads of its host now, or why it could not. */
+  const cluster = async (c: Context, name: NodeName) =>
+    clusterPage(c, name, await nodeHealth(c.caller, name).catch((err: unknown) => err as Error), canDeploy(registry, options.deployment, c.caller));
+
+  /** The thread, queued thread or item the home page previews, with a thread's conversation as its page reads it. */
+  async function peekOf(c: Context, key: string | null): Promise<Peek | null> {
+    if (key === null || key === "") return null;
+    const thread = registry.thread(key as ThreadId);
+    if (thread !== undefined) {
+      const view = await transcript(thread);
+      const d = detail(registry.thread(thread.id)!);
+      const read = view === null || view instanceof Error ? null : view;
+      return { kind: "thread", d, items: read === null ? [] : itemsOf(read, () => d.questions ?? [], thread.id, () => promptSenders(registry, thread.id)) };
+    }
+    const queued = registry.queuedThread(key as ThreadId);
+    if (queued !== undefined && queued.status === "queued") return { kind: "queued", q: queuedView(registry, queued) };
+    const item = registry.items().find((i) => i.id === key);
+    return item === undefined ? null : { kind: "item", item: itemView(registry, item) };
+  }
+
   return [
-    ["GET", /^\/$/, (_, r) => ok(home(context(r.caller), {}))],
+    ["GET", /^\/$/, async (_, r) => {
+      const c = context(r.caller);
+      return ok(home(c, {}, await peekOf(c, r.query.get("peek"))));
+    }],
     ["GET", /^\/threads\/new$/, (_, r) => ok(home(context(r.caller), { start: { project: r.query.get("project") } }))],
     ["GET", /^\/projects\/new$/, (_, r) => ok(home(context(r.caller), { addProject: true }))],
     ["GET", /^\/usage$/, (_, r) => {
       const period = r.query.get("period") ?? "";
       return ok(usagePage(context(r.caller), Object.hasOwn(periods, period) ? period as Period : "7d", (r.query.get("project") || null) as ProjectId | null));
     }],
-    ["GET", /^\/pipeline$/, (_, r) => ok(pipelinePage(context(r.caller)))],
+    // The pipeline's items show on the home page's work in flight now, and on their threads.
+    ["GET", /^\/pipeline$/, () => ({ status: 303, headers: { location: "/#in-flight" }, body: "" })],
+    ["GET", /^\/cluster$/, async (_, r) => {
+      const c = context(r.caller);
+      const first = c.registry.nodes()[0];
+      if (first === undefined) return { ...ok(notFound(c, "No nodes yet.")), status: 404 };
+      return ok(await cluster(c, first.name));
+    }],
     ["GET", /^\/health$/, (_, r) => ok(healthPage(context(r.caller), options.health?.() ?? null))],
     ["GET", /^\/threads\/([^/]+)$/, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
@@ -99,7 +132,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const c = context(r.caller);
       const name = m[1]! as NodeName;
       if (c.registry.node(name) === undefined) return { ...ok(notFound(c, `No node ${name}.`)), status: 404 };
-      return ok(nodePage(c, name, await nodeHealth(c.caller, name).catch((err: unknown) => err as Error)));
+      return ok(await cluster(c, name));
     }],
     ["GET", /^\/assets\/([\w.-]+)$/, (m, r) => {
       const asset = assets.get(m[1]!);

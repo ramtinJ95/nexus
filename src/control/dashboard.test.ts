@@ -203,7 +203,8 @@ test("the sidebar lists every project's threads with their state, folds the arch
   assert.equal(sidebarOf(page).active, fix.id);
   assert.match(page, /<details class="archived" id="archived-acme">/, "the archived fold starts closed");
   assert.match((await s.call("GET", `/threads/${old.id}`)).text, /<details class="archived" id="archived-acme" open>/, "an archived thread's page opens its fold");
-  assert.match(textOf(page.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat/);
+  assert.doesNotMatch(page, /id="side-nodes"/, "the sidebar leaves the nodes to the Cluster page");
+  assert.match(textOf(await nodeHeads(s)), /rj-firebat/);
 });
 
 test("a review the person cancelled says which thread they archived, and asks nothing of them", async (t) => {
@@ -480,12 +481,15 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
 
 /** The home page's Needs you cards as a reader takes them in: what each is, its thread, and the card's text. */
 function needsOf(page: string) {
-  const region = page.split('id="needs-you"')[1]!.split('<div class="page" id="overview"')[0]!;
+  const region = page.split('id="needs-you"')[1]!.split('<div class="split-peek" id="peek"')[0]!;
   return {
     cards: [...region.matchAll(/<article class="need need-(\w+)" id="([^"]+)" data-thread="([^"]+)" data-attention="(\w+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(m[0]), html: m[0] })),
     text: textOf(region.replace(/^[^>]*>/, "")),
   };
 }
+/** Each node's card head on the Cluster page, where the sidebar's nodes block went: its name, marks, memory and release lines. */
+const nodeHeads = async (s: { call(method: string, path: string): Promise<{ text: string }> }) =>
+  [...(await s.call("GET", "/cluster")).text.matchAll(/<header class="node-card-h">([\s\S]*?)<\/header>/g)].map((m) => m[1]!).join("\n");
 const needsCount = (page: string) => /<span class="side-count" id="needs-count" data-live>([^<]*)<\/span>/.exec(page)![1];
 
 test("Needs you lists, oldest first, each held review, open question and ask, and each thread stopped where only the person moves it, with the action on its card", async (t) => {
@@ -524,7 +528,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   assert.ok(!cards.some((c) => c.thread === replied.id), "a new reply waits on no one");
   assert.equal(needsCount(page), "6");
   assert.equal(new Set(cards.map((c) => c.id)).size, cards.length);
-  for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}">`), "each card links its thread");
+  for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}"[ >]`), "each card links its thread");
 
   const land = cards[0]!;
   assert.match(land.text, /^Held review acme \/ Cache the list just now Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Held for you #7 Cache ↗ /);
@@ -653,7 +657,7 @@ test("every page links Needs you with its count in the sidebar, and on a phone f
   const s = await seeded(t);
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
-  for (const path of ["/", "/usage", "/pipeline", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
+  for (const path of ["/", "/usage", "/cluster", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
     const page = (await s.call("GET", path)).text;
     assert.match(page, /<a class="side-link" href="\/#needs-you">[\s\S]*?Needs you<span class="side-count" id="needs-count" data-live>1<\/span><\/a>/, path);
     assert.match(page, /<a class="icon-btn phone-only" href="\/#needs-you" aria-label="Needs you"/, path);
@@ -775,12 +779,12 @@ test("the side nodes show each node's committed memory, mark an overcommitted on
   const stopped = (t: Thread) => stoppedPylon(t.pylonId, { sessions: null });
   s.registry.ingested(testObservation(node, { capacity: over, pylons: [stopped(fix), stopped(docs)] }), []);
   assert.equal((await s.call("POST", `/v1/threads/${docs.id}/archive`)).status, 200);
-  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
+  const nodes = (await nodeHeads(s));
   assert.match(nodes, /<em>overcommitted<\/em>/, "the marker uses the offline marker's style");
   assert.match(textOf(nodes), /rj-firebat overcommitted 40\/22\.8 GiB memory · 4 GiB to wake paused/, "only the paused pylon whose thread is not archived needs memory to wake");
 
   s.observe();
-  const fits = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
+  const fits = textOf((await nodeHeads(s)));
   assert.match(fits, /rj-firebat 0\/64 GiB memory/);
   assert.doesNotMatch(fits, /overcommitted|to wake/);
 });
@@ -788,7 +792,7 @@ test("the side nodes show each node's committed memory, mark an overcommitted on
 test("the side nodes show no memory for a node whose capacity is from a probe before pylons were counted, and never mark it overcommitted", async (t) => {
   const s = await seeded(t);
   s.registry.apply({ record: "node", node, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
-  const nodes = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
+  const nodes = textOf((await nodeHeads(s)));
   assert.match(nodes, /rj-firebat/);
   assert.doesNotMatch(nodes, /overcommitted|GiB memory/);
 });
@@ -801,7 +805,7 @@ test("an offline node shows its pylons as unknown, and the last observation as s
 
   const list = (await s.call("GET", "/")).text;
   assert.equal(overviewRow(list, fix), "Fix checkout running unknown rj-firebat offline just now never");
-  assert.match(textOf(list.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat offline/);
+  assert.match(textOf(await nodeHeads(s)), /rj-firebat offline/);
   const pylon = textOf(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "pylon-h"));
   assert.match(pylon, /Observed unknown Node rj-firebat offline Last seen just now \(stale\)/);
 });
@@ -931,7 +935,7 @@ test("the inspector's tabs pick the changes, the previews or the pylon, and the 
   assert.match(page, /id="changes-turn"><span class="switch-label">Latest turn<\/span>/);
   assert.ok(!regions.includes('id="pane-changes"') && page.includes(`<section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${fix.id}">`), "no refresh replaces what the client read");
   assert.match(page, /<div id="facts" data-live hidden><span data-pylon="running" data-turn="false" data-agent-at="0" data-thread-status="(active|idle)"><\/span><\/div>/, "the client learns when the pylon runs and a turn ends");
-  assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the conversation is the first tab, and the terminal is one click away beside it");
+  assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">.*Timeline<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the conversation is the first tab, and the terminal is one click away beside it");
 });
 
 test("the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews", async (t) => {
@@ -1592,7 +1596,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
 test("every page has somewhere to say a refresh failed", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage", "/pipeline"]) {
+  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage", "/cluster"]) {
     assert.equal([...(await s.call("GET", path)).text.matchAll(/<p id="refresh-state" class="refresh-state" role="status"><\/p>/g)].length, 1, `${path} has one refresh status`);
   }
 });
@@ -1812,7 +1816,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
   assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
     "the turn is timed from when control heard it start, and Interrupt stops it");
   const since = s.registry.thread(thread.id)!.workingSince;
-  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 3, "the run bar, the sidebar row and the inspector tick the same clock");
+  assert.equal(html.split(`<time data-since="${since}">`).length - 1, 4, "the run bar, the sidebar row, the inspector and the timeline tick the same clock");
   assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's pane");
   assert.match(html, /placeholder="Steer the run…"/);
   assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
@@ -2248,12 +2252,12 @@ test("the side nodes mark a node with a low filesystem, and its page lists each 
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
   const capacity = testCapacity({ diskFreeGiB: 15, disks });
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
+  const nodes = (await nodeHeads(s));
   assert.match(nodes, /<em title="15\.0 of 100\.0 GiB free at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts, low">disk low<\/em>/);
   const text = textOf((await s.call("GET", `/nodes/${node}`)).text.split('id="node-health"')[1]!);
   assert.ok(text.includes("Disk 15 of 100 GiB free at /var/lib/nexus/pylons , /var/lib/nexus/artifacts low 400 of 500 GiB free at /opt/nexus/releases Temperatures"), text);
   s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ ...disks[0]!, freeGiB: 20 }] }) });
-  assert.doesNotMatch((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /disk low/, "20 GiB of 100 is not low");
+  assert.doesNotMatch((await nodeHeads(s)), /disk low/, "20 GiB of 100 is not low");
 });
 
 test("a node's page shows its health as its probe reads it, unknown where the host exposes nothing, and only to a deployer", async (t) => {
@@ -2265,7 +2269,7 @@ test("a node's page shows its health as its probe reads it, unknown where the ho
   const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => health };
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
   const started = await s.start("acme", "Busy thread");
-  assert.match((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /<a class="link" href="\/nodes\/rj-firebat"/, "the sidebar's node links its page");
+  assert.match((await nodeHeads(s)), /<a class="link" href="\/nodes\/rj-firebat"/, "the Cluster page's card for the node links its page");
   health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.46, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
   const page = await s.call("GET", `/nodes/${node}`);
   assert.equal(page.status, 200);
@@ -2320,10 +2324,9 @@ test("a node's page frames its graphs outside the live region, with a range pick
   assert.doesNotMatch(failed, /data-sample=/);
 });
 
-test("the pipeline page lists each project's items with the phase their records put them in, what each is after, its thread, and Approve and Cancel while it has none", async (t) => {
+test("the work in flight lists each item at its phase, an item held for the person is in Needs you with Approve and Cancel, its preview says what it is after, and no page links /pipeline", async (t) => {
   const s = await seeded(t, { deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } });
-  const empty = textOf((await s.call("GET", "/pipeline")).text);
-  assert.match(empty, /No project runs the pipeline\. nexus project edit <id> --pipeline start turns it on/);
+  assert.doesNotMatch((await s.call("GET", "/")).text, /href="\/pipeline"/, "no page links it");
   s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
   const add = async (title: string, after: string[] = []) => {
     const res = await s.call("POST", "/v1/items", { project: "acme", title, message: `Build ${title}.`, after });
@@ -2332,19 +2335,164 @@ test("the pipeline page lists each project's items with the phase their records 
   };
   const a = await add("Greet by name");
   const b = await add("Greet in French", [a.id]);
+  const c = await add("Greet in Dutch", [b.id]);
   assert.equal((await s.call("POST", `/v1/items/${a.id}/approve`, {})).status, 200);
   const thread = itemThread(s.registry, a.id)!;
-  const page = (await s.call("GET", "/pipeline")).text;
-  assert.match(page, /<a class="side-link active" href="\/pipeline" aria-current="page">/);
-  const section = sectionOf(page, "pipeline-acme");
-  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Phase After Thread/);
-  const row = (id: string) => textOf(section.split(`<tr data-item="${id}"`)[1]!.split("</tr>")[0]!.replace(/^[^>]*>/, ""));
-  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ nothing Greet by name$`));
-  assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} Greet by name none yet Approve Cancel`);
-  assert.match(section, new RegExp(`<a class="link" href="/threads/${thread}">Greet by name</a>`));
-  assert.match(section, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
-  assert.doesNotMatch(section, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");
-  assert.doesNotMatch(page, /aria-labelledby="pipeline-beta"/, "a project without the pipeline or items is left out");
+  const page = (await s.call("GET", "/")).text;
+  const flight = page.split('id="flight"')[1]!.split('id="overview"')[0]!;
+  const phaseOf = (key: string) => /<section class="phase[^"]*" id="phase-(\w+)"/.exec(flight.slice(0, flight.indexOf(`data-peek="${key}"`)).split("</section>").at(-1)!)?.[1];
+  assert.equal(phaseOf(c.id), "planned", "an item waiting for the one it is after is planned");
+  assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${c.id}" data-peek="${c.id}">`));
+  assert.match(phaseOf(thread) ?? "", /^(queued|building)$/, "an item that became a thread shows as its thread");
+  assert.doesNotMatch(flight, new RegExp(`data-peek="(${a.id}|${b.id})"`), "nor as itself, and held work is in Needs you");
+  const needs = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
+  const card = needs.split(`id="need-${b.id}"`)[1]!.split("</article>")[0]!;
+  assert.equal(textOf(card.replace(/^[^>]*>/, "")), `Approve item acme / Greet in French item project acme waits for the person to approve each item: nexus item approve ${b.id}. Approve Cancel`);
+  assert.match(card, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
+  assert.match(card, new RegExp(`data-action="cancel-item" data-item="${b.id}"`));
+  const peek = async (key: string) => (await s.call("GET", `/?peek=${key}`)).text.split('id="peek"')[1]!.split('id="in-flight"')[0]!;
+  const held = await peek(b.id);
+  assert.match(textOf(held), /Waits on you project acme waits for the person to approve each item: nexus item approve .*\. After Greet by name Brief Build Greet in French\. Added by .* for the Nexus agent\. Approve Cancel/);
+  assert.match(held, new RegExp(`<a class="link" href="/\\?peek=${a.id}" data-peek="${a.id}">Greet by name</a>`), "what it is after links its preview");
+  assert.match((await s.call("GET", `/?peek=${c.id}`)).text, new RegExp(`<a class="fl-row" href="/\\?peek=${c.id}" data-peek="${c.id}" aria-current="true">`), "the stack marks the line it previews");
+  assert.match(await peek(thread), new RegExp(`<a class="btn btn-xs[^"]*" href="/threads/${thread}">Open thread</a>`), "the preview of the item's thread opens its page");
+  assert.doesNotMatch(await peek(thread), /data-action="(approve|cancel)-item"/, "an item that is a thread has no item actions");
+  assert.doesNotMatch(await peek("it-000000000000"), /class="peek"/, "an unknown key previews nothing");
+});
+
+test("/pipeline sends the reader to the home page's work in flight, where its items show", async (t) => {
+  const s = await seeded(t);
+  const gone = await s.call("GET", "/pipeline");
+  assert.equal(gone.status, 303);
+  assert.equal(gone.headers.location, "/#in-flight");
+  assert.match((await s.call("GET", "/")).text, /<section class="split-flight" id="in-flight" aria-labelledby="flight-h">/);
+});
+
+test("the home page holds two columns, Needs you before the work in flight by phase, and on a phone two tabs with Needs you picked first", async (t) => {
+  const s = await seeded(t);
+  const page = (await s.call("GET", "/")).text;
+  const split = page.split('<div class="split" id="split">')[1]!;
+  const needs = split.indexOf('<section class="split-needs" id="needs-you"');
+  const flight = split.indexOf('<section class="split-flight" id="in-flight"');
+  assert.ok(needs >= 0 && flight > needs, "Needs you comes first, the work in flight after it");
+  assert.deepEqual([...split.matchAll(/<section class="phase[^"]*" id="phase-(\w+)"/g)].map((m) => m[1]), ["planned", "queued", "building", "review", "landing", "deployed"], "held work is in Needs you, not a phase");
+  const tabs = [...page.matchAll(/<input type="radio" name="home-side" value="(\w+)" id="side-\w+"( checked)?>/g)].map((m) => `${m[1]}${m[2] ?? ""}`);
+  assert.deepEqual(tabs, ["needs checked", "flight"]);
+});
+
+test("the sidebar's Needs you count, the phone's tab and the list count the same things, work held for approval included", async (t) => {
+  const s = await seeded(t);
+  s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "Greet by name", message: "Build it.", after: [] })).status, 201);
+  const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
+  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
+  const page = (await s.call("GET", "/")).text;
+  const list = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
+  assert.deepEqual([...list.matchAll(/<article class="need need-(\w+)"/g)].map((m) => m[1]), ["thread", "held"]);
+  assert.match(list, /<h2 id="needs-h">Needs you<\/h2><span class="count">2<\/span>/);
+  assert.equal(/<span class="seg-n" id="seg-needs-n" data-live>([^<]*)<\/span>/.exec(page)![1], "2");
+  for (const path of ["/", "/usage"]) assert.equal(needsCount((await s.call("GET", path)).text), "2", path);
+});
+
+test("/nodes/<name> is the Cluster page with that node picked, and /cluster picks the first", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const tower = "tower" as NodeName;
+  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  const picked = (page: string) => [...page.matchAll(/<article class="node-card( picked)?" data-node="([^"]+)"/g)].map((m) => `${m[2]}${m[1] ?? ""}`);
+  const page = await s.call("GET", `/nodes/${tower}`);
+  assert.equal(page.status, 200);
+  assert.deepEqual(picked(page.text), [node, `${tower} picked`], "every node has its card, and the one named is picked");
+  assert.match(page.text, /<h2 class="node-detail-h">tower<\/h2>/);
+  assert.match(page.text, /<title>Cluster: tower · Nexus<\/title>/);
+  assert.match(page.text, /<a class="side-link active" href="\/cluster" aria-current="page">/);
+  assert.deepEqual(picked((await s.call("GET", "/cluster")).text), [`${node} picked`, tower]);
+  assert.equal((await s.call("GET", "/nodes/nowhere")).status, 404);
+});
+
+test("the Cluster page asks only the picked node's probe, and shows each other node's newest recorded sample", async (t) => {
+  const health: NodeHealth = {
+    node, readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: { one: 2.5, five: 1.75, fifteen: 1 },
+    memory: { totalGiB: 62.8, availableGiB: 40.24, swapTotalGiB: 0, swapFreeGiB: 0 }, disk: { path: "/var/lib/nexus", totalGiB: 457.1, freeGiB: 180.33 },
+    temperatures: null, pylons: [],
+  };
+  const unused = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")) };
+  const asked: string[] = [];
+  const tower = "tower" as NodeName;
+  const attic = "attic" as NodeName;
+  const probes = new Map([node, tower, attic].map((name) => [name, { ...unused, health: async () => { asked.push(name); return health; } }] as const));
+  const s = await seeded(t, { ...landingOptions(), probes });
+  for (const [name, id] of [[tower, "nTOWER"], [attic, "nATTIC"]] as const) s.registry.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: id as TailnetNodeId });
+  s.registry.recordHealthSample(tower, sampleOf({ ...health, cpus: 8, load: { one: 6.25, five: 1, fifteen: 1 } }, Date.now() - 30_000, () => null));
+  s.registry.recordHealthSample(attic, sampleOf(health, Date.now() - 10 * 60_000, () => null));
+  const page = await s.call("GET", `/nodes/${node}`);
+  assert.equal(page.status, 200);
+  const card = (name: string) => textOf(page.text.split(`data-node="${name}"`)[1]!.split("</article>")[0]!);
+  assert.match(card(node), /Load 2\.50 on 16 CPUs Memory 40\.2 of 62\.8 GiB free Disk 180\.3 of 457\.1 GiB free/, "the picked node's card is the read its page made");
+  assert.match(card(tower), /Load 6\.25 on 8 CPUs Memory 40\.2 of 62\.8 GiB free/, "another node's card is its newest sample");
+  assert.match(card(attic), /Load no reading in 5 minutes/, "a sample older than 5 minutes is not shown");
+  assert.deepEqual(asked, [node], "only the picked node's probe is asked");
+});
+
+test("a queued thread's preview says once what it waits for", async (t) => {
+  const s = await seeded(t);
+  const first = await s.start("acme", "Fix checkout");
+  const queued = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Then the receipts", after: [first.id] })).text) as QueuedThread;
+  const peek = textOf((await s.call("GET", `/?peek=${queued.id}`)).text.split('id="peek"')[1]!.split('id="in-flight"')[0]!);
+  assert.equal(peek.split("Fix checkout").length - 1, 1, peek);
+});
+
+test("Deployed lists a landed thread for a day after its archive, and the work in flight's count leaves it out", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const landed = await s.start("acme", "Landed");
+  const dropped = await s.start("acme", "Archived unlanded");
+  const building = await s.start("acme", "Still building");
+  s.registry.saveReview(approvedReview(landed.id, { kind: "landed", commit: "c".repeat(40) }, { merged: "c".repeat(40) }));
+  for (const th of [landed, dropped]) s.registry.setThreadStatus(th.id, "archived");
+  const home = async () => {
+    const page = (await s.call("GET", "/")).text;
+    return { page, deployed: page.split('id="phase-deployed"')[1]!.split("</section>")[0]!, flight: page.split('id="flight"')[1]!.split('id="overview"')[0]! };
+  };
+  const now = await home();
+  assert.match(now.deployed, new RegExp(`data-peek="${landed.id}"`));
+  assert.doesNotMatch(now.flight, new RegExp(dropped.id), "an archived thread that never landed is not in flight");
+  assert.match(now.flight.split('id="phase-building"')[1]!.split("</section>")[0]!, new RegExp(`data-peek="${building.id}"`));
+  assert.match(now.page, /<span class="count" id="flight-n" data-live>1<\/span>/, "only the building thread is on its way");
+  assert.match(now.page, /<span class="seg-n" id="seg-flight-n" data-live>1<\/span>/);
+  const real = Date.now();
+  t.mock.method(Date, "now", () => real + 25 * 60 * 60 * 1000);
+  assert.doesNotMatch((await home()).deployed, new RegExp(landed.id), "a day after its archive it has left Deployed");
+});
+
+test("an archived thread whose review still holds for the person is not in Needs you", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Rolled back");
+  s.registry.saveReview(approvedReview(fix.id, personPhase("deploy", "The deploy of 4444 failed.", "Rolled back to the previous release."), { merged: "4".repeat(40), land: { requestedBy: laptop } }));
+  assert.equal(needsCount((await s.call("GET", "/")).text), "1");
+  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
+  const page = (await s.call("GET", "/")).text;
+  assert.equal(needsCount(page), "");
+  assert.equal(needsOf(page).text, "Needs you Nothing waits on you.");
+});
+
+test("a queued thread's page shows its track of steps without links to a timeline it does not have", async (t) => {
+  const s = await seeded(t);
+  const first = await s.start("acme", "Fix checkout");
+  const queued = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Then the receipts", after: [first.id] })).text) as QueuedThread;
+  const page = (await s.call("GET", `/threads/${queued.id}`)).text;
+  const track = page.split('<nav class="life-bar" id="life"')[1]!.split("</nav>")[0]!;
+  assert.equal([...track.matchAll(/<span class="life-step">/g)].length, 6, "each step is a plain step");
+  assert.doesNotMatch(track, /data-tab-go|href="#tl-/);
+  assert.doesNotMatch(page, /id="timeline-view"/);
+});
+
+test("a queued thread whose waits all landed previews why it did not start yet", async (t) => {
+  const s = await seeded(t);
+  const first = await s.start("acme", "Fix checkout");
+  const queued = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Then the receipts", after: [first.id] })).text) as QueuedThread;
+  s.registry.saveReview(approvedReview(first.id, { kind: "landed", commit: "c".repeat(40) }, { merged: "c".repeat(40) }));
+  s.registry.saveQueued({ ...s.registry.queuedThread(queued.id)!, lastError: "not enough memory on rj-firebat" });
+  const peek = textOf((await s.call("GET", `/?peek=${queued.id}`)).text.split('id="peek"')[1]!.split('id="in-flight"')[0]!);
+  assert.match(peek, /Next did not start yet: not enough memory on rj-firebat\. Starts on rj-firebat/);
 });
 
 /** The images a page shows, as each link and image name them, with any caption. */
@@ -2447,7 +2595,7 @@ test("a page reads the threads, the queue and the release reports as often whate
     }
     const counted = (["threads", "queuedThreads", "releaseReports"] as const).map((name) => [name, t.mock.method(s.registry, name)] as const);
     const counts: Record<string, Record<string, number>> = {};
-    for (const path of ["/", `/threads/${thread!.id}`, "/pipeline"]) {
+    for (const path of ["/", `/threads/${thread!.id}`, "/cluster"]) {
       for (const [, mock] of counted) mock.mock.resetCalls();
       assert.equal((await s.call("GET", path)).status, 200);
       counts[path.replace(thread!.id, "<id>")] = Object.fromEntries(counted.map(([name, mock]) => [name, mock.mock.callCount()]));
@@ -2456,7 +2604,8 @@ test("a page reads the threads, the queue and the release reports as often whate
   };
   const one = await reads(1, 1);
   assert.deepEqual(await reads(5, 4), one);
-  assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
+  assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 0 }, "the home page shows no release, which the Cluster page does");
+  assert.deepEqual(one["/cluster"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
 });
 
 test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {
@@ -2467,7 +2616,7 @@ test("the sidebar's release lines read as the release view does: stale and missi
   const report = (role: "control" | "probe", observedAt: number) => s.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt });
   report("control", Date.now());
   report("probe", Date.now() - 90_000);
-  const lines = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!.split(/<span><svg class="i i-server"/).slice(1)
+  const lines = (await nodeHeads(s)).split(/<span><svg class="i i-server"/).slice(1)
     .map((n) => [textOf(/<a [^>]*>([^<]*)<\/a>/.exec(n)![1]!), ...[...n.matchAll(/<small title="([^"]*)">([^<]*)<\/small>/g)].map((m) => `${m[2]} (${m[1]})`)]);
   assert.deepEqual(lines, [
     [node, "control: aaaaaaaaaaaa · healthy ()", "probe: aaaaaaaaaaaa · pending (deployer report is stale)"],

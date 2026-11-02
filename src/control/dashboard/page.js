@@ -3,6 +3,7 @@
 import { agoText, clock } from "./elapsed.ts";
 import { atEnd, endFollower } from "./scroll.js";
 import { api } from "./request.js";
+import { toggledBy } from "./folds.js";
 
 export const main = document.querySelector("main");
 export const pollMs = Number(main?.dataset.pollMs);
@@ -37,9 +38,10 @@ const foldedKey = "nexus.folded";
 const folded = new Set(JSON.parse(localStorage.getItem(foldedKey) ?? "[]"));
 for (const id of folded) toggled.set(id, false);
 document.addEventListener("click", (event) => {
-  const details = event.target instanceof Element ? event.target.closest("summary")?.parentElement : null;
-  if (!(details instanceof HTMLDetailsElement) || details.id === "") return;
-  toggled.set(details.id, !details.open);
+  const toggle = toggledBy(event);
+  if (toggle === null) return;
+  const { details } = toggle;
+  toggled.set(details.id, toggle.open);
   if (!details.classList.contains("group")) return;
   if (details.open) folded.add(details.id);
   else folded.delete(details.id);

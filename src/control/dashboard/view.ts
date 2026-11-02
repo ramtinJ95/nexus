@@ -44,7 +44,7 @@ export function html(strings: TemplateStringsArray, ...parts: Part[]): Html {
 }
 
 /** The colour of a status dot. `work` is an agent mid-turn, `busy` a pylon changing phase, `reply` a reply the person has not read. */
-export type Tone = "ok" | "work" | "reply" | "busy" | "idle" | "bad" | "muted";
+export type Tone = "ok" | "work" | "reply" | "review" | "busy" | "idle" | "bad" | "muted";
 export const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   running: ["running", "ok"], spawning: ["spawning", "busy"], pausing: ["pausing", "busy"], deleting: ["deleting", "busy"],
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],
@@ -73,11 +73,11 @@ const iconPaths = {
   contrast: "M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11zM8 2.5v11",
   up: "M8 13V3M4 7l4-4 4 4",
   chart: "M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6",
-  list: "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01",
   terminal: "M2.5 3.5h11v9h-11zM5 6.5l2 1.5-2 1.5M8.5 10h2.5",
   check: "M3.5 8.5l3 3 6-7",
   cross: "M4.5 4.5l7 7M11.5 4.5l-7 7",
   dash: "M5 8h6",
+  timeline: "M4.5 2.5v11M3.3 4.5a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M3.3 11.5a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0M7.5 4.5h6M7.5 8h4.5M7.5 11.5h5.5",
   inbox: "M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z",
 } as const;
 type IconName = keyof typeof iconPaths;
