@@ -85,7 +85,7 @@ export function threadPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase
     case "needs-person": return phase("held", `its review ended for the person: ${review.phase.reasons[0] ?? "no reason given"}`);
     case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}${phaseNote(review)}`);
     case "approved": return review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
-    case "reviewing": case "fixing": case "checking": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${review.phase.kind}`);
+    case "reviewing": case "fixing": case "quoting": case "checking": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${review.phase.kind}`);
     case "verifying": return phase("reviewing", `${pr}, round ${review.rounds.length}: ${liveNote(review)}`);
     // A review that ended without landing says nothing of a pull request reopened or merged since, which its links do.
     case "closed": case "cancelled": case undefined: break;

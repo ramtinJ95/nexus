@@ -12,8 +12,9 @@ import type { SecretGrant } from "../secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, reservedNames, type HoldCode } from "./holds.ts";
-import { carryWaiver, landingHolds } from "./policy.ts";
-import { changeOf, humanLabel, landable, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
+import { carryWaiver, landingHolds, landPress } from "./policy.ts";
+import { landing } from "./dashboard/cards.ts";
+import { changeOf, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
 import { reviewLoop, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
@@ -3041,4 +3042,193 @@ test("a review stored before carried approvals and waiver changes still loads, a
     `Nexus cannot tell whether the change at ${head2.slice(0, 12)} is the one nLAPTOP pressed Land for at ${head1.slice(0, 12)}, as the waiver was saved before Nexus recorded the change it waives, so that waiver does not carry over. Look at the change again, and press Land to waive the holds at ${head2.slice(0, 12)}.`,
     ...reservedHolds,
   ] });
+});
+
+test("an approved review in a project that leaves landing to the person waits on them until it lands, merges or closes outside it, or its builder is archived", async (t) => {
+  const reviewOnly = { autoReview: { land: false, enabledBy: "nLAPTOP" }, repo: "acme/app" };
+  const approve = async (f: ReturnType<typeof fixture>) => {
+    const loop = f.loop();
+    await loop.auto(f.registry.thread(f.builder)!, f.pr);
+    await loop.poll();
+    f.reply(f.review().reviewer, verdict(f.review(), {}));
+    await loop.poll();
+    assert.deepEqual(f.review().phase, { kind: "approved" });
+    assert.equal(f.attention().at(-1), "decision", "an approval the person must land waits on them");
+    return loop;
+  };
+  const f = fixture(t, reviewOnly);
+  const loop = await approve(f);
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.notEqual(f.attention().at(-1), "decision", "a landed review waits on no one");
+
+  for (const state of ["merged", "closed"] as const) {
+    const g = fixture(t, { ...reviewOnly, path: ":memory:" });
+    const gLoop = await approve(g);
+    g.watched(state);
+    await gLoop.poll();
+    assert.deepEqual(g.review().phase, { kind: state }, `a pull request ${state} outside the review ends it`);
+    assert.notEqual(g.attention().at(-1), "decision", `a review whose pull request ${state} outside it waits on no one`);
+  }
+
+  const h = fixture(t, { ...reviewOnly, path: ":memory:" });
+  const hLoop = await approve(h);
+  archive(h.registry, h.builder);
+  await hLoop.poll();
+  assert.deepEqual(h.review().phase, { kind: "cancelled", who: "builder", status: "archived" }, "archiving the builder ends it, as it ends a held review");
+  assert.notEqual(h.attention().at(-1), "decision", "a cancelled review waits on no one");
+});
+
+test("a Land press the policy can never take is refused, so the route and the dashboard agree on what lands", async (t) => {
+  const f = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] });
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409, message: /A Claude reviewer approved it/ }, "a press that would only hold again is refused with what holds it");
+  assert.equal(f.review().phase.kind, "needs-person", "and the review stays as it was");
+});
+
+test("a description that says what could not be checked live only after the approving round lands once the person presses Land, through the reviewer's quote", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/api.ts", previous: null, patch: "" }];
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.reply(reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  const auth = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live.", auth] });
+
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache.\n\n## Not checked live\n\nThe cache under real traffic on the fleet." } };
+  const sent = f.sent.length;
+  loop.land(f.builder, "nLAPTOP", head1, [auth]);
+  await loop.poll();
+  assert.equal(f.sent.length, sent + 1, "the press asks the reviewer");
+  const ask = f.sent.at(-1)!;
+  assert.equal(ask.to, reviewer);
+  assert.match(ask.message.text, /The cache under real traffic on the fleet\./, "with the description as it is now");
+  assert.deepEqual(f.merges, [], "nothing merges before the reviewer quotes it");
+  f.reply(reviewer, `Quoted.\n\`\`\`nexus-quote\n${JSON.stringify({ token: f.review().expect, notCheckedLive: "The cache under real traffic on the fleet." })}\n\`\`\``);
+  await loop.poll();
+  assert.equal(f.review().rounds.length, 1, "the quote is no new round");
+  assert.equal(f.review().rounds[0]!.verdict!.notCheckedLive, "The cache under real traffic on the fleet.");
+  assert.deepEqual(f.merges, [head1], "the reviewer's quote clears the hold, and the press lands");
+});
+
+test("a press whose description still does not say what could not be checked live holds again on the reviewer's answer", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "quoting");
+  f.reply(f.review().reviewer, `None.\n\`\`\`nexus-quote\n${JSON.stringify({ token: f.review().expect, notCheckedLive: null })}\n\`\`\``);
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
+});
+
+test("for every hold, and for an approval, the land route takes a press exactly when the dashboard offers Land", async (t) => {
+  const codes: HoldCode[] = [
+    "same-model", "not-approved", "open-findings", "unanswered", "check-failed", "live-failed", "github-checks", "not-approved-head", "conflict", "pr-not-open",
+    "not-checked-live", "claude-approved", "check-changed", "verify-changed", "reserved:auth", "reserved-path:secrets", "stale-head", "waiver-not-carried", "loop",
+  ];
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  const base = f.review();
+  const round = base.rounds[0]!;
+  const reviews: [string, Review][] = [
+    ...codes.map((code): [string, Review] => [`held by ${code}`, { ...base, land: { requestedBy: "nLAPTOP" }, phase: personPhase("policy", { code, text: `held by ${code}` }) }]),
+    ["approved", base],
+    ["approved, reserved by the reviewer", { ...base, rounds: [{ ...round, verdict: { ...round.verdict!, reserved: [{ case: "auth", why: "it changes the login" }] } }] }],
+    ["approved by a Claude reviewer", { ...base, reviewerKind: "claude" }],
+    ["approved on the builder's own model", { ...base, models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } }],
+  ];
+  const c = { deploys: () => false, landRefusal: null, caller: "nLAPTOP" } as never;
+  const unescape = (attr: string) => attr.replace(/&(quot|#39|lt|gt|amp);/g, (_, e: string) => ({ quot: '"', "#39": "'", lt: "<", gt: ">", amp: "&" })[e]!);
+  for (const [name, review] of reviews) {
+    f.registry.saveReview(review);
+    const card = landing(c, { thread: f.registry.thread(f.builder)!, review, pullRequests: [f.pr] } as never)?.text ?? "";
+    const offered = card.includes('data-action="land"');
+    const waive = /data-holds="([^"]*)"/.exec(card)?.[1];
+    let took = true;
+    try { loop.land(f.builder, "nLAPTOP", head1, waive === undefined ? undefined : JSON.parse(unescape(waive))); } catch (err) { if ((err as HttpError).status !== 409) throw err; took = false; }
+    assert.equal(took, offered, `${name}: the route ${took ? "takes" : "refuses"} a press the dashboard ${offered ? "offers" : "does not offer"}`);
+    if (took) await loop.poll();
+    else assert.deepEqual(f.review(), review, `${name}: a refused press leaves the review as it was`);
+  }
+});
+
+test("an approval under a stopped PR watch still learns its pull request merged outside it, and stops waiting on the person", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  const loop = await approved(f, null);
+  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merged" });
+  assert.notEqual(f.attention().at(-1), "decision");
+});
+
+test("an approval by a reviewer on the builder's own model offers no Land press, before any landing tries", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  f.registry.saveReview({ ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } });
+  assert.equal(landPress(f.review()).kind, "stuck");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409, message: /builder's own model/ });
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+test("a reviewer asked to quote is reminded of the nexus-quote block, and a pull request closed meanwhile ends the review", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  f.reply(f.review().reviewer, "Nothing to quote.");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "quoting");
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-quote block with the token/, "the reminder names the block the request asked for");
+  f.watched("closed");
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "closed" });
+  assert.deepEqual(f.merges, []);
+});
+
+test("one press lands a description whose statement changed after the reviewer quoted it, through a quote of the new one, and a quote not in it holds without asking again", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  const loop = await approved(f, null);
+  assert.equal(f.review().rounds[0]!.verdict!.notCheckedLive, "the cache under real traffic");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache.\n\n## Not checked live\n\nThe cache's hit rate on the fleet." } };
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "quoting", "the landing finds the quote gone from the description and asks the reviewer");
+  const ask = f.sent.at(-1)!.message.text;
+  assert.match(ask, /The cache's hit rate on the fleet\./);
+  assert.match(ask, /check it against the change you approved at that commit/, "the reviewer judges the passage, not only copies it");
+  f.reply(f.review().reviewer, `Quoted.\n\`\`\`nexus-quote\n${JSON.stringify({ token: f.review().expect, notCheckedLive: "The cache's hit rate on the fleet." })}\n\`\`\``);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "one press lands it");
+
+  const g = fixture(t, { repo: "acme/app", path: ":memory:" });
+  const gLoop = await approved(g, null);
+  g.snapshot = { ...g.snapshot, detail: { ...g.snapshot.detail, body: "Adds a cache.\n\n## Not checked live\n\nThe cache's hit rate on the fleet." } };
+  gLoop.land(g.builder, "nLAPTOP", head1);
+  await gLoop.poll();
+  const sent = g.sent.length;
+  g.reply(g.review().reviewer, `Quoted.\n\`\`\`nexus-quote\n${JSON.stringify({ token: g.review().expect, notCheckedLive: "the hit rate of the cache on the fleet" })}\n\`\`\``);
+  await gLoop.poll();
+  assert.deepEqual(g.merges, []);
+  assert.equal(g.sent.length, sent, "a quote that is not in the description it came from is not asked for again");
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["The reviewer's quote of what could not be checked live is not in the pull request's description."] });
 });

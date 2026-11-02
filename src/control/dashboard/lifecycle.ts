@@ -53,6 +53,7 @@ function reviewNext(r: Review): string | null {
   switch (r.phase.kind) {
     case "reviewing": return `The reviewer reads round ${round}`;
     case "fixing": return `The builder answers round ${round}'s findings`;
+    case "quoting": return "The reviewer quotes what could not be checked live";
     case "checking": return "Runs .nexus/check at the approved head";
     case "verifying": return liveNote(r) ?? "Runs the live check";
     case "approved": return r.land === null ? "Approved, and lands once you press Land" : "Approved, landing next";

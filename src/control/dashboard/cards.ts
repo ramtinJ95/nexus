@@ -7,7 +7,7 @@ import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, roundNote, roundsSpent, type Review } from "../review-model.ts";
 import { holdRule, reservedNames } from "../holds.ts";
-import { heldBy } from "../policy.ts";
+import { heldBy, landPress } from "../policy.ts";
 import type { AnswerRefusal, AskedQuestion, NodeQuestion, Question } from "../questions.ts";
 import { bytesText, freedBytes, itemKey, itemText, type CleanupItem } from "../cleanup-model.ts";
 import type { DeleteOutcome } from "../../protocol/cleanup.ts";
@@ -25,6 +25,7 @@ type Step = typeof landingSteps[number][0];
 export function landingAt(r: Review): { step: Step; failed: boolean } | null {
   switch (r.phase.kind) {
     case "checking": case "verifying": return r.land === null ? null : { step: r.phase.kind, failed: false };
+    case "quoting": return { step: "checking", failed: false };
     case "merging": case "deploying": case "landed": return { step: r.phase.kind, failed: false };
     case "rolling-back": return { step: "deploying", failed: true };
     case "needs-person": return r.merged !== null && r.land !== null ? { step: "deploying", failed: true } : null;
@@ -187,7 +188,8 @@ export function landing(c: Context, d: ThreadDetail, id = (name: string) => name
   const state = stateOf(step, i);
   return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`;
 })}</ol>
-${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, or its kept result for that commit is read.</p>`
+${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from the description as it is now, what could not be checked live at ${short(r.rounds.at(-1)!.head)}, then .nexus/check runs there.</p>`
+  : phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, or its kept result for that commit is read.</p>`
   : phase.kind === "verifying" ? html`<p class="land-note">${phase.thread === null && phase.refused !== undefined ? html`No node can take the verify pylon yet: ${phase.refused}` : html`.nexus/verify runs at ${short(r.rounds.at(-1)!.head)} in a verify pylon${phase.thread !== null && html`, <a href="/threads/${phase.thread}">${phase.thread}</a>`}.`}</p>`
   : phase.kind === "merging" && phase.waiting !== undefined ? html`<p class="land-note">Waiting while ${phase.waiting}, since landings deploy one at a time, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
   : phase.kind === "merging" ? html`<p class="land-note">Checking the merge policy again with what GitHub says now, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
@@ -207,14 +209,16 @@ ${phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${s
   const held = r.phase.kind === "needs-person";
   const reasons = heldBy(r);
   const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));
-  const waived = rules.filter((h) => h.waivable).map((h) => h.reason);
+  const press = landPress(r);
+  const waived = press.kind === "lands" ? press.waives.map((h) => h.text) : [];
   // A hold that meets every landing again, and that the person cannot waive, leaves only merging on GitHub.
-  const stuck = rules.some((h) => h.holdsAgain && !h.waivable);
+  const stuck = press.kind === "stuck";
+  const checks = press.kind === "lands" && press.quotes ? "Nexus first asks the reviewer to quote, from the description as it is now, what could not be checked live, then checks" : "Nexus checks";
   const findings = findingsOf(round);
   const deploys = c.deploys(r) ? " and deploys the merge commit" : "";
   const confirm = waived.length === 0
-    ? `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}? Nexus checks the merge policy again, merges that commit${deploys}.`
-    : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? Nexus checks everything else again, merges that commit${deploys}.`;
+    ? `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}? ${checks} the merge policy again, merges that commit${deploys}.`
+    : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? ${checks} everything else again, merges that commit${deploys}.`;
   return html`<section class="landing" aria-labelledby="${id("landing-h")}">
 <div class="land-top"><h2 id="${id("landing-h")}">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
 ${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}

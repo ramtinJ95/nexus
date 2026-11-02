@@ -38,6 +38,8 @@ export const answersSchema = z.object({
   token: z.string(),
   answers: z.array(z.object({ id: z.string().max(40), action: z.enum(["fixed", "rejected"]), reason: z.string().max(4_000) })).max(60),
 });
+/** The reviewer's quote, asked for by a Land press at an approved head, of what the description now says could not be checked live. */
+export const quoteSchema = z.object({ token: z.string(), notCheckedLive: z.string().max(4_000).nullable() });
 export type Finding = z.output<typeof findingSchema>;
 export type Verdict = z.output<typeof verdictSchema>;
 export type Answer = z.infer<typeof answersSchema>["answers"][number];
@@ -50,13 +52,16 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string } }
+export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string }
 /**
  * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
  * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
  * change at both is the same, so no reviewer round ran for it and it counts against no limit. Its checks run as any
- * round's do, since the base under the change moved.
+ * round's do, since the base under the change moved. `quotedFrom` is the digest of the description the reviewer last
+ * quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  */
+/** The digest of a pull request's description, which a round's `quotedFrom` records. */
+export const descriptionDigest = (body: string) => createHash("sha256").update(body).digest("hex");
 /**
  * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
  * instead. `ran` when the script gave its verdict in verify pylon `thread`.
@@ -81,6 +86,12 @@ export type Phase =
    * could take the verify pylon yet, which the loop tries again.
    */
   | { kind: "verifying"; startedAt: number; thread: ThreadId | null; refused?: string }
+  /**
+   * A landing at an approved head with no live check needs the reviewer's quote, from the description as it is now,
+   * of what could not be checked live, as after the person's Land press. `asked` is the digest of the description the
+   * request carries, once it is saved to send, and null before. The landing's checks follow.
+   */
+  | { kind: "quoting"; asked: string | null; failing?: ModelFailure }
   | { kind: "approved" }
   /**
    * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
@@ -196,6 +207,8 @@ export const settledKinds = ["landed", "merged", "closed", "cancelled"] as const
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
+/** Whether the review waits on the person: held for them, or stopped at an approval that only their Land merges. */
+export const waitsOnPerson = (r: Review | null) => needsPerson(r) || r?.phase.kind === "approved";
 /** What a landing that authorized its merge, or is deploying or rolling back, does now, or null for any other review. */
 export const landingVerb = (r: Review): "deploys" | "rolls back" | "merges" | null =>
   r.phase.kind === "deploying" ? "deploys" : r.phase.kind === "rolling-back" ? "rolls back" : r.phase.kind === "merging" && r.phase.authorized !== null ? "merges" : null;
@@ -325,7 +338,7 @@ const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, la
 export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.who === "person" ? `, cancelled by ${r.phase.by}` : `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
   : r.phase.kind === "merging" && r.phase.waiting !== undefined ? `, waiting while ${r.phase.waiting}`
   : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state]
-  : (r.phase.kind === "reviewing" || r.phase.kind === "fixing") && r.phase.failing ? `, the ${r.phase.kind === "reviewing" ? "reviewer" : "builder"}'s model is failing (${r.phase.failing.count} in a row, last: ${r.phase.failing.last}), retrying at ${new Date(r.phase.failing.retryAt).toISOString().slice(11, 16)} UTC` : "";
+  : (r.phase.kind === "reviewing" || r.phase.kind === "fixing" || r.phase.kind === "quoting") && r.phase.failing ? `, the ${r.phase.kind === "fixing" ? "builder" : "reviewer"}'s model is failing (${r.phase.failing.count} in a row, last: ${r.phase.failing.last}), retrying at ${new Date(r.phase.failing.retryAt).toISOString().slice(11, 16)} UTC` : "";
 /** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
 export function liveNote(r: Review): string | null {
   const round = r.rounds.at(-1)!;
