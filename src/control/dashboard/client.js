@@ -35,8 +35,11 @@ const writeTo = () => {
 writeTo();
 addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
-// A node's graphs bring uPlot, which no other page needs.
-if (document.getElementById("node-graphs") !== null) void import("./node-graphs.js");
+// The Cluster page's cards and its node's graphs, which bring uPlot, are chunks no other page needs.
+if (document.getElementById("cluster-nodes") !== null) {
+  void import("./node-cards.js");
+  void import("./node-graphs.js");
+}
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
 setInterval(tick, 1000);
