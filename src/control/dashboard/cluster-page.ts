@@ -38,7 +38,7 @@ function releaseLines(c: Context) {
 const lowDisks = (n: NodeRecord) => countedCapacity(n.capacity)?.disks?.filter(lowDisk) ?? [];
 
 /** A share as a bar, which says its numbers in words beside it. */
-const meter = (used: number, total: number, low = false) => html`<span class="meter${low && " meter-low"}" aria-hidden="true"><i style="width: ${Math.round(Math.min(1, total === 0 ? 0 : used / total) * 100)}%"></i></span>`;
+const meter = (used: number, total: number, low = false) => html`<meter class="meter${low && " meter-low"}" min="0" max="${Math.max(total, used)}" value="${used}" aria-hidden="true"></meter>`;
 
 /** A node's tile: what it is, how full it is, what runs on it and at which release, and its open problems. */
 function tile(c: Context, n: NodeRecord, health: NodeHealth | Error, picked: boolean, problems: number, releases: ReturnType<typeof releaseLines>): Html {

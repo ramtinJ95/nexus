@@ -978,7 +978,7 @@ a.card-main:focus-visible { outline-offset: -2px; }
 
 /* the Cluster page: a tile for each node, the checks, and the picked node in full */
 .cluster { max-width: 1120px; }
-.tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
 .tile { display: grid; gap: 7px; padding: 11px 14px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 12.5px; color: var(--text-2); }
 .tile:hover { background: var(--hover); }
 .tile.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -988,17 +988,21 @@ a.card-main:focus-visible { outline-offset: -2px; }
 .tile-h em { font-style: normal; font-size: 11.5px; color: var(--warn); }
 .tile-bad { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--bad); white-space: nowrap; }
 .tile-row { display: grid; grid-template-columns: 56px 64px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
-.tile-row > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-row > :last-child { min-width: 0; overflow-wrap: anywhere; }
 .tile-row small { font-size: inherit; }
-.tile-row > .tile-k + span:not(.meter), .tile-rel .tile-lines { grid-column: 2 / -1; }
+.tile-row > .tile-k + span, .tile-rel .tile-lines { grid-column: 2 / -1; }
 .tile-k { color: var(--text-3); }
 .tile-lines { display: grid; gap: 1px; font-family: var(--mono); font-size: 11px; }
 .tile-lines small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile-rel { align-items: start; }
-.meter { height: 5px; border-radius: 3px; background: var(--raised-2); overflow: hidden; }
-.meter i { display: block; height: 100%; border-radius: 3px; background: var(--text-3); }
-.meter-low i { background: var(--bad); }
+.meter { appearance: none; display: block; width: 100%; height: 5px; border: 0; border-radius: 3px; background: var(--raised-2); overflow: hidden; }
+.meter::-webkit-meter-bar { background: var(--raised-2); border: 0; border-radius: 3px; height: 5px; }
+.meter::-webkit-meter-optimum-value { background: var(--text-3); border-radius: 3px; }
+.meter::-moz-meter-bar { background: var(--text-3); border-radius: 3px; }
+.meter-low::-webkit-meter-optimum-value { background: var(--bad); }
+.meter-low::-moz-meter-bar { background: var(--bad); }
 .report > p { margin: 0 0 6px; }
+.ov-report td { white-space: normal; overflow-wrap: anywhere; }
 .check-group + .check-group { margin-top: 4px; }
 .check-group .ov-sub { margin-top: 10px; }
 .node-detail { display: grid; gap: 22px; padding-top: 22px; border-top: 1px solid var(--line-soft); }
@@ -1029,4 +1033,7 @@ a.card-main:focus-visible { outline-offset: -2px; }
   .life li + li::before { width: 10px; margin: 0 5px; }
   .life-done .life-name, .life-todo .life-name, .life-skipped .life-name { display: none; }
   .tiles { grid-template-columns: minmax(0, 1fr); }
+  /* what a check found is the point of it, so a phone keeps that column */
+  .ov-report .wide { display: table-cell; }
+  .ov-report th:first-child { width: 32%; }
 }
