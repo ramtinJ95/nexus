@@ -1075,9 +1075,9 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--l
   .main:is([data-view="file"], [data-view="term"]) > #scroll { grid-column: 1; grid-row: 4; }
   .main:is([data-view="file"], [data-view="term"]) > .dock { grid-column: 1; grid-row: 5; padding-left: var(--s5); padding-right: var(--s5); }
   .main:is([data-view="file"], [data-view="term"]) > :is(.file-view, .term-view) { grid-column: 3; grid-row: 4 / 6; min-width: 0; }
-  .main:is([data-view="file"], [data-view="term"]) > .file-view { background: var(--card); }
   .main:is([data-view="file"], [data-view="term"]) > .term-view { margin: var(--s2) var(--s4) var(--s4) var(--s2); }
   .main:is([data-view="file"], [data-view="term"]) > .ws-sep { display: block; grid-column: 2; grid-row: 4 / 6; }
+  .ws-sep::after { background: var(--line-soft); }
   .main:is([data-view="file"], [data-view="term"]) .convo { padding-left: var(--s5); padding-right: var(--s5); }
 }
 @media (max-width: 1199px) {
