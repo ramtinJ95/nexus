@@ -1048,6 +1048,7 @@ a.need-thread:hover { color: var(--accent); }
   .life { padding: 0 12px 8px; }
   .life-line li { font-size: var(--t-s); }
   .ll-held > .ll-held { display: none; }
+  .bar-end .btn-ghost { display: none; }
   .tabs { margin: 0 12px; }
   .strip { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; scrollbar-width: none; flex: none; }
   .mini { flex: none; display: inline-flex; align-items: center; gap: 6px; font: 400 var(--t-s)/1 var(--sans); padding: 7px 11px; border-radius: 6px; background: var(--card); color: var(--text-2); cursor: pointer; white-space: nowrap; box-shadow: var(--shadow); border: 0; }
