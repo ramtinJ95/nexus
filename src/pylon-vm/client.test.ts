@@ -2,14 +2,14 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import fs, { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import fs, { chmod, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { run, scratchDirectory, sweepScratch } from "./client.ts";
-import { publishIdentity } from "./identity.ts";
+import { identityOf, publishIdentity } from "./identity.ts";
 import { saveJson } from "../json-file.ts";
 import { directory, privateDirectory } from "./storage.ts";
 
@@ -246,4 +246,22 @@ test("a launch that ends on a full disk still releases its lock, so the next lau
 	t.mock.restoreAll();
 	syncBuiltinESMExports();
 	await assert.rejects(run(root, { action: "start", name: "pylon-full", boot: spec }), /EISDIR/);
+});
+
+test("a launch that recovers the lock of a launch that died releases it onto the dead launch's reserved directory, and leaves no directory beside the lock", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const dir = directory(root, "instances", "pylon-orphaned");
+	await privateDirectory(dir);
+	await saveJson(join(dir, "record.json"), { version: 1, name: "pylon-orphaned", config: {}, createdAt: new Date().toISOString(), labels: {} });
+	// What a launch killed while it held its lock left.
+	const lock = join(dir, "launch.lock");
+	await privateDirectory(lock);
+	await saveJson(join(lock, "owner"), { ...(await identityOf(process.pid))!, start: "an earlier process" });
+	await writeFile(join(lock, "release"), "launch.lock-dead01");
+	await privateDirectory(join(dir, "launch.lock-dead01"));
+	// Fails the launch at its first write after it holds the lock, so no controller is spawned.
+	await mkdir(join(dir, "status.json"));
+	await assert.rejects(run(root, { action: "start", name: "pylon-orphaned", boot: spec }), /EISDIR/);
+	assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), []);
 });

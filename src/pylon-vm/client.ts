@@ -11,9 +11,10 @@ import {
 	rename,
 	rm,
 	stat,
+	writeFile,
 } from "node:fs/promises";
 import http from "node:http";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
@@ -116,8 +117,8 @@ const launching = (dir: string) => published(join(dir, "launch.lock", "owner"));
 /**
  * Takes a lock directory with this process's identity already in it, so no one finds it without an owner. A rename
  * replaces only an empty directory, which is all a taker that died before publishing its identity left. Returns the
- * empty directory its release renames the lock onto, made now so a release needs no new space, or null when another
- * process holds the lock.
+ * empty directory its release renames the lock onto, made now so a release needs no new space and named in the lock so
+ * the recovery of a dead owner's lock reuses it, or null when another process holds the lock.
  */
 async function takeLock(lock: string): Promise<string | null> {
 	const release = await mkdtemp(`${lock}-`);
@@ -125,6 +126,7 @@ async function takeLock(lock: string): Promise<string | null> {
 	try {
 		aside = await mkdtemp(`${lock}-`);
 		await publishIdentity(join(aside, "owner"));
+		await writeFile(join(aside, "release"), basename(release), { mode: 0o600 });
 		await rename(aside, lock);
 		return release;
 	} catch (error) {
@@ -273,7 +275,11 @@ async function launch(
 				throw new Error(
 					"Sandbox controller is still starting. Retry inspect shortly",
 				);
-			await releaseLock(lock, await mkdtemp(`${lock}-`));
+			const reserved = await readFile(join(lock, "release"), "utf8").then(
+				(name) => join(dirname(lock), basename(name)),
+				(error: unknown) => (existsError(error, "ENOENT") ? mkdtemp(`${lock}-`) : Promise.reject(error)),
+			);
+			await releaseLock(lock, reserved);
 			release = await takeLock(lock);
 			if (release === null)
 				throw new Error(
