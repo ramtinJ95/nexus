@@ -31,9 +31,7 @@ import { assets } from "../dashboard/assets.ts";
 import { notFound } from "../dashboard/shell.ts";
 import { home, needsOf } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
-import { pipelinePage } from "../dashboard/pipeline-page.ts";
-import { nodePage } from "../dashboard/node-page.ts";
-import { healthPage } from "../dashboard/health-page.ts";
+import { clusterPage } from "../dashboard/cluster-page.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
@@ -69,6 +67,14 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     return c;
   };
 
+  /** The Cluster page with a node picked, which reads every node's health, as the table shows each. */
+  async function cluster(c: Context, picked: NodeName | null) {
+    const names = c.registry.nodes().map((n) => n.name);
+    const reads = await Promise.all(names.map((name) => nodeHealth(c.caller, name).catch((err: unknown) => err as Error)));
+    return ok(clusterPage(c, picked, new Map(names.map((name, i) => [name, reads[i]!])), options.health?.() ?? null));
+  }
+  const redirect = (location: string) => ({ status: 302, headers: { location, "cache-control": "no-store" }, body: "" });
+
   return [
     ["GET", /^\/$/, (_, r) => ok(home(context(r.caller), {}))],
     ["GET", /^\/threads\/new$/, (_, r) => ok(home(context(r.caller), { start: { project: r.query.get("project") } }))],
@@ -77,8 +83,10 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const period = r.query.get("period") ?? "";
       return ok(usagePage(context(r.caller), Object.hasOwn(periods, period) ? period as Period : "7d", (r.query.get("project") || null) as ProjectId | null));
     }],
-    ["GET", /^\/pipeline$/, (_, r) => ok(pipelinePage(context(r.caller)))],
-    ["GET", /^\/health$/, (_, r) => ok(healthPage(context(r.caller), options.health?.() ?? null))],
+    // The pipeline's items show on the home page's overview, and the health checks on the Cluster page.
+    ["GET", /^\/pipeline$/, () => redirect("/#overview")],
+    ["GET", /^\/health$/, () => redirect("/cluster#health")],
+    ["GET", /^\/cluster$/, (_, r) => cluster(context(r.caller), registry.nodes()[0]?.name ?? null)],
     ["GET", /^\/threads\/([^/]+)$/, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {
@@ -95,11 +103,11 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const d = detail(registry.thread(thread.id)!);
       return ok(threadPage(context(r.caller), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, r.query.has("streaming")));
     }],
-    ["GET", /^\/nodes\/([^/]+)$/, async (m, r) => {
+    ["GET", /^\/nodes\/([^/]+)$/, (m, r) => {
       const c = context(r.caller);
       const name = m[1]! as NodeName;
       if (c.registry.node(name) === undefined) return { ...ok(notFound(c, `No node ${name}.`)), status: 404 };
-      return ok(nodePage(c, name, await nodeHealth(c.caller, name).catch((err: unknown) => err as Error)));
+      return cluster(c, name);
     }],
     ["GET", /^\/assets\/([\w.-]+)$/, (m, r) => {
       const asset = assets.get(m[1]!);

@@ -1,64 +1,115 @@
 /** Renders the home page: the inbox of what waits on the person, and every open thread. */
-import { desiredPhase } from "../../reconcile.ts";
 import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import { cannotLand, type Review } from "../review-model.ts";
 import { heldBy } from "../policy.ts";
-import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
+import type { Project } from "../project.ts";
+import type { QueuedThread } from "../queue.ts";
+import type { ItemPhase, PipelineItem } from "../pipeline.ts";
+import { Html, html, dot, icon, menu, limitText, threadState, dims, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
-import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
+import { heldAlone, itemsOf, lifeOfItem, lifeOfThread, miniTrack, needWhy, stages, steps, type Life, type Step } from "./lifecycle.ts";
+import { layout, threadsOf, queuedLook, closedLabel, quietLabel, newProjectButton, lastActive, type Shell } from "./shell.ts";
 
-/** Every open thread with what its pylon is asked to be and is, for the desk and for the phone's thread list. */
+/**
+ * One line of the overview: a thread, a queued thread or an item not yet a thread, with where its life is and what
+ * moves it on. `href` is null for an item, which has no page of its own.
+ */
+interface Line { title: string; project: string; href: string | null; life: Life; state: readonly [string, Tone]; node: string; when: Part; dim: boolean; actions: Part; order: number }
+
+const threadLine = (c: Context, t: Thread): Line => {
+  const r = c.row(t);
+  const node = c.registry.node(r.pylon.node);
+  return {
+    title: t.title, project: t.project, href: `/threads/${t.id}`, life: lifeOfThread(c, t.id), state: threadState(r, c.now),
+    node: `${r.pylon.node}${node?.state === "offline" ? ", offline" : ""}`, when: workingFor(t, c.now) ?? ago(lastActive(t), c.now), dim: dims(r), actions: null, order: -lastActive(t),
+  };
+};
+const queuedLine = (c: Context, q: QueuedThread): Line => ({
+  title: q.title, project: q.project, href: `/threads/${q.id}`, life: lifeOfThread(c, q.id), state: queuedLook(q), node: q.node, when: "queued", dim: false, actions: null, order: 0,
+});
+function itemLine(c: Context, i: PipelineItem): Line {
+  const p = c.registry.project(i.project);
+  return { title: i.title, project: i.project, href: null, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], node: "", when: ago(i.addedAt, c.now), dim: false, actions: p === undefined ? null : itemActions(i, p), order: i.addedAt };
+}
+
+/** An item's Approve, where its project waits for the person to approve each, and Cancel, until it becomes a thread. */
+const itemActions = (i: PipelineItem, p: Project) => i.thread === null && i.phase.kind !== "cancelled" && [
+  p.pipeline?.autoStart === false && i.approved === null && html`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${i.id}">Approve</button>`,
+  html`<button type="button" class="btn btn-xs btn-ghost" data-action="cancel-item" data-item="${i.id}" data-confirm="Cancel ${i.title}? It never becomes a thread.">Cancel</button>`,
+];
+const phaseTone: Record<ItemPhase["kind"], Tone> = {
+  planned: "idle", queued: "idle", building: "work", reviewing: "work", landing: "busy", landed: "ok", held: "bad", archived: "muted", cancelled: "muted",
+};
+
+const lineRow = (k: Line) => {
+  const [label, tone] = k.state;
+  return html`<tr${k.dim && html` class="dim"`}>
+<td><span class="ov-title">${dot(tone, label)}${k.href === null ? html`<span>${k.title}</span>` : html`<a href="${k.href}">${k.title}</a>`}</span></td>
+<td class="wide ov-proj">${k.project}</td>
+<td><span class="ov-where">${miniTrack(k.life)}<span class="ov-why">${k.life.why}</span></span></td>
+<td class="wide">${k.node}</td>
+<td class="ov-when">${k.when}${k.actions !== null && k.actions !== false && html`<span class="ov-act">${k.actions}</span>`}</td>
+</tr>`;
+};
+const lineTable = (body: Part) => html`<table class="ov ov-life">
+<thead><tr><th>Thread</th><th class="wide">Project</th><th>Where it is</th><th class="wide">Node</th><th>Last</th></tr></thead>
+${body}
+</table>`;
+const foldTable = (c: Context, threads: readonly Thread[]) => lineTable(html`<tbody>${threads.map((t) => lineRow(threadLine(c, t)))}</tbody>`);
+
+/** What an empty phase says, so an empty overview still reads as the path work takes. */
+const emptyPhase: Record<Step, string> = {
+  planned: "No items lined up.", queued: "Nothing waits in the queue.", building: "No agent is building.",
+  review: "No pull request in review.", landing: "Nothing is landing.", deployed: "Nothing open has landed.",
+};
+
+/**
+ * Needs you, then every open thread, queued thread and item not yet a thread under the step its life is at, read from
+ * the records as the pipeline reads them. What waits on the person is in Needs you, so the overview leaves it out.
+ * Each project's quiet and archived threads fold below, as the sidebar folds them.
+ */
 export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">): Html {
   const projects = c.registry.projects();
-  const nodes = new Map(c.registry.nodes().map((n) => [n.name, n]));
-  const table = (threads: readonly Thread[]) => html`<table class="ov">
-<thead><tr><th>Thread</th><th class="wide">Desired</th><th>Observed</th><th class="wide">Node</th><th class="wide">Human</th><th class="wide">Agent</th></tr></thead>
-<tbody>${threads.map((t) => {
-  const r = c.row(t);
-  const desired = desiredPhase(t, c.now);
-  const [label, tone] = threadState(r, c.now);
-  return html`<tr${dims(r) && html` class="dim"`}>
-<td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>
-<td class="wide">${state(desired, desiredTone[desired])}</td>
-<td>${state(...actualBadge[r.pylon.actualState])}</td>
-<td class="wide">${r.pylon.node}${nodes.get(r.pylon.node)!.state === "offline" && html` <span class="tag">offline</span>`}</td>
-<td class="wide">${ago(t.lastHumanActivityAt, c.now)}</td>
-<td class="wide">${workingFor(t, c.now) ?? ago(t.lastAgentActivityAt, c.now)}</td>
-</tr>`;
-})}</tbody>
-</table>`;
+  const byProject = new Map(projects.map((p) => [p.id, threadsOf(c, p.id)]));
+  const items = itemsOf(c);
+  const lines = [
+    ...items.filter((i) => i.thread === null).map((i) => itemLine(c, i)),
+    ...projects.flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
+    ...[...byProject.values()].flatMap((t) => t.recent).map((t) => threadLine(c, t)),
+  ];
+  const placed = Map.groupBy(lines.filter((k) => k.life.stage !== null), (k) => k.life.stage!);
+  for (const phase of placed.values()) phase.sort((a, b) => a.order - b.order);
+  const held = [...lines, ...[...byProject.values()].flatMap((t) => t.quiet).map((t) => threadLine(c, t))].filter((k) => heldAlone(k.life));
+  const folds = projects.flatMap((p) => {
+    const { quiet, closed } = byProject.get(p.id)!;
+    return [
+      quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)} in ${p.id}</summary>${foldTable(c, quiet)}</details>`,
+      closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)} in ${p.id}</summary>${foldTable(c, closed)}</details>`,
+    ];
+  }).filter((f) => f !== false);
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
     main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c)}</section></div>
+<div class="scroll"><div class="page page-needs"><p id="action-error" class="error" role="alert" hidden></p><section class="needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, held)}</section></div>
 <div class="page" id="overview" data-live>
-${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
-  const { recent, quiet, closed } = threadsOf(c, p.id);
-  const queued = c.queuedIn(p.id);
-  return html`<section aria-labelledby="project-${p.id}">
-<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
-${recent.length > 0 ? table(recent) : quiet.length === 0 && html`<p class="empty">No open threads.</p>`}
-${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-queued">
-<thead><tr><th>Thread</th><th>Waits for</th><th class="wide">Node</th></tr></thead>
-<tbody>${queued.map((q) => {
-  const [label, tone] = queuedLook(q);
-  return html`<tr>
-<td><span class="ov-title">${dot(tone, label)}<a href="/threads/${q.id}">${q.title}</a><span class="tag">${label}</span></span></td>
-<td>${q.waits.map((w) => html`<span class="ov-wait">${threadTitle(c, w.thread)}: ${w.why}</span>`)}</td>
-<td class="wide">${q.node}</td>
-</tr>`;
-})}</tbody>
-</table>`}
-${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)}</summary>${table(quiet)}</details>`}
-${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
-</section>`;
-})}
+${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : html`<section aria-labelledby="phases-h">
+<div class="ov-head"><h2 id="phases-h">Everything else</h2><span class="dim">by the step each is at</span></div>
+${lineTable(steps.map((step) => {
+  const at = placed.get(step) ?? [];
+  const s = stages.find((x) => x.stage === step)!;
+  return html`<tbody class="phase" id="phase-${step}" aria-labelledby="phase-${step}-h">
+<tr class="phase-h"><th colspan="5" scope="rowgroup"><span class="mark mark-${step}" aria-hidden="true"></span><span id="phase-${step}-h">${s.label}</span><span class="phase-n">${at.length}</span><span class="phase-means">${at.length > 0 ? s.means : step === "planned" && !projects.some((p) => p.pipeline != null) ? html`No project runs the pipeline. <code>nexus project edit &lt;id&gt; --pipeline start</code> turns it on.` : emptyPhase[step]}</span></th></tr>
+${at.map(lineRow)}
+</tbody>`;
+}))}
+</section>
+${folds.length > 0 && html`<section class="ov-folds" aria-label="Quiet and archived">${folds}</section>`}`}
 </div></div>`,
   });
 }
@@ -102,25 +153,31 @@ function heldSince(registry: Registry, r: Review): number {
 
 const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}` : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
 
-/** The inbox's cards, each the card its thread's page shows where there is one, under a line that links the thread. */
-function needsList(c: Context): Html {
+/**
+ * The inbox: each thing that waits on the person, oldest first, folded to one line that says what it is, whose it is
+ * and why, and opening in place to the card its thread's page shows, with its actions. Work held for the person that
+ * no card acts on, such as a blocked queued thread, follows as a line that links it.
+ */
+function needsList(c: Context, held: readonly Line[]): Html {
   const needs = c.needs();
-  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
-${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
+  const count = needs.length + held.length;
+  const line = (n: Need, what: string, who: Html, why: string, body: Html) => html`<details class="need-fold" id="fold-${needId(n)}"><summary class="need-sum"><span class="need-what">${what}</span>${who}<span class="need-why">${why}</span><span class="need-at">${ago(n.since, c.now)}</span>${icon("chevron")}</summary>
+<div class="need-body">${body}</div></details>`;
+  return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${count > 0 && html`<span class="count">${count}</span>`}</div>
+${count === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
   if (n.kind === "cleanup") {
     const { node } = n.question;
     return html`<article class="need need-cleanup" id="${needId(n)}" data-node="${node}" tabindex="-1" aria-label="Cleanup: ${node}">
-<div class="need-head"><span class="need-what">Cleanup</span><a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
-${cleanupCard(c, n.question)}
+${line(n, "Cleanup", html`<a class="need-thread" href="/nodes/${node}"><span class="dim">node</span> ${node}</a>`, "Frees space once you confirm what to delete", cleanupCard(c, n.question))}
 </article>`;
   }
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
+  const why = needWhy(n, c.now) || lifeOfThread(c, t.id).why;
   return html`<article class="need need-${n.kind}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>
-${body}
+${line(n, what, html`<a class="need-thread" href="/threads/${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a>`, why, body)}
 </article>`;
-})}</div>`}`;
+})}${held.map((k) => html`<div class="need need-held"><div class="need-sum"><span class="need-what">Held</span><span class="need-thread">${k.href === null ? html`<span class="dim">${k.project} /</span> ${k.title}` : html`<a href="${k.href}"><span class="dim">${k.project} /</span> ${k.title}</a>`}</span><span class="need-why">${k.life.why}</span>${k.actions !== null && k.actions !== false && html`<span class="need-act">${k.actions}</span>`}<span class="need-at">${k.when}</span></div></div>`)}</div>`}`;
 }
 
 /** What the card is, and what it shows: a review, question or nudge as its thread's page shows it, or what stopped the thread and the one action that gets past it. */

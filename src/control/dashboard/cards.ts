@@ -22,7 +22,7 @@ type Step = typeof landingSteps[number][0];
  * The step a landing is at, and whether it failed there. A landing held after its merge stopped at the deploy, which
  * failed or rolled back. One held before its merge is not on its way anywhere, and is landable again or not at all.
  */
-function landingAt(r: Review): { step: Step; failed: boolean } | null {
+export function landingAt(r: Review): { step: Step; failed: boolean } | null {
   switch (r.phase.kind) {
     case "checking": case "verifying": return r.land === null ? null : { step: r.phase.kind, failed: false };
     case "merging": case "deploying": case "landed": return { step: r.phase.kind, failed: false };

@@ -22,6 +22,7 @@ import { runOf, stateBar, composer } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
+import { lifeChip, lifeOfThread, type Life } from "./lifecycle.ts";
 import { usageColumns, exact } from "./usage-page.ts";
 
 const waitTone: Record<Wait["state"], Tone> = { waiting: "idle", landed: "ok", blocked: "bad" };
@@ -61,7 +62,7 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = t.status === "active" || t.status === "idle";
-  const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), [
+  const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), lifeOfThread(c, t.id), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
@@ -104,12 +105,12 @@ function termView(t: Thread): Html {
 }
 
 /** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */
-function threadBar(t: { project: string; title: string }, [label, tone]: readonly [string, Tone], actions: readonly Part[], tag: Part = null): Html {
+function threadBar(t: { project: string; title: string }, [label, tone]: readonly [string, Tone], life: Life, actions: readonly Part[], tag: Part = null): Html {
   const shown = actions.filter((a) => a !== false);
   return html`<header class="bar" id="bar" data-live>
 ${menu}
 <div class="crumb"><a class="crumb-p" href="/">${t.project}</a><span class="sep" aria-hidden="true">/</span><h1>${t.title}</h1>${tag}</div>
-<span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>
+<span class="chip chip-${tone}">${dot(tone)}<span class="chip-label">${label}</span></span>${lifeChip(life)}
 ${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}</div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>`}
 </header>`;
 }
@@ -128,7 +129,7 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
   return layout(c, {
     title: q.title,
     active: q.id,
-    main: html`${threadBar(q, queuedLook(q), [
+    main: html`${threadBar(q, queuedLook(q), lifeOfThread(c, q.id), [
       q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
       q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
     ])}
