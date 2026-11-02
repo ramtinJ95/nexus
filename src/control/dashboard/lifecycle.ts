@@ -122,7 +122,7 @@ const ranIn = (r: Review, id: ThreadId) => ((r.phase.kind === "checking" || r.ph
 /** Where a review is, in a word or two after the thread it serves. */
 const reviewAt: Record<PhaseKind, (r: Review) => string> = {
   reviewing: (r) => `reviewing round ${roundsSpent(r)}`, fixing: (r) => `the builder answers round ${roundsSpent(r)}`,
-  checking: () => "running the checks", verifying: () => "running the live check", approved: (r) => r.land === null ? "approved, yours to land" : "approved, landing next",
+  checking: () => "running the checks", quoting: () => "quoting what could not be checked live", verifying: () => "running the live check", approved: (r) => r.land === null ? "approved, yours to land" : "approved, landing next",
   merging: () => "merging", deploying: () => "deploying", "rolling-back": () => "rolling back", landed: () => "landed", "needs-person": () => "needs you",
   merged: () => "merged outside its review", closed: () => "its pull request closed", cancelled: () => "cancelled",
 };

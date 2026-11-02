@@ -12,7 +12,7 @@ import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
-import { lifeOfThread, needWhy, itemsOf, type Life } from "./lifecycle.ts";
+import { lifeOfThread, needWhy, itemsOf, roleLine, threadRole, type Life } from "./lifecycle.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
 import type { Item } from "./items.ts";
@@ -189,15 +189,16 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
 }
 
 /**
- * Where a thread's work is, in a strip above its card: the steps it took and the one it waits on the person at, its
- * pull request and round, its pylon, and the latest reply once the person picked it, as reading it costs a read of
- * the conversation.
+ * Where a thread's work is, in a strip above its card: for a builder the steps it took and the one it waits on the
+ * person at, and for any other thread its role line, then its pull request and round, its pylon, and the latest reply
+ * once the person picked it, as reading it costs a read of the conversation.
  */
 function whereNow(c: Context, d: ThreadDetail, life: Life, items: readonly Item[] | null): Html {
   const r = d.review;
   const pr = d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   const reply = items?.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
-  return html`<div class="need-ctx">${lifeTrack(life, false)}
+  const role = threadRole(c, d.thread.id);
+  return html`<div class="need-ctx">${role.kind === "builder" ? lifeTrack(life, false) : roleLine(c, d.thread.id, role)}
 <p class="need-facts">${pr !== undefined && html`<span><a class="link" href="${pr.url}" target="_blank" rel="noreferrer" title="${pr.title}">#${pr.number}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">round ${roundsSpent(r)} of ${r.maxRounds}</span>`}</span>`}<span>${state(...actualBadge[d.pylon.actualState])} <span class="dim">on</span> ${d.pylon.node}</span><a class="link" href="/threads/${d.thread.id}">Open thread</a></p>
 ${reply?.kind === "agent" && html`<p class="need-reply"><span class="dim">Latest reply${d.thread.lastReplyAt !== null && html` ${ago(d.thread.lastReplyAt, c.now)}`}</span> ${inline(reply.text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim())}</p>`}
 </div>`;

@@ -98,6 +98,18 @@ test("a reviewer, check or verify thread's page says in one line whose pull requ
   assert.match(own, /id="timeline-view"/);
 });
 
+test("a reviewer waiting on the person has its role line on its Needs you card, with no builder track, and says when it quotes", async (t) => {
+  const { s, builder, reviewer, review } = await reviewed(t);
+  s.registry.askQuestion({ id: "qn-review", thread: reviewer.id, text: "Run the migration?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  const card = (await s.page(`/?peek=${reviewer.id}`)).split('id="needs-you"')[1]!.split(`data-thread="${reviewer.id}"`)[1]!.split("</article>")[0]!;
+  assert.doesNotMatch(card, /class="life"/, "no builder track on its card");
+  assert.match(textOf(card), /Reviewer of PR #7 for Cache the totals running the checks/);
+  assert.match(card, new RegExp(`href="/threads/${builder.id}"`), "it links its builder");
+
+  s.registry.saveReview({ ...review, phase: { kind: "quoting", asked: null } });
+  assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals quoting what could not be checked live");
+});
+
 test("a planning thread's page says what it is in place of the track", async (t) => {
   const s = await setup(t);
   const plan = await s.start({ title: "Plan the wave", planning: true });
