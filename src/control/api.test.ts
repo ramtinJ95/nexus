@@ -612,6 +612,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "DELETE ^\\/v1\\/usage\\/backfill$ open: deployers only, which steerUsageBackfill checks",
     "GET ^\\/$",
     "GET ^\\/assets\\/([\\w.-]+)$",
+    "GET ^\\/cluster$",
     "GET ^\\/health$",
     "GET ^\\/nodes\\/([^/]+)$",
     "GET ^\\/pipeline$",
