@@ -1,7 +1,7 @@
 /**
  * The cleanup pass: for each node, what it could delete (cleanup-model.ts), asked as one question once that set holds
  * an item the node's last question did not, so neither the same set nor a smaller one is asked again, whether the
- * person kept it or not, and at most once a week unless a filesystem of the node is low (cleanupDue). Once the person answers Delete, the node's probe deletes the images and templates, which this
+ * person kept it or not, and at most once a day unless a filesystem of the node is low (cleanupDue). Once the person answers Delete, the node's probe deletes the images and templates, which this
  * pass sends it, and the node's deployer the releases, which it asks for when it next reports them (`releases`). Each
  * item is read again before its delete, and one now in use stays, with why, in the answered question.
  */
