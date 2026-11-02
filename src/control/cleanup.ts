@@ -1,7 +1,7 @@
 /**
  * The cleanup pass: for each node, what it could delete (cleanup-model.ts), asked as one question once that set holds
  * an item the node's last question did not, so neither the same set nor a smaller one is asked again, whether the
- * person kept it or not. Once the person answers Delete, the node's probe deletes the images and templates, which this
+ * person kept it or not, and at most once a week unless a filesystem of the node is low (cleanupDue). Once the person answers Delete, the node's probe deletes the images and templates, which this
  * pass sends it, and the node's deployer the releases, which it asks for when it next reports them (`releases`). Each
  * item is read again before its delete, and one now in use stays, with why, in the answered question.
  */
@@ -11,12 +11,14 @@ import { ProbeHttpError } from "../protocol/http.ts";
 import { maxDrops, type ArtifactUsage, type DeleteOutcome } from "../protocol/cleanup.ts";
 import { releaseKeeps, type ReleaseInventory } from "../deploy/release-cleanup.ts";
 import { singleFlight } from "../single-flight.ts";
+import { lowDisk } from "../disk-space.ts";
+import { countedCapacity } from "../protocol/observations.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeQuestion } from "./questions.ts";
-import { artifactKept, bytesText, cleanupCandidates, cleanupQuestion, grew, itemKey, undeleted, type CleanupItem, type NodeFacts } from "./cleanup-model.ts";
+import { artifactKept, bytesText, cleanupCandidates, cleanupDue, cleanupQuestion, grew, itemKey, undeleted, type CleanupItem, type NodeFacts } from "./cleanup-model.ts";
 
 type CleanupRegistry = Pick<Registry, "askQuestion" | "currentImage" | "imageOperation" | "node" | "nodeQuestions" | "nodes" | "previousImage" | "projects" | "pylonsWithThreadsOn"
-  | "recordCleanup" | "releaseInventory" | "saveReleaseInventory" | "templates" | "withdrawNodeQuestion">;
+  | "recordCleanup" | "releaseInventory" | "saveReleaseInventory" | "templates">;
 
 export const cleanupEveryMs = 60_000;
 
@@ -56,7 +58,8 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
     // An offline node's images and templates are unknown, and a question without them would be asked again with them.
     if (facts.held === null) return;
     const asked = registry.nodeQuestions(node);
-    const latest = asked.at(-1);
+    const low = countedCapacity(registry.node(node)?.capacity ?? null)?.disks?.some(lowDisk) ?? false;
+    if (!cleanupDue(asked, low, now())) return;
     const deleting = new Set(asked.flatMap((q) => undeleted(q).map(itemKey)));
     const candidates = cleanupCandidates(node, facts, now()).filter((c) => !deleting.has(itemKey(c)));
     if (!grew(candidates, asked)) return;
@@ -67,7 +70,6 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
       return bytes === undefined ? [] : [{ ...c, bytes }];
     });
     if (!grew(items, asked)) return;
-    if (latest !== undefined && latest.answer === null) registry.withdrawNodeQuestion(latest.id);
     const question = registry.askQuestion(cleanupQuestion(node, items, now()));
     log(`${node}: asked ${question.id}, whether to delete ${items.length} items that take ${bytesText(items.reduce((sum, i) => sum + i.bytes, 0))}`);
   }
