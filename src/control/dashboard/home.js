@@ -24,9 +24,16 @@ function peek(key) {
 if (split !== null) {
   const view = document.getElementById(`view-${localStorage.getItem(viewKey)}`);
   if (view !== null) view.checked = true;
-  const showFlight = () => { if (location.hash === "#in-flight") document.getElementById("side-flight").checked = true; };
-  showFlight();
-  addEventListener("hashchange", showFlight);
+  const showSide = () => {
+    const side = location.hash === "#in-flight" ? "flight" : location.hash.startsWith("#needs-you") ? "needs" : null;
+    if (side !== null) document.getElementById(`side-${side}`).checked = true;
+  };
+  showSide();
+  addEventListener("hashchange", showSide);
+  // A link to the hash the page is already at fires no hashchange.
+  document.addEventListener("click", (event) => {
+    if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) document.getElementById("side-needs").checked = true;
+  });
   addEventListener("change", ({ target }) => { if (target.name === "flight-view") localStorage.setItem(viewKey, target.value); });
 
   split.addEventListener("click", (event) => {
