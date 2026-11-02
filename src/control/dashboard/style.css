@@ -909,8 +909,7 @@ h4.md-h { font-size: 1.07em; }
 .need-fold[open] .need-why { display: none; }
 .need-body { display: grid; gap: 8px; padding: 10px 12px 12px; min-width: 0; }
 .lane-held { display: contents; list-style: none; }
-.lane-held .card { --stage: var(--bad); }
-.lane-held .card { border-left: 3px solid var(--bad); }
+.lane-held .card { --stage: var(--bad); border-left: 3px solid var(--bad); }
 
 .board-nav { display: none; }
 .board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; padding: 18px var(--gutter) 32px; align-items: start; }
@@ -1013,11 +1012,10 @@ a.card-main:focus-visible { outline-offset: -2px; }
   .board { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 22px; }
 }
 @media (max-width: 760px) {
-  .home-scroll { --gutter: 12px; }
   .lane { padding-top: 12px; }
   .lane .need-list { grid-template-columns: minmax(0, 1fr); }
   /* on a phone the steps' chips lead the page, a glance at the board before the lane and a jump to each column */
-  .home-scroll { display: flex; flex-direction: column; }
+  .home-scroll { --gutter: 12px; display: flex; flex-direction: column; }
   .board-nav { order: -1; flex: none; display: flex; gap: 6px; overflow-x: auto; padding: 10px var(--gutter) 2px; scrollbar-width: none; }
   .bn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
   .bn b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }

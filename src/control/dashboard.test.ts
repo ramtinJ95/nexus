@@ -203,7 +203,8 @@ test("the sidebar lists every project's threads with their state, folds the arch
   assert.equal(sidebarOf(page).active, fix.id);
   assert.match(page, /<details class="archived" id="archived-acme">/, "the archived fold starts closed");
   assert.match((await s.call("GET", `/threads/${old.id}`)).text, /<details class="archived" id="archived-acme" open>/, "an archived thread's page opens its fold");
-  assert.match(textOf(page.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat/);
+  assert.ok(!page.includes('id="side-nodes"'), "the nodes live on Cluster, not in the sidebar");
+  assert.match(textOf(await clusterTiles(s)), /rj-firebat/);
 });
 
 test("a review the person cancelled says which thread they archived, and asks nothing of them", async (t) => {
@@ -478,13 +479,20 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
   assert.ok(!claude.includes("Land #7"));
 });
 
-/** The home page's Needs you cards as a reader takes them in: what each is, its thread, and the card's text. */
+/** A Needs you card as it reads opened, which hides the folded card's one-line reason. */
+const opened = (card: string) => card.replace(/<span class="need-why">[^<]*<\/span>/, "");
+
+/** The home page's Needs you cards, the lane above the board, as a reader takes them in: what each is, its thread, and the card's text. */
 function needsOf(page: string) {
-  const region = page.split('id="needs-you"')[1]!.split('<div class="page" id="overview"')[0]!;
+  const region = page.split('id="needs-you"')[1]!.split('<nav class="board-nav"')[0]!;
   return {
-    cards: [...region.matchAll(/<article class="need need-(\w+)" id="([^"]+)" data-thread="([^"]+)" data-attention="(\w+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(m[0]), html: m[0] })),
+    cards: [...region.matchAll(/<article class="need need-(\w+)" id="([^"]+)" data-thread="([^"]+)" data-attention="(\w+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(opened(m[0])), html: m[0] })),
     text: textOf(region.replace(/^[^>]*>/, "")),
   };
+}
+/** The Cluster page's node tiles, which stand where the sidebar's nodes were. */
+async function clusterTiles(s: Awaited<ReturnType<typeof setup>>) {
+  return (await s.call("GET", "/cluster")).text.split('id="cluster-nodes"')[1]!.split("</ul>")[0]!;
 }
 const needsCount = (page: string) => /<span class="side-count" id="needs-count" data-live>([^<]*)<\/span>/.exec(page)![1];
 
@@ -653,7 +661,7 @@ test("every page links Needs you with its count in the sidebar, and on a phone f
   const s = await seeded(t);
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
-  for (const path of ["/", "/usage", "/pipeline", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
+  for (const path of ["/", "/usage", "/cluster", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
     const page = (await s.call("GET", path)).text;
     assert.match(page, /<a class="side-link" href="\/#needs-you">[\s\S]*?Needs you<span class="side-count" id="needs-count" data-live>1<\/span><\/a>/, path);
     assert.match(page, /<a class="icon-btn phone-only" href="\/#needs-you" aria-label="Needs you"/, path);
@@ -767,7 +775,7 @@ test("a paused thread's unread reply has a dot of its own, so it never looks lik
   assert.match((await s.call("GET", `/threads/${replied.id}`)).text, /<span class="chip chip-reply"><span class="dot dot-reply" aria-hidden="true"><\/span><span class="chip-label">new reply<\/span><\/span>/, "the thread page's header");
 });
 
-test("the side nodes show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
+test("Cluster's node tiles show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
   const s = await seeded(t);
   const [fix, docs] = [await s.start("acme", "Fix checkout"), await s.start("acme", "Write docs")];
   const over = testCapacity({ memoryGiB: 22.8, committedMemoryGiB: 40, committedDiskGiB: 20 });
@@ -775,20 +783,20 @@ test("the side nodes show each node's committed memory, mark an overcommitted on
   const stopped = (t: Thread) => stoppedPylon(t.pylonId, { sessions: null });
   s.registry.ingested(testObservation(node, { capacity: over, pylons: [stopped(fix), stopped(docs)] }), []);
   assert.equal((await s.call("POST", `/v1/threads/${docs.id}/archive`)).status, 200);
-  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
+  const nodes = await clusterTiles(s);
   assert.match(nodes, /<em>overcommitted<\/em>/, "the marker uses the offline marker's style");
-  assert.match(textOf(nodes), /rj-firebat overcommitted 40\/22\.8 GiB memory · 4 GiB to wake paused/, "only the paused pylon whose thread is not archived needs memory to wake");
+  assert.match(textOf(nodes), /rj-firebat overcommitted .*Memory 40\/22\.8 GiB memory · 4 GiB to wake paused/, "only the paused pylon whose thread is not archived needs memory to wake");
 
   s.observe();
-  const fits = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
-  assert.match(fits, /rj-firebat 0\/64 GiB memory/);
+  const fits = textOf(await clusterTiles(s));
+  assert.match(fits, /rj-firebat .*Memory 0\/64 GiB memory/);
   assert.doesNotMatch(fits, /overcommitted|to wake/);
 });
 
-test("the side nodes show no memory for a node whose capacity is from a probe before pylons were counted, and never mark it overcommitted", async (t) => {
+test("Cluster's node tiles show no memory for a node whose capacity is from a probe before pylons were counted, and never mark it overcommitted", async (t) => {
   const s = await seeded(t);
   s.registry.apply({ record: "node", node, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
-  const nodes = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
+  const nodes = textOf(await clusterTiles(s));
   assert.match(nodes, /rj-firebat/);
   assert.doesNotMatch(nodes, /overcommitted|GiB memory/);
 });
@@ -801,7 +809,7 @@ test("an offline node shows its pylons as unknown, and the last observation as s
 
   const list = (await s.call("GET", "/")).text;
   assert.equal(overviewRow(list, fix), "Fix checkout running unknown rj-firebat offline just now never");
-  assert.match(textOf(list.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat offline/);
+  assert.match(textOf(await clusterTiles(s)), /rj-firebat offline/);
   const pylon = textOf(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "pylon-h"));
   assert.match(pylon, /Observed unknown Node rj-firebat offline Last seen just now \(stale\)/);
 });
@@ -1592,7 +1600,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
 test("every page has somewhere to say a refresh failed", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage", "/pipeline"]) {
+  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage", "/cluster"]) {
     assert.equal([...(await s.call("GET", path)).text.matchAll(/<p id="refresh-state" class="refresh-state" role="status"><\/p>/g)].length, 1, `${path} has one refresh status`);
   }
 });
@@ -2236,7 +2244,7 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
   }
 });
 
-test("the side nodes mark a node with a low filesystem, and its page lists each filesystem with its paths", async (t) => {
+test("Cluster's node tiles mark a node with a low filesystem, and its page lists each filesystem with its paths", async (t) => {
   const disks = [
     { paths: ["/var/lib/nexus/pylons", "/var/lib/nexus/artifacts"], totalGiB: 100, freeGiB: 15, pylons: true as const },
     { paths: ["/opt/nexus/releases"], totalGiB: 500, freeGiB: 400 },
@@ -2248,12 +2256,12 @@ test("the side nodes mark a node with a low filesystem, and its page lists each 
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
   const capacity = testCapacity({ diskFreeGiB: 15, disks });
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
+  const nodes = await clusterTiles(s);
   assert.match(nodes, /<em title="15\.0 of 100\.0 GiB free at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts, low">disk low<\/em>/);
   const text = textOf((await s.call("GET", `/nodes/${node}`)).text.split('id="node-health"')[1]!);
   assert.ok(text.includes("Disk 15 of 100 GiB free at /var/lib/nexus/pylons , /var/lib/nexus/artifacts low 400 of 500 GiB free at /opt/nexus/releases Temperatures"), text);
   s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ ...disks[0]!, freeGiB: 20 }] }) });
-  assert.doesNotMatch((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /disk low/, "20 GiB of 100 is not low");
+  assert.doesNotMatch(await clusterTiles(s), /disk low/, "20 GiB of 100 is not low");
 });
 
 test("a node's page shows its health as its probe reads it, unknown where the host exposes nothing, and only to a deployer", async (t) => {
@@ -2265,7 +2273,7 @@ test("a node's page shows its health as its probe reads it, unknown where the ho
   const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => health };
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
   const started = await s.start("acme", "Busy thread");
-  assert.match((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /<a class="link" href="\/nodes\/rj-firebat"/, "the sidebar's node links its page");
+  assert.match(await clusterTiles(s), /<a class="tile[^"]*" href="\/nodes\/rj-firebat"/, "the node's tile on Cluster links its page");
   health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.46, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
   const page = await s.call("GET", `/nodes/${node}`);
   assert.equal(page.status, 200);
@@ -2320,10 +2328,12 @@ test("a node's page frames its graphs outside the live region, with a range pick
   assert.doesNotMatch(failed, /data-sample=/);
 });
 
-test("the pipeline page lists each project's items with the phase their records put them in, what each is after, its thread, and Approve and Cancel while it has none", async (t) => {
+test("the pipeline's items are cards on the board, each where its record puts it, with Approve and Cancel while it is not a thread, and /pipeline sends the reader there", async (t) => {
   const s = await seeded(t, { deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } });
-  const empty = textOf((await s.call("GET", "/pipeline")).text);
-  assert.match(empty, /No project runs the pipeline\. nexus project edit <id> --pipeline start turns it on/);
+  const moved = await s.call("GET", "/pipeline");
+  assert.equal(moved.status, 302);
+  assert.equal(moved.headers.location, "/#board", "the Pipeline page is gone, and its items show on the board");
+  assert.equal(textOf(sectionOf((await s.call("GET", "/")).text, "col-planned-h")), "Planned 0 No items lined up.");
   s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
   const add = async (title: string, after: string[] = []) => {
     const res = await s.call("POST", "/v1/items", { project: "acme", title, message: `Build ${title}.`, after });
@@ -2334,17 +2344,16 @@ test("the pipeline page lists each project's items with the phase their records 
   const b = await add("Greet in French", [a.id]);
   assert.equal((await s.call("POST", `/v1/items/${a.id}/approve`, {})).status, 200);
   const thread = itemThread(s.registry, a.id)!;
-  const page = (await s.call("GET", "/pipeline")).text;
-  assert.match(page, /<a class="side-link active" href="\/pipeline" aria-current="page">/);
-  const section = sectionOf(page, "pipeline-acme");
-  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Phase After Thread/);
-  const row = (id: string) => textOf(section.split(`<tr data-item="${id}"`)[1]!.split("</tr>")[0]!.replace(/^[^>]*>/, ""));
-  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ nothing Greet by name$`));
-  assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} Greet by name none yet Approve Cancel`);
-  assert.match(section, new RegExp(`<a class="link" href="/threads/${thread}">Greet by name</a>`));
-  assert.match(section, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
-  assert.doesNotMatch(section, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");
-  assert.doesNotMatch(page, /aria-labelledby="pipeline-beta"/, "a project without the pipeline or items is left out");
+  const page = (await s.call("GET", "/")).text;
+  const card = (id: string) => /<li class="card[^"]*" id="([^"]+)"[\s\S]*?<\/li>/g[Symbol.matchAll](page).find((m) => m[1] === id)?.[0];
+  const held = card(`item-${b.id}`);
+  assert.ok(held !== undefined && page.split('id="needs-you"')[1]!.split('<nav class="board-nav"')[0]!.includes(held), "an item waiting for approval waits on the person, so it is in the Needs you lane");
+  assert.equal(textOf(held), `acme item Greet in French project acme waits for the person to approve each item: nexus item approve ${b.id} after Greet by name Approve Cancel`);
+  assert.match(held, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
+  assert.match(held, new RegExp(`data-action="cancel-item" data-item="${b.id}"`));
+  assert.equal(card(`item-${a.id}`), undefined, "an item that is a thread shows as its thread");
+  assert.match(page, new RegExp(`<a class="card-main" href="/threads/${thread}">[\\s\\S]*?Greet by name`), "its thread's card links the thread");
+  assert.doesNotMatch(page, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");
 });
 
 /** The images a page shows, as each link and image name them, with any caption. */
@@ -2447,7 +2456,7 @@ test("a page reads the threads, the queue and the release reports as often whate
     }
     const counted = (["threads", "queuedThreads", "releaseReports"] as const).map((name) => [name, t.mock.method(s.registry, name)] as const);
     const counts: Record<string, Record<string, number>> = {};
-    for (const path of ["/", `/threads/${thread!.id}`, "/pipeline"]) {
+    for (const path of ["/", `/threads/${thread!.id}`, "/cluster"]) {
       for (const [, mock] of counted) mock.mock.resetCalls();
       assert.equal((await s.call("GET", path)).status, 200);
       counts[path.replace(thread!.id, "<id>")] = Object.fromEntries(counted.map(([name, mock]) => [name, mock.mock.callCount()]));
@@ -2456,10 +2465,10 @@ test("a page reads the threads, the queue and the release reports as often whate
   };
   const one = await reads(1, 1);
   assert.deepEqual(await reads(5, 4), one);
-  assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
+  assert.equal(one["/cluster"]!.releaseReports, 2, "the release view reads the reports again after the control node is found");
 });
 
-test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {
+test("Cluster's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {
   const s = await seeded(t);
   const tower = "tower" as NodeName;
   s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
@@ -2467,8 +2476,8 @@ test("the sidebar's release lines read as the release view does: stale and missi
   const report = (role: "control" | "probe", observedAt: number) => s.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt });
   report("control", Date.now());
   report("probe", Date.now() - 90_000);
-  const lines = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!.split(/<span><svg class="i i-server"/).slice(1)
-    .map((n) => [textOf(/<a [^>]*>([^<]*)<\/a>/.exec(n)![1]!), ...[...n.matchAll(/<small title="([^"]*)">([^<]*)<\/small>/g)].map((m) => `${m[2]} (${m[1]})`)]);
+  const lines = (await clusterTiles(s)).split(/<li><a class="tile/).slice(1)
+    .map((n) => [textOf(/<span class="tile-name">([^<]*)<\/span>/.exec(n)![1]!), ...[...n.matchAll(/<small title="([^"]*)">([^<]*)<\/small>/g)].map((m) => `${m[2]} (${m[1]})`)]);
   assert.deepEqual(lines, [
     [node, "control: aaaaaaaaaaaa · healthy ()", "probe: aaaaaaaaaaaa · pending (deployer report is stale)"],
     [tower, "probe: unknown · pending (no deployer report)"],
