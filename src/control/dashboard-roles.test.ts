@@ -135,3 +135,23 @@ test("the header and the dock agree: an idle agent on a running pylon reads agen
   assert.equal(chipOf(paused), "paused");
   assert.match(dockOf(paused), /^Idle .*the pylon is paused/);
 });
+
+test("the header reads agent working while the agent works on a running pylon, as the dock does", async (t) => {
+  const s = await setup(t);
+  const fix = await s.start({ title: "Fix checkout" });
+  s.observe([fix]);
+  s.registry.recordActivity(fix.id, { agent: Date.now(), agentTurnRunning: true });
+  s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
+  const page = await s.page(`/threads/${fix.id}`);
+  assert.equal(chipOf(page), "agent working");
+  assert.match(dockOf(page), /^Working /);
+});
+
+test("a thread started by neither a person's node nor the review loop is a builder, in flight with its track", async (t) => {
+  const s = await setup(t);
+  const fix = await s.startThread({ project: "acme", title: "Fix checkout" }, "nexus-queue");
+  s.observe([fix]);
+  const home = await s.page("/");
+  assert.match(flightOf(home).split('id="phase-building"')[1]!.split("</section>")[0]!, new RegExp(`data-peek="${fix.id}"`));
+  assert.match(underBar(await s.page(`/threads/${fix.id}`)), /<ol class="life"/);
+});
