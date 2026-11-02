@@ -549,15 +549,17 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (held || r.phase.kind === "approved") {
       const status = registry.thread(r.builder)?.status;
       if (status === "archived" || status === "deleted") return end(r, { kind: "cancelled", who: "builder", status });
-      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself about a held review, as
-      // often as the watch would. One that stopped at approval is left to the landing, which reads GitHub before it merges.
+      // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself whether the PR is still
+      // open, as often as the watch would, and about a held review's head. One that stopped at approval leaves its head
+      // to the landing, which reads GitHub before it merges.
       const capped = watchStopped(registry.prWatch(r.builder));
-      const due = capped && held && now() - (cappedReads.get(r.id) ?? -Infinity) >= prWatchMs;
+      const due = capped && now() - (cappedReads.get(r.id) ?? -Infinity) >= prWatchMs;
       const fresh = due ? await read(r) : null;
       if (due) cappedReads.set(r.id, now());
-      const pr = fresh !== null ? { ...fresh.pr, head: fresh.detail.head } : capped ? undefined : watchedPr(r);
-      const gone = r.phase.kind === "approved" ? outside(r, pr?.state) : pr?.state === "closed" ? end(r, { kind: "closed" }) : null;
+      const state = fresh?.pr.state ?? (capped ? undefined : watchedPr(r)?.state);
+      const gone = r.phase.kind === "approved" ? outside(r, state) : state === "closed" ? end(r, { kind: "closed" }) : null;
       if (gone !== null) return gone;
+      const pr = fresh !== null && held ? { ...fresh.pr, head: fresh.detail.head } : capped ? undefined : watchedPr(r);
       // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
       const moved = pushedHead(r, pr) === null ? null : await pushedAfter(r, fresh ?? await read(r));
       if (moved !== null) return moved;

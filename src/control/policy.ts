@@ -42,6 +42,8 @@ const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch:
 
 const hold = (code: HoldCode, text: string): Hold => ({ code, text });
 
+const sameModel = (review: Review): Hold[] => review.models.reviewer === review.models.builder ? [hold("same-model", `The reviewer ran the builder's own model, ${review.models.builder}.`)] : [];
+
 /** The holds the review's record alone decides: they hold every landing of its approved head, whatever GitHub says. */
 export const recordedHolds = (review: Review): Hold[] => [
   ...review.reviewerKind === "claude" ? [hold("claude-approved", "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.")] : [],
@@ -49,7 +51,7 @@ export const recordedHolds = (review: Review): Hold[] => [
 ];
 
 /** What the holds currently on a review are: those its landing met, or else those its record alone decides. */
-export const heldBy = (review: Review): Hold[] => review.phase.kind === "needs-person" ? review.phase.holds : recordedHolds(review);
+export const heldBy = (review: Review): Hold[] => review.phase.kind === "needs-person" ? review.phase.holds : [...sameModel(review), ...recordedHolds(review)];
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 /** The reviewer's quote of what could not be checked live at the round, or null when it quoted nothing long enough to count. */
@@ -75,7 +77,7 @@ export function landPress(review: Review): LandPress {
 }
 
 const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
-  ({ review }) => review.models.reviewer === review.models.builder ? [hold("same-model", `The reviewer ran the builder's own model, ${review.models.builder}.`)] : [],
+  ({ review }) => sameModel(review),
   ({ review }) => {
     const round = review.rounds.at(-1)!;
     if (round.verdict?.verdict !== "approve") return [hold("not-approved", "The reviewer has not approved the latest commits.")];

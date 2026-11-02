@@ -3156,3 +3156,42 @@ test("for every hold, the land route takes a press exactly when the dashboard of
     assert.equal(offered, landPress(review).kind === "lands", code);
   }
 });
+
+test("an approval under a stopped PR watch still learns its pull request merged outside it, and stops waiting on the person", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  const loop = await approved(f, null);
+  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merged" });
+  assert.notEqual(f.attention().at(-1), "decision");
+});
+
+test("an approval by a reviewer on the builder's own model offers no Land press, before any landing tries", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  f.registry.saveReview({ ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } });
+  assert.equal(landPress(f.review()).kind, "stuck");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409, message: /builder's own model/ });
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+test("a reviewer asked to quote is reminded of the nexus-quote block, and a pull request closed meanwhile ends the review", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  f.reply(f.review().reviewer, "Nothing to quote.");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "quoting");
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-quote block with the token/, "the reminder names the block the request asked for");
+  f.watched("closed");
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "closed" });
+  assert.deepEqual(f.merges, []);
+});
