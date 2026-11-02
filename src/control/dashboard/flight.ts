@@ -41,12 +41,19 @@ const threadLine = (c: Context, t: Thread): Line => {
 const queuedLine = (c: Context, q: QueuedThread): Line => ({ key: q.id, title: q.title, project: q.project, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued", dim: false, order: 0 });
 const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.title, project: i.project, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], when: "item", dim: false, order: i.addedAt });
 
-/** Every piece of work once, at its stage: items not yet threads, queued threads, and threads, an archived one only once it landed. */
+/** How long a landed thread stays under Deployed once it is archived, as the review loop archives each builder that lands. */
+export const deployedForMs = 24 * 60 * 60 * 1000;
+
+/**
+ * Every piece of work once, at its stage: items not yet threads, queued threads, and open threads, and an archived
+ * thread only once it landed, for `deployedForMs` after its archive.
+ */
 export function flightLines(c: Context): Map<Stage, Line[]> {
+  const recent = (t: Thread) => t.status === "active" || t.status === "idle" || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
   const lines = [
     ...itemsOf(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
     ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
-    ...c.threads().filter((t) => t.status !== "deleted").map((t) => threadLine(c, t)),
+    ...c.threads().filter(recent).map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
   ];
   const placed = Map.groupBy(lines.filter((l) => l.life.stage !== null), (l) => l.life.stage!);
   for (const stage of placed.values()) stage.sort((a, b) => a.order - b.order);
@@ -75,8 +82,8 @@ ${lines.length > 0 && html`<ul class="fl-list">${lines.map((l) => line(l, peeked
   })}`;
 }
 
-/** How many lines the stack shows, which its head and the phone's switch count. */
-export const inFlight = (placed: Map<Stage, Line[]>) => [...placed].filter(([stage]) => stage !== "held").reduce((n, [, lines]) => n + lines.length, 0);
+/** How many lines the stack shows on their way, which its head and the phone's switch count: held and deployed work is not. */
+export const inFlight = (placed: Map<Stage, Line[]>) => [...placed].filter(([stage]) => stage !== "held" && stage !== "deployed").reduce((n, [, lines]) => n + lines.length, 0);
 
 /** What the preview shows, as the route read it: a thread with its conversation's items, a queued thread, or an item. */
 export type Peek =

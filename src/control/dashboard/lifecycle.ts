@@ -23,7 +23,7 @@ export const stages: readonly { stage: Stage; label: string; tone: Tone; means: 
   { stage: "review", label: "In review", tone: "review", means: "Its pull request is open, or the review loop runs its rounds" },
   { stage: "held", label: "Held for you", tone: "bad", means: "Only you move these on" },
   { stage: "landing", label: "Landing", tone: "busy", means: "Checked, merged and deployed one at a time" },
-  { stage: "deployed", label: "Deployed", tone: "ok", means: "Merged, and deployed where the project deploys" },
+  { stage: "deployed", label: "Deployed", tone: "ok", means: "Merged, and deployed where the project deploys, until a day after its thread is archived" },
 ];
 export const stageLabel = Object.fromEntries(stages.map((s) => [s.stage, s.label])) as Record<Stage, string>;
 

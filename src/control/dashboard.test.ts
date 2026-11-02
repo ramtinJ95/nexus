@@ -2441,6 +2441,28 @@ test("a queued thread's preview says once what it waits for", async (t) => {
   assert.equal(peek.split("Fix checkout").length - 1, 1, peek);
 });
 
+test("Deployed lists a landed thread for a day after its archive, and the work in flight's count leaves it out", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const landed = await s.start("acme", "Landed");
+  const dropped = await s.start("acme", "Archived unlanded");
+  const building = await s.start("acme", "Still building");
+  s.registry.saveReview(approvedReview(landed.id, { kind: "landed", commit: "c".repeat(40) }, { merged: "c".repeat(40) }));
+  for (const th of [landed, dropped]) s.registry.setThreadStatus(th.id, "archived");
+  const home = async () => {
+    const page = (await s.call("GET", "/")).text;
+    return { page, deployed: page.split('id="phase-deployed"')[1]!.split("</section>")[0]!, flight: page.split('id="flight"')[1]!.split('id="overview"')[0]! };
+  };
+  const now = await home();
+  assert.match(now.deployed, new RegExp(`data-peek="${landed.id}"`));
+  assert.doesNotMatch(now.flight, new RegExp(dropped.id), "an archived thread that never landed is not in flight");
+  assert.match(now.flight.split('id="phase-building"')[1]!.split("</section>")[0]!, new RegExp(`data-peek="${building.id}"`));
+  assert.match(now.page, /<span class="count" id="flight-n" data-live>1<\/span>/, "only the building thread is on its way");
+  assert.match(now.page, /<span class="seg-n" id="seg-flight-n" data-live>1<\/span>/);
+  const real = Date.now();
+  t.mock.method(Date, "now", () => real + 25 * 60 * 60 * 1000);
+  assert.doesNotMatch((await home()).deployed, new RegExp(landed.id), "a day after its archive it has left Deployed");
+});
+
 test("a queued thread's page shows its track of steps without links to a timeline it does not have", async (t) => {
   const s = await seeded(t);
   const first = await s.start("acme", "Fix checkout");
