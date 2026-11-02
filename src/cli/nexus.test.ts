@@ -326,6 +326,15 @@ test("a thread's default title is its brief's first line that is not blank, cut 
   assert.equal(titleOf("a".repeat(81)), `${"a".repeat(80)}...`);
 });
 
+test("project add sizes a project at 2 CPUs, 4 GiB of memory and 10 GiB of disk, and each size flag overrides its own field", async (t) => {
+  const s = await setup(t);
+  const repo = "https://github.com/octocat/Hello-World.git";
+  assert.deepEqual((await s.json(["project", "add", "plain", repo, "--node", node])).resources, { cpus: 2, memoryGiB: 4, diskGiB: 10 });
+  assert.deepEqual((await s.json(["project", "add", "big", repo, "--node", node, "--memory", "6"])).resources, { cpus: 2, memoryGiB: 6, diskGiB: 10 });
+  assert.deepEqual((await s.json(["project", "add", "wide", repo, "--node", node, "--cpus", "4"])).resources, { cpus: 4, memoryGiB: 4, diskGiB: 10 });
+  assert.deepEqual(s.registry.project("big" as ProjectId)?.resources, { cpus: 2, memoryGiB: 6, diskGiB: 10 });
+});
+
 test("project add creates a project with the contract's defaults or its flags, and maps the API's refusals", async (t) => {
   const s = await setup(t);
   const repo = "https://github.com/octocat/Hello-World.git";
@@ -333,8 +342,8 @@ test("project add creates a project with the contract's defaults or its flags, a
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added project hello (${repo}) on ${node}\n`, ""]);
   assert.deepEqual(s.registry.project("hello" as ProjectId), {
     id: "hello", repoUrl: repo, defaultBranch: "main", defaultNode: node,
-    resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-  }, "an unflagged project gets main, 2 CPUs, 6 GiB of memory and 10 GiB of disk");
+    resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  }, "an unflagged project gets main, 2 CPUs, 4 GiB of memory and 10 GiB of disk");
   assert.deepEqual(s.registry.project("hello" as ProjectId)?.resources, defaultProjectResources, "the resources the dashboard's new-project dialog gives");
 
   const custom = await s.json([
@@ -375,7 +384,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
   const added = await s.nexus(["project", "add", "sketch", "--scratch", "--node", node, "--secret", "GH_TOKEN:api.github.com,github.com", "--secret", "EXA_API_KEY:api.exa.ai"]);
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added scratch project sketch on ${node}\n`, ""]);
   assert.deepEqual(s.registry.project("sketch" as ProjectId), {
-    id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 }, allowedHosts: [],
+    id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [],
     secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
   });
   assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +auto review off +pipeline off +scratch$/m);

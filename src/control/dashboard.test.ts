@@ -1568,7 +1568,7 @@ test("the new-project form adds the project nexus project add would, and the API
   assert.deepEqual(JSON.parse(form[1]!.replace(/&quot;/g, '"')), defaultProjectResources, "the resources nexus project add gives");
   const added = await add("acme", node);
   assert.equal(added.status, 201, added.text);
-  assert.deepEqual(JSON.parse(added.text), { ...project("acme"), resources: { cpus: 2, memoryGiB: 6, diskGiB: 10 } }, "the same project as the CLI's defaults");
+  assert.deepEqual(JSON.parse(added.text), { ...project("acme"), resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, "the same project as the CLI's defaults");
   assert.equal(sidebarOf((await s.call("GET", "/")).text).text, "acme main", "the sidebar lists it with its branch");
 
   const refusal = (res: Reply) => [res.status, (JSON.parse(res.text) as { error: string }).error];
