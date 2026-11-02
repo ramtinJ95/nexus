@@ -14,11 +14,12 @@ import type { AgentView } from "../conversation-view.ts";
 import { liveNote, phaseNote, roundNote, roundsSpent } from "../review-model.ts";
 import type { QueuedThread, Wait } from "../queue.ts";
 import { tokenCount, type UsageTotals } from "../usage.ts";
+import { attentions } from "../attention.ts";
 import { Html, html, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { itemsOf, modelOf } from "./items.ts";
-import { runOf, stateBar, composer } from "./conversation.ts";
+import { runOf, stateBar, composer, type Run } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
@@ -65,7 +66,7 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
   const open = t.status === "active" || t.status === "idle";
   const role = threadRole(c, t.id);
   const life = role.kind === "builder" ? lifeOfThread(c, t.id) : null;
-  const bar = threadBar(t, threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now), [
+  const bar = threadBar(t, headState(d, run, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
@@ -107,6 +108,18 @@ function termView(t: Thread): Html {
 <div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
 <div class="tv-host" id="term-host"></div>
 </section>`;
+}
+
+/**
+ * The header's state never contradicts the dock's. While the pylon runs and nothing outranks the agent, it is the
+ * agent's state, in the dock's words, since a running pylon above an idle agent reads as a contradiction. Otherwise it
+ * is the thread's attention, its archive or its pylon's state, which the dock either agrees with or does not say.
+ */
+function headState(d: ThreadDetail, run: Run, now: number): readonly [string, Tone] {
+  const own = threadState({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon }, now);
+  const open = d.thread.status === "active" || d.thread.status === "idle";
+  if (!open || d.pylon.actualState !== "running" || (d.attention !== null && d.attention !== "working")) return own;
+  return run.kind === "working" ? [attentions.working.label, attentions.working.tone] : run.kind === "idle" ? ["agent idle", "idle"] : own;
 }
 
 /** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */

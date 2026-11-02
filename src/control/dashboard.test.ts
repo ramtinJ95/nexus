@@ -991,7 +991,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
 
   const res = await s.call("GET", `/threads/${fix.id}`);
   assert.equal(res.status, 200);
-  assert.equal(textOf(res.text.split('id="bar"')[1]!.split("</header>")[0]!.replace(/^[^>]*>/, "")), "☰ acme / Fix checkout running Archive Delete ⋯");
+  assert.equal(textOf(res.text.split('id="bar"')[1]!.split("</header>")[0]!.replace(/^[^>]*>/, "")), "☰ acme / Fix checkout agent idle Archive Delete ⋯");
   assert.match(conversationOf(res.text).text, new RegExp(`^${fix.id} · started just now`));
   assert.equal(textOf(sectionOf(res.text, "pylon-h")), `Pylon Desired running Observed running Node rj-firebat Last seen just now Human just now Agent never Tokens none counted ${fix.pylonId}`);
 
