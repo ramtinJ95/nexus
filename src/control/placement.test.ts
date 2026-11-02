@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import type { NodeName, PylonId } from "../ids.ts";
 import type { HealthSample } from "./node-metrics.ts";
 import type { NodeRecord } from "./node-store.ts";
-import type { Room, StoredPylon } from "./thread-store.ts";
+import type { Room, StoredPylon, Thread } from "./thread-store.ts";
 import { testCapacity, testObservation } from "../test-kit.ts";
 import { HttpError } from "./http-error.ts";
 import { placeAuto, placeNear, weighNodes } from "./placement.ts";
@@ -16,14 +16,17 @@ const need = (memoryGiB = 4) => ({
   repo: { kind: "empty", branch: "main" }, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
 }) as unknown as Parameters<typeof placeAuto>[1];
 
-interface FakeNode { name: string; total: number; committed: number; free?: number | "unread"; readAgoMs?: number; pylons?: { id: string; memoryGiB: number; residentGiB: number }[]; reserved?: number | undefined }
+interface FakeNode {
+  name: string; total: number; committed: number; free?: number | "unread"; readAgoMs?: number; reserved?: number | undefined;
+  pylons?: { id: string; memoryGiB: number; residentGiB: number; observed?: false }[];
+}
 
 function fakeRegistry(nodes: FakeNode[]) {
   const now = Date.now();
   const record = (n: FakeNode): NodeRecord => {
     const capacity = testCapacity({ memoryGiB: n.total, committedMemoryGiB: n.committed, diskFreeGiB: 200 });
     return { name: n.name as NodeName, tailnetHost: `${n.name}.ts.net`, tailnetNodeId: `n${n.name}`, state: "online", capacity,
-      observation: testObservation(n.name as NodeName, { capacity, artifacts: [image] }) } as NodeRecord;
+      observation: testObservation(n.name as NodeName, { capacity, artifacts: [image], pylons: (n.pylons ?? []).filter((p) => p.observed !== false).map((p) => ({ pylonId: `pylon-${p.id}` as PylonId, phase: "booting" })) }) } as NodeRecord;
   };
   const sample = (n: FakeNode): HealthSample | null => n.free === undefined ? null : {
     at: now - (n.readAgoMs ?? 0),
@@ -36,7 +39,11 @@ function fakeRegistry(nodes: FakeNode[]) {
     pylonsWithStatusOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
       pylon: { pylonId: `pylon-${p.id}` as PylonId, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as StoredPylon, status: "active" as const,
     })),
-    pylonsWithThreadsOn: () => [],
+    // Each pylon's thread is active, so one its node has yet to report is about to boot there.
+    pylonsWithThreadsOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
+      pylon: { pylonId: `pylon-${p.id}` as PylonId, failed: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as unknown as StoredPylon,
+      thread: { status: "active", agentTurnRunning: false, working: false, lastAgentActivityAt: now, lastHumanActivityAt: now } as unknown as Thread,
+    })),
     reserved: (name: NodeName): Room[] => { const r = byName.get(name)?.reserved; return r === undefined ? [] : [{ cpus: 0, memoryGiB: r, diskGiB: 0 }]; },
   };
 }
@@ -80,6 +87,11 @@ test("free memory counts what the node's pylons have yet to touch and what pylon
   assert.deepEqual(weighNodes(fakeRegistry(nodes(4)), need()).weighed, [{
     node: "a", refused: "has 14 GiB of memory free, less 6 GiB its pylons have yet to touch and 4 GiB for pylons about to boot there, and the pylon needs 4 GiB with 1 GiB to spare",
   }]);
+});
+
+test("a pylon the health read names before the observation does counts once, by all it asked for", () => {
+  const registry = fakeRegistry([{ name: "a", total: 64, committed: 0, free: 14, pylons: [{ id: "th-aaaaaaaaaaaa", memoryGiB: 8, residentGiB: 2, observed: false }] }]);
+  assert.deepEqual(weighNodes(registry, need()).weighed, [{ node: "a", left: { cpus: 12, memoryGiB: 2, diskGiB: 180 } }]);
 });
 
 test("a node with no fresh reading of its free memory is weighed by its commitments alone", () => {

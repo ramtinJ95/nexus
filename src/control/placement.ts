@@ -58,7 +58,7 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
-  const free = freeMemory(registry, node, Date.now());
+  const free = freeMemory(registry, node.name, o, Date.now());
   // With no fresh reading of its free memory, the node is weighed by its commitments alone.
   if (free !== null) {
     const freeLeft = free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB;
@@ -85,16 +85,19 @@ const freshReadMs = 2 * backgroundReadMs;
  * The node's MemAvailable in its newest health read, and how much of it the pylons that read named are yet to take: a
  * guest takes its memory from the host only as it touches it, so a pylon whose processes hold less than its size will
  * take the rest. A pylon the read did not name, on a backend that cannot name its processes or booted since the read,
- * counts as all touched. Null without a read in the last `freshReadMs`, or from a host that reports no memory.
+ * counts as all touched. One the observation does not count yet is left out, since `roomLeft` counts all it asked for.
+ * Null without a read in the last `freshReadMs`, or from a host that reports no memory.
  */
-function freeMemory(registry: WeighingRegistry, node: NodeRecord, now: number): { availableGiB: number; untouchedGiB: number } | null {
-  const read = registry.latestHealthSample(node.name);
+function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, now: number): { availableGiB: number; untouchedGiB: number } | null {
+  const read = registry.latestHealthSample(node);
   const availableGiB = read?.values.memAvailable;
   if (read == null || now - read.at > freshReadMs || availableGiB === undefined) return null;
-  const size = new Map(registry.pylonsWithStatusOn(node.name).map(({ pylon }) => [pylon.pylonId, pylon.boot.resources.memoryGiB]));
+  const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
+  const counted = new Map(registry.pylonsWithStatusOn(node).flatMap(({ pylon }) =>
+    uncounted(pylon, seen.get(pylon.pylonId)).memoryGiB > 0 ? [] : [[pylon.pylonId, pylon.boot.resources.memoryGiB] as const]));
   const untouchedGiB = Object.entries(read.values).reduce((sum, [key, resident]) => {
     const s = seriesOf(key);
-    return s?.kind === "pylonResident" ? sum + Math.max(0, (size.get(s.pylon) ?? 0) - resident) : sum;
+    return s?.kind === "pylonResident" ? sum + Math.max(0, (counted.get(s.pylon) ?? 0) - resident) : sum;
   }, 0);
   return { availableGiB, untouchedGiB };
 }
