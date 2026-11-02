@@ -6,11 +6,15 @@ import css from "uplot/dist/uPlot.min.css";
 import { afterSwap, el } from "./page.js";
 import { api } from "./request.js";
 import { onThemeChange, themeValue } from "./theme.js";
+import { pickedLink } from "./node-cards.js";
 import { appended, bucketed, charts, columns, gapMs, historyOf, missed, rangeMs, rangeOf, reading, regroupMs, regroups, slotter, yRange } from "./graph-data.ts";
 
 const sheet = new CSSStyleSheet();
 sheet.replaceSync(css);
 document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+
+// The cards are on every page that has graphs, so the click that picks a node from a card costs the first load nothing.
+document.addEventListener("click", (event) => pickedLink(event, getSelection())?.click());
 
 const section = document.getElementById("node-graphs");
 const grid = section.querySelector(".graph-grid");

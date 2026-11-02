@@ -946,7 +946,8 @@ a.need-thread:hover { color: var(--accent); }
 
 /* the Cluster page: a card per node, then the picked node's detail */
 .node-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
-.node-card { display: grid; gap: 10px; align-content: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 12.5px; }
+.node-card { display: grid; gap: 10px; align-content: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 12.5px; cursor: pointer; }
+.node-card:has(.node-card-h a:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .node-card.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
 .node-card-h { display: grid; gap: 3px; color: var(--text-2); }
 .node-card-h > span { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
