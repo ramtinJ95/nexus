@@ -39,7 +39,7 @@ function memoryCell(c: Context, n: NodeRecord): Html {
   const capacity = countedCapacity(n.capacity);
   if (capacity === null) return unknown;
   const paused = nodePylons(c.registry, n)?.paused.memoryGiB ?? 0;
-  return html`${gib(capacity.committedMemoryGiB)}/${gib(capacity.memoryGiB)} GiB committed${paused > 0 && html`<small>${gib(paused)} GiB to wake paused</small>`}`;
+  return html`${gib(capacity.committedMemoryGiB)}/${gib(capacity.memoryGiB)} GiB${paused > 0 && html`<small>${gib(paused)} GiB to wake paused</small>`}`;
 }
 
 /** Each node on one row: whether it is up and what marks it, its load and disk as its probe read them, and its release. */
@@ -47,7 +47,7 @@ function nodesTable(c: Context, picked: NodeName | null, healths: ReadonlyMap<No
   const releases = Map.groupBy(releaseLines(c), (r) => r.node);
   return html`<section aria-labelledby="nodes-h"><div class="ov-head"><h2 id="nodes-h">Nodes</h2><span class="dim">Desired release ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</span></div>
 <table class="ov ov-nodes">
-<thead><tr><th>Node</th><th>Load</th><th class="wide">Memory</th><th class="wide">Disk</th><th class="wide">Pylons</th><th class="wide">Release</th></tr></thead>
+<thead><tr><th>Node</th><th>Load</th><th class="wide">Memory committed</th><th class="wide">Disk</th><th class="wide">Pylons</th><th class="wide">Release</th></tr></thead>
 <tbody>${c.registry.nodes().map((n) => {
   const health = healths.get(n.name);
   const read = health instanceof Error || health === undefined ? null : health;
@@ -59,7 +59,7 @@ function nodesTable(c: Context, picked: NodeName | null, healths: ReadonlyMap<No
 <td class="wide">${memoryCell(c, n)}</td>
 <td class="wide">${read === null ? unknown : html`${gib(read.disk.freeGiB)} of ${gib(read.disk.totalGiB)} GiB free`}</td>
 <td class="wide">${pylons === null ? unknown : html`${pylons.up.pylons} up${pylons.paused.pylons > 0 && html`<small>${pylons.paused.pylons} paused</small>`}`}</td>
-<td class="wide ov-release">${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role} ${r.commit?.slice(0, 12) ?? "unknown"}, ${r.state}</small>`)}</td>
+<td class="wide ov-release">${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? r.commit ?? ""}">${r.role} ${r.commit?.slice(0, 12) ?? "unknown"}, ${r.state}</small>`)}</td>
 </tr>`;
 })}</tbody>
 </table></section>`;

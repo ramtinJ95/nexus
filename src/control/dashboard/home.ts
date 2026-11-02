@@ -51,9 +51,9 @@ const lineRow = (k: Line) => {
   return html`<tr${k.dim && html` class="dim"`}>
 <td><span class="ov-title">${dot(tone, label)}${k.href === null ? html`<span>${k.title}</span>` : html`<a href="${k.href}">${k.title}</a>`}</span></td>
 <td class="wide ov-proj">${k.project}</td>
-<td><span class="ov-where">${miniTrack(k.life)}<span class="ov-why">${k.life.why}</span></span></td>
+<td><span class="ov-where">${miniTrack(k.life)}<span class="ov-why">${k.life.why}</span>${k.actions !== null && k.actions !== false && html`<span class="ov-act">${k.actions}</span>`}</span></td>
 <td class="wide">${k.node}</td>
-<td class="ov-when">${k.when}${k.actions !== null && k.actions !== false && html`<span class="ov-act">${k.actions}</span>`}</td>
+<td class="ov-when">${k.when}</td>
 </tr>`;
 };
 const lineTable = (body: Part) => html`<table class="ov ov-life">
