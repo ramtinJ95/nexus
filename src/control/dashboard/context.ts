@@ -37,5 +37,5 @@ export type ThreadNeed =
   | { kind: "question"; d: ThreadDetail; question: Question; since: number }
   | { kind: "nudge"; d: ThreadDetail; since: number }
   | { kind: "thread"; d: ThreadDetail; attention: Exclude<Attention, "reply" | "working" | "decision" | null>; since: number };
-export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread };
+export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread; d: ThreadDetail };
 export type Need = ThreadNeed | { kind: "cleanup"; question: NodeQuestion; since: number } | { kind: "held"; work: HeldWork; since: number };

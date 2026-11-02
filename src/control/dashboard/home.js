@@ -1,11 +1,25 @@
 // The home page's two sides: the phone's switch between Needs you and the work in flight, the way the stack lists the
-// work, and the preview, which the page renders from `?peek=` so a poll keeps it fresh. Picking a line, or opening a
-// Needs you card on a desk, swaps the preview in place without leaving home.
-import { refreshAfter } from "./page.js";
+// work, and the preview, which the page renders from `?peek=` so a poll keeps it fresh. Picking a line swaps the
+// preview in place without leaving home. Work in Needs you previews in its card instead: picking its line brings the
+// card into view, and opening the card reads its latest reply into it.
+import { afterSwap, refreshAfter, toggled } from "./page.js";
 
 const split = document.getElementById("split");
 const desk = matchMedia("(min-width: 761px)");
 const viewKey = "nexus.flight-view";
+
+const cardOf = (key) => document.querySelector(`.need[data-thread="${key}"],.need[data-peek-key="${key}"]`);
+
+/** Brings work's card in Needs you into view, opened and marked, as a notice's link does. */
+function pick(card) {
+  document.getElementById("side-needs").checked = true;
+  for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
+  card.classList.add("picked");
+  const fold = card.querySelector(".need-fold");
+  toggled.set(fold.id, fold.open = true);
+  card.scrollIntoView({ block: "start" });
+  card.focus({ preventScroll: true });
+}
 
 function peek(key) {
   const url = new URL(location.href);
@@ -13,7 +27,7 @@ function peek(key) {
   else url.searchParams.set("peek", key);
   if (url.href === location.href) return;
   history.replaceState(history.state, "", url);
-  split.classList.toggle("peeking", key !== "");
+  split.classList.toggle("peeking", key !== "" && !cardOf(key));
   for (const row of document.querySelectorAll(".fl-row")) {
     if (row.dataset.peek === key) row.setAttribute("aria-current", "true");
     else row.removeAttribute("aria-current");
@@ -27,9 +41,15 @@ if (split !== null) {
   const showSide = () => {
     const side = location.hash === "#in-flight" ? "flight" : location.hash.startsWith("#needs-you") ? "needs" : null;
     if (side !== null) document.getElementById(`side-${side}`).checked = true;
+    // A notice opens its card by this hash, and picking the card is what reads its latest reply into it.
+    const picked = /^#needs-you:([\w-]+):/.exec(location.hash)?.[1];
+    if (cardOf(picked)) peek(picked);
   };
   showSide();
   addEventListener("hashchange", showSide);
+  // A link to work in Needs you, opened afresh, brings its card into view, as picking its line does.
+  const picked = cardOf(new URL(location.href).searchParams.get("peek"));
+  if (picked && !location.hash.startsWith("#needs-you")) pick(picked);
   // A link to the hash the page is already at fires no hashchange.
   document.addEventListener("click", (event) => {
     if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) document.getElementById("side-needs").checked = true;
@@ -40,8 +60,8 @@ if (split !== null) {
     if (!(event.target instanceof Element)) return;
     const link = event.target.closest("a[data-peek]");
     const opening = event.target.closest(".need-sum");
-    // Only the reader's opening of a card previews it on a desk: a poll's swap reopens folds too, and picks nothing.
-    if (link === null && opening !== null && desk.matches && !opening.parentElement.open) {
+    // Only the reader's opening of a card picks it: a poll's swap reopens folds too, and picks nothing.
+    if (link === null && opening !== null && !opening.parentElement.open) {
       const need = opening.closest(".need");
       const key = need.dataset.thread ?? need.dataset.peekKey;
       if (key !== undefined) peek(key);
@@ -55,8 +75,12 @@ if (split !== null) {
       const fold = head.parentElement;
       if (!fold.open) head.click();
     }
+    const card = head === null && cardOf(link.dataset.peek);
+    if (card) pick(card);
     peek(link.dataset.peek);
   });
+  // A card that goes, as its answer takes it off, leaves its work's preview to show.
+  afterSwap(() => split.classList.toggle("peeking", document.getElementById("peek").childElementCount > 0));
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || !split.classList.contains("peeking") || document.querySelector("dialog[open]") !== null) return;
     peek("");
