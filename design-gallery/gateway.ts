@@ -3,27 +3,34 @@
  * design, the page, the theme and the width, and the dashboard runs in a frame below it, so the bar covers nothing.
  * A cookie names the design, and every other request is proxied to that design's demo server, so the dashboard's
  * absolute paths, polls, streams and terminals reach the design the person is looking at. The compare view shows one
- * page in every design side by side, from screenshots the headless shooter takes on demand.
+ * page in every design side by side: live, in frames of each design's own preview, or from screenshots.
  *
- *   node design-gallery/gateway.ts      # PORT=8080, each design's demo on its port below
+ * Each design's preview is a relay in front of its demo, this same file run with UPSTREAM set, because the dashboard
+ * forbids being framed and the compare view frames it from another origin. The relay lets tailnet pages frame it.
+ *
+ *   node design-gallery/gateway.ts                    # the gallery, on PORT (8080)
+ *   UPSTREAM=9087 node design-gallery/gateway.ts      # a design's relay, on PORT (its public port)
  */
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import { createServer, request, type IncomingMessage, type ServerResponse } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 const port = Number(process.env.PORT ?? 8080);
 const shooter = process.env.SHOOTER ?? new URL("./shoot.sh", import.meta.url).pathname;
 const shots = process.env.SHOTS ?? "/home/user/.cache/nexus-gallery";
 
+/** `port` is where the design's demo listens, and `public` its relay, which has the preview. */
 export const designs = [
-  { key: "board-console", label: "Board console", port: 8087, idea: "Pipeline board's calm flow of phases, carrying Mission control's fleet and reviews." },
-  { key: "console-board", label: "Console board", port: 8088, idea: "Mission control's console made calm, carrying Pipeline board's phases and timeline." },
-  { key: "pipeline-board", label: "Pipeline board", port: 8084, idea: "Round 1: a kanban board of each piece of work's life." },
-  { key: "mission-control", label: "Mission control", port: 8082, idea: "Round 1: a dense, dark-first operator console." },
-  { key: "original", label: "Original", port: 8086, idea: "The dashboard as it is on main." },
+  { key: "board-console", label: "Board console", port: 9087, public: 8087, idea: "Pipeline board's calm flow of phases, carrying Mission control's fleet and reviews." },
+  { key: "console-board", label: "Console board", port: 9088, public: 8088, idea: "Mission control's console made calm, carrying Pipeline board's phases and timeline." },
+  { key: "pipeline-board", label: "Pipeline board", port: 9084, public: 8084, idea: "Round 1: a kanban board of each piece of work's life." },
+  { key: "mission-control", label: "Mission control", port: 9082, public: 8082, idea: "Round 1: a dense, dark-first operator console." },
+  { key: "original", label: "Original", port: 9086, public: 8086, idea: "The dashboard as it is on main." },
 ] as const;
 type Design = (typeof designs)[number];
 
@@ -78,6 +85,45 @@ function shell(d: Design, path: string): string {
 <script type="module" src="/__gallery/shell.js"></script></body></html>`;
 }
 
+/** Each design's preview URL by public port, as Nexus reports its services. Read again at most every 30 seconds. */
+let previewCache: { at: number; urls: Map<number, string> } | null = null;
+async function previewUrls(): Promise<Map<number, string>> {
+  if (previewCache !== null && Date.now() - previewCache.at < 30_000) return previewCache.urls;
+  const { stdout } = await promisify(execFile)("nexus", ["services", "list", "--json"], { timeout: 10_000 });
+  const listed = JSON.parse(stdout) as { services: { port: number | null; state: string; url: string | null }[] };
+  const urls = new Map(listed.services.filter((x) => x.port !== null && x.url !== null && x.state === "ready").map((x) => [x.port!, x.url!.replace(/\/$/, "")]));
+  previewCache = { at: Date.now(), urls };
+  return urls;
+}
+
+/**
+ * Every design live, side by side, each in a frame of its own preview on the chosen page and theme. `local` frames
+ * each relay on this machine's loopback instead, for a browser inside the pylon.
+ */
+async function liveComparePage(page: string, width: string, theme: string, local: boolean): Promise<string> {
+  const urls = local ? new Map(designs.map((d) => [d.public, `http://127.0.0.1:${d.public}`])) : await previewUrls().catch(() => new Map<number, string>());
+  const frames = await Promise.all(designs.map(async (d) => {
+    const base = urls.get(d.public);
+    const path = await pathOf(d, page).catch(() => "/");
+    const src = base === undefined ? null : `${base}/__theme?set=${theme}&next=${encodeURIComponent(path)}`;
+    return `<figure class="live"><figcaption><span><a href="/__gallery/open?design=${d.key}&page=${page}" target="_top">${esc(d.label)}</a>${base === undefined ? "" : ` <a class="direct" href="${esc(base + path)}" target="_blank" rel="noopener">Open in its own tab</a>`}</span><small>${esc(d.idea)}</small></figcaption>
+<div class="frame"><div class="screen">${src === null ? `<p class="missing">${esc(d.label)} has no preview yet: its relay on port ${d.public} is not ready.</p>` : `<iframe title="${esc(d.label)}" src="${esc(src)}" loading="eager"></iframe>`}</div></div></figure>`;
+  }));
+  const option = (value: string, label: string, current: string) => `<option value="${value}"${value === current ? " selected" : ""}>${label}</option>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare live · ${esc(page)}</title><link rel="stylesheet" href="/__gallery/style.css"></head><body class="gallery">
+<form class="bar" method="get" action="/__gallery/compare">
+  <a class="brand" href="/__gallery/">← Gallery</a>
+  <label class="pick">Page <select name="page" onchange="this.form.submit()">${pages.map((p) => option(p.key, p.label, page)).join("")}</select></label>
+  <label class="pick">Width <select name="width" onchange="this.form.submit()">${option("desktop", "Desktop 1440", width)}${option("phone", "Phone 390", width)}</select></label>
+  <label class="pick">Theme <select name="theme" onchange="this.form.submit()">${option("light", "Light", theme)}${option("dark", "Dark", theme)}</select></label>
+  ${local ? '<input type="hidden" name="local" value="1">' : ""}
+  <span class="hint">Live: each frame is that design's own preview, scaled to fit. <a href="?page=${page}&width=${width}&theme=${theme}&mode=shots">Screenshots instead</a></span>
+</form>
+<main class="live-grid ${width}" data-width="${width === "phone" ? 390 : 1440}" data-height="${width === "phone" ? 844 : 900}">${frames.join("")}</main>
+<script type="module" src="/__gallery/live.js"></script></body></html>`;
+}
+
 function comparePage(page: string, width: string, theme: string): string {
   const option = (value: string, label: string, current: string) => `<option value="${value}"${value === current ? " selected" : ""}>${label}</option>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -87,7 +133,8 @@ function comparePage(page: string, width: string, theme: string): string {
   <label class="pick">Page <select name="page" onchange="this.form.submit()">${pages.map((p) => option(p.key, p.label, page)).join("")}</select></label>
   <label class="pick">Width <select name="width" onchange="this.form.submit()">${option("desktop", "Desktop 1440", width)}${option("phone", "Phone 390", width)}</select></label>
   <label class="pick">Theme <select name="theme" onchange="this.form.submit()">${option("light", "Light", theme)}${option("dark", "Dark", theme)}</select></label>
-  <span class="hint">Screenshots are taken on first view and kept. <a href="?page=${page}&width=${width}&theme=${theme}&fresh=${Date.now()}">Retake</a></span>
+  <input type="hidden" name="mode" value="shots">
+  <span class="hint">Screenshots are taken on first view and kept. <a href="?page=${page}&width=${width}&theme=${theme}&mode=shots&fresh=${Date.now()}">Retake</a> · <a href="?page=${page}&width=${width}&theme=${theme}">Live instead</a></span>
 </form>
 <main class="grid ${width}">${designs.map((d) => `<figure><figcaption><button type="button" data-open="${d.key}" data-page="${page}">${esc(d.label)}</button><small>${esc(d.idea)}</small></figcaption>
 <a href="/__gallery/open?design=${d.key}&page=${page}" target="_top"><img loading="lazy" alt="${esc(d.label)}: ${esc(page)}" src="/__gallery/shot/${d.key}/${page}/${width}/${theme}.png"></a></figure>`).join("")}</main>
@@ -120,6 +167,14 @@ figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
 figcaption { display: flex; flex-direction: column; gap: 2px; }
 figcaption button { all: unset; font-weight: 650; cursor: pointer; }
 figcaption small { color: var(--muted); }
+.live-grid { flex: 1; overflow: auto; display: grid; gap: 20px 16px; padding: 16px; align-content: start; grid-template-columns: repeat(auto-fill, minmax(min(100%, 620px), 1fr)); }
+.live-grid.phone { grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+.live figcaption a { color: var(--fg); font-weight: 650; text-decoration: none; }
+.live figcaption a.direct { color: #93c5fd; font-weight: 400; margin-left: 6px; }
+.frame { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--chip); }
+.screen { position: absolute; inset: 0 auto auto 0; transform-origin: 0 0; }
+.screen iframe { border: 0; width: 100%; height: 100%; background: #fff; }
+.missing { color: var(--muted); padding: 24px; margin: 0; }
 figure img { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--chip); min-height: 120px; display: block; }
 `;
 
@@ -158,6 +213,29 @@ if (state.theme && localStorage.getItem("nexus.theme") !== state.theme) localSto
 apply();
 `;
 
+const liveJs = `
+const grid = document.querySelector(".live-grid");
+const [w, h] = [Number(grid.dataset.width), Number(grid.dataset.height)];
+function fit() {
+  for (const frame of document.querySelectorAll(".frame")) {
+    const scale = frame.clientWidth / w;
+    frame.style.height = Math.round(h * scale) + "px";
+    const screen = frame.firstElementChild;
+    screen.style.width = w + "px";
+    screen.style.height = h + "px";
+    screen.style.transform = "scale(" + scale + ")";
+  }
+}
+new ResizeObserver(fit).observe(grid);
+fit();
+// A dashboard that scrolls its conversation into view on load scrolls this page too. Hold the grid where the person
+// left it until they scroll it themselves.
+let moved = false;
+for (const kind of ["wheel", "touchmove", "keydown", "pointerdown"]) addEventListener(kind, () => { moved = true; }, { once: true, passive: true });
+let held = 0;
+grid.addEventListener("scroll", () => { if (!moved) grid.scrollTop = held; else held = grid.scrollTop; });
+`;
+
 const compareJs = `
 document.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => { location.href = "/__gallery/open?design=" + b.dataset.open + "&page=" + b.dataset.page; }));
 `;
@@ -185,13 +263,15 @@ function send(res: ServerResponse, status: number, type: string, body: string) {
   res.writeHead(status, { "content-type": type, "cache-control": "no-store" }).end(body);
 }
 
-async function gallery(req: IncomingMessage, res: ServerResponse, url: URL) {
+async function galleryRoute(req: IncomingMessage, res: ServerResponse, url: URL) {
   const d = designOf(req);
   const route = url.pathname.replace(/^\/__gallery/, "") || "/";
   if (route === "/") return send(res, 200, "text/html; charset=utf-8", shell(d, /^\/(?!\/)/.test(url.searchParams.get("path") ?? "") ? url.searchParams.get("path")! : "/"));
   if (route === "/style.css") return send(res, 200, "text/css", css);
   if (route === "/shell.js") return send(res, 200, "text/javascript", shellJs);
   if (route === "/compare.js") return send(res, 200, "text/javascript", compareJs);
+  if (route === "/live.js") return send(res, 200, "text/javascript", liveJs);
+  if (route === "/compare" && url.searchParams.get("mode") !== "shots") return send(res, 200, "text/html; charset=utf-8", await liveComparePage(url.searchParams.get("page") ?? "home", url.searchParams.get("width") === "phone" ? "phone" : "desktop", url.searchParams.get("theme") === "dark" ? "dark" : "light", url.searchParams.has("local")));
   if (route === "/compare") return send(res, 200, "text/html; charset=utf-8", comparePage(url.searchParams.get("page") ?? "home", url.searchParams.get("width") === "phone" ? "phone" : "desktop", url.searchParams.get("theme") === "dark" ? "dark" : "light"));
   if (route === "/go") return res.writeHead(302, { location: await pathOf(d, url.searchParams.get("page") ?? "home") }).end();
   if (route === "/open") {
@@ -213,41 +293,30 @@ async function gallery(req: IncomingMessage, res: ServerResponse, url: URL) {
   send(res, 404, "text/plain", "no such gallery route");
 }
 
-/** The design's response, with its frame-ancestors relaxed so the gallery's own frame may show it. */
-function proxy(req: IncomingMessage, res: ServerResponse, d: Design) {
-  const host = `127.0.0.1:${d.port}`;
+/** Where a request goes: a design's demo, and which pages may frame its responses. */
+interface Target { port: number; label: string; ancestors: string }
+const inGallery = (d: Design): Target => ({ port: d.port, label: d.label, ancestors: "'self'" });
+
+/** The design's response, with its frame-ancestors relaxed so the gallery's frames may show it. */
+function proxy(req: IncomingMessage, res: ServerResponse, t: Target) {
+  const host = `127.0.0.1:${t.port}`;
   const headers = { ...req.headers, host, ...(req.headers.origin === undefined ? {} : { origin: `http://${host}` }) };
-  const upstream = request({ host: "127.0.0.1", port: d.port, method: req.method, path: req.url, headers }, (up) => {
+  const upstream = request({ host: "127.0.0.1", port: t.port, method: req.method, path: req.url, headers }, (up) => {
     const out = { ...up.headers };
     const csp = out["content-security-policy"];
-    if (typeof csp === "string") out["content-security-policy"] = csp.replace(/frame-ancestors[^;]*/, "frame-ancestors 'self'");
+    if (typeof csp === "string") out["content-security-policy"] = csp.replace(/frame-ancestors[^;]*/, `frame-ancestors ${t.ancestors}`);
     delete out["x-frame-options"];
     res.writeHead(up.statusCode ?? 502, out);
     up.pipe(res);
   });
-  upstream.on("error", () => { if (!res.headersSent) send(res, 502, "text/plain", `${d.label}'s demo is not answering on port ${d.port}.`); else res.destroy(); });
+  upstream.on("error", () => { if (!res.headersSent) send(res, 502, "text/plain", `${t.label}'s demo is not answering on port ${t.port}.`); else res.destroy(); });
   req.pipe(upstream);
 }
 
-const server = createServer((req, res) => {
-  const url = new URL(req.url ?? "/", "http://gallery");
-  if (url.pathname === "/__gallery" || url.pathname.startsWith("/__gallery/")) {
-    gallery(req, res, url).catch((err: unknown) => { if (!res.headersSent) send(res, 500, "text/plain", (err as Error).message); });
-    return;
-  }
-  // A page opened at the top level, not in the gallery's frame, opens in the gallery.
-  if (req.method === "GET" && req.headers["sec-fetch-dest"] === "document") {
-    res.writeHead(302, { location: `/__gallery/?path=${encodeURIComponent(req.url ?? "/")}` }).end();
-    return;
-  }
-  proxy(req, res, designOf(req));
-});
-
-// Terminals and other upgrades pass through to the design as raw bytes, with Host and Origin rewritten as for HTTP.
-server.on("upgrade", (req, socket, head) => {
-  const d = designOf(req);
-  const host = `127.0.0.1:${d.port}`;
-  const upstream = connect(d.port, "127.0.0.1", () => {
+/** Terminals and other upgrades pass through to the design as raw bytes, with Host and Origin rewritten as for HTTP. */
+function tunnel(req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer, t: Target) {
+  const host = `127.0.0.1:${t.port}`;
+  const upstream = connect(t.port, "127.0.0.1", () => {
     const lines = [`${req.method} ${req.url} HTTP/1.1`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const name = req.rawHeaders[i]!;
@@ -260,6 +329,49 @@ server.on("upgrade", (req, socket, head) => {
   });
   upstream.on("error", () => socket.destroy());
   socket.on("error", () => upstream.destroy());
-});
+}
 
-server.listen(port, "127.0.0.1", () => console.log(`design gallery on http://127.0.0.1:${port}/__gallery/`));
+/**
+ * A design's relay: everything goes to its demo, and any tailnet page, or one on this machine, may frame it. Its own
+ * route sets the dashboard's theme on its origin and goes on to a page, since a framing page cannot reach that
+ * origin's storage.
+ */
+function relay(upstream: number) {
+  const d = designs.find((x) => x.port === upstream);
+  const t: Target = { port: upstream, label: d?.label ?? `port ${upstream}`, ancestors: "'self' https://*.ts.net:* http://127.0.0.1:*" };
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://relay");
+    if (url.pathname === "/__theme") {
+      const theme = url.searchParams.get("set") === "dark" ? "dark" : "light";
+      const next = /^\/(?!\/)/.test(url.searchParams.get("next") ?? "") ? url.searchParams.get("next")! : "/";
+      const script = `localStorage.setItem("nexus.theme", ${JSON.stringify(theme)}); location.replace(${JSON.stringify(next)});`;
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `default-src 'none'; script-src 'sha256-${createHash("sha256").update(script).digest("base64")}'; frame-ancestors ${t.ancestors}` });
+      res.end(`<!doctype html><title>${esc(t.label)}</title><script>${script}</script>`);
+      return;
+    }
+    proxy(req, res, t);
+  });
+  server.on("upgrade", (req, socket, head) => tunnel(req, socket, head, t));
+  server.listen(port, "127.0.0.1", () => console.log(`${t.label} relay on http://127.0.0.1:${port}/, to its demo on ${upstream}`));
+}
+
+function gallery() {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://gallery");
+    if (url.pathname === "/__gallery" || url.pathname.startsWith("/__gallery/")) {
+      galleryRoute(req, res, url).catch((err: unknown) => { if (!res.headersSent) send(res, 500, "text/plain", (err as Error).message); });
+      return;
+    }
+    // A page opened at the top level, not in the gallery's frame, opens in the gallery.
+    if (req.method === "GET" && req.headers["sec-fetch-dest"] === "document") {
+      res.writeHead(302, { location: `/__gallery/?path=${encodeURIComponent(req.url ?? "/")}` }).end();
+      return;
+    }
+    proxy(req, res, inGallery(designOf(req)));
+  });
+  server.on("upgrade", (req, socket, head) => tunnel(req, socket, head, inGallery(designOf(req))));
+  server.listen(port, "127.0.0.1", () => console.log(`design gallery on http://127.0.0.1:${port}/__gallery/`));
+}
+
+if (process.env.UPSTREAM === undefined) gallery();
+else relay(Number(process.env.UPSTREAM));
