@@ -3,6 +3,11 @@
  * (the desired phase `reading`), reads every transcript on each from its start as live counting records calls, and lets
  * the pylon pause again before it wakes the next. Each step reads the run from the registry and does what is left of
  * it, so a control plane that restarts or deploys mid-run goes on where it stopped.
+ *
+ * Its steps also settle each archive, with no run: once an archived thread's pylon has paused, it is woken and read
+ * the same way, and the read records the archive settled, which its disk's delete waits on. The pause ends every turn
+ * on the pylon and a wake for reading starts none, so only a read after it proves nothing came after the read. One
+ * pylon is up at a time across the run and the settles, and a settle goes first.
  */
 import type { NodeName, ThreadId } from "../ids.ts";
 import { desiredPhase } from "../reconcile.ts";
@@ -11,11 +16,21 @@ import { singleFlight } from "../single-flight.ts";
 import { observedPylon } from "./observed.ts";
 import { gib, roomLeft, uncounted } from "./placement.ts";
 import type { Registry } from "./registry.ts";
-import type { StoredPylon, Thread } from "./thread-store.ts";
+import type { StoredPylon, Thread, UsageHold } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
 import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 
-type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdUsageBackfill" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseUsageBackfill" | "reserved" | "startUsageBackfill" | "stopUsageBackfill" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitUsageBackfill">;
+type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitUsageBackfill">;
+
+/**
+ * What holds a pylon to read it whole: the run, whose hold the registry keeps, or a settle, whose hold it keeps in
+ * memory. `finish` records the thread read, with a null reason, or given up on, and the hold then waits for the pause.
+ */
+interface Holder {
+  finish(thread: ThreadId, reason: string | null): void;
+  holds(thread: ThreadId): boolean;
+  release(): void;
+}
 
 export interface UsageBackfillJob {
   status(): UsageBackfill;
@@ -41,8 +56,10 @@ export function usageBackfill(options: {
   bootMs?: number;
   /** How long a read pylon may take to pause before the run goes on, 10 minutes by default. */
   pauseMs?: number;
+  /** How long after an archive's failed settle the next is tried, an hour by default. */
+  settleRetryMs?: number;
 }): UsageBackfillJob {
-  const { registry, counter, wake, log = (message: string) => console.error(message), intervalMs = 2_000, bootMs = 600_000, pauseMs = 600_000 } = options;
+  const { registry, counter, wake, log = (message: string) => console.error(message), intervalMs = 2_000, bootMs = 600_000, pauseMs = 600_000, settleRetryMs = 3_600_000 } = options;
   const shutdown = new AbortController();
   const steps = singleFlight(async () => {
     try {
@@ -53,6 +70,22 @@ export function usageBackfill(options: {
   }, () => shutdown.signal.aborted);
 
   const seen = (p: StoredPylon): PylonObservation | "absent" | null => registry.node(p.node)?.state === "online" ? observedPylon(registry, p) : null;
+  const imageHeld = (p: StoredPylon) => registry.nodes().some((n) => n.state === "online" && n.observation?.artifacts.includes(p.boot.image) === true);
+
+  const runHolder: Holder = {
+    finish: (thread, reason) => registry.finishUsageBackfillThread(thread, reason === null ? "done" : "skipped", reason, Date.now()),
+    holds(thread) {
+      const r = registry.usageBackfill();
+      return r.state === "running" && r.current?.thread === thread;
+    },
+    release: () => registry.releaseUsageBackfill(),
+  };
+  // A failure keeps its first line, as a pylon's failure ends with its log.
+  const settleHolder: Holder = {
+    finish: (thread, reason) => registry.finishSettle(thread, reason === null ? null : reason.split("\n")[0]!, Date.now()),
+    holds: (thread) => registry.settleHold()?.thread === thread,
+    release: () => registry.releaseSettle(),
+  };
 
   function unreadable(t: Thread): string | null {
     if (t.status === "deleted") return "it was deleted, and its pylon with it";
@@ -63,8 +96,7 @@ export function usageBackfill(options: {
     if (p.failed !== null) return `its pylon failed: ${p.failed}`;
     const o = seen(p);
     if (o === "absent") return `${p.node} holds no disk for its pylon`;
-    const held = registry.nodes().some((n) => n.state === "online" && n.observation?.artifacts.includes(p.boot.image) === true);
-    if (o !== null && o.phase === "stopped" && !held) return `no online node holds its image ${p.boot.image}`;
+    if (o !== null && o.phase === "stopped" && !imageHeld(p)) return `no online node holds its image ${p.boot.image}`;
     return null;
   }
 
@@ -108,54 +140,91 @@ export function usageBackfill(options: {
     registry.finishUsageBackfill(now);
   }
 
-  async function reading(id: ThreadId, since: number, now: number) {
+  /**
+   * Holds the oldest archive not settled whose pylon can be woken now, and wakes it. A pylon that runs has not paused
+   * since its archive yet, so it waits. One its online node does not have has no disk to lose, so it is settled as it
+   * is, and one that failed or whose image no online node holds cannot be woken, which is a failed settle. A settle
+   * that failed is tried again `settleRetryMs` after.
+   */
+  function nextSettle(now: number): boolean {
+    for (const t of registry.keptArchives()) {
+      if (t.usageSettledAt !== undefined || (t.settleFailure !== undefined && now - t.settleFailure.at < settleRetryMs)) continue;
+      const p = registry.pylon(t.pylonId);
+      const o = p === undefined ? null : seen(p);
+      if (p === undefined || o === null) continue;
+      if (o === "absent") {
+        if (p.submitted === null) settleHolder.finish(t.id, null);
+        continue;
+      }
+      if (p.failed !== null) {
+        settleHolder.finish(t.id, `its pylon failed: ${p.failed}`);
+        continue;
+      }
+      if (o.phase !== "stopped") continue;
+      if (!imageHeld(p)) {
+        settleHolder.finish(t.id, `no online node holds its image ${p.boot.image}`);
+        continue;
+      }
+      if (blocked(p) !== null) continue;
+      if (p.attempts.last !== null || p.attempts.readFailure !== undefined) registry.clearPylonAttempts(p.pylonId);
+      registry.holdSettle(t.id, now);
+      wake(p.node);
+      return true;
+    }
+    return false;
+  }
+
+  async function reading(holder: Holder, id: ThreadId, since: number, now: number) {
     const t = registry.thread(id)!;
     const p = registry.pylon(t.pylonId);
-    const finish = (state: "done" | "skipped", reason: string | null) => {
-      registry.finishUsageBackfillThread(id, state, reason, Date.now());
+    const finish = (reason: string | null) => {
+      holder.finish(id, reason);
       if (p !== undefined) wake(p.node);
     };
-    if (t.status === "deleted") return finish("skipped", "it was deleted while it was read");
-    if (t.status !== "archived") return finish("skipped", "it was unarchived while it was read, so live counting reads it");
-    if (p === undefined) return finish("skipped", "its pylon has no record");
-    if (p.failed !== null) return finish("skipped", `its pylon failed: ${p.failed}`);
+    if (t.status === "deleted") return finish("it was deleted while it was read");
+    if (t.status !== "archived") return finish("it was unarchived while it was read, so live counting reads it");
+    if (p === undefined) return finish("its pylon has no record");
+    if (p.failed !== null) return finish(`its pylon failed: ${p.failed}`);
     const last = p.attempts.readFailure ?? p.attempts.last;
     if (last !== null) {
       registry.clearPylonAttempts(p.pylonId);
-      return finish("skipped", `the pylon did not boot: ${last.code}: ${last.message}`);
+      return finish(`the pylon did not boot: ${last.code}: ${last.message}`);
     }
     const o = seen(p);
     if (o !== null && o !== "absent" && o.phase === "running") {
       try {
         await counter.readWhole(id, shutdown.signal);
       } catch (err) {
-        // A stop or a shutdown cut the read short, so the thread waits for the next run.
-        const run = registry.usageBackfill();
-        if (shutdown.signal.aborted || run.state !== "running" || run.current?.thread !== id) return;
-        return finish("skipped", `reading it failed: ${(err as Error).message}`);
+        // A stop or a shutdown cut the read short, so the thread waits for the next run or settle.
+        if (shutdown.signal.aborted || !holder.holds(id)) return;
+        return finish(`reading it failed: ${(err as Error).message}`);
       }
-      return finish("done", null);
+      return finish(null);
     }
-    if (now - since >= bootMs) finish("skipped", `its pylon did not boot within ${minutes(bootMs)}`);
+    if (now - since >= bootMs) finish(`its pylon did not boot within ${minutes(bootMs)}`);
   }
 
-  function pausing(id: ThreadId, since: number, now: number) {
+  function pausing(holder: Holder, id: ThreadId, since: number, now: number) {
     const t = registry.thread(id)!;
     const p = registry.pylon(t.pylonId);
     const o = p === undefined ? "absent" : seen(p);
     const paused = o === "absent" || o?.phase === "stopped";
     if (!paused && t.status === "archived" && now - since < pauseMs) return;
-    if (!paused && t.status === "archived") log(`usage backfill: ${t.pylonId} did not pause within ${minutes(pauseMs)}, so the run goes on without it`);
-    registry.releaseUsageBackfill();
+    if (!paused && t.status === "archived") log(`usage backfill: ${t.pylonId} did not pause within ${minutes(pauseMs)}, so the next pylon is woken without it`);
+    holder.release();
   }
 
+  const advance = (holder: Holder, hold: UsageHold, now: number) =>
+    hold.phase === "reading" ? reading(holder, hold.thread, hold.since, now) : pausing(holder, hold.thread, hold.since, now);
+
   async function step() {
-    const run = registry.usageBackfill();
-    if (run.state !== "running") return;
     const now = Date.now();
-    if (run.current === null) return next(now);
-    if (run.current.phase === "reading") return reading(run.current.thread, run.current.since, now);
-    pausing(run.current.thread, run.current.since, now);
+    const settling = registry.settleHold();
+    if (settling !== null) return advance(settleHolder, settling, now);
+    const backfill = registry.usageBackfill();
+    if (backfill.state === "running" && backfill.current !== null) return advance(runHolder, backfill.current, now);
+    if (nextSettle(now) || backfill.state !== "running") return;
+    next(now);
   }
 
   function plan(): BackfillPlanRow[] {
