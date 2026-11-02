@@ -1023,7 +1023,7 @@ body[data-open="sheet"] .sheet { position: fixed; top: 0; right: 0; bottom: 0; z
   .crumb h1 { font-size: 16px; }
   .bar .chip { padding: 5px; gap: 0; }
   .bar .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .bar-panels { display: none; }
+  .bar-panels, .panel-sub, .panel-icon { display: none; }
   body[data-open="actions"] .bar-actions { right: 8px; top: 48px; }
   .bar-end .btn-ghost { display: none; }
 
