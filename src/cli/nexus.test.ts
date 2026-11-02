@@ -280,6 +280,19 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   assert.deepEqual(disk({ ...dayOld, thread: { ...unfailed, usageSettledAt: 1, backedUpAt: 2 } }), []);
 });
 
+test("show says an archived thread's usage is unread when its pylon could not be read, before and after its disk goes", async (t) => {
+  const s = await setup(t);
+  const { id } = await s.json(["start", "--project", "acme", "--title", "Failed spike"]);
+  await s.json(["archive", id]);
+  s.registry.markUnread(id, "its pylon failed: gave up after 5 failed attempts");
+  const detail: ThreadDetail = await s.json(["show", id]);
+  assert.equal(detail.thread.usageUnread, "its pylon failed: gave up after 5 failed attempts", "show --json carries it");
+  const lines = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("usage:") || line.startsWith("disk:"));
+  const dayOld = { ...detail, thread: { ...detail.thread, archivedAt: Date.now() - 25 * 60 * 60_000 } };
+  assert.deepEqual(lines(dayOld), ["usage: unread, as its pylon failed: gave up after 5 failed attempts, so its disk goes 24 hours after the archive without it"], "a disk whose usage cannot be read is not kept for it");
+  assert.deepEqual(lines({ ...dayOld, pylon: { ...dayOld.pylon, actualState: "absent" } }), ["usage: unread, as its pylon failed: gave up after 5 failed attempts, so its disk went without it"]);
+});
+
 test("each failure has its own exit code, and with --json its error is one JSON line on stderr", async (t) => {
   const s = await setup(t);
   const fails = async (args: readonly string[], code: number, error: Record<string, unknown>, overrides?: Record<string, string>) => {

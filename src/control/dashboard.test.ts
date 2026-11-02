@@ -197,7 +197,7 @@ test("an archived thread's timeline says why its disk is kept past its 24 hours,
   assert.doesNotMatch(await archived(), /kept/);
 });
 
-test("an archive whose usage will not be read without the person needs them: its reads keep failing or it is overdue, with a retry for a failed pylon and a delete that loses the unread usage", async (t) => {
+test("an archive whose usage will not be read without the person needs them, as its reads keep failing, with a delete that loses the unread usage, and a pylon that cannot be read is shown as usage unread", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
   const old = await s.start("acme", "Old spike");
@@ -205,16 +205,20 @@ test("an archive whose usage will not be read without the person needs them: its
   s.registry.apply({ record: "node", node, state: "online", capacity });
   s.registry.ingested(testObservation(node, { pylons: [stoppedPylon(old.pylonId)] }), []);
   const card = async () => (await s.call("GET", "/")).text.split(`id="need-${old.id}-disk"`)[1]?.split("</article>")[0];
+  const archived = async () => textOf((await s.call("GET", `/threads/${old.id}`)).text.split('id="tl-archived"')[1]!.split("</li>")[0]!);
   t.mock.timers.setTime(Date.now() + 25 * 60 * 60_000);
   for (let i = 0; i < 2; i++) s.registry.finishSettle(old.id, "its pylon did not boot within 10 minutes", Date.now());
   assert.equal(await card(), undefined, "two failed reads are tried again on their own");
-  s.registry.savePylon({ ...s.registry.pylon(old.pylonId)!, failed: "gave up after 5 failed attempts" });
-  s.registry.finishSettle(old.id, "its pylon failed: gave up after 5 failed attempts", Date.now());
-  const failed = textOf((await card())!);
-  assert.match(failed, /Disk kept/);
-  assert.match(failed, /Its disk is kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed 3 times in a row, the last because its pylon failed: gave up after 5 failed attempts\. Retry its pylon to read it again, or delete the thread, which deletes the disk with the token usage on it unread\./);
-  assert.match((await card())!, /data-action="retry-pylon"/);
-  assert.match((await card())!, /data-action="delete"[^>]*data-confirm="Delete &quot;Old spike&quot;\? Its disk goes with the token usage on it unread\."/);
+  s.registry.finishSettle(old.id, "its pylon did not boot within 10 minutes", Date.now());
+  const kept = (await card())!;
+  assert.match(textOf(kept), /Disk kept/);
+  assert.match(textOf(kept), /Its disk is kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed 3 times in a row, the last because its pylon did not boot within 10 minutes\. Nexus tries the read again on its own, or delete the thread, which deletes the disk with the token usage on it unread\./);
+  assert.match(kept, /data-action="delete"[^>]*data-confirm="Delete &quot;Old spike&quot;\? Its disk goes with the token usage on it unread\."/);
+
+  s.registry.markUnread(old.id, "its pylon failed: gave up after 5 failed attempts");
+  assert.equal(await card(), undefined, "a disk whose usage cannot be read is not kept for it");
+  assert.match(await archived(), /Usage unread: its disk goes 24 hours after the archive with the token usage on it unread, as its pylon failed: gave up after 5 failed attempts\.$/);
+  assert.doesNotMatch(await archived(), /kept/);
 });
 
 test("the sidebar lists every project's threads with their state, folds the archived and marks the open one", async (t) => {

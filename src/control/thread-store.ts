@@ -294,9 +294,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   }
 
   /** What the thread's archive row says, and when the newest backup began, which only an archived thread's disk waits on. */
-  function archiveFacts(r: Row, backedUp: number | null, waiting: string | undefined): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt" | "settleWaiting"> {
+  function archiveFacts(r: Row, backedUp: number | null, waiting: string | undefined): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt" | "settleWaiting" | "usageUnread"> {
     return {
       archivedAt: r.archived_at as number,
+      ...(r.usage_unread === null ? {} : { usageUnread: r.usage_unread as string }),
       ...(waiting === undefined || r.usage_settled_at !== null ? {} : { settleWaiting: waiting }),
       ...(r.usage_settled_at === null ? {} : { usageSettledAt: r.usage_settled_at as number }),
       ...(r.settle_failure === null ? {} : { settleFailure: { reason: r.settle_failure as string, at: r.settle_failed_at as number, count: r.settle_failures as number } }),
@@ -533,8 +534,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     finishSettle(thread: ThreadId, failure: string | null, at: number) {
       // A read the hold started before an unarchive and a new archive may have missed the turns between them.
       const archive = settling?.thread === thread ? settling.archivedAt : null;
-      if (failure === null) sql("UPDATE thread_archives SET usage_settled_at = ?, settle_failures = 0, settle_failure = NULL, settle_failed_at = NULL WHERE thread = ? AND usage_settled_at IS NULL AND archived_at = coalesce(?, archived_at)").run(at, thread, archive);
-      else sql("UPDATE thread_archives SET settle_failures = settle_failures + 1, settle_failure = ?, settle_failed_at = ? WHERE thread = ? AND usage_settled_at IS NULL AND archived_at = coalesce(?, archived_at)").run(failure, at, thread, archive);
+      if (failure === null) sql("UPDATE thread_archives SET usage_settled_at = ?, settle_failures = 0, settle_failure = NULL, settle_failed_at = NULL, usage_unread = NULL WHERE thread = ? AND usage_settled_at IS NULL AND archived_at = coalesce(?, archived_at)").run(at, thread, archive);
+      else sql("UPDATE thread_archives SET settle_failures = settle_failures + 1, settle_failure = ?, settle_failed_at = ? WHERE thread = ? AND usage_settled_at IS NULL AND usage_unread IS NULL AND archived_at = coalesce(?, archived_at)").run(failure, at, thread, archive);
       if (settling?.thread === thread) settling = { ...settling, phase: "pausing", since: at };
     },
     /** The pylon a settle holds, or null. */
@@ -544,6 +545,14 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       settleWaits.delete(thread);
       const archivedAt = sql("SELECT archived_at FROM thread_archives WHERE thread = ?").get(thread)?.archived_at as number | undefined;
       if (archivedAt !== undefined) settling = { thread, phase: "reading", since: now, archivedAt };
+    },
+    /**
+     * The archive's usage cannot be read, for `reason`, so its disk goes at its 24 hours with it unread, or can be read
+     * again, with null. Its failed settles are forgotten, as no settle of it failed.
+     */
+    markUnread(thread: ThreadId, reason: string | null) {
+      sql("UPDATE thread_archives SET usage_unread = ?, settle_failures = 0, settle_failure = NULL, settle_failed_at = NULL WHERE thread = ? AND usage_settled_at IS NULL AND usage_unread IS NOT ?")
+        .run(reason, thread, reason);
     },
     /** Why the archive's next settle waits, or null once it does not. */
     waitSettle(thread: ThreadId, reason: string | null) {

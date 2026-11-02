@@ -409,6 +409,29 @@ test("a pylon whose archive's last read was missed is woken for reading once pau
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause", "delete"]);
 });
 
+test("a failed archived pylon, whose usage cannot be read, is deleted 24 hours after its archive with no settle and no backup, its usage recorded unread", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  await archivedAgo(registry, shift, thread, archivedDiskMs, false);
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped" && registry.pylon(thread.pylonId)?.submitted === null);
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts, the last with backend: boom" });
+  for (let i = 0; i < 3; i++) await settled(fake, loop);
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped", "until a settle finds its usage cannot be read, the disk stays");
+
+  const reads: string[] = [];
+  const settler = usageBackfill({ registry, counter: { readWhole: async (id) => { reads.push(id); return { calls: 0, tokens: 0 }; }, unseal: async () => {} }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
+  t.after(() => settler.close());
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "delete"]);
+  for (let i = 0; i < 3; i++) await settled(fake, loop);
+  const kept = registry.thread(thread.id)!;
+  assert.deepEqual([reads, kept.usageSettledAt, kept.settleFailure, kept.backedUpAt], [[], undefined, undefined, undefined], "no read, no settle and no backup came first");
+  assert.equal(kept.usageUnread, "its pylon failed: gave up after 5 failed attempts, the last with backend: boom", "the loss stays on record once the disk is gone");
+});
+
 test("a pylon archived 24 hours ago is deleted, its thread and conversation kept, and an unarchive boots it fresh", async (t) => {
   const path = tempDb();
   const { registry, shift } = shiftedRegistry(path);

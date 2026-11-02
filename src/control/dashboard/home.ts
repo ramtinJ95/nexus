@@ -188,11 +188,8 @@ function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
 ${card}`];
     }
     case "nudge": return ["Stopped short", nudgeCard(c, t, (name) => `${name}-${t.id}`)!];
-    case "disk": {
-      const retry = d.pylon.failed !== null && d.pylon.retryRefused === null;
-      return ["Disk kept", fix(`Its disk is kept past its 24 hours, as ${keptPastDay(t, c.now)}. ${retry ? "Retry its pylon to read it again, or delete" : "Delete"} the thread, which deletes the disk with the token usage on it unread.`,
-        html`${retry && button("retry-pylon", "Retry")}<button type="button" class="btn btn-xs danger" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its disk goes with the token usage on it unread.">Delete</button>`)];
-    }
+    case "disk": return ["Disk kept", fix(`Its disk is kept past its 24 hours, as ${keptPastDay(t, c.now)}. Nexus tries the read again on its own, or delete the thread, which deletes the disk with the token usage on it unread.`,
+      html`<button type="button" class="btn btn-xs danger" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its disk goes with the token usage on it unread.">Delete</button>`)];
     case "question": {
       const q = n.question;
       const judgment = (d.judgments ?? []).filter((j) => j.question === q.id);

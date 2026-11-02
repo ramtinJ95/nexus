@@ -45,6 +45,8 @@ export interface ActivityFacts {
   backedUpAt?: number;
   /** Why this archive's next settle waits, such as no room on its node, while it is unsettled and waits. */
   settleWaiting?: string;
+  /** Why this archive's usage cannot be read, as of a failed pylon, so its disk goes at its 24 hours with it unread. */
+  usageUnread?: string;
 }
 
 /** Amp's numbers. */
@@ -59,9 +61,11 @@ export const settleFailuresFail = 3;
 /**
  * Why an archived thread's disk outlives its 24 hours, or null once it may go: the token usage on it was read to its
  * end after its pylon last ran, and a backup that began after that read verified, so the numbers are in the registry
- * and in a backup of it before the only copy of their transcripts goes.
+ * and in a backup of it before the only copy of their transcripts goes. A disk whose usage cannot be read, as a failed
+ * pylon's, is not kept for it, as the person decided on 2026-11-02.
  */
 export function diskKept(a: ActivityFacts): string | null {
+  if (a.usageUnread !== undefined) return null;
   const f = a.settleFailure;
   if (a.usageSettledAt === undefined) {
     return `its token usage is not read to its end yet${f === undefined ? "" : `, and reading it failed ${f.count === 1 ? "once" : `${f.count} times in a row`}, the last because ${f.reason}`}${a.settleWaiting === undefined ? "" : `. Its next read waits, as ${a.settleWaiting}`}`;

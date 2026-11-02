@@ -149,11 +149,11 @@ function archivedDisks(f: DoctorFacts): Verdict {
   const lastFailure = (ts: typeof kept) => ts.flatMap((t) => t.settleFailure ?? []).toSorted((a, b) => b.at - a.at)[0]?.reason;
   const failing = kept.filter((t) => (t.settleFailure?.count ?? 0) >= settleFailuresFail);
   if (failing.length > 0) {
-    return fail(`reading the token usage on the disk of ${named(failing)} failed ${settleFailuresFail} or more times in a row, the last because ${lastFailure(failing)}, so ${failing.length === 1 ? "it is" : "they are"} kept. nexus show says why, nexus retry-pylon retries a failed pylon, and nexus delete deletes a thread with its disk unread`);
+    return fail(`reading the token usage on the disk of ${named(failing)} failed ${settleFailuresFail} or more times in a row, the last because ${lastFailure(failing)}, so ${failing.length === 1 ? "it is" : "they are"} kept. nexus show says why, and nexus delete deletes a thread with its disk and the usage on it unread`);
   }
   const overdue = kept.filter((t) => t.usageSettledAt === undefined && f.now - t.archivedAt! >= settleOverdueMs);
   if (overdue.length > 0) {
-    return fail(`${named(overdue)} ${overdue.length === 1 ? "is" : "are"} still unread ${span(settleOverdueMs)} after ${overdue.length === 1 ? "its" : "their"} archive, so ${overdue.length === 1 ? "its disk is" : "their disks are"} kept, the first as ${keptPastDay(overdue[0]!, f.now)}. Bring its node online or free room there, retry a failed pylon with nexus retry-pylon, or delete the thread with its disk and its unread usage`);
+    return fail(`${named(overdue)} ${overdue.length === 1 ? "is" : "are"} still unread ${span(settleOverdueMs)} after ${overdue.length === 1 ? "its" : "their"} archive, so ${overdue.length === 1 ? "its disk is" : "their disks are"} kept, the first as ${keptPastDay(overdue[0]!, f.now)}. Bring its node online or free room there, or delete the thread with its disk and its unread usage`);
   }
   const read = kept.flatMap((t) => t.usageSettledAt ?? []);
   const oldest = f.now - Math.min(...read);

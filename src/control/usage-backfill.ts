@@ -20,7 +20,7 @@ import type { StoredPylon, Thread, UsageHold } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
 import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 
-type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitSettle" | "waitUsageBackfill">;
+type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitSettle" | "waitUsageBackfill">;
 
 /**
  * What holds a pylon to read it whole: the run, whose hold the registry keeps, or a settle, whose hold it keeps in
@@ -172,8 +172,9 @@ export function usageBackfill(options: {
   /**
    * Holds the oldest archive not settled whose pylon can be woken now, and wakes it, or says why nothing is woken: a
    * pylon is already up, so no settle and no run wakes another. A pylon that runs has not paused since its archive yet,
-   * so it waits. One its online node does not have has no disk to lose, so it is settled as it is, and one that failed
-   * or whose image no online node holds cannot be woken, which is a failed settle. A settle that failed is tried again
+   * so it waits. One its online node does not have has no disk to lose, so it is settled as it is. One that failed or
+   * whose image no online node holds cannot be read, which is recorded, and its disk goes at its 24 hours with its usage
+   * unread, as the person decided on 2026-11-02, until it can be read again. A settle that failed is tried again
    * `settleRetryMs` after. Each archive that waits records why, which its thread shows.
    */
   function nextSettle(now: number): "held" | "up" | "none" {
@@ -184,28 +185,31 @@ export function usageBackfill(options: {
       return "up";
     }
     for (const t of archives) {
-      if (t.settleFailure !== undefined && now - t.settleFailure.at < settleRetryMs) continue;
       const p = registry.pylon(t.pylonId);
       if (p === undefined) continue;
+      // A failure ends with its log, so only its first line is kept.
+      if (p.failed !== null) {
+        registry.markUnread(t.id, `its pylon failed: ${p.failed.split("\n")[0]!}`);
+        continue;
+      }
       const o = seen(p);
       if (o === null) {
         registry.waitSettle(t.id, `${p.node} is offline`);
         continue;
       }
       if (o === "absent") {
-        if (p.submitted === null) settleHolder.finish(t.id, null);
+        // A disk that went with its usage unread keeps that on record.
+        if (p.submitted === null && t.usageUnread === undefined) settleHolder.finish(t.id, null);
         continue;
       }
-      if (p.failed !== null) {
-        settleHolder.finish(t.id, `its pylon failed: ${p.failed}`);
+      if (o.phase === "stopped" && !imageHeld(p)) {
+        registry.markUnread(t.id, `no online node holds its image ${p.boot.image}`);
         continue;
       }
+      if (t.usageUnread !== undefined) registry.markUnread(t.id, null);
+      if (t.settleFailure !== undefined && now - t.settleFailure.at < settleRetryMs) continue;
       if (o.phase !== "stopped") {
         registry.waitSettle(t.id, o.phase === "running" ? "its pylon has not paused since its archive yet" : `its pylon is ${o.phase}`);
-        continue;
-      }
-      if (!imageHeld(p)) {
-        settleHolder.finish(t.id, `no online node holds its image ${p.boot.image}`);
         continue;
       }
       const waiting = blocked(p);

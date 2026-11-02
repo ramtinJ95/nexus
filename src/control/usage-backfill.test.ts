@@ -428,22 +428,28 @@ test("a settle that fails keeps the disk, counts the failures in a row with the 
   assert.deepEqual([settled.usageSettledAt !== undefined, settled.settleFailure], [true, undefined], "a settle that reads it forgets the failures");
 });
 
-test("a settle wakes no pylon whose node has no disk for it, which is settled as it is, nor one that failed or whose image no online node holds, which it records as failed", async (t) => {
-  const registry = opened(t);
+test("a settle wakes no pylon whose node has no disk for it, which is settled as it is, nor one that failed or whose image no online node holds, whose usage it records unread, so its disk goes at its 24 hours", async (t) => {
+  let now = Date.now() - archivedDiskMs;
+  const registry = seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`), () => now), { nodes: [n1, n2] });
   const gone = addThread(registry, n1, "gone", "archived", false);
   const failed = addThread(registry, n1, "failed", "archived", false);
   const imageless = addThread(registry, n2, "imageless", "archived", false);
+  now = Date.now();
   registry.savePylon({ ...registry.pylon(failed.pylonId)!, failed: "gave up after 5 failed attempts, the last with backend: boom\nthe log's last line" });
   observe(registry, n1, [[failed.pylonId, "stopped"]], { artifacts: [] });
   observe(registry, n2, [[imageless.pylonId, "stopped"]], { artifacts: [] });
-  const { woken } = backfill(t, registry, fakeCounter(registry), { settleRetryMs: 60_000 });
-  await until("each is settled or failed", () => [gone, failed, imageless].map((x) => registry.thread(x.id)!), (ts) => ts.every((x) => x.usageSettledAt !== undefined || x.settleFailure !== undefined));
+  const { woken } = backfill(t, registry);
+  await until("each is settled or unread", () => [gone, failed, imageless].map((x) => registry.thread(x.id)!), (ts) => ts.every((x) => x.usageSettledAt !== undefined || x.usageUnread !== undefined));
   assert.ok(registry.thread(gone.id)!.usageSettledAt !== undefined, "a pylon its online node does not have has no disk to lose");
-  assert.equal(registry.thread(failed.id)!.settleFailure?.reason, "its pylon failed: gave up after 5 failed attempts, the last with backend: boom");
-  assert.equal(registry.thread(imageless.id)!.settleFailure?.reason, `no online node holds its image ${image}`);
+  assert.deepEqual([failed, imageless].map((x) => registry.thread(x.id)!.usageUnread), ["its pylon failed: gave up after 5 failed attempts, the last with backend: boom", `no online node holds its image ${image}`]);
+  assert.deepEqual([failed, imageless].map((x) => [registry.thread(x.id)!.settleFailure, desired(registry, x)]), [[undefined, "deleted"], [undefined, "deleted"]], "no settle failed, and no backup is waited for");
   await delay(50);
   assert.deepEqual([woken, registry.settleHold()], [[], null]);
-  assert.deepEqual([failed, imageless].map((x) => registry.thread(x.id)!.settleFailure?.count), [1, 1], "a failure counts once per retry wait");
+
+  observe(registry, n2, [[imageless.pylonId, "stopped"]]);
+  await until("an archive whose image a node holds again can be read", () => registry.thread(imageless.id)!.usageUnread, (u) => u === undefined);
+  await settling(registry, imageless, "reading");
+  assert.equal(desired(registry, imageless), "reading");
 });
 
 test("one pylon is up at a time across the run and the settles, a settle goes first, and the run's read of a pylon that has not paused settles nothing", async (t) => {

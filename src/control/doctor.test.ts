@@ -136,13 +136,14 @@ test("archived disks are ok kept for a fresh backup, warn while one waits for it
   expect(keptArchives(archived("th-unread")), null, "archived-disks", "warn", /^th-unread \(thread th-unread\) is kept past its 24 hours, as its token usage is not read to its end yet\. Each is read once its pylon paused/);
   expect(keptArchives(archived("th-a", failure(2)), archived("th-b")), null, "archived-disks", "warn", /^2 archived disks wait past the 24 hours for the token usage on them to be read to its end, 1 after a failed read, the last because its pylon did not boot/);
   expect(keptArchives(archived("th-a", failure(3, "its pylon failed: gave up after 5 failed attempts")), archived("th-b", failure(1))), null, "archived-disks", "fail",
-    /^reading the token usage on the disk of th-a \(thread th-a\) failed 3 or more times in a row, the last because its pylon failed: gave up after 5 failed attempts, so it is kept\. nexus show says why, nexus retry-pylon/);
+    /^reading the token usage on the disk of th-a \(thread th-a\) failed 3 or more times in a row, the last because its pylon failed: gave up after 5 failed attempts, so it is kept\. nexus show says why, and nexus delete deletes a thread with its disk and the usage on it unread$/);
   expect(keptArchives(archived("th-read", { usageSettledAt: now - 27 * hour })), null, "archived-disks", "fail",
     /^1 archived disk waits past the 24 hours for a backup that begins after the token usage on it was read, the oldest read 27 h ago\. The backup check says why.*nexus-backup/);
   expect(keptArchives(archived("th-read", { usageSettledAt: now - 27 * hour, backedUpAt: now - 28 * hour })), null, "archived-disks", "fail", /the oldest read 27 h ago/);
+  expect(keptArchives(archived("th-unreadable", { archivedAt: now - 72 * hour, usageUnread: "its pylon failed: gave up after 5 failed attempts" })), null, "archived-disks", "ok", /^no archived disk is kept past its 24 hours$/);
   expect(keptArchives(archived("th-full", { archivedAt: now - 47 * hour, settleWaiting: "infra-testbench would have 2 GiB of memory left" })), null, "archived-disks", "warn", /Its next read waits, as infra-testbench would have 2 GiB/);
   expect(keptArchives(archived("th-full", { archivedAt: now - 48 * hour, settleWaiting: "infra-testbench would have 2 GiB of memory left" })), null, "archived-disks", "fail",
-    /^th-full \(thread th-full\) is still unread 2 days after its archive, so its disk is kept, the first as .*Its next read waits, as infra-testbench would have 2 GiB of memory left\. Bring its node online or free room there, retry a failed pylon with nexus retry-pylon, or delete the thread with its disk and its unread usage$/);
+    /^th-full \(thread th-full\) is still unread 2 days after its archive, so its disk is kept, the first as .*Its next read waits, as infra-testbench would have 2 GiB of memory left\. Bring its node online or free room there, or delete the thread with its disk and its unread usage$/);
 });
 
 test("the harness's login is ok signed in and offering its model, and fails without the provider, signed out, refusing to refresh, or not offering the model", () => {

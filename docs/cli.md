@@ -204,6 +204,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `archivedAt` | optional number | When the thread was archived, in milliseconds, while it is. Once it is 24 hours old, its usage is settled and a backup began after that, its `desired` is `deleted` and its pylon goes, while the thread stays |
 | `usageSettledAt` | optional number | When a read of the archived pylon's disk after its pause reached the end of every transcript, in milliseconds. Left out until one did |
 | `settleFailure` | optional `{ reason: string, at: number, count: number }` | The archive's last failed settle, why, and how many failed in a row. Left out once a settle read the disk, or while none failed |
+| `usageUnread` | optional string | Why the archive's usage cannot be read, as of a failed pylon, so its disk goes 24 hours after the archive with it unread. Kept once the disk is gone |
 | `settleWaiting` | optional string | Why the archive's next settle waits, such as its node being offline or without room for its pylon. Left out once a settle read the disk, or while it does not wait |
 | `backedUpAt` | optional number | On an archived thread only: when the newest backup the control plane has seen verify began, in milliseconds. Its disk waits for one that began after `usageSettledAt` |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
