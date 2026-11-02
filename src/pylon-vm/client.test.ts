@@ -2,8 +2,9 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import fs, { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -205,4 +206,32 @@ test("sweeps that race over the same instances never fail to take or release a l
 	for (let round = 0; round < 20; round++) await Promise.all(Array.from({ length: 4 }, () => sweepScratch(root)));
 	assert.deepEqual(errors.mock.calls.map((call) => call.arguments.map(String).join(" ")), []);
 	assert.deepEqual(dirs.filter((dir) => existsSync(join(dir, "launch.lock"))), []);
+});
+
+test("a launch that ends on a full disk still releases its lock, so the next launch is not refused by the probe that is still running", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const dir = directory(root, "instances", "pylon-full");
+	await privateDirectory(dir);
+	await saveJson(join(dir, "record.json"), { version: 1, name: "pylon-full", config: {}, createdAt: new Date().toISOString(), labels: {} });
+	// Fails the launch at its first write after it holds the lock, so no controller is spawned.
+	await mkdir(join(dir, "status.json"));
+	const lock = join(dir, "launch.lock");
+	const full = (path: unknown) => Object.assign(new Error(`ENOSPC: no space left on device, '${String(path)}'`), { code: "ENOSPC" });
+	const { mkdtemp: original, rename } = fs;
+	let made = 0;
+	// The disk fills while the launch holds its lock: only its taking of the lock gets space.
+	t.mock.method(fs, "mkdtemp", (prefix: string, ...rest: unknown[]) =>
+		prefix === `${lock}-` && made++ > 0 ? Promise.reject(full(prefix)) : (original as (...args: unknown[]) => Promise<string>)(prefix, ...rest));
+	t.mock.method(fs, "rename", (from: string, to: string) => (from === lock ? Promise.reject(full(to)) : rename(from, to)));
+	syncBuiltinESMExports();
+	t.after(() => {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+	});
+	await assert.rejects(run(root, { action: "start", name: "pylon-full", boot: spec }), /EISDIR/);
+	assert.equal(existsSync(lock), false, "a launch on a full disk kept its lock");
+	t.mock.restoreAll();
+	syncBuiltinESMExports();
+	await assert.rejects(run(root, { action: "start", name: "pylon-full", boot: spec }), /EISDIR/);
 });

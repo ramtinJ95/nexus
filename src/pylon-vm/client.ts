@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync } from "node:fs";
 import {
 	constants,
@@ -130,16 +130,21 @@ async function takeLock(lock: string): Promise<boolean> {
 		throw error;
 	}
 }
-/** Renamed aside before it is removed, because takeLock would take the empty directory a removal in place passes through. */
+/**
+ * Renamed aside before it is removed, because takeLock would take the empty directory a removal in place passes
+ * through. The aside path is not made first, so a full disk does not keep the lock, and if even the rename fails the
+ * lock is removed in place.
+ */
 async function releaseLock(lock: string): Promise<void> {
-	const aside = await mkdtemp(`${lock}-`);
+	const aside = `${lock}-${randomUUID()}`;
 	try {
 		await rename(lock, aside);
 	} catch (error) {
-		if (!existsError(error, "ENOENT")) throw error;
-	} finally {
-		await rm(aside, { recursive: true, force: true });
+		if (existsError(error, "ENOENT")) return;
+		await rm(lock, { recursive: true, force: true });
+		return;
 	}
+	await rm(aside, { recursive: true, force: true });
 }
 /** A missing identity file means the process has not published itself yet, or is gone. */
 async function published(file: string): Promise<boolean> {
