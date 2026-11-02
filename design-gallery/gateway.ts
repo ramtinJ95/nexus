@@ -26,16 +26,16 @@ const shots = process.env.SHOTS ?? "/home/user/.cache/nexus-gallery";
 
 /** `port` is where the design's demo listens, and `public` its relay, which has the preview. */
 export const designs = [
-  { key: "board-console", label: "Board console", port: 9087, public: 8087, idea: "Pipeline board's calm flow of phases, carrying Mission control's fleet and reviews." },
-  { key: "console-board", label: "Console board", port: 9088, public: 8088, idea: "Mission control's console made calm, carrying Pipeline board's phases and timeline." },
-  { key: "pipeline-board", label: "Pipeline board", port: 9084, public: 8084, idea: "Round 1: a kanban board of each piece of work's life." },
-  { key: "mission-control", label: "Mission control", port: 9082, public: 8082, idea: "Round 1: a dense, dark-first operator console." },
-  { key: "original", label: "Original", port: 9086, public: 8086, idea: "The dashboard as it is on main." },
+  { key: "meld-board", label: "Meld: board", port: 9089, public: 8089, cluster: true, idea: "Pipeline board's board in the Original's look, with Needs you as its first column." },
+  { key: "meld-inbox", label: "Meld: inbox", port: 9090, public: 8090, cluster: true, idea: "The Original's shape, led by Pipeline board's Needs you list, with work by phase below." },
+  { key: "meld-split", label: "Meld: split", port: 9091, public: 8091, cluster: true, idea: "Needs you to act on beside the work in flight to watch, with a preview of either." },
+  { key: "original", label: "Original", port: 9086, public: 8086, cluster: false, idea: "The dashboard as it is on main." },
+  { key: "pipeline-board", label: "Pipeline board", port: 9084, public: 8084, cluster: false, idea: "Round 1: a kanban board of each piece of work's life." },
 ] as const;
 type Design = (typeof designs)[number];
 
 /** Each page the bar offers: a path, or a thread found by its title, since every demo server mints its own IDs. */
-export const pages: readonly { key: string; label: string; path?: string; thread?: string }[] = [
+export const pages: readonly { key: string; label: string; path?: string; thread?: string; before?: string }[] = [
   { key: "home", label: "Home", path: "/" },
   { key: "long", label: "Long thread", thread: "Graph node health with 31 days of history" },
   { key: "review", label: "Held review", thread: "Retry flaky probe reconnects" },
@@ -43,7 +43,8 @@ export const pages: readonly { key: string; label: string; path?: string; thread
   { key: "claude", label: "Claude worker", thread: "Keep nexus attach alive across a deploy" },
   { key: "planning", label: "Planning", thread: "Plan the maintenance wave" },
   { key: "failed", label: "Failed", thread: "Fix doctor's certificate check" },
-  { key: "pipeline", label: "Pipeline", path: "/pipeline" },
+  // The melds replace the Pipeline page with Cluster. A design from before them shows its node page there.
+  { key: "cluster", label: "Cluster", path: "/cluster", before: "/nodes/rj-firebat" },
   { key: "nodes", label: "Nodes", path: "/nodes/infra-testbench" },
   { key: "graphs", label: "Node graphs", path: "/nodes/rj-firebat" },
   { key: "health", label: "Health", path: "/health" },
@@ -65,6 +66,7 @@ async function threadPath(d: Design, title: string): Promise<string> {
 
 async function pathOf(d: Design, key: string): Promise<string> {
   const page = pages.find((p) => p.key === key) ?? pages[0]!;
+  if (page.before !== undefined && !d.cluster) return page.before;
   return page.path ?? threadPath(d, page.thread!);
 }
 
