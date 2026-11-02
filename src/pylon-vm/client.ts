@@ -9,6 +9,7 @@ import {
 	readFile,
 	rename,
 	rm,
+	stat,
 } from "node:fs/promises";
 import http from "node:http";
 import { join } from "node:path";
@@ -122,6 +123,46 @@ async function published(file: string): Promise<boolean> {
  */
 export const scratchDirectory = (root: string, dir: string) =>
 	join(root, "tmp", createHash("sha256").update(dir).digest("hex").slice(0, 12));
+/**
+ * Older than any gap between a sweep reading that no launch or controller owns a scratch directory and removing it, so a
+ * launch that makes its directory meanwhile, whose mtime is then the launch's, is never swept.
+ */
+export const scratchSweepAgeMs = 60 * 60_000;
+/**
+ * Removes the scratch directories that no running controller or launch owns and that are older than scratchSweepAgeMs:
+ * those a controller killed outright left, those of instances destroyed meanwhile, and those every controller older than
+ * the controller's own removal left. Returns their names.
+ */
+export async function sweepScratch(root: string, now = Date.now()): Promise<string[]> {
+	const names = async (path: string) => {
+		try {
+			return await readdir(path);
+		} catch (error) {
+			if (existsError(error, "ENOENT")) return [];
+			throw error;
+		}
+	};
+	const owners = new Map<string, string>();
+	for (const kind of ["instances", "templates"] as const)
+		for (const name of await names(join(root, kind))) {
+			const dir = directory(root, kind, name);
+			owners.set(scratchDirectory(root, dir), dir);
+		}
+	const swept: string[] = [];
+	for (const name of await names(join(root, "tmp"))) {
+		const path = join(root, "tmp", name);
+		const owner = owners.get(path);
+		if (owner !== undefined && ((await controllerAlive(owner)) || (await launching(owner)))) continue;
+		const modified = await stat(path).then((s) => s.mtimeMs, (error: unknown) => {
+			if (existsError(error, "ENOENT")) return null;
+			throw error;
+		});
+		if (modified === null || now - modified < scratchSweepAgeMs) continue;
+		await rm(path, { recursive: true, force: true });
+		swept.push(name);
+	}
+	return swept;
+}
 /**
  * An instance whose controller already runs keeps the spec it booted with. Returns the controller's inspection once it
  * runs, with any startupError its setup or services left.

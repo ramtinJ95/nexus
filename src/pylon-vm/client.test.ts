@@ -1,12 +1,14 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { run } from "./client.ts";
+import { run, scratchDirectory, sweepScratch } from "./client.ts";
+import { publishIdentity } from "./identity.ts";
 import { saveJson } from "../json-file.ts";
 import { directory, privateDirectory } from "./storage.ts";
 
@@ -99,4 +101,26 @@ test("with no controller listening, an inspect reads the instance offline, a sto
 	await assert.rejects(run(c.root, { action: "services", name: c.name, op: "status" }), /^Error: pylon-t1 is not running\. Use start first$/);
 	assert.equal(((await run(c.root, { action: "stop", name: c.name })) as Inspection).status.state, "stopped");
 	assert.deepEqual(c.arrived, []);
+});
+
+test("the start sweep removes an old scratch directory no controller owns, and keeps a young one and one a running controller owns", async (t) => {
+	const c = await controller(t);
+	t.after(() => c.server.close());
+	await publishIdentity(join(c.dir, "controller.pid"));
+	const hour = 60 * 60_000;
+	const scratch = async (path: string, age: number) => {
+		await privateDirectory(path);
+		await writeFile(join(path, "overlay.qcow2"), "overlay");
+		const at = new Date(Date.now() - age);
+		await utimes(path, at, at);
+		return path;
+	};
+	const owned = await scratch(scratchDirectory(c.root, c.dir), 2 * hour);
+	const stoppedDir = directory(c.root, "instances", "pylon-t2");
+	await privateDirectory(stoppedDir);
+	const stopped = await scratch(scratchDirectory(c.root, stoppedDir), 2 * hour);
+	const destroyed = await scratch(join(c.root, "tmp", "f7352d554b6b"), 2 * hour);
+	const young = await scratch(join(c.root, "tmp", "0123456789ab"), 60_000);
+	assert.deepEqual((await sweepScratch(c.root)).sort(), [basename(destroyed), basename(stopped)].sort());
+	assert.deepEqual([owned, stopped, destroyed, young].map((path) => existsSync(path)), [true, false, false, true]);
 });
