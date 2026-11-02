@@ -392,7 +392,7 @@ test("a pylon whose archive's last read was missed is woken for reading once pau
     reads.push(`${id} ${fake.pylons.get(thread.pylonId)?.phase}`);
     return { calls: 0, tokens: 0 };
   };
-  const settler = usageBackfill({ registry, counter: { readWhole }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
+  const settler = usageBackfill({ registry, counter: { readWhole, unseal: async () => {} }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
   t.after(() => settler.close());
   await until("the settle lets go of the pylon it read", () => registry.thread(thread.id)?.usageSettledAt !== undefined && registry.settleHold() === null);
   await settler.close();

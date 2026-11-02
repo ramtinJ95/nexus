@@ -20,6 +20,7 @@ export interface Tokens { input: number; output: number; cacheWrite: number; cac
 export interface AgentCall extends Tokens { id: string; agent: AgentKind; model: string; at: number }
 
 const helper = readFileSync(new URL("./agent-usage.py", import.meta.url));
+const sealHelper = readFileSync(new URL("./agent-seal.py", import.meta.url));
 
 /** Where a pylon's agents keep their transcripts. */
 export const agentLogs = { claude: claudeProjects, pi: "/home/user/.pi/agent/sessions" };
@@ -52,4 +53,13 @@ export async function readAgentUsage(open: OpenPipe, offsets: ReadonlyMap<string
   const lines = out.toString("utf8").split("\n").filter((line) => line !== "");
   const end = parseJson(endSchema, lines.pop() ?? "null", "the agent usage read's end");
   return { calls: lines.map((line, i) => parseJson(callSchema, line, `agent usage call ${i + 1}`)), offsets: new Map(Object.entries(end.offsets) as [string, FileCursor][]), more: end.more };
+}
+
+/**
+ * Seals the pylon's transcripts, as root, so no agent, hook or service on it can add a call before its pause: a read
+ * after the seal is the last of them. `false` unseals them, for a pylon that runs on.
+ */
+export async function sealAgentLogs(open: OpenPipe, seal: boolean, logs = agentLogs, deadlineMs = usageReadDeadlineMs): Promise<void> {
+  const stream = await openPython((argv) => open(["sudo", "-n", ...argv]), sealHelper, [], "agent-seal.py");
+  await pipeOutput(stream, { deadlineMs, maxBytes: 4096, what: seal ? "the seal of its agents' transcripts" : "the unseal of its agents' transcripts", input: Buffer.from(JSON.stringify({ ...logs, seal })) });
 }

@@ -46,11 +46,15 @@ const recover = (registry: Registry, thread: ThreadId, calls: number, tokens: nu
 function fakeCounter(registry: Registry) {
   const counter = {
     reads: [] as ThreadId[],
+    sealed: [] as ThreadId[],
+    unsealed: [] as ThreadId[],
     answer: async (id: ThreadId) => recover(registry, id, 3, 300),
-    readWhole(id: ThreadId) {
+    readWhole(id: ThreadId, _signal?: AbortSignal, seal = false) {
       counter.reads.push(id);
+      if (seal) counter.sealed.push(id);
       return counter.answer(id);
     },
+    async unseal(id: ThreadId) { counter.unsealed.push(id); },
   };
   return counter;
 }
@@ -380,7 +384,7 @@ test("an archive whose last read was missed is woken for reading once its pylon 
   assert.deepEqual([desired(registry, a), woken], ["reading", [n1]], "a disk kept past its 24 hours is woken for reading");
   observe(registry, n1, [[a.pylonId, "running"]]);
   await settling(registry, a, "pausing");
-  assert.deepEqual(counter.reads, [a.id]);
+  assert.deepEqual([counter.reads, counter.sealed], [[a.id], [a.id]], "the read is sealed, so no hook or service of the wake adds a call after it");
   const settled = registry.thread(a.id)!;
   assert.ok(settled.usageSettledAt !== undefined && settled.usageSettledAt >= now);
   assert.deepEqual([desired(registry, a), diskKept(settled)], ["paused", "it waits for a backup that begins after its token usage was read"]);
@@ -470,6 +474,7 @@ test("one pylon is up at a time across the run and the settles, a settle goes fi
   observe(registry, n2, [[early.pylonId, "stopped"], [late.pylonId, "stopped"]]);
   await settling(registry, early, "reading");
   assert.deepEqual(counter.reads, [late.id, read.id, early.id]);
+  assert.deepEqual(counter.sealed, [late.id], "the run's read seals nothing");
 });
 
 test("a control plane restarted while a settle holds a pylon lets it pause, and settles it once it has", async (t) => {
@@ -543,4 +548,25 @@ test("after a restart lost a settle's hold, no other pylon is woken until the on
   assert.deepEqual([registry.settleHold(), woken], [null, []], "the pylon the lost hold woke is still up");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
   await settling(registry, a, "reading");
+});
+
+test("a thread unarchived while its settle reads it sealed gets its transcripts back, and its archive is not settled", async (t) => {
+  const registry = opened(t);
+  const a = addThread(registry, n1, "unarchived", "archived", false);
+  observe(registry, n1, [[a.pylonId, "stopped"]]);
+  const counter = fakeCounter(registry);
+  const reading = Promise.withResolvers<void>();
+  counter.answer = async (id) => {
+    await reading.promise;
+    return recover(registry, id, 1, 10);
+  };
+  backfill(t, registry, counter);
+  await settling(registry, a, "reading");
+  observe(registry, n1, [[a.pylonId, "running"]]);
+  await until("the settle reads it sealed", () => counter.sealed.length, (n) => n === 1);
+  registry.setThreadStatus(a.id, "idle");
+  reading.resolve();
+  await until("its transcripts are unsealed", () => counter.unsealed, (u) => u.length === 1);
+  assert.deepEqual(counter.unsealed, [a.id]);
+  assert.equal(registry.thread(a.id)!.usageSettledAt, undefined);
 });

@@ -1449,7 +1449,7 @@ An archived thread's pylon is paused, and counting reads a pylon only while it r
 
 A thread is skipped, with the reason, when it was unarchived or deleted before or while it was read, its disk was deleted once its usage was read and backed up, its pylon failed or its node holds no disk for it, its wake failed, which never fails the pylon, its pylon did not run within 10 minutes, or the read failed. The run waits up to 10 minutes for each pylon it read to pause.
 
-The same job settles each archive with no run: once an archived thread's pylon has paused, it wakes the pylon for reading and reads it the same way, and the archive's disk goes only once that read reached the end and a backup that began after it verified. A settle goes before the run's next thread, and only one pylon is up at a time across both. `nexus show` says why an archived disk is kept past its 24 hours, and `nexus doctor`'s `archived-disks` check names the disks whose reads keep failing. [Settling an archive](data-model.md#settling-an-archive) has the steps.
+The same job settles each archive with no run: once an archived thread's pylon has paused, it wakes the pylon for reading, seals its transcripts so no hook or service can add a call, and reads it the same way, and the archive's disk goes only once that read reached the end and a backup that began after it verified. A settle goes before the run's next thread, and only one pylon is up at a time across both. `nexus show` says why an archived disk is kept past its 24 hours, and `nexus doctor`'s `archived-disks` check names the disks whose reads keep failing. [Settling an archive](data-model.md#settling-an-archive) has the steps.
 
 The backfill's line in `usage`, and what `usage backfill` prints:
 

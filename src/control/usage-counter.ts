@@ -6,7 +6,7 @@
  * read only while its node's last observation reports it running, so reading never wakes one, and a failed read keeps
  * what is recorded.
  */
-import { readAgentUsage, agentLogs, type FileCursor } from "../agent-usage.ts";
+import { readAgentUsage, agentLogs, sealAgentLogs, type FileCursor } from "../agent-usage.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ConversationId } from "../harness/host.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
@@ -27,8 +27,11 @@ export interface UsageCounter {
    * read as a sweep would, adding what each recovered to the thread's backfill row with it, so a read cut short keeps
    * what it recorded. Returns the calls no read had counted and the tokens they added. Throws when the pylon is
    * not running, a read fails, or `signal` aborts it between reads. No other read of the pylon starts until it is done.
+   * `seal` first seals the transcripts (sealAgentLogs), so the read is the last until the pylon pauses.
    */
-  readWhole(id: ThreadId, signal?: AbortSignal): Promise<{ calls: number; tokens: number }>;
+  readWhole(id: ThreadId, signal?: AbortSignal, seal?: boolean): Promise<{ calls: number; tokens: number }>;
+  /** Unseals the transcripts of the thread's running pylon, which a sealed read left sealed until its pause. */
+  unseal(id: ThreadId): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -100,12 +103,20 @@ export function usageCounter(options: {
     }
   });
 
-  async function readWhole(id: ThreadId, signal?: AbortSignal) {
+  function sealing(id: ThreadId, seal: boolean) {
+    const t = registry.thread(id);
+    const probe = t === undefined ? null : runningProbe(registry, probes, t);
+    if (probe === null) throw new Error("its pylon is not running");
+    return sealAgentLogs((argv) => probe.stream(t!.pylonId, argv), seal, logs);
+  }
+
+  async function readWhole(id: ThreadId, signal?: AbortSignal, seal = false) {
     const key = `${id}/pylon`;
     if (held.has(key)) throw new Error(`${id}'s pylon is already being read whole`);
     held.add(key);
     try {
       await reads.get(key)?.settled();
+      if (seal) await sealing(id, true);
       let cursors = new Map<string, FileCursor>();
       const added = { calls: 0, tokens: 0 };
       for (let n = 0; n < maxWholeReads; n++) {
@@ -152,6 +163,7 @@ export function usageCounter(options: {
   return {
     sweep,
     readWhole,
+    unseal: (id) => sealing(id, false),
     async close() {
       closed = true;
       stopFollowing();

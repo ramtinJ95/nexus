@@ -114,6 +114,36 @@ test("a pylon's Claude transcripts and pi sessions count each call once, however
   assert.deepEqual(totals(registry), sum(both, { calls: 1, input: 3, output: 40, cacheWrite: 500, cacheRead: 9000 }), "a call appended later counts once, and a half-written line waits");
 });
 
+test("a sealed whole read seals the pylon's transcripts as root before its first read, and one whose seal fails reads nothing", async (t) => {
+  const registry = openOnline(t);
+  const thread = addThread(registry);
+  const { logs } = pylonHome();
+  const probe = localProbe();
+  const seals: (readonly string[])[] = [];
+  let sealExit = 0;
+  const local = probe.stream;
+  probe.stream = async (pylon, argv) => {
+    if (argv[0] !== "sudo") return local(pylon, argv);
+    seals.push(argv);
+    return processStream("sh", ["-c", `cat > /dev/null; exit ${sealExit}`], () => undefined);
+  };
+  const counter = usageCounter({ registry, probes: new Map([[node, probe]]), harness: noHarness, logs, sweepMs: 3_600_000 });
+  t.after(() => counter.close());
+  await counter.sweep();
+  const reads = probe.reads;
+
+  await counter.readWhole(thread.id, undefined, true);
+  assert.deepEqual(seals.map((argv) => argv.slice(0, 3)), [["sudo", "-n", "python3"]], "the seal runs as root, once, before the reads");
+  assert.ok(probe.reads > reads, "and the reads follow it");
+  await counter.unseal(thread.id);
+  assert.equal(seals.length, 2, "an unseal runs the helper as root too");
+
+  sealExit = 1;
+  const before = probe.reads;
+  await assert.rejects(counter.readWhole(thread.id, undefined, true), /the seal of its agents' transcripts/);
+  assert.equal(probe.reads, before, "a read whose seal failed reads nothing, so it settles nothing");
+});
+
 test("a whole read counts every call from the start of each transcript, past where live counting's cursors stand, once", async (t) => {
   const registry = openOnline(t);
   const thread = addThread(registry);
