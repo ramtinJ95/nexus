@@ -13,7 +13,7 @@
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, changedPaths, findingsOf, type Change, type Review, type Round } from "./review-model.ts";
+import { answered, blocks, changedPaths, descriptionDigest, findingsOf, type Change, type Review, type Round } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;
@@ -59,6 +59,9 @@ const quoteOf = (round: Round) => {
   const quoted = round.verdict?.notCheckedLive ?? null;
   return quoted === null || squash(quoted).length < 20 ? null : quoted;
 };
+
+/** Whether the round has a quote that a landing should ask the reviewer for again, as the description changed since the reviewer last quoted from it. */
+export const staleQuote = (round: Round, body: string) => quoteOf(round) !== null && round.quotedFrom !== descriptionDigest(body);
 
 /**
  * What the person's Land press does now, the one rule the land route and the dashboard both follow. It is `stuck` on

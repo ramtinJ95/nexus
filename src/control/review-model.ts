@@ -52,13 +52,16 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string } }
+export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string }
 /**
  * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
  * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
  * change at both is the same, so no reviewer round ran for it and it counts against no limit. Its checks run as any
- * round's do, since the base under the change moved.
+ * round's do, since the base under the change moved. `quotedFrom` is the digest of the description the reviewer last
+ * quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  */
+/** The digest of a pull request's description, which a round's `quotedFrom` records. */
+export const descriptionDigest = (body: string) => createHash("sha256").update(body).digest("hex");
 /**
  * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
  * instead. `ran` when the script gave its verdict in verify pylon `thread`.
@@ -84,11 +87,11 @@ export type Phase =
    */
   | { kind: "verifying"; startedAt: number; thread: ThreadId | null; refused?: string }
   /**
-   * The person pressed Land at an approved head with no live check, and the reviewer owes its quote, from the
-   * description as it is now, of what could not be checked live. `asked` once the request, which carries that
-   * description, is saved to send. The landing's checks follow.
+   * A landing at an approved head with no live check needs the reviewer's quote, from the description as it is now,
+   * of what could not be checked live, as after the person's Land press. `asked` is the digest of the description the
+   * request carries, once it is saved to send, and null before. The landing's checks follow.
    */
-  | { kind: "quoting"; asked: boolean; failing?: ModelFailure }
+  | { kind: "quoting"; asked: string | null; failing?: ModelFailure }
   | { kind: "approved" }
   /**
    * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
