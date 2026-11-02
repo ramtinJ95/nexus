@@ -42,9 +42,6 @@ import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
 
 /** The dashboard's pages, each a GET route. */
-/** How long the Cluster page waits for a node it does not show in full. A health read samples CPU for about a second. */
-const cardReadMs = 3_000;
-
 export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; deployment?: DeploymentOptions | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry, detail } = kit;
   const deploys = (r: Review) => options.reviews?.deploys(r) ?? false;
@@ -75,17 +72,9 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     return c;
   };
 
-  /**
-   * What every node's probe reads of its host now, or why it could not, for the Cluster page's cards. Of the nodes but
-   * the picked one, an offline node is not asked and the others have `cardReadMs` to answer, so the page waits only on
-   * the node it shows.
-   */
-  const healths = async (c: Context, picked: NodeName) => new Map(await Promise.all(c.registry.nodes().map(async (n) => {
-    if (n.name === picked) return [n.name, await nodeHealth(c.caller, n.name).catch((err: unknown) => err as Error)] as const;
-    const read = n.state === "offline" ? Promise.reject(new Error(`${n.name} is offline`)) : nodeHealth(c.caller, n.name);
-    const bounded = Promise.race([read, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${n.name} did not answer within ${cardReadMs / 1000} s`)), cardReadMs).unref())]);
-    return [n.name, await bounded.catch((err: unknown) => err as Error)] as const;
-  })));
+  /** The Cluster page with this node picked: what its probe reads of its host now, or why it could not. */
+  const cluster = async (c: Context, name: NodeName) =>
+    clusterPage(c, name, await nodeHealth(c.caller, name).catch((err: unknown) => err as Error), canDeploy(registry, options.deployment, c.caller));
 
   /** The thread, queued thread or item the home page previews, with a thread's conversation as its page reads it. */
   async function peekOf(c: Context, key: string | null): Promise<Peek | null> {
@@ -120,7 +109,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const c = context(r.caller);
       const first = c.registry.nodes()[0];
       if (first === undefined) return { ...ok(notFound(c, "No nodes yet.")), status: 404 };
-      return ok(clusterPage(c, first.name, await healths(c, first.name)));
+      return ok(await cluster(c, first.name));
     }],
     ["GET", /^\/health$/, (_, r) => ok(healthPage(context(r.caller), options.health?.() ?? null))],
     ["GET", /^\/threads\/([^/]+)$/, async (m, r) => {
@@ -143,7 +132,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const c = context(r.caller);
       const name = m[1]! as NodeName;
       if (c.registry.node(name) === undefined) return { ...ok(notFound(c, `No node ${name}.`)), status: 404 };
-      return ok(clusterPage(c, name, await healths(c, name)));
+      return ok(await cluster(c, name));
     }],
     ["GET", /^\/assets\/([\w.-]+)$/, (m, r) => {
       const asset = assets.get(m[1]!);

@@ -11,7 +11,7 @@ import { countedCapacity } from "../../protocol/observations.ts";
 import { gib, nodePylons, overcommitted } from "../placement.ts";
 import { releaseView } from "../releases.ts";
 import { utc } from "../usage.ts";
-import { seriesLabel, seriesOf } from "../node-metrics.ts";
+import { seriesKey, seriesLabel, seriesOf, type Series } from "../node-metrics.ts";
 import { charts, ranges } from "./graph-data.ts";
 import { Html, html, menu, dot, icon, type Part } from "./view.ts";
 import type { Context } from "./context.ts";
@@ -82,18 +82,39 @@ function meter(label: string, used: number | null, total: number | null, words: 
   return html`<div class="meter"><dt>${label}</dt><dd>${known ? html`<meter min="0" max="${total}" low="${total * 0.75}" high="${total * 0.9}" optimum="0" value="${Math.min(used, total)}"></meter>` : html`<span class="meter-none" aria-hidden="true"></span>`}<span class="meter-words">${words}</span></dd></div>`;
 }
 
+/** What a node's card shows of its host. */
+interface Reading { cpus: number; load: number | null; memory: { totalGiB: number; availableGiB: number } | null; disk: { totalGiB: number; freeGiB: number } }
+
+function liveReading(h: NodeHealth): Reading {
+  const disks = h.disks ?? [{ ...h.disk, paths: [h.disk.path] }];
+  const disk = disks.find((d) => "pylons" in d && d.pylons === true) ?? disks[0]!;
+  return { cpus: h.cpus, load: h.load?.one ?? null, memory: h.memory, disk };
+}
+
+/** How old a recorded sample may be for a card to show it. The control plane samples every online node once a minute. */
+const recentMs = 5 * 60_000;
+
+/** A node's newest recorded sample, or null when it has none from the last `recentMs`. */
+function recordedReading(c: Context, name: NodeName): Reading | null {
+  const m = c.registry.nodeMetrics(name, c.now - recentMs, c.now, c.now);
+  if (m.sampledAt === null || c.now - m.sampledAt > recentMs) return null;
+  const last = (s: Series) => m.series.find((x) => x.key === seriesKey(s))?.avg.at(-1) ?? null;
+  const [cpus, totalGiB, freeGiB, load, memTotal, memAvailable] = ([{ kind: "cpus" }, { kind: "diskTotal" }, { kind: "diskFree" }, { kind: "load1" }, { kind: "memTotal" }, { kind: "memAvailable" }] as const).map(last);
+  if (cpus == null || totalGiB == null || freeGiB == null) return null;
+  return { cpus, load: load ?? null, memory: memTotal == null || memAvailable == null ? null : { totalGiB: memTotal, availableGiB: memAvailable }, disk: { totalGiB, freeGiB } };
+}
+
 /** A node's card: its state, what its probe read of its load, memory and disk, its pylons, release and open checks. */
-function nodeCard(c: Context, n: NodeRecord, health: NodeHealth | Error | undefined, releases: ReturnType<typeof releaseLines>, picked: boolean): Html {
-  const read = health === undefined || health instanceof Error ? null : health;
-  const disks = read === null ? [] : read.disks ?? [{ ...read.disk, paths: [read.disk.path] }];
-  const disk = disks.find((d) => "pylons" in d && d.pylons === true) ?? disks[0];
+function nodeCard(c: Context, n: NodeRecord, reading: Reading | Error | null, releases: ReturnType<typeof releaseLines>, picked: boolean): Html {
+  const read = reading instanceof Error ? null : reading;
+  const disk = read?.disk;
   const problems = c.registry.healthStates().filter((s) => s.status !== "ok" && s.node === n.name);
   const tallies = nodePylons(c.registry, n);
   const asked = c.registry.openNodeQuestions().some((q) => q.node === n.name);
   return html`<article class="node-card${picked && " picked"}" data-node="${n.name}" aria-labelledby="node-${n.name}-h">
 <header class="node-card-h"><span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" id="node-${n.name}-h"${picked && html` aria-current="page"`} title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}${lowDisks(n).length > 0 && html`<em title="${lowDisks(n).map(diskText).join("; ")}">disk low</em>`}</span>${memoryLine(c, n)}${releases.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}</header>
 <dl class="meters">
-${meter("Load", read?.load?.one ?? null, read?.cpus ?? null, read === null ? html`<span class="dim">${health instanceof Error ? "not read" : "unknown"}</span>` : read.load === null ? html`<span class="dim">unknown</span>` : `${read.load.one.toFixed(2)} on ${read.cpus} CPUs`)}
+${meter("Load", read?.load ?? null, read?.cpus ?? null, read === null ? html`<span class="dim"${reading instanceof Error && html` title="${reading.message}"`}>${reading instanceof Error ? "not read" : "no reading in 5 minutes"}</span>` : read.load === null ? html`<span class="dim">unknown</span>` : `${read.load.toFixed(2)} on ${read.cpus} CPUs`)}
 ${meter("Memory", read?.memory === null || read === null ? null : read.memory.totalGiB - read.memory.availableGiB, read?.memory?.totalGiB ?? null, read?.memory == null ? html`<span class="dim">unknown</span>` : `${gib(read.memory.availableGiB)} of ${gib(read.memory.totalGiB)} GiB free`)}
 ${meter("Disk", disk === undefined ? null : disk.totalGiB - disk.freeGiB, disk?.totalGiB ?? null, disk === undefined ? html`<span class="dim">unknown</span>` : `${gib(disk.freeGiB)} of ${gib(disk.totalGiB)} GiB free`)}
 </dl>
@@ -102,9 +123,12 @@ ${problems.length > 0 && html`<ul class="node-problems">${problems.map((p) => ht
 </article>`;
 }
 
-/** Every node's card, then the picked node's cleanup, health, pylon processes and graphs. */
-export function clusterPage(c: Context, name: NodeName, healths: ReadonlyMap<NodeName, NodeHealth | Error>): Html {
-  const health = healths.get(name) ?? new Error(`${name} was not read`);
+/**
+ * Every node's card, then the picked node's cleanup, health, pylon processes and graphs. The picked node's card shows
+ * the read this page made, and every other node's its newest recorded sample, which a reader that may read health
+ * sees, so the page asks one probe.
+ */
+export function clusterPage(c: Context, name: NodeName, health: NodeHealth | Error, mayRead: boolean): Html {
   const releases = Map.groupBy(releaseLines(c), (r) => r.node);
   const nodes = c.registry.nodes();
   const pylonOf = new Map(c.registry.pylonsOn(name).map((p) => [p.pylonId, p.thread]));
@@ -135,7 +159,7 @@ ${health.pylons === null ? html`<p class="empty">This node's backend does not sa
     main: html`<header class="bar">${menu}<div class="crumb"><a class="crumb-p" href="/cluster">Cluster</a><span class="sep" aria-hidden="true">/</span><h1>${name}</h1></div></header>
 <div class="scroll"><div class="page page-cluster"><section class="cluster" id="cluster-nodes" aria-label="Nodes" data-live>
 <div class="ov-head"><h2>Nodes</h2><span class="count">${nodes.length}</span><span class="dim">Desired release ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</span></div>
-<div class="node-cards">${nodes.map((n) => nodeCard(c, n, healths.get(n.name), releases.get(n.name) ?? [], n.name === name))}</div>
+<div class="node-cards">${nodes.map((n) => nodeCard(c, n, n.name === name ? (health instanceof Error ? health : liveReading(health)) : mayRead ? recordedReading(c, n.name) : new Error("Only a deployer reads a node's health"), releases.get(n.name) ?? [], n.name === name))}</div>
 </section>
 <div class="node-detail"><h2 class="node-detail-h">${name}</h2><div class="node-live" id="node-cleanup" data-live>${cleanup(c, name)}</div><div class="node-live" id="node-health" data-live>
 ${reading}
