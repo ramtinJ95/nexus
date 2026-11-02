@@ -165,12 +165,15 @@ export const prOf = (d: ThreadDetail) => d.pullRequests?.find((p) => p.repo === 
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
  * Land button, and then the landing's steps until it lands or ends for them again. The land route decides who may
  * land, and the page says so up front rather than offer a button that fails. `id` names its elements, so the inbox
- * can show several.
+ * can show several. A Needs you `card` leaves out the title and the pull request, which its head and strip say, and
+ * folds what the person need not read to decide.
  */
-export function landing(c: Context, d: ThreadDetail, id = (name: string) => name): Html | null {
+export function landing(c: Context, d: ThreadDetail, id = (name: string) => name, card = false): Html | null {
   const r = d.review;
   if (r == null) return null;
   const prLink = html`<a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a>`;
+  const top = (title: string) => !card && html`<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2>${prLink}</div>`;
+  const named = (title: string) => card ? html`aria-label="${title}"` : html`aria-labelledby="${id("landing-h")}"`;
   const at = landingAt(r);
   if (at !== null) {
     const deploys = c.deploys(r);
@@ -182,8 +185,8 @@ export function landing(c: Context, d: ThreadDetail, id = (name: string) => name
       : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
     const title = at.step === "landed" ? "Landed" : r.phase.kind === "needs-person" ? "Merged, not deployed" : r.phase.kind === "rolling-back" ? "Rolling back" : "Landing";
     const phase = r.phase;
-    return html`<section class="landing" aria-labelledby="${id("landing-h")}">
-<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2>${prLink}</div>
+    return html`<section class="landing" ${named(title)}>
+${top(title)}
 <ol class="land-steps">${landingSteps.map(([step, label], i) => {
   const state = stateOf(step, i);
   return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`;
@@ -202,7 +205,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
 </section>`;
   }
   const pr = prOf(d);
-  if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, id) : null;
+  if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, id, card) : null;
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
   const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
@@ -219,21 +222,26 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   const confirm = waived.length === 0
     ? `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}? ${checks} the merge policy again, merges that commit${deploys}.`
     : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? ${checks} everything else again, merges that commit${deploys}.`;
-  return html`<section class="landing" aria-labelledby="${id("landing-h")}">
-<div class="land-top"><h2 id="${id("landing-h")}">${held ? "Held for you" : "Approved, not landed"}</h2>${prLink}</div>
-${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}
-<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind}) in round ${roundsSpent(r)} of ${r.maxRounds} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
-<details id="${id("land-why")}" open><summary>Why it waits for you</summary>
-${reasons.length === 0 ? html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`
-  : html`<ul class="land-reasons">${rules.map((h) => html`<li>${h.reason} ${h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`}<br><span class="dim">${h.why}</span></li>`)}</ul>`}
-<h3>The reviewer's findings</h3>
+  const tag = (h: typeof rules[number]) => h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`;
+  const nothing = html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`;
+  const found = html`<h3>The reviewer's findings</h3>
 ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class="land-findings">${findings.map((f) => {
   const answer = r.rounds.flatMap((rd) => rd.answers ?? []).findLast((a) => a.id === f.id);
   return html`<li><span class="tag${blocking(f) ? " tag-bad" : ""}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`}: ${f.summary}${answer && html` <span class="dim">(builder: ${answer.action}${answer.reason && `, ${answer.reason}`})</span>`}</li>`;
 })}</ul>`}
 ${round.check !== null && html`<details id="${id("land-check")}"><summary>.nexus/check ${round.check.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.check.output}</pre></details>`}
-${round.live?.kind === "ran" && html`<details id="${id("land-live")}"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}
-</details>
+${round.live?.kind === "ran" && html`<details id="${id("land-live")}"><summary>The live check ${round.live.passed ? "passed" : "failed"} at ${round.head.slice(0, 12)}</summary><pre>${round.live.output}</pre></details>`}`;
+  const title = held ? "Held for you" : "Approved, not landed";
+  return html`<section class="landing" ${named(title)}>
+${top(title)}
+${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}
+<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind})${!card && ` in round ${roundsSpent(r)} of ${r.maxRounds}`} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
+${card ? html`${reasons.length === 0 ? nothing : html`<ul class="land-reasons">${rules.map((h, i) => html`<li><details id="${id(`land-hold-${i}`)}"><summary>${h.reason} ${tag(h)}</summary><span class="dim">${h.why}</span></details></li>`)}</ul>`}
+<details id="${id("land-why")}"><summary>Findings and checks</summary>${found}</details>`
+  : html`<details id="${id("land-why")}" open><summary>Why it waits for you</summary>
+${reasons.length === 0 ? nothing : html`<ul class="land-reasons">${rules.map((h) => html`<li>${h.reason} ${tag(h)}<br><span class="dim">${h.why}</span></li>`)}</ul>`}
+${found}
+</details>`}
 ${moved !== null ? html`<p class="land-note">The PR watch last read the pull request at ${short(moved)}, not ${short(round.head)}, so ${short(round.head)} is not offered for landing. Nexus confirms the head with GitHub, and a new head gets a new round, or holds for you when no round is left.</p>`
   : stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
   : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="${id("land")}" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} and any rebase of it that leaves the change as it is. Landing checks everything else again.</p>`}</div>`
@@ -247,15 +255,16 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
  * One that merged or closed outside the review has nothing left to review. Cancelling it ends it for the person, who
  * then owns the pull request, and archives its reviewer.
  */
-function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof prOf>, id: (name: string) => string): Html {
+function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof prOf>, id: (name: string) => string, card: boolean): Html {
   const outside = pr === undefined || pr.state === "open" ? null : pr.state;
   const land = c.registry.project(d.thread.project)?.autoReview?.land === true;
   const refusal = land || c.landRefusal === "no review loop" ? c.landRefusal : null;
   const again = outside === null && d.thread.status === "active";
   const confirm = `Review pull request #${r.pr.number}, "${r.pr.title}", again? A new reviewer thread starts at round 1${land ? ", and Nexus lands the pull request once it approves, as this project lands its reviews" : ""}.`;
-  return html`<section class="landing held-review" aria-labelledby="${id("landing-h")}">
-<div class="land-top"><h2 id="${id("landing-h")}">${outside === "merged" ? "Merged outside its review" : outside === "closed" ? "Closed outside its review" : "Review needs you"}</h2><a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a></div>
-<p class="land-meta">Ended in round ${roundsSpent(r)} of ${r.maxRounds} · reviewer <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})</p>
+  const title = outside === "merged" ? "Merged outside its review" : outside === "closed" ? "Closed outside its review" : "Review needs you";
+  return html`<section class="landing held-review" ${card ? html`aria-label="${title}"` : html`aria-labelledby="${id("landing-h")}"`}>
+${!card && html`<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2><a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a></div>`}
+<p class="land-meta">${card ? "Reviewer" : `Ended in round ${roundsSpent(r)} of ${r.maxRounds} · reviewer`} <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})</p>
 ${r.phase.kind === "needs-person" && html`<ul class="error">${r.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
 ${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} merged on GitHub outside this review, so nothing is left to review or land.${c.deploys(r) && " Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run."} Cancel the review once nothing more is needed.</p>`
   : outside === "closed" ? html`<p class="land-note">Pull request #${r.pr.number} closed on GitHub, so nothing is left to review or land. Cancel the review once nothing more is needed.</p>`
