@@ -101,7 +101,9 @@ const shown = (strips: readonly Strip[]) => Math.max(5, strips.filter((s) => s.l
 /** The bays, left to right in the order work moves, each a live region the poll swaps on its own. */
 export function board(c: Context): Html {
   const bays = boardStrips(c);
-  return html`<div class="board" id="board" role="list" aria-label="Work by step">
+  const held = (step: Step) => (bays.get(step) ?? []).filter((x) => x.life.stage === "held").length;
+  return html`<nav class="bay-index" id="bay-index" aria-label="Steps" data-live>${steps.map((step) => html`<a href="#bay-${step}"${(bays.get(step)?.length ?? 0) === 0 && html` class="none"`}>${stages.find((x) => x.stage === step)!.label} <b>${bays.get(step)?.length ?? 0}</b>${held(step) > 0 && html`<span class="bi-held">${unseen(", ")}${held(step)} held</span>`}</a>`)}</nav>
+<div class="board" id="board" role="list" aria-label="Work by step">
 ${steps.map((step) => {
   const s = stages.find((x) => x.stage === step)!;
   const strips = bays.get(step) ?? [];
