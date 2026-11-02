@@ -5,6 +5,7 @@ import {
 	constants,
 	copyFile,
 	mkdir,
+	mkdtemp,
 	readdir,
 	readFile,
 	rename,
@@ -112,6 +113,23 @@ function privateRoot(root: string): Promise<void> {
 const controllerAlive = (dir: string) => published(join(dir, "controller.pid"));
 /** A client that holds the launch lock is still to start the controller, or waits for it to come up. */
 const launching = (dir: string) => published(join(dir, "launch.lock", "owner"));
+/**
+ * Takes a lock directory with this process's identity already in it, so no one finds it without an owner. A rename
+ * replaces only an empty directory, which is all a taker that died before publishing its identity left. False when
+ * another process holds it.
+ */
+async function takeLock(lock: string): Promise<boolean> {
+	const aside = await mkdtemp(`${lock}-`);
+	try {
+		await publishIdentity(join(aside, "owner"));
+		await rename(aside, lock);
+		return true;
+	} catch (error) {
+		await rm(aside, { recursive: true, force: true });
+		if (existsError(error, "ENOTEMPTY") || existsError(error, "EEXIST")) return false;
+		throw error;
+	}
+}
 /** A missing identity file means the process has not published itself yet, or is gone. */
 async function published(file: string): Promise<boolean> {
 	const identity = await readIdentity(file);
@@ -163,15 +181,14 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		}
 		const lock = join(owner, "launch.lock");
 		try {
-			await mkdir(lock, { mode: 0o700 });
+			// A launch holds it, or one that died left it, which the next launch recovers.
+			if (!(await takeLock(lock))) return false;
 		} catch (error) {
-			// A launch holds it, or one that died left it, which the next launch recovers. Its instance may also be gone.
-			if (existsError(error, "EEXIST") || existsError(error, "ENOENT")) return false;
+			// Its instance is gone.
+			if (existsError(error, "ENOENT")) return false;
 			throw error;
 		}
 		try {
-			// So a launch that meets the lock waits on a live owner, and one after a crash here recovers it.
-			await publishIdentity(join(lock, "owner"));
 			if (await controllerAlive(owner) || !(await old(path))) return false;
 			await rm(path, { recursive: true, force: true });
 			return true;
@@ -217,10 +234,7 @@ async function launch(
 			`Sandbox controller ${daemonPath} is missing`,
 		);
 	const lock = join(dir, "launch.lock");
-	try {
-		await mkdir(lock, { mode: 0o700 });
-	} catch (error) {
-		if (!existsError(error, "EEXIST")) throw error;
+	if (!(await takeLock(lock))) {
 		const recovery = join(lock, "recovery");
 		try {
 			await mkdir(recovery, { mode: 0o700 });
@@ -244,13 +258,15 @@ async function launch(
 					"Sandbox controller is still starting. Retry inspect shortly",
 				);
 			await rm(lock, { recursive: true });
-			await mkdir(lock, { mode: 0o700 });
+			if (!(await takeLock(lock)))
+				throw new Error(
+					"Sandbox start is already in progress. Retry inspect shortly",
+				);
 		} finally {
 			await rm(recovery, { recursive: true, force: true });
 		}
 	}
 	try {
-		await publishIdentity(join(lock, "owner"));
 		// The boot's resources, so the node counts what a VM still coming up holds.
 		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
 		await rm(controlSocket(dir), { force: true });

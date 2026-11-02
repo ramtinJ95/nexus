@@ -2,7 +2,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { chmod, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -121,6 +121,7 @@ test("the start sweep removes an old scratch directory no controller owns, and k
 	const stopped = await scratch(scratchDirectory(c.root, stoppedDir), 2 * hour);
 	const launchingDir = directory(c.root, "instances", "pylon-t3");
 	await privateDirectory(join(launchingDir, "launch.lock"));
+	await publishIdentity(join(launchingDir, "launch.lock", "owner"));
 	const launching = await scratch(scratchDirectory(c.root, launchingDir), 2 * hour);
 	const destroyed = await scratch(join(c.root, "tmp", "f7352d554b6b"), 2 * hour);
 	const young = await scratch(join(c.root, "tmp", "0123456789ab"), 60_000);
@@ -159,4 +160,34 @@ test("the start sweep keeps a directory whose controller.pid it cannot read or w
 	assert.equal(existsSync(join(tornDir, "launch.lock")), false, "the sweep left the launch lock it held");
 	const logged = errors.mock.calls.map((call) => String(call.arguments[0]));
 	assert.deepEqual(logged.sort(), [basename(locked), basename(torn)].sort().map((name) => `scratch sweep kept ${name}:`));
+});
+
+const spec = { resources: { cpus: 1, memoryGiB: 1 }, allowedHosts: [], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null };
+
+test("a launch lock that an interrupted sweep or launch left without an owner is taken by the next sweep and the next launch", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const interrupted = async (instance: string, age: number) => {
+		const dir = directory(root, "instances", instance);
+		await privateDirectory(dir);
+		await saveJson(join(dir, "record.json"), { version: 1, name: instance, config: {}, createdAt: new Date().toISOString(), labels: {} });
+		// What a probe killed between making the lock and publishing its identity in it left.
+		await privateDirectory(join(dir, "launch.lock"));
+		const scratch = scratchDirectory(root, dir);
+		await privateDirectory(scratch);
+		const at = new Date(Date.now() - age);
+		await utimes(scratch, at, at);
+		return { dir, scratch };
+	};
+	const dead = await interrupted("pylon-dead", 2 * 60 * 60_000);
+	const paused = await interrupted("pylon-paused", 60_000);
+	assert.deepEqual(await sweepScratch(root), [basename(dead.scratch)]);
+	assert.equal(existsSync(paused.scratch), true);
+	assert.deepEqual([dead, paused].map(({ dir }) => existsSync(join(dir, "launch.lock"))), [false, false], "the sweep left an ownerless lock");
+
+	const starting = await interrupted("pylon-starting", 60_000);
+	// Fails the launch at its first write after it holds the lock, so no controller is spawned.
+	await mkdir(join(starting.dir, "status.json"));
+	await assert.rejects(run(root, { action: "start", name: "pylon-starting", boot: spec }), /EISDIR/);
+	assert.equal(existsSync(join(starting.dir, "launch.lock")), false, "the launch left the lock it took");
 });
