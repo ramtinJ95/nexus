@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ReleaseReport } from "../deploy/model.ts";
 import type { DiskFact } from "../protocol/observations.ts";
 import { testCapacity } from "../test-kit.ts";
@@ -40,6 +40,7 @@ function healthy(over: Partial<DoctorFacts> = {}): DoctorFacts {
     backup: { ranAt: iso(now - 3 * hour), succeeded: true, newest: { name: "2026-11-01T09-00-00Z", verified: true, createdAt: iso(now - 3 * hour) } },
     login: { provider: "openai", modelId: "gpt-6-astra", credential: "oauth", offered: ["gpt-6-astra", "gpt-6-mini"], refresh: { ok: true } },
     certificate: { kind: "served", hostname: "rj-firebat.example.ts.net", validTo: iso(now + 60 * day), forHostname: true },
+    keptArchives: [],
     ...over,
   };
 }
@@ -61,7 +62,7 @@ test("a healthy install passes every check, the control plane's first and then e
   assert.equal(r.at, iso(now));
   assert.equal(r.status, "ok");
   assert.deepEqual(r.checks.map((c) => [c.node, c.name, c.status]), [
-    [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "certificate", "ok"],
+    [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"],
     [node, "online", "ok"], [node, "release", "ok"], [node, "disk", "ok"], [node, "pylons", "ok"],
     [peer, "online", "ok"], [peer, "release", "ok"], [peer, "disk", "ok"], [peer, "pylons", "ok"],
   ]);
@@ -120,6 +121,25 @@ test("the backup is ok while the newest is verified and under 26 hours old, warn
   expect(healthy({ backup: { ranAt: ran, succeeded: false, newest: null } }), null, "backup", "fail", /no complete backup exists/);
   expect(healthy({ backup: "missing" }), null, "backup", "fail", /no backup run is recorded in the 3 days this control plane has run.*nexus-backup\.timer is enabled/);
   expect(healthy({ backup: { unreadable: "EACCES: permission denied" } }), null, "backup", "fail", /unreadable: EACCES/);
+});
+
+test("archived disks are ok kept for a fresh backup, warn while one waits for its usage to be read, and fail after 3 failed reads in a row or once the oldest read waits on a backup over 26 hours", () => {
+  const archived = (id: string, over: Partial<DoctorFacts["keptArchives"][number]> = {}): DoctorFacts["keptArchives"][number] => ({
+    id: id as ThreadId, title: `thread ${id}`, status: "archived", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, archivedAt: now - 25 * hour, ...over,
+  });
+  const failure = (count: number, reason = "its pylon did not boot within 10 minutes") => ({ settleFailure: { reason, at: now - hour, count } });
+  const keptArchives = (...threads: DoctorFacts["keptArchives"]) => healthy({ keptArchives: threads });
+  expect(keptArchives(), null, "archived-disks", "ok", /^no archived disk is kept past its 24 hours$/);
+  expect(keptArchives(archived("th-young", { archivedAt: now - 23 * hour })), null, "archived-disks", "ok", /no archived disk is kept/);
+  expect(keptArchives(archived("th-gone", { usageSettledAt: now - 2 * hour, backedUpAt: now - hour })), null, "archived-disks", "ok", /no archived disk is kept/);
+  expect(keptArchives(archived("th-read", { usageSettledAt: now - 2 * hour, backedUpAt: now - 3 * hour })), null, "archived-disks", "ok", /^1 archived disk waits past the 24 hours for the next backup, and then goes$/);
+  expect(keptArchives(archived("th-unread")), null, "archived-disks", "warn", /^th-unread \(thread th-unread\) is kept past its 24 hours, as its token usage is not read to its end yet\. Each is read once its pylon paused/);
+  expect(keptArchives(archived("th-a", failure(2)), archived("th-b")), null, "archived-disks", "warn", /^2 archived disks wait past the 24 hours for the token usage on them to be read to its end, 1 after a failed read, the last because its pylon did not boot/);
+  expect(keptArchives(archived("th-a", failure(3, "its pylon failed: gave up after 5 failed attempts")), archived("th-b", failure(1))), null, "archived-disks", "fail",
+    /^reading the token usage on the disk of th-a \(thread th-a\) failed 3 or more times in a row, the last because its pylon failed: gave up after 5 failed attempts, so it is kept\. nexus show says why, nexus retry-pylon/);
+  expect(keptArchives(archived("th-read", { usageSettledAt: now - 27 * hour })), null, "archived-disks", "fail",
+    /^1 archived disk waits past the 24 hours for a backup that begins after the token usage on it was read, the oldest read 27 h ago\. The backup check says why.*nexus-backup/);
+  expect(keptArchives(archived("th-read", { usageSettledAt: now - 27 * hour, backedUpAt: now - 28 * hour })), null, "archived-disks", "fail", /the oldest read 27 h ago/);
 });
 
 test("the harness's login is ok signed in and offering its model, and fails without the provider, signed out, refusing to refresh, or not offering the model", () => {

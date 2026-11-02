@@ -3,8 +3,9 @@
  * holds, gathered by src/control/doctor-run.ts. Each gives ok, warn or fail with one line that says what is wrong and
  * what to do.
  */
-import type { NodeName } from "../ids.ts";
+import type { NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
+import { archivedDiskMs, diskKept, type ActivityFacts } from "../reconcile.ts";
 import { countedCapacity } from "../protocol/observations.ts";
 import type { ReleaseReport, ReleaseView } from "../deploy/model.ts";
 import type { LoginState } from "../harness/credentials.ts";
@@ -30,6 +31,8 @@ export interface DoctorFacts {
   /** `unreadable` holds the error's code, never its message, which can carry the login's own text. */
   login: LoginState | { unreadable: string };
   certificate: CertificateFact;
+  /** The archived threads whose disk may be kept for their usage, as the registry's keptArchives lists them, less those whose node has no disk for them. */
+  keptArchives: readonly (ActivityFacts & { id: ThreadId; title: string })[];
 }
 
 const minute = 60_000;
@@ -48,6 +51,8 @@ export const rolloutMs = 30 * minute;
 /** The API asks tailscaled for a certificate valid a week and reloads it every 12 hours, so less than this left means renewal fails. */
 export const certificateWarnMs = 6 * day;
 export const certificateFailMs = 2 * day;
+/** Settles of one archive that failed this many times in a row will not succeed on their own: its pylon failed, or its disk does not boot or read. */
+export const settleFailuresFail = 3;
 
 const span = (ms: number) => ms < hour ? `${Math.max(1, Math.round(ms / minute))} min` : ms < 2 * day ? `${Math.round(ms / hour)} h` : `${Math.round(ms / day)} days`;
 const ok = (text: string): Verdict => ({ status: "ok", text });
@@ -139,6 +144,30 @@ function certificate(f: DoctorFacts): Verdict {
   return ok(`the dashboard's certificate for ${c.hostname} is valid for ${span(left)}`);
 }
 
+function archivedDisks(f: DoctorFacts): Verdict {
+  const kept = f.keptArchives.filter((t) => t.archivedAt !== undefined && f.now - t.archivedAt >= archivedDiskMs && diskKept(t) !== null);
+  if (kept.length === 0) return ok("no archived disk is kept past its 24 hours");
+  const named = (ts: typeof kept) => ts.map((t) => `${t.id} (${t.title})`).join(", ");
+  const lastFailure = (ts: typeof kept) => ts.flatMap((t) => t.settleFailure ?? []).toSorted((a, b) => b.at - a.at)[0]?.reason;
+  const failing = kept.filter((t) => (t.settleFailure?.count ?? 0) >= settleFailuresFail);
+  if (failing.length > 0) {
+    return fail(`reading the token usage on the disk of ${named(failing)} failed ${settleFailuresFail} or more times in a row, the last because ${lastFailure(failing)}, so ${failing.length === 1 ? "it is" : "they are"} kept. nexus show says why, nexus retry-pylon retries a failed pylon, and nexus delete deletes a thread with its disk unread`);
+  }
+  const read = kept.flatMap((t) => t.usageSettledAt ?? []);
+  const oldest = f.now - Math.min(...read);
+  if (read.length > 0 && oldest > backupMaxAgeMs) {
+    return fail(`${read.length === 1 ? "1 archived disk waits" : `${read.length} archived disks wait`} past the 24 hours for a backup that begins after the token usage on it was read, the oldest read ${span(oldest)} ago. The backup check says why none verified since, and sudo systemctl status nexus-backup on the control plane's machine says more`);
+  }
+  const unread = kept.filter((t) => t.usageSettledAt === undefined);
+  if (unread.length > 0) {
+    const failed = unread.filter((t) => t.settleFailure !== undefined);
+    const what = unread.length === 1 ? `${named(unread)} is kept past its 24 hours, as ${diskKept(unread[0]!)}`
+      : `${unread.length} archived disks wait past the 24 hours for the token usage on them to be read to its end${failed.length === 0 ? "" : `, ${failed.length} after a failed read, the last because ${lastFailure(failed)}`}`;
+    return warn(`${what}. Each is read once its pylon paused, while its node is online with a current probe and room for it`);
+  }
+  return ok(`${read.length === 1 ? "1 archived disk waits" : `${read.length} archived disks wait`} past the 24 hours for the next backup, and then ${read.length === 1 ? "goes" : "go"}`);
+}
+
 const nodeChecks: Readonly<Record<NodeCheckName, (n: NodeSummary, f: DoctorFacts) => Verdict>> = {
   online,
   release: (n, f) => release(f.release.nodes.find((r) => r.node === n.name && r.role === "probe"), f.release.desired, f.now),
@@ -150,6 +179,7 @@ const controlChecks: Readonly<Record<ControlCheckName, (f: DoctorFacts) => Verdi
   backup,
   login,
   certificate,
+  "archived-disks": archivedDisks,
 };
 
 /** Every check, the control plane's first and then each node's. */
