@@ -58,7 +58,7 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
-  const free = freeMemory(registry, node.name, o, Date.now());
+  const free = freeMemory(registry, node.name, o, c, Date.now());
   // With no fresh reading of its free memory, the node is weighed by its commitments alone.
   if (free !== null) {
     const freeLeft = free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB;
@@ -82,22 +82,31 @@ const memoryHeadroomGiB = 1;
 const freshReadMs = 2 * backgroundReadMs;
 
 /**
- * The node's MemAvailable in its newest health read, and how much of it the pylons that read named are yet to take: a
- * guest takes its memory from the host only as it touches it, so a pylon whose processes hold less than its size will
- * take the rest. A pylon the read did not name, on a backend that cannot name its processes or booted since the read,
- * counts as all touched. One the observation does not count yet is left out, since `roomLeft` counts all it asked for.
- * Null without a read in the last `freshReadMs`, or from a host that reports no memory.
+ * The node's MemAvailable in its newest health read, and how much of it the node's up pylons are yet to take: a guest
+ * takes its memory from the host only as it touches it, so a pylon whose processes hold less than its size will take
+ * the rest. An up pylon the read did not name booted since the read, so it is yet to take all of it, on a node whose
+ * probe names its pylons' processes. Only pylon-vm's does, and only its probe reports a filesystem of pylons' disks. On
+ * any other node, such as a Docker node, such a pylon counts as all touched, since no read could say. One the
+ * observation does not count yet is left out, since `roomLeft` counts all it asked for. Null without a read in the
+ * last `freshReadMs`, or from a host that reports no memory.
  */
-function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, now: number): { availableGiB: number; untouchedGiB: number } | null {
+function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number): { availableGiB: number; untouchedGiB: number } | null {
   const read = registry.latestHealthSample(node);
   const availableGiB = read?.values.memAvailable;
   if (read == null || now - read.at > freshReadMs || availableGiB === undefined) return null;
-  const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
-  const counted = new Map(registry.pylonsWithStatusOn(node).flatMap(({ pylon }) =>
-    uncounted(pylon, seen.get(pylon.pylonId)).memoryGiB > 0 ? [] : [[pylon.pylonId, pylon.boot.resources.memoryGiB] as const]));
-  const untouchedGiB = Object.entries(read.values).reduce((sum, [key, resident]) => {
+  const resident = new Map(Object.entries(read.values).flatMap(([key, value]) => {
     const s = seriesOf(key);
-    return s?.kind === "pylonResident" ? sum + Math.max(0, (counted.get(s.pylon) ?? 0) - resident) : sum;
+    return s?.kind === "pylonResident" ? [[s.pylon, value] as const] : [];
+  }));
+  const namesProcesses = c.disks?.some((d) => d.pylons === true) === true;
+  const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
+  const untouchedGiB = registry.pylonsWithStatusOn(node).reduce((sum, { pylon }) => {
+    const p = seen.get(pylon.pylonId);
+    const up = p !== undefined && p.phase !== "stopped" && !(p.phase === "broken" && p.cause === "controller");
+    if (!up || uncounted(pylon, p).memoryGiB > 0) return sum;
+    const size = pylon.boot.resources.memoryGiB;
+    const held = resident.get(pylon.pylonId);
+    return sum + (held !== undefined ? Math.max(0, size - held) : namesProcesses ? size : 0);
   }, 0);
   return { availableGiB, untouchedGiB };
 }
