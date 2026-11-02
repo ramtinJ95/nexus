@@ -1157,7 +1157,7 @@ A review that ended `closed` or `cancelled` says nothing of the pull request sin
 
 `nexus items` lists each item with its ID, phase, why, thread and project, its age and its title. Cancelled items are listed only with `--all`. `nexus item show <item>` prints its title, ID and project, phase and why, thread, worker and model, the items it is after, the first line of its brief, and who added and approved it.
 
-The dashboard's home page shows each item with no thread yet at its phase in the work in flight, and its preview says why, what it is after and its brief. An item that became a thread shows as that thread. An item with no thread has Cancel, and Approve where its project waits for the person. An item held for the person, such as one waiting for approval, is in Needs you instead. `/pipeline` redirects there.
+The dashboard's home page shows each item with no thread yet at its phase in the work in flight, and its preview says why, what it is after and its brief. An item that became a thread shows as that thread. An item with no thread has Cancel, and Approve where its project waits for the person. An item held for the person, such as one waiting for approval, is in Needs you instead, where its card says what it is after and its brief, and its line in the work in flight leads to that card. `/pipeline` redirects there.
 
 Pipeline items need the queue, so without the control plane's GitHub token the item routes answer 409 `pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured`.
 
