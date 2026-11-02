@@ -965,14 +965,13 @@ h4.md-h { font-size: 1.07em; }
   .need-body { padding: 10px 12px 12px; }
   .ov-life thead { display: none; }
   .ov-life, .ov-life tbody, .ov-life .phase-h, .ov-life .phase-h th { display: block; }
-  .ov-life .phase-h th { width: auto; }
   .ov-life tbody tr:not(.phase-h) { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--line-soft); }
   .ov-life tbody tr:not(.phase-h) td { border: 0; }
   .ov-life tbody tr:not(.phase-h) td:first-child { padding-bottom: 0; }
   .ov-life tbody tr:not(.phase-h) td:nth-child(3) { grid-row: 2; grid-column: 1 / -1; padding: 2px 10px 8px 26px; }
   .ov-life tbody tr:not(.phase-h) .ov-when { grid-row: 1; grid-column: 2; padding-bottom: 0; text-align: right; }
   .ov-life .ov-why { white-space: normal; }
-  .ov-life .phase-h th { white-space: normal; }
+  .ov-life .phase-h th { width: auto; white-space: normal; }
   .phase-means { display: block; margin: 2px 0 0; }
   .life .life-at { display: none; }
   .ov-nodes th:first-child { width: 58%; }

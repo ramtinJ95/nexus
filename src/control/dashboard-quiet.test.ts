@@ -60,13 +60,16 @@ function textOf(html: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
-/** Acme's overview as a reader takes it in: the titles its table lists, the quiet fold's tag and summary, and the titles in it. */
+/**
+ * Acme's overview as a reader takes it in: the titles its phases list, the quiet fold's tag and summary, and the titles
+ * in it. Each phase lists every project's threads, and acme is the only project here.
+ */
 function overviewOf(html: string) {
-  const section = html.split("<section").find((chunk) => chunk.includes('aria-labelledby="project-acme"'))!.split("</section>")[0]!;
-  const [listed, fold = ""] = section.split(/(?=<details class="ov-closed" id="quiet-acme")/);
-  const quiet = fold.split("</details>")[0]!;
+  const overview = html.split('id="overview"')[1]!;
+  const listed = overview.split('<section class="ov-folds"')[0]!;
+  const quiet = overview.split(/(?=<details class="ov-closed" id="quiet-acme")/)[1]?.split("</details>")[0] ?? "";
   const titles = (part: string) => [...part.matchAll(/<a href="\/threads\/[^"]+">([^<]*)<\/a>/g)].map((m) => m[1]).toSorted();
-  return { listed: titles(listed!), tag: /^<details[^>]*>/.exec(quiet)?.[0], summary: /<summary>([^<]*)<\/summary>/.exec(quiet)?.[1], folded: titles(quiet), text: textOf(section) };
+  return { listed: titles(listed), tag: /^<details[^>]*>/.exec(quiet)?.[0], summary: /<summary>([^<]*)<\/summary>/.exec(quiet)?.[1], folded: titles(quiet), text: textOf(overview) };
 }
 
 /** Acme's sidebar group the same way, each row read as its status dot's name, then its text. */
@@ -137,9 +140,9 @@ test("the overview's quiet fold counts its threads, lists them in its own table,
   const overview = overviewOf(await s.page());
   assert.deepEqual(overview.listed, [], "no table lists threads above the fold");
   assert.doesNotMatch(overview.text, /No open threads/, "the project does not claim it has no open threads");
-  assert.equal(overview.summary, "2 quiet for over 8 hours");
+  assert.equal(overview.summary, "2 quiet for over 8 hours in acme");
   assert.equal(overview.tag, '<details class="ov-closed" id="quiet-acme">', "the fold starts closed");
-  assert.match(overview.text, /2 quiet for over 8 hours Thread Desired Observed Node Human Agent (Old spike|Older spike) .* (Old spike|Older spike) /);
+  assert.match(overview.text, /2 quiet for over 8 hours in acme Thread Project Where it is Node Last (Old spike|Older spike) .* (Old spike|Older spike) /);
   assert.deepEqual(overview.folded, ["Old spike", "Older spike"]);
 });
 

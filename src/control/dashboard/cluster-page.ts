@@ -59,7 +59,7 @@ function nodesTable(c: Context, picked: NodeName | null, healths: ReadonlyMap<No
 <td class="wide">${memoryCell(c, n)}</td>
 <td class="wide">${read === null ? unknown : html`${gib(read.disk.freeGiB)} of ${gib(read.disk.totalGiB)} GiB free`}</td>
 <td class="wide">${pylons === null ? unknown : html`${pylons.up.pylons} up${pylons.paused.pylons > 0 && html`<small>${pylons.paused.pylons} paused</small>`}`}</td>
-<td class="wide ov-release">${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? r.commit ?? ""}">${r.role} ${r.commit?.slice(0, 12) ?? "unknown"}, ${r.state}</small>`)}</td>
+<td class="wide ov-release">${releases.get(n.name)?.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}</td>
 </tr>`;
 })}</tbody>
 </table></section>`;

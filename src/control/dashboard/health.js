@@ -12,7 +12,12 @@ export function healthNotice(change) {
   const check = `${change.node ?? "Control plane"} ${change.name}`;
   const worse = ranks.indexOf(change.status) > ranks.indexOf(change.from);
   const title = worse ? `${check}: ${change.status}` : change.status === "ok" ? `${check} recovered` : `${check}: ${change.status}, better than ${change.from}`;
-  return { key: JSON.stringify([change.node, change.name]), title, body: change.text, url: "/health", quiet: !worse };
+  return { key: JSON.stringify([change.node, change.name]), title, body: change.text, url: "/cluster#health", quiet: !worse };
+}
+
+/** Whether a path shows the health checks: the Cluster page, with or without a node picked. */
+export function showsChecks(path) {
+  return path === "/cluster" || path.startsWith("/nodes/");
 }
 
 /** The seen mark a Health page owes for the newest problem it shows, or null when it marked that one or shows none. */
@@ -75,16 +80,17 @@ export function showHealth(change, notificationChannel, refreshed = refresh) {
   if (!fresh(change)) return;
   const n = healthNotice(change);
   void shown.get(n.key)?.then((close) => close());
-  const page = location.pathname === "/health" ? "health" : null;
+  const page = showsChecks(location.pathname) ? "health" : null;
   const secure = window.isSecureContext && "Notification" in window;
   const channel = n.quiet ? (focused() && page === null ? "toast" : null) : notificationChannel(focused(), page, "health", secure, secure ? Notification.permission : "unavailable");
   shown.set(n.key, notice(channel, n.title, n.body, n.url));
-  // The sidebar's count, and the Health page, show the change without waiting for the next poll.
+  // The sidebar's count, and the Cluster page's checks, show the change without waiting for the next poll.
   void refreshed();
 }
 
-/** Marks the problems the Health page shows seen once the person looks at it, which clears the sidebar's count. */
+/** Marks the problems the Cluster page shows seen once the person looks at it, which clears the sidebar's count. */
 export function markHealthSeen() {
+  if (!showsChecks(location.pathname)) return;
   let marked = null;
   let marking = false;
   setInterval(async () => {

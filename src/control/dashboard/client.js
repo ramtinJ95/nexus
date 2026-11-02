@@ -87,7 +87,7 @@ const notifications = coordinator((row) => {
 });
 const health = (change) => void checks.then((m) => m.showHealth(change, notificationChannel));
 const caughtUp = (hand) => void checks.then((m) => m.caughtUp(hand));
-if (location.pathname === "/health") void checks.then((m) => m.markHealthSeen());
+void checks.then((m) => m.markHealthSeen());
 const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
 if (window.isSecureContext && "Notification" in window) {
   permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };

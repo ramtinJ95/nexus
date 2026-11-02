@@ -116,6 +116,9 @@ function sidebarOf(html: string) {
   };
 }
 
+/** The Cluster page's table of nodes, the place each node's facts show now that the sidebar has none. */
+const clusterNodes = async (s: { call: (method: string, path: string) => Promise<{ text: string }> }) => (await s.call("GET", "/cluster")).text.split('id="cluster-nodes"')[1]!.split('id="health"')[0]!;
+
 /** One overview row per thread, as its table cells read. */
 function overviewRow(html: string, thread: Thread): string {
   const row = html.split('id="overview"')[1]!.split(/<tr(?: class="[^"]*")?>/).find((chunk) => chunk.includes(`href="/threads/${thread.id}"`));
@@ -152,7 +155,7 @@ function conversationOf(html: string) {
   };
 }
 
-test("the overview lists each project's open threads with their phases, node and activity, and folds the archived", async (t) => {
+test("the overview lists every open thread under the step it is at, with its project, what moves it on, node and activity, and folds the archived", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
@@ -168,14 +171,15 @@ test("the overview lists each project's open threads with their phases, node and
   assert.match(res.headers["content-type"] as string, /^text\/html/);
   assert.match(res.headers["content-security-policy"] as string, /script-src 'self'/);
 
-  const [acme, beta] = ["project-acme", "project-beta"].map((id) => sectionOf(res.text, id));
-  assert.ok(acme!.includes(fix.id) && !acme!.includes(docs.id), "each thread is listed under its own project");
-  assert.ok(beta!.includes(docs.id));
-  assert.equal(overviewRow(res.text, fix), "Fix checkout running running rj-firebat just now never");
-  assert.match(overviewRow(res.text, docs), /^Write docs running not on its node rj-firebat just now working 1m 03s$/);
-  assert.match(beta!, new RegExp(`<td class="wide">working <time data-since="${started}">1m 03s</time></td>`), "the client ticks the turn's clock from its start");
-  assert.match(textOf(acme!), /Thread Desired Observed Node Human Agent Fix checkout .* 1 archived Thread .* Old spike archived paused not on its node/);
-  assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
+  const building = res.text.split('id="phase-building"')[1]!.split("</tbody>")[0]!;
+  assert.ok(building.includes(fix.id) && building.includes(docs.id), "a thread with no pull request yet is building, whatever its project");
+  assert.equal(overviewRow(res.text, fix), "Fix checkout acme no pull request yet rj-firebat just now");
+  assert.match(overviewRow(res.text, docs), /^Write docs beta .+ rj-firebat working 1m 03s$/);
+  assert.match(building, new RegExp(`<td class="ov-when">working <time data-since="${started}">1m 03s</time></td>`), "the client ticks the turn's clock from its start");
+  const folds = res.text.split('<section class="ov-folds"')[1]!.split("</section>")[0]!;
+  assert.match(folds, /<details class="ov-closed" id="closed-acme"><summary>1 archived in acme<\/summary>/, "archived threads start folded away, under their project");
+  assert.match(textOf(folds), /1 archived in acme Thread Project Where it is Node Last Old spike acme /);
+  assert.ok(!res.text.split('id="overview"')[1]!.split('<section class="ov-folds"')[0]!.includes(old.id), "an archived thread is in no phase");
 });
 
 test("the sidebar lists every project's threads with their state, folds the archived and marks the open one", async (t) => {
@@ -203,7 +207,8 @@ test("the sidebar lists every project's threads with their state, folds the arch
   assert.equal(sidebarOf(page).active, fix.id);
   assert.match(page, /<details class="archived" id="archived-acme">/, "the archived fold starts closed");
   assert.match((await s.call("GET", `/threads/${old.id}`)).text, /<details class="archived" id="archived-acme" open>/, "an archived thread's page opens its fold");
-  assert.match(textOf(page.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat/);
+  assert.doesNotMatch(page, /id="side-nodes"/, "the sidebar lists no nodes, which Cluster lists");
+  assert.match(textOf(await clusterNodes(s)), /rj-firebat/);
 });
 
 test("a review the person cancelled says which thread they archived, and asks nothing of them", async (t) => {
@@ -527,7 +532,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}">`), "each card links its thread");
 
   const land = cards[0]!;
-  assert.match(land.text, /^Held review acme \/ Cache the list just now Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Held for you #7 Cache ↗ /);
+  assert.match(land.text, /^Held review acme \/ Cache the list The pull request's GitHub checks are pending\. just now Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Held for you #7 Cache ↗ /);
   assert.match(land.text, /pending\. not waivable .* src\/control\/api\.ts\. you may waive /);
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(land.html)![0];
   assert.match(button, new RegExp(`id="land-${held.id}" data-action="land" data-thread="${held.id}" data-head="${head}"`), "the thread page's Land button, under an ID of the card's own");
@@ -624,7 +629,7 @@ test("a held review waits from when it was held, not from when its review last m
   s.registry.saveReview({ ...review, phase: { ...review.phase, label: { state: "added" } } as Review["phase"] });
   const { cards } = needsOf((await s.call("GET", "/")).text);
   assert.deepEqual(cards.map((c) => c.thread), [asked.id, held.id], "the label added after it was held does not date it again");
-  assert.match(cards[1]!.text, /^Held review acme \/ Cache the list just now /);
+  assert.match(cards[1]!.text, /^Held review acme \/ Cache the list The pull request's GitHub checks are pending\. just now /);
 });
 
 test("acting on a card through the route its button calls takes the card off the list and the count down", async (t) => {
@@ -653,7 +658,7 @@ test("every page links Needs you with its count in the sidebar, and on a phone f
   const s = await seeded(t);
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
-  for (const path of ["/", "/usage", "/pipeline", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
+  for (const path of ["/", "/usage", "/cluster", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
     const page = (await s.call("GET", path)).text;
     assert.match(page, /<a class="side-link" href="\/#needs-you">[\s\S]*?Needs you<span class="side-count" id="needs-count" data-live>1<\/span><\/a>/, path);
     assert.match(page, /<a class="icon-btn phone-only" href="\/#needs-you" aria-label="Needs you"/, path);
@@ -728,7 +733,9 @@ test("rows of threads that need the person stay bright, and the rest dim unless 
   const bright = { [failed!.id]: false, [parked!.id]: false, [reply!.id]: false, [waiting!.id]: false, [working!.id]: true, [idle!.id]: true };
 
   const home = (await s.call("GET", "/")).text;
-  assert.deepEqual(dimmed(home.split('id="overview"')[1]!, /<tr( class="dim")?>\s*<td><span class="ov-title">.*?href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
+  const { [failed!.id]: _f, [parked!.id]: _p, [waiting!.id]: _w, ...overview } = bright;
+  assert.deepEqual(dimmed(home.split('id="overview"')[1]!, /<tr( class="dim")?>\s*<td><span class="ov-title">.*?href="\/threads\/([^"]+)"/g), { ...overview, [open!.id]: true }, "the overview leaves out what Needs you lists");
+  assert.deepEqual(needsOf(home).cards.map((c) => c.thread).toSorted(), [failed!.id, parked!.id, waiting!.id].toSorted());
   assert.deepEqual(dimmed(home.split('id="side-threads"')[1]!, /<a class="row( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: true });
   const page = (await s.call("GET", `/threads/${open!.id}`)).text;
   assert.deepEqual(dimmed(page.split('id="side-threads"')[1]!, /<a class="row(?: active)?( dim)?" href="\/threads\/([^"]+)"/g), { ...bright, [open!.id]: false }, "the open thread's row stays bright");
@@ -743,7 +750,9 @@ test("a new thread whose node does not have its pylon yet reads as absent, not d
   assert.equal(JSON.parse(detail.text).pylon.actualState, "absent");
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.match(textOf(sectionOf(page, "pylon-h")), /Observed not on its node Node rj-firebat Last seen just now/);
-  assert.equal(overviewRow((await s.call("GET", "/")).text, fix), "Fix checkout running not on its node rj-firebat just now never");
+  const home = (await s.call("GET", "/")).text;
+  assert.equal(overviewRow(home, fix), "Fix checkout acme no pull request yet rj-firebat just now");
+  assert.match(home.split('id="overview"')[1]!, new RegExp(`<span class="dot dot-muted" role="img" aria-label="not on its node" title="not on its node"></span><a href="/threads/${fix.id}">`), "its dot says its pylon is not on its node");
 });
 
 test("a paused thread's unread reply has a dot of its own, so it never looks like a running pylon", async (t) => {
@@ -775,22 +784,22 @@ test("the side nodes show each node's committed memory, mark an overcommitted on
   const stopped = (t: Thread) => stoppedPylon(t.pylonId, { sessions: null });
   s.registry.ingested(testObservation(node, { capacity: over, pylons: [stopped(fix), stopped(docs)] }), []);
   assert.equal((await s.call("POST", `/v1/threads/${docs.id}/archive`)).status, 200);
-  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
-  assert.match(nodes, /<em>overcommitted<\/em>/, "the marker uses the offline marker's style");
-  assert.match(textOf(nodes), /rj-firebat overcommitted 40\/22\.8 GiB memory · 4 GiB to wake paused/, "only the paused pylon whose thread is not archived needs memory to wake");
+  const nodes = await clusterNodes(s);
+  assert.match(nodes, /<span class="tag tag-bad">overcommitted<\/span>/, "the marker is a tag beside the offline tag");
+  assert.match(textOf(nodes), /rj-firebat overcommitted unknown 40\/22\.8 GiB 4 GiB to wake paused/, "only the paused pylon whose thread is not archived needs memory to wake");
 
   s.observe();
-  const fits = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
-  assert.match(fits, /rj-firebat 0\/64 GiB memory/);
+  const fits = textOf(await clusterNodes(s));
+  assert.match(fits, /rj-firebat unknown 0\/64 GiB/);
   assert.doesNotMatch(fits, /overcommitted|to wake/);
 });
 
 test("the side nodes show no memory for a node whose capacity is from a probe before pylons were counted, and never mark it overcommitted", async (t) => {
   const s = await seeded(t);
   s.registry.apply({ record: "node", node, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
-  const nodes = textOf((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!);
-  assert.match(nodes, /rj-firebat/);
-  assert.doesNotMatch(nodes, /overcommitted|GiB memory/);
+  const row = textOf((await clusterNodes(s)).split("<tbody>")[1]!);
+  assert.match(row, /^rj-firebat unknown unknown /, "its memory reads unknown");
+  assert.doesNotMatch(row, /overcommitted|GiB/);
 });
 
 test("an offline node shows its pylons as unknown, and the last observation as stale", async (t) => {
@@ -800,8 +809,9 @@ test("an offline node shows its pylons as unknown, and the last observation as s
   s.registry.markOffline(node);
 
   const list = (await s.call("GET", "/")).text;
-  assert.equal(overviewRow(list, fix), "Fix checkout running unknown rj-firebat offline just now never");
-  assert.match(textOf(list.split('id="side-nodes"')[1]!.split("</div>")[0]!), /rj-firebat offline/);
+  assert.equal(overviewRow(list, fix), "Fix checkout acme no pull request yet rj-firebat offline just now");
+  assert.match(list.split('id="overview"')[1]!, new RegExp(`aria-label="unknown" title="unknown"></span><a href="/threads/${fix.id}">`), "its dot says its pylon is unknown");
+  assert.match(textOf(await clusterNodes(s)), /rj-firebat offline/);
   const pylon = textOf(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "pylon-h"));
   assert.match(pylon, /Observed unknown Node rj-firebat offline Last seen just now \(stale\)/);
 });
@@ -891,7 +901,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
 
   const res = await s.call("GET", `/threads/${fix.id}`);
   assert.equal(res.status, 200);
-  assert.equal(textOf(res.text.split('id="bar"')[1]!.split("</header>")[0]!.replace(/^[^>]*>/, "")), "☰ acme / Fix checkout running Archive Delete ⋯");
+  assert.equal(textOf(res.text.split('id="bar"')[1]!.split("</header>")[0]!.replace(/^[^>]*>/, "")), "☰ acme / Fix checkout running Building Archive Delete ⋯");
   assert.match(conversationOf(res.text).text, new RegExp(`^${fix.id} · started just now`));
   assert.equal(textOf(sectionOf(res.text, "pylon-h")), `Pylon Desired running Observed running Node rj-firebat Last seen just now Human just now Agent never Tokens none counted ${fix.pylonId}`);
 
@@ -1586,13 +1596,13 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( data-scratch)?( checked)?><span class="seg-name">[^<]*<\/span><span class="seg-repo">([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[4]]),
     [["acme", false, "git@example.com:acme.git"], ["beta", false, "git@example.com:beta.git"], ["sketch", true, "scratch"]]);
   assert.match(dialog, /name="project" required value="sketch" data-node="rj-firebat" data-branch="main"[^>]* data-scratch[ >]/, "client.js says the thread starts an empty repository from these");
-  assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote New thread/);
+  assert.match(page, /<a class="group-new" href="\/threads\/new\?project=sketch" data-start="sketch"/, "the sidebar's project offers a new thread, as the overview lists threads by phase");
 });
 
 test("every page has somewhere to say a refresh failed", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
-  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage", "/pipeline"]) {
+  for (const path of ["/", "/threads/new", `/threads/${fix.id}`, "/threads/th-missing", "/usage", "/cluster"]) {
     assert.equal([...(await s.call("GET", path)).text.matchAll(/<p id="refresh-state" class="refresh-state" role="status"><\/p>/g)].length, 1, `${path} has one refresh status`);
   }
 });
@@ -2037,7 +2047,9 @@ test("a queued and a blocked thread show in the sidebar and the overview as queu
   assert.ok(rows.includes("queued Next step queued"), rows.join(" | "));
   assert.ok(rows.includes("blocked Stuck step blocked"), rows.join(" | "));
   assert.doesNotMatch(home, new RegExp(`class="row dim" href="/threads/${stuck.id}"`), "a blocked row is never dimmed");
-  assert.match(textOf(sectionOf(home, "project-acme")), new RegExp(`Queued Thread Waits for Node Next step queued Fix checkout: PR #3 is open ${node} Stuck step blocked Spike: is archived and its pull request did not merge auto`));
+  const between = (from: string, to: string) => textOf(home.split(from)[1]!.split(to)[0]!.replace(/^[^>]*>/, ""));
+  assert.equal(between('id="phase-queued"', "</tbody>"), `Queued 1 Threads that start once the work they wait on merges Next step acme waits for Fix checkout: PR #3 is open ${node} queued`, "the overview lists a queued thread under Queued, with what it waits for");
+  assert.match(between('id="needs-you"', 'id="overview"'), /Held acme \/ Stuck step blocked by Spike: is archived and its pull request did not merge blocked/, "a blocked thread waits on the person, so Needs you lists it");
 
   const page = await s.call("GET", `/threads/${stuck.id}`);
   assert.equal(page.status, 200);
@@ -2248,12 +2260,12 @@ test("the side nodes mark a node with a low filesystem, and its page lists each 
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
   const capacity = testCapacity({ diskFreeGiB: 15, disks });
   s.registry.apply({ record: "node", node, state: "online", capacity });
-  const nodes = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!;
-  assert.match(nodes, /<em title="15\.0 of 100\.0 GiB free at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts, low">disk low<\/em>/);
+  const nodes = await clusterNodes(s);
+  assert.match(nodes, /<span class="tag tag-bad" title="15\.0 of 100\.0 GiB free at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts, low">disk low<\/span>/);
   const text = textOf((await s.call("GET", `/nodes/${node}`)).text.split('id="node-health"')[1]!);
   assert.ok(text.includes("Disk 15 of 100 GiB free at /var/lib/nexus/pylons , /var/lib/nexus/artifacts low 400 of 500 GiB free at /opt/nexus/releases Temperatures"), text);
   s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ ...disks[0]!, freeGiB: 20 }] }) });
-  assert.doesNotMatch((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /disk low/, "20 GiB of 100 is not low");
+  assert.doesNotMatch(await clusterNodes(s), /disk low/, "20 GiB of 100 is not low");
 });
 
 test("a node's page shows its health as its probe reads it, unknown where the host exposes nothing, and only to a deployer", async (t) => {
@@ -2265,7 +2277,7 @@ test("a node's page shows its health as its probe reads it, unknown where the ho
   const probe = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => health };
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
   const started = await s.start("acme", "Busy thread");
-  assert.match((await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!, /<a class="link" href="\/nodes\/rj-firebat"/, "the sidebar's node links its page");
+  assert.match(await clusterNodes(s), /<a href="\/nodes\/rj-firebat" aria-current="page">rj-firebat<\/a>/, "Cluster's row links the node's page, picked as the first node");
   health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.46, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
   const page = await s.call("GET", `/nodes/${node}`);
   assert.equal(page.status, 200);
@@ -2320,10 +2332,13 @@ test("a node's page frames its graphs outside the live region, with a range pick
   assert.doesNotMatch(failed, /data-sample=/);
 });
 
-test("the pipeline page lists each project's items with the phase their records put them in, what each is after, its thread, and Approve and Cancel while it has none", async (t) => {
+test("/pipeline sends the reader to the home overview, which lists each item under the step its records put it at, with Approve and Cancel while it has no thread", async (t) => {
   const s = await seeded(t, { deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } });
-  const empty = textOf((await s.call("GET", "/pipeline")).text);
-  assert.match(empty, /No project runs the pipeline\. nexus project edit <id> --pipeline start turns it on/);
+  const moved = await s.call("GET", "/pipeline");
+  assert.equal(moved.status, 302);
+  assert.equal(moved.headers.location, "/#overview");
+  const planned = (html: string) => html.split('id="phase-planned"')[1]!.split("</tbody>")[0]!;
+  assert.match(textOf(planned((await s.call("GET", "/")).text)), /Planned 0 No project runs the pipeline\. nexus project edit <id> --pipeline start turns it on\./);
   s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
   const add = async (title: string, after: string[] = []) => {
     const res = await s.call("POST", "/v1/items", { project: "acme", title, message: `Build ${title}.`, after });
@@ -2334,17 +2349,14 @@ test("the pipeline page lists each project's items with the phase their records 
   const b = await add("Greet in French", [a.id]);
   assert.equal((await s.call("POST", `/v1/items/${a.id}/approve`, {})).status, 200);
   const thread = itemThread(s.registry, a.id)!;
-  const page = (await s.call("GET", "/pipeline")).text;
-  assert.match(page, /<a class="side-link active" href="\/pipeline" aria-current="page">/);
-  const section = sectionOf(page, "pipeline-acme");
-  assert.match(textOf(section), /^acme Each item waits for the person to approve it before it becomes a queued thread\. Item Phase After Thread/);
-  const row = (id: string) => textOf(section.split(`<tr data-item="${id}"`)[1]!.split("</tr>")[0]!.replace(/^[^>]*>/, ""));
-  assert.match(row(a.id), new RegExp(`^Greet by name ${a.id} (queued|building) .+ nothing Greet by name$`));
-  assert.equal(row(b.id), `Greet in French ${b.id} held project acme waits for the person to approve each item: nexus item approve ${b.id} Greet by name none yet Approve Cancel`);
-  assert.match(section, new RegExp(`<a class="link" href="/threads/${thread}">Greet by name</a>`));
-  assert.match(section, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
-  assert.doesNotMatch(section, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");
-  assert.doesNotMatch(page, /aria-labelledby="pipeline-beta"/, "a project without the pipeline or items is left out");
+  const page = (await s.call("GET", "/")).text;
+  assert.match(page, new RegExp(`<a href="/threads/${thread}">Greet by name</a>`), "an item that is a thread is listed as its thread");
+  assert.doesNotMatch(page, new RegExp(`data-action="(approve|cancel)-item" data-item="${a.id}"`), "an item that is a thread has no item actions");
+  const held = needsOf(page).text;
+  assert.match(held, new RegExp(`Held acme / Greet in French project acme waits for the person to approve each item: nexus item approve ${b.id} Approve Cancel `), "an item waiting for approval waits on the person, so Needs you lists it");
+  assert.match(page, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
+  assert.match(page, new RegExp(`data-action="cancel-item" data-item="${b.id}"`));
+  assert.equal(needsCount(page), "1", "the sidebar counts it with the cards");
 });
 
 /** The images a page shows, as each link and image name them, with any caption. */
@@ -2447,7 +2459,7 @@ test("a page reads the threads, the queue and the release reports as often whate
     }
     const counted = (["threads", "queuedThreads", "releaseReports"] as const).map((name) => [name, t.mock.method(s.registry, name)] as const);
     const counts: Record<string, Record<string, number>> = {};
-    for (const path of ["/", `/threads/${thread!.id}`, "/pipeline"]) {
+    for (const path of ["/", `/threads/${thread!.id}`, "/cluster"]) {
       for (const [, mock] of counted) mock.mock.resetCalls();
       assert.equal((await s.call("GET", path)).status, 200);
       counts[path.replace(thread!.id, "<id>")] = Object.fromEntries(counted.map(([name, mock]) => [name, mock.mock.callCount()]));
@@ -2456,7 +2468,8 @@ test("a page reads the threads, the queue and the release reports as often whate
   };
   const one = await reads(1, 1);
   assert.deepEqual(await reads(5, 4), one);
-  assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
+  assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 0 }, "the home page shows no releases, which Cluster shows");
+  assert.deepEqual(one["/cluster"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
 });
 
 test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {
@@ -2467,8 +2480,8 @@ test("the sidebar's release lines read as the release view does: stale and missi
   const report = (role: "control" | "probe", observedAt: number) => s.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt });
   report("control", Date.now());
   report("probe", Date.now() - 90_000);
-  const lines = (await s.call("GET", "/")).text.split('id="side-nodes"')[1]!.split("</div>")[0]!.split(/<span><svg class="i i-server"/).slice(1)
-    .map((n) => [textOf(/<a [^>]*>([^<]*)<\/a>/.exec(n)![1]!), ...[...n.matchAll(/<small title="([^"]*)">([^<]*)<\/small>/g)].map((m) => `${m[2]} (${m[1]})`)]);
+  const lines = (await clusterNodes(s)).split("<tbody>")[1]!.split(/<tr data-node=/).slice(1)
+    .map((n) => [textOf(/<a [^>]*>([^<]*)<\/a>/.exec(n)![1]!), ...[...n.split('class="wide ov-release"')[1]!.matchAll(/<small title="([^"]*)">([^<]*)<\/small>/g)].map((m) => `${m[2]} (${m[1]})`)]);
   assert.deepEqual(lines, [
     [node, "control: aaaaaaaaaaaa · healthy ()", "probe: aaaaaaaaaaaa · pending (deployer report is stale)"],
     [tower, "probe: unknown · pending (no deployer report)"],

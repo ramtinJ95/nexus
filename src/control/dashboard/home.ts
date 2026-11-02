@@ -19,18 +19,18 @@ import { layout, threadsOf, queuedLook, closedLabel, quietLabel, newProjectButto
  * One line of the overview: a thread, a queued thread or an item not yet a thread, with where its life is and what
  * moves it on. `href` is null for an item, which has no page of its own.
  */
-interface Line { title: string; project: string; href: string | null; life: Life; state: readonly [string, Tone]; node: string; when: Part; dim: boolean; actions: Part; order: number }
+interface Line { title: string; project: string; href: string | null; life: Life; state: readonly [string, Tone]; node: Part; when: Part; dim: boolean; actions: Part; order: number }
 
 const threadLine = (c: Context, t: Thread): Line => {
   const r = c.row(t);
   const node = c.registry.node(r.pylon.node);
   return {
     title: t.title, project: t.project, href: `/threads/${t.id}`, life: lifeOfThread(c, t.id), state: threadState(r, c.now),
-    node: `${r.pylon.node}${node?.state === "offline" ? ", offline" : ""}`, when: workingFor(t, c.now) ?? ago(lastActive(t), c.now), dim: dims(r), actions: null, order: -lastActive(t),
+    node: html`${r.pylon.node}${node?.state === "offline" && html` <span class="tag">offline</span>`}`, when: workingFor(t, c.now) ?? ago(lastActive(t), c.now), dim: dims(r), actions: null, order: -lastActive(t),
   };
 };
 const queuedLine = (c: Context, q: QueuedThread): Line => ({
-  title: q.title, project: q.project, href: `/threads/${q.id}`, life: lifeOfThread(c, q.id), state: queuedLook(q), node: q.node, when: "queued", dim: false, actions: null, order: 0,
+  title: q.title, project: q.project, href: `/threads/${q.id}`, life: lifeOfThread(c, q.id), state: queuedLook(q), node: q.node, when: queuedLook(q)[0], dim: false, actions: null, order: 0,
 });
 function itemLine(c: Context, i: PipelineItem): Line {
   const p = c.registry.project(i.project);

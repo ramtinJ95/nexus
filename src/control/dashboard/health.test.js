@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 const change = (from, status, node = "rj-firebat") => ({ id: 3, node, name: "disk", from, status, text: "12.4 of 98.0 GiB free", at: "2026-11-02T00:30:00.000Z", seenAt: null });
 
 test("a check that went bad or worse alerts, and one that got better says so quietly, each opening the Health page", () => {
-  assert.deepEqual(healthNotice(change("ok", "warn")), { key: '["rj-firebat","disk"]', title: "rj-firebat disk: warn", body: "12.4 of 98.0 GiB free", url: "/health", quiet: false });
+  assert.deepEqual(healthNotice(change("ok", "warn")), { key: '["rj-firebat","disk"]', title: "rj-firebat disk: warn", body: "12.4 of 98.0 GiB free", url: "/cluster#health", quiet: false });
   assert.equal(healthNotice(change("warn", "fail")).quiet, false);
   assert.deepEqual([healthNotice(change("fail", "warn")).title, healthNotice(change("fail", "warn")).quiet], ["rj-firebat disk: warn, better than fail", true]);
   assert.deepEqual([healthNotice(change("warn", "ok", null)).title, healthNotice(change("warn", "ok", null)).quiet], ["Control plane disk recovered", true]);
