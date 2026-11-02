@@ -12,7 +12,8 @@ import { activeTab, canRead, changesPane, changesUnreadable, checkout, factsNow,
 import "./composer.js";
 import "./actions.js";
 import { startRows } from "./rows.js";
-import "./home.js";
+// The home page's preview and its two sides, which no other page has.
+if (document.getElementById("split") !== null) void import("./home.js");
 
 for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
 const savedPane = localStorage.getItem(paneKey);
