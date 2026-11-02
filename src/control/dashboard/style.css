@@ -452,8 +452,7 @@ button.side-add { color: var(--text-3); font-size: 12px; }
 /* A visually hidden label in the conversation is placed against its scroller, or it would stretch the page past the window. */
 .scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
 .convo { max-width: 760px; margin: 0 auto; padding: var(--s5) var(--s6) var(--s6); display: flex; flex-direction: column; gap: var(--s4); }
-.convo-meta { margin: 0; font-size: var(--t-1); color: var(--text-3); }
-.convo-meta code { font-size: var(--t-1); }
+.convo-meta { display: none; }
 
 .msg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.agent { font-size: 14px; line-height: 1.65; color: var(--text); }
@@ -1004,6 +1003,7 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--l
 .graph-swatch.dashed { border-top-style: dashed; }
 .graph .u-cursor-x { border-right: 1px solid var(--text-3); opacity: 0.6; }
 .node-health em, .ov-report em { font-style: normal; color: var(--warn); }
+.ov-report td { white-space: normal; }
 .cleanups { display: grid; gap: var(--s3); }
 .cleanup-items td { padding-top: var(--s1); padding-bottom: var(--s1); }
 
@@ -1131,7 +1131,6 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--l
   .mini-bad { color: var(--bad); }
 
   .convo { padding: var(--s3) var(--s4) var(--s5); gap: var(--s3); }
-  .convo-meta { display: none; }
   .msg.agent, .msg.user { font-size: 14.5px; }
   .msg.user { max-width: 92%; }
   .tools { margin-left: 0; padding-left: var(--s2); }
@@ -1145,7 +1144,7 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--l
   .dock { padding: var(--s2) var(--s3) var(--s3); padding-bottom: max(var(--s3), env(safe-area-inset-bottom)); }
   .comp-box textarea { font-size: 16px; }
   .comp-foot kbd, .comp-hint { display: none; }
-  .attach-line { margin-left: 0; }
+  .attach-line { display: none; }
   .term-view { margin: 0 0 var(--s2); border-radius: 0; }
   .fv-head { padding: var(--s3); }
   .fv-head .fv-layout { display: none; }
@@ -1153,6 +1152,7 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--l
   .page { padding: var(--s2) var(--s4) var(--s5); gap: var(--s5); }
   .page-needs { padding-bottom: 0; }
   .ov .wide { display: none; }
+  .ov.cleanup-items .wide { display: table-cell; }
   .ov th:first-child { width: 62%; }
   .ov-head code { display: none; }
   .ov td { white-space: normal; }
@@ -1173,9 +1173,8 @@ a.need-thread:hover { text-decoration: underline; text-decoration-color: var(--l
   .rg td .ov-wait { font-size: 12px; }
   .rg-why { white-space: normal; }
   .ov tr:hover td:first-child { box-shadow: none; }
-  .ov-items td:nth-child(2) { display: block; }
-  .ov-items tr { grid-template-columns: minmax(0, 1fr); }
-  .ov-items td:nth-child(3), .ov-items td:nth-child(6) { grid-column: 1; grid-row: auto; text-align: left; }
+  .ov-items td:nth-child(3) .dot { display: none; }
+  .ov-items td:nth-child(6) { grid-column: 1 / -1; padding: var(--s2) 0 0 15px; }
 
   .need-fold > summary { grid-template-columns: 15px minmax(0, 1fr) auto; row-gap: 2px; }
   .need-what { grid-column: 2; grid-row: 1; }
