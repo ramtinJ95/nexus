@@ -115,8 +115,8 @@ select { font: inherit; color: var(--fg); background: var(--chip); border: 1px s
 .stage iframe { border: 0; width: 100%; height: 100%; background: #fff; }
 .stage.phone { padding: 16px 0; }
 .stage.phone iframe { width: 390px; border-radius: 18px; box-shadow: 0 0 0 1px var(--line), 0 12px 40px #0008; }
-.grid { flex: 1; overflow: auto; display: grid; gap: 16px; padding: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; }
-.grid.phone { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.grid { flex: 1; overflow: auto; display: grid; gap: 16px; padding: 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 620px), 1fr)); align-content: start; }
+.grid.phone { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
 figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
 figcaption { display: flex; flex-direction: column; gap: 2px; }
 figcaption button { all: unset; font-weight: 650; cursor: pointer; }
