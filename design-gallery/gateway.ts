@@ -19,12 +19,11 @@ const shooter = process.env.SHOOTER ?? new URL("./shoot.sh", import.meta.url).pa
 const shots = process.env.SHOTS ?? "/home/user/.cache/nexus-gallery";
 
 export const designs = [
+  { key: "board-console", label: "Board console", port: 8087, idea: "Pipeline board's calm flow of phases, carrying Mission control's fleet and reviews." },
+  { key: "console-board", label: "Console board", port: 8088, idea: "Mission control's console made calm, carrying Pipeline board's phases and timeline." },
+  { key: "pipeline-board", label: "Pipeline board", port: 8084, idea: "Round 1: a kanban board of each piece of work's life." },
+  { key: "mission-control", label: "Mission control", port: 8082, idea: "Round 1: a dense, dark-first operator console." },
   { key: "original", label: "Original", port: 8086, idea: "The dashboard as it is on main." },
-  { key: "inbox", label: "Inbox", port: 8081, idea: "Calm triage of what needs you, Linear and Superhuman style." },
-  { key: "mission-control", label: "Mission control", port: 8082, idea: "A dense, dark-first operator console." },
-  { key: "conversation", label: "Conversation", port: 8083, idea: "Nexus as a chat app; everything else comes into the conversation." },
-  { key: "pipeline-board", label: "Pipeline board", port: 8084, idea: "A kanban board of each piece of work's life." },
-  { key: "keyboard", label: "Keyboard", port: 8085, idea: "A command palette and split panes, monospace-forward." },
 ] as const;
 type Design = (typeof designs)[number];
 
