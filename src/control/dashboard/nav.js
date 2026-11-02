@@ -63,11 +63,11 @@ document.addEventListener("click", (event) => {
 // The inspector's tab the reader picked last, on every thread page.
 export const paneKey = "nexus.pane";
 export function pickPane(pane) {
-  const radio = document.querySelector(`.seg-bar input[value="${CSS.escape(pane)}"]`);
+  const radio = document.querySelector(`.inspect .seg-bar input[value="${CSS.escape(pane)}"]`);
   if (radio === null) return;
   radio.checked = true;
   localStorage.setItem(paneKey, pane);
 }
 document.addEventListener("change", (event) => {
-  if (event.target instanceof HTMLInputElement && event.target.matches(".seg-bar input")) localStorage.setItem(paneKey, event.target.value);
+  if (event.target instanceof HTMLInputElement && event.target.matches(".inspect .seg-bar input")) localStorage.setItem(paneKey, event.target.value);
 });
