@@ -3,7 +3,6 @@
 // is open. Each of them is also a page at its own address, which a reader who opens it in a new tab gets. client.js
 // loads this on the first panel link the reader follows.
 import { el, pollMs } from "./page.js";
-import { setOpen } from "./nav.js";
 
 const sheet = document.getElementById("sheet");
 const panelPath = /^\/(?:pipeline|usage|health|nodes\/[^/]+)$/;
@@ -53,7 +52,7 @@ export async function open(url) {
   shown = url;
   sheet.setAttribute("aria-label", url.pathname.slice(1).split("/")[0]);
   sheet.replaceChildren(el("p", { className: "empty sheet-loading", textContent: "Loading…" }));
-  setOpen("sheet");
+  document.body.dataset.open = "sheet";
   for (const link of document.querySelectorAll(".side-nav a, .nodes a")) link.classList.toggle("active", link.pathname === url.pathname);
   try {
     await load(url);
@@ -69,7 +68,7 @@ if (sheet !== null) {
   sheet.addEventListener("click", (event) => {
     if (!(event.target instanceof Element) || event.target.closest(".bar-close") === null) return;
     event.preventDefault();
-    setOpen(null);
+    delete document.body.dataset.open;
   });
   new MutationObserver(() => {
     if (isOpen() || shown === null) return;

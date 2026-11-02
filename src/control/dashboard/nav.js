@@ -12,7 +12,7 @@ export function setOpen(panel) {
 }
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
-  const opener = target?.closest("[data-open]");
+  const opener = target?.closest("[data-open]:not(body)");
   if (opener !== null && opener !== undefined) {
     // A panel button for another pane switches the open panel to it rather than closing it.
     const { open, pane } = opener.dataset;

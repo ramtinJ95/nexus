@@ -815,8 +815,7 @@ body[data-open="inspect"] .inspect { transform: none; visibility: visible; trans
 /* the home page: a composer that starts a thread, the inbox as a feed of Nexus's posts, then every chat */
 .page { max-width: calc(var(--read) + 64px); margin: 0 auto; padding: 24px 32px 40px; display: grid; gap: 28px; }
 .page-needs, #overview { max-width: 1064px; }
-.hero { max-width: 760px; }
-.hero { display: grid; gap: 14px; padding-top: 28px; }
+.hero { display: grid; gap: 14px; padding-top: 28px; max-width: 760px; }
 .hero h2 { margin: 0; font: 400 28px/1.2 var(--serif); letter-spacing: -0.01em; color: var(--text); }
 .hero h2 .brand-mark { width: 30px; height: 30px; font-size: 13px; border-radius: 9px; margin-right: 10px; vertical-align: 3px; }
 .hero-start { display: flex; align-items: center; gap: 12px; padding: 18px 16px 18px 20px; background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05), var(--shadow); color: var(--text-3); font-size: 15.5px; transition: border-color 0.15s, box-shadow 0.15s; }
