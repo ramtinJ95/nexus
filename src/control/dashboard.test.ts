@@ -574,6 +574,8 @@ test("a thread in Needs you has its call to action once, in its card, with where
     const all = [...page.matchAll(action)].length;
     assert.ok(all > 0 && [...card.html.matchAll(action)].length === all, `${thread.title}'s action is on its card alone`);
     assert.match(card.html, /<article class="need need-\w+ picked"/, "the card is marked as picked");
+    assert.match(card.html, /<details class="need-fold" id="fold-[^"]+" open>/, "and a fresh load of the link renders it open");
+    assert.ok(needsOf(page).cards.filter((c) => c.thread !== thread.id).every((c) => !/<details class="need-fold" id="fold-[^"]+" open>/.test(c.html)), "and only it");
     assert.match(card.html, /<ol class="life" aria-label="Where this work is">.*<li class="life-held" aria-current="step">/s, "its steps mark where it waits on the person");
     assert.match(card.html, new RegExp(`<a class="link" href="/threads/${thread.id}">Open thread</a>`));
     const flight = page.split('id="flight"')[1]!.split('id="overview"')[0]!;

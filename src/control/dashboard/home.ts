@@ -157,7 +157,8 @@ function needsList(c: Context, picked: { key: string; items: readonly Item[] | n
   const needs = c.needs();
   const mark = (n: Need) => keyOf(n) === picked?.key && " picked";
   const itemsOf = (key: string) => key === picked?.key ? picked.items : null;
-  const fold = (id: string, head: Html, body: Html, why: string) => html`<details class="need-fold" id="fold-${id}"><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
+  // The picked card opens, so a link to it shows it on a fresh load. A reader's own close survives each poll's swap.
+  const fold = (id: string, head: Html, body: Html, why: string, open: Part = false) => html`<details class="need-fold" id="fold-${id}"${open && " open"}><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
   return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
 ${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
   if (n.kind === "cleanup") {
@@ -173,7 +174,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">Cleanup</s
     const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
     return html`<article class="need need-held${mark(n)}" id="${needId(n)}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
-  html`${n.work.kind === "thread" ? whereNow(c, n.work.d, l.life, itemsOf(l.key)) : html`<div class="need-ctx">${lifeTrack(l.life, false)}</div>`}<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(c, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : n.work.kind === "queued" && html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why)}
+  html`${n.work.kind === "thread" ? whereNow(c, n.work.d, l.life, itemsOf(l.key)) : html`<div class="need-ctx">${lifeTrack(l.life, false)}</div>`}<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(c, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : n.work.kind === "queued" && html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why, mark(n))}
 </article>`;
   }
   const t = n.d.thread;
@@ -181,7 +182,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
   const life = lifeOfThread(c, t.id);
   const why = needWhy(n, c.now) || life.why;
   return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, itemsOf(t.id))}${body}`, why)}
+${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, itemsOf(t.id))}${body}`, why, mark(n))}
 </article>`;
 })}</div>`}`;
 }

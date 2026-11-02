@@ -47,6 +47,9 @@ if (split !== null) {
   };
   showSide();
   addEventListener("hashchange", showSide);
+  // A link to work in Needs you, opened afresh, brings its card into view, as picking its line does.
+  const picked = cardOf(new URL(location.href).searchParams.get("peek"));
+  if (picked && !location.hash.startsWith("#needs-you")) pick(picked);
   // A link to the hash the page is already at fires no hashchange.
   document.addEventListener("click", (event) => {
     if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) document.getElementById("side-needs").checked = true;
