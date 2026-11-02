@@ -39,6 +39,8 @@ async function setup(t: TestContext) {
   return { ...s, start, page, observe };
 }
 
+const approve = () => ({ token: "t", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null });
+
 /** A builder with PR #7 under review, the review's reviewer, the check it runs now and the live check of an earlier round. */
 async function reviewed(t: TestContext) {
   const s = await setup(t);
@@ -46,10 +48,9 @@ async function reviewed(t: TestContext) {
   const reviewer = await s.startThread({ project: "acme", title: "Review of #7: Cache", branch: "cache" }, reviewerCaller);
   const check = await s.startThread({ project: "acme", title: "Check of cache at 222222222222", branch: "cache", commit: "2".repeat(40), bare: true }, checkCaller);
   const verify = await s.startThread({ project: "acme", title: "Live check of cache at 111111111111", branch: "cache", commit: "1".repeat(40), bare: true }, verifyCaller);
-  const approve = { token: "t", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null };
   const rounds: Round[] = [
-    { head: "1".repeat(40), verdict: approve, check: { passed: true, output: "ok" }, live: { kind: "ran", thread: verify.id, passed: false, output: "boot failed" }, answers: [] },
-    { head: "2".repeat(40), verdict: approve, check: null, answers: null },
+    { head: "1".repeat(40), verdict: approve(), check: { passed: true, output: "ok" }, live: { kind: "ran", thread: verify.id, passed: false, output: "boot failed" }, answers: [] },
+    { head: "2".repeat(40), verdict: approve(), check: null, answers: null },
   ];
   const review = testReview({
     builder: builder.id, reviewer: reviewer.id, rounds, phase: { kind: "checking", startedAt: Date.now(), thread: check.id },
@@ -86,6 +87,9 @@ test("a reviewer, check or verify thread's page says in one line whose pull requ
   }
   s.registry.saveReview({ ...review, phase: { kind: "reviewing" }, rounds: [...review.rounds, { head: "3".repeat(40), verdict: null, check: null, answers: null }] });
   assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals reviewing round 3");
+  const carried: Round = { head: "4".repeat(40), verdict: approve(), check: null, answers: null, carried: { from: "3".repeat(40) } };
+  s.registry.saveReview({ ...review, phase: { kind: "reviewing" }, rounds: [review.rounds[0]!, carried, { head: "5".repeat(40), verdict: null, check: null, answers: null }] });
+  assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals reviewing round 2", "a carried approval spends no round");
   s.registry.saveReview({ ...review, phase: { kind: "landed", commit: "3".repeat(40) } } satisfies Review);
   assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals landed");
 

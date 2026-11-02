@@ -7,7 +7,7 @@ import type { ThreadId } from "../../ids.ts";
 import { roleOf } from "../../agent-protocol.ts";
 import { keptPastDay } from "../../reconcile.ts";
 import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pipeline.ts";
-import { liveNote, type PhaseKind, type Review } from "../review-model.ts";
+import { liveNote, roundsSpent, type PhaseKind, type Review } from "../review-model.ts";
 import { html, limitText, type Html, type Tone } from "./view.ts";
 import { landingAt } from "./cards.ts";
 import type { Context, ThreadNeed } from "./context.ts";
@@ -121,7 +121,7 @@ const ranIn = (r: Review, id: ThreadId) => ((r.phase.kind === "checking" || r.ph
 
 /** Where a review is, in a word or two after the thread it serves. */
 const reviewAt: Record<PhaseKind, (r: Review) => string> = {
-  reviewing: (r) => `reviewing round ${r.rounds.length}`, fixing: (r) => `the builder answers round ${r.rounds.length}`,
+  reviewing: (r) => `reviewing round ${roundsSpent(r)}`, fixing: (r) => `the builder answers round ${roundsSpent(r)}`,
   checking: () => "running the checks", verifying: () => "running the live check", approved: (r) => r.land === null ? "approved, yours to land" : "approved, landing next",
   merging: () => "merging", deploying: () => "deploying", "rolling-back": () => "rolling back", landed: () => "landed", "needs-person": () => "needs you",
   merged: () => "merged outside its review", closed: () => "its pull request closed", cancelled: () => "cancelled",
