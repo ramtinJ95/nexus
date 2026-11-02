@@ -8,7 +8,7 @@ import type { Thread } from "./thread-store.ts";
 import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { archivedDiskMs, desiredPhase, diskKept, envelope } from "../reconcile.ts";
-import type { ImageId, JobId, NodeName, PylonId, ThreadId } from "../ids.ts";
+import type { ImageId, JobId, LiveHash, NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity } from "../test-kit.ts";
 
@@ -30,11 +30,11 @@ function addThread(registry: Registry, node: NodeName, title: string, status: Th
   return registry.thread(id)!;
 }
 
-/** A pylon `running` booted after its archive, as a wake for reading boots it, and one running `since archive` before it. */
+/** A pylon `running` from a wake for reading, which reports no liveHash, and one running `since archive` with its sessions. */
 function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, "stopped" | "running" | "since archive"][], over: Partial<NodeObservation> = {}, memory = { total: 64, committed: 0 }) {
   const capacity = testCapacity({ memoryGiB: memory.total, committedMemoryGiB: memory.committed });
   const observed = pylons.map(([pylonId, phase]) => phase === "stopped" ? stoppedPylon(pylonId, { checkpoint: `ckpt-${pylonId}-1` })
-    : runningPylon(pylonId, phase === "since archive" ? { bootedAt: "2020-01-01T00:00:00Z" } : {}));
+    : runningPylon(pylonId, phase === "since archive" ? { bootedAt: "2020-01-01T00:00:00Z", liveHash: "live-1" as LiveHash } : {}));
   observeNode(registry, { node, probeBootId: "boot-1", capacity, artifacts: [image], pylons: observed, spawnsWithoutRelaunch: true, ...over });
 }
 
@@ -281,7 +281,7 @@ test("a read that fails skips the thread with its error, and one a stop cut shor
   const registry = opened(t);
   const a = addThread(registry, n1, "broken transcript");
   const b = addThread(registry, n1, "stopped mid-read");
-  observe(registry, n1, [[a.pylonId, "running"], [b.pylonId, "running"]]);
+  observe(registry, n1, [[a.pylonId, "since archive"], [b.pylonId, "since archive"]]);
   const counter = fakeCounter(registry);
   const reading = Promise.withResolvers<{ calls: number; tokens: number }>();
   counter.answer = async (id) => id === a.id ? Promise.reject(new Error("the pipe to the pylon was lost")) : reading.promise;
@@ -290,7 +290,7 @@ test("a read that fails skips the thread with its error, and one a stop cut shor
 
   await held(registry, a, "pausing");
   assert.deepEqual([row(registry, a)!.state, row(registry, a)!.reason], ["skipped", "reading it failed: the pipe to the pylon was lost"]);
-  observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "running"]]);
+  observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "since archive"]]);
   await until("b is read", () => counter.reads, (reads) => reads.includes(b.id));
   woken.length = 0;
   assert.equal(job.stop().state, "stopped");
@@ -337,7 +337,7 @@ test("a control plane restarted mid-run goes on with the pylon it held, and a se
   assert.deepEqual(current(registry)?.thread, a.id);
   observe(registry, n1, [[a.pylonId, "running"], [b.pylonId, "stopped"]]);
   await held(registry, a, "pausing");
-  observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "running"]]);
+  observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "since archive"]]);
   await held(registry, b, "pausing");
   observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
   await until("the run is done", () => registry.usageBackfill().state, (s) => s === "done");
@@ -569,4 +569,61 @@ test("a thread unarchived while its settle reads it sealed gets its transcripts 
   await until("its transcripts are unsealed", () => counter.unsealed, (u) => u.length === 1);
   assert.deepEqual(counter.unsealed, [a.id]);
   assert.equal(registry.thread(a.id)!.usageSettledAt, undefined);
+});
+
+test("a run wakes nothing while a pylon a restart's lost settle woke is still up, and goes on once it paused", async (t) => {
+  const path = join(dir, `${randomUUID()}.db`);
+  const first = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
+  const a = addThread(first, n1, "held", "archived", false);
+  observe(first, n1, [[a.pylonId, "stopped"]]);
+  const before = usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} });
+  await settling(first, a, "reading");
+  await before.close();
+  first.close();
+
+  const registry = opened(t, path);
+  const c = addThread(registry, n2, "the run's");
+  observe(registry, n1, [[a.pylonId, "running"]]);
+  observe(registry, n2, [[c.pylonId, "stopped"]]);
+  const { job, woken } = backfill(t, registry);
+  job.start();
+  await delay(50);
+  assert.deepEqual([current(registry), woken], [null, []], "the run waits for the pylon up for reading");
+  assert.equal(registry.thread(a.id)!.settleWaiting, undefined, "the archive whose pylon is up is the one it waits for");
+  observe(registry, n1, [[a.pylonId, "stopped"]]);
+  await settling(registry, a, "reading");
+  observe(registry, n1, [[a.pylonId, "running"]]);
+  await settling(registry, a, "pausing");
+  observe(registry, n1, [[a.pylonId, "stopped"]]);
+  await until("the run takes its next pylon once nothing is up", () => current(registry), (h) => h !== null);
+});
+
+test("a pylon stuck up for reading holds the settles back only for the pause's time limit, and is logged", async (t) => {
+  const registry = opened(t);
+  const stuck = addThread(registry, n1, "stuck");
+  const next = addThread(registry, n2, "next", "archived", false);
+  observe(registry, n1, [[stuck.pylonId, "running"]]);
+  observe(registry, n2, [[next.pylonId, "stopped"]]);
+  const logs: string[] = [];
+  const job = usageBackfill({ registry, counter: fakeCounter(registry), wake: () => {}, intervalMs: 5, pauseMs: 200, log: (m) => logs.push(m) });
+  t.after(() => job.close());
+  await delay(50);
+  assert.equal(registry.settleHold(), null);
+  assert.match(registry.thread(next.id)!.settleWaiting!, new RegExp(`${stuck.pylonId} on rj-firebat is up for reading`));
+  assert.match(diskKept(registry.thread(next.id)!)!, /Its next read waits, as .* is up for reading, and one pylon is woken at a time/);
+  await settling(registry, next, "reading");
+  assert.ok(logs.some((m) => m.includes(`${stuck.pylonId} has been up for reading`)), "the pylon it stopped waiting for is logged");
+});
+
+test("an archive whose settle waits says why: its node is offline, or has no room for its pylon", async (t) => {
+  const registry = opened(t);
+  const offline = addThread(registry, n1, "offline", "archived", false);
+  const full = addThread(registry, n2, "full", "archived", false);
+  observe(registry, n2, [[full.pylonId, "stopped"]], {}, { total: 64, committed: 60 });
+  registry.markOffline(n1);
+  backfill(t, registry);
+  await until("both record why they wait", () => [offline, full].map((x) => registry.thread(x.id)!.settleWaiting), (w) => w.every((r) => r !== undefined));
+  assert.equal(registry.thread(offline.id)!.settleWaiting, "rj-firebat is offline");
+  assert.match(registry.thread(full.id)!.settleWaiting!, /^infra-testbench would have .* GiB of memory left with it up/);
+  assert.equal(registry.settleHold(), null);
 });

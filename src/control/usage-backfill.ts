@@ -9,7 +9,7 @@
  * on the pylon and a wake for reading starts none, so only a read after it proves nothing came after the read. One
  * pylon is up at a time across the run and the settles, and a settle goes first.
  */
-import type { NodeName, ThreadId } from "../ids.ts";
+import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { desiredPhase } from "../reconcile.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
@@ -20,7 +20,7 @@ import type { StoredPylon, Thread, UsageHold } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
 import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 
-type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitUsageBackfill">;
+type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitSettle" | "waitUsageBackfill">;
 
 /**
  * What holds a pylon to read it whole: the run, whose hold the registry keeps, or a settle, whose hold it keeps in
@@ -145,27 +145,53 @@ export function usageBackfill(options: {
     registry.finishUsageBackfill(now);
   }
 
+  /** When each archived pylon was first seen up while nothing held it, so one stuck up stops holding every settle back. */
+  const upSince = new Map<PylonId, number>();
+
   /**
-   * Holds the oldest archive not settled whose pylon can be woken now, and wakes it. A pylon that runs has not paused
-   * since its archive yet, so it waits. One its online node does not have has no disk to lose, so it is settled as it
-   * is, and one that failed or whose image no online node holds cannot be woken, which is a failed settle. A settle
-   * that failed is tried again `settleRetryMs` after. While a pylon woken for reading since its archive is still up, as
-   * one a restart's lost hold woke, no settle wakes another.
+   * An archived pylon up while nothing holds it, as one a restart's lost hold or a released hold left booting, running
+   * for reading (no liveHash) or stopping, for up to `pauseMs` from when it was first seen so. Past that it is logged and
+   * waited for no more.
    */
-  function nextSettle(now: number): boolean {
-    const archives = registry.keptArchives();
-    const up = archives.some((t) => {
+  function upPylon(now: number): StoredPylon | null {
+    const up = registry.storedThreads({ status: ["archived"] }).flatMap((t) => {
       const p = registry.pylon(t.pylonId);
       const o = p === undefined || p.failed !== null ? null : seen(p);
-      if (o === null || o === "absent") return false;
-      return o.phase === "booting" || o.phase === "stopping" || (o.phase === "running" && Date.parse(o.bootedAt) > t.archivedAt!);
+      return o !== null && o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || (o.phase === "running" && o.liveHash === null)) ? [p!] : [];
     });
-    if (up) return false;
+    for (const id of upSince.keys()) if (!up.some((p) => p.pylonId === id)) upSince.delete(id);
+    for (const p of up) {
+      const since = upSince.get(p.pylonId) ?? now;
+      upSince.set(p.pylonId, since);
+      if (now - since < pauseMs) return p;
+      if (now - since < pauseMs + intervalMs) log(`usage settle: ${p.pylonId} has been up for reading ${minutes(pauseMs)} with nothing holding it, so the settles go on without it`);
+    }
+    return null;
+  }
+
+  /**
+   * Holds the oldest archive not settled whose pylon can be woken now, and wakes it, or says why nothing is woken: a
+   * pylon is already up, so no settle and no run wakes another. A pylon that runs has not paused since its archive yet,
+   * so it waits. One its online node does not have has no disk to lose, so it is settled as it is, and one that failed
+   * or whose image no online node holds cannot be woken, which is a failed settle. A settle that failed is tried again
+   * `settleRetryMs` after. Each archive that waits records why, which its thread shows.
+   */
+  function nextSettle(now: number): "held" | "up" | "none" {
+    const archives = registry.keptArchives().filter((t) => t.usageSettledAt === undefined);
+    const up = upPylon(now);
+    if (up !== null) {
+      for (const t of archives) if (t.pylonId !== up.pylonId) registry.waitSettle(t.id, `${up.pylonId} on ${up.node} is up for reading, and one pylon is woken at a time`);
+      return "up";
+    }
     for (const t of archives) {
-      if (t.usageSettledAt !== undefined || (t.settleFailure !== undefined && now - t.settleFailure.at < settleRetryMs)) continue;
+      if (t.settleFailure !== undefined && now - t.settleFailure.at < settleRetryMs) continue;
       const p = registry.pylon(t.pylonId);
-      const o = p === undefined ? null : seen(p);
-      if (p === undefined || o === null) continue;
+      if (p === undefined) continue;
+      const o = seen(p);
+      if (o === null) {
+        registry.waitSettle(t.id, `${p.node} is offline`);
+        continue;
+      }
       if (o === "absent") {
         if (p.submitted === null) settleHolder.finish(t.id, null);
         continue;
@@ -174,18 +200,23 @@ export function usageBackfill(options: {
         settleHolder.finish(t.id, `its pylon failed: ${p.failed}`);
         continue;
       }
-      if (o.phase !== "stopped") continue;
+      if (o.phase !== "stopped") {
+        registry.waitSettle(t.id, o.phase === "running" ? "its pylon has not paused since its archive yet" : `its pylon is ${o.phase}`);
+        continue;
+      }
       if (!imageHeld(p)) {
         settleHolder.finish(t.id, `no online node holds its image ${p.boot.image}`);
         continue;
       }
-      if (blocked(p) !== null) continue;
+      const waiting = blocked(p);
+      registry.waitSettle(t.id, waiting);
+      if (waiting !== null) continue;
       if (p.attempts.last !== null || p.attempts.readFailure !== undefined) registry.clearPylonAttempts(p.pylonId);
       registry.holdSettle(t.id, now);
       wake(p.node);
-      return true;
+      return "held";
     }
-    return false;
+    return "none";
   }
 
   async function reading(holder: Holder, id: ThreadId, since: number, now: number) {
@@ -241,7 +272,7 @@ export function usageBackfill(options: {
     if (settling !== null) return advance(settleHolder, settling, now);
     const backfill = registry.usageBackfill();
     if (backfill.state === "running" && backfill.current !== null) return advance(runHolder, backfill.current, now);
-    if (nextSettle(now) || backfill.state !== "running") return;
+    if (nextSettle(now) !== "none" || backfill.state !== "running") return;
     next(now);
   }
 

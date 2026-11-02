@@ -5,7 +5,7 @@
  */
 import type { NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
-import { keptPastDay, type ActivityFacts } from "../reconcile.ts";
+import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts } from "../reconcile.ts";
 import { countedCapacity } from "../protocol/observations.ts";
 import type { ReleaseReport, ReleaseView } from "../deploy/model.ts";
 import type { LoginState } from "../harness/credentials.ts";
@@ -51,8 +51,6 @@ export const rolloutMs = 30 * minute;
 /** The API asks tailscaled for a certificate valid a week and reloads it every 12 hours, so less than this left means renewal fails. */
 export const certificateWarnMs = 6 * day;
 export const certificateFailMs = 2 * day;
-/** Settles of one archive that failed this many times in a row will not succeed on their own: its pylon failed, or its disk does not boot or read. */
-export const settleFailuresFail = 3;
 
 const span = (ms: number) => ms < hour ? `${Math.max(1, Math.round(ms / minute))} min` : ms < 2 * day ? `${Math.round(ms / hour)} h` : `${Math.round(ms / day)} days`;
 const ok = (text: string): Verdict => ({ status: "ok", text });
@@ -152,6 +150,10 @@ function archivedDisks(f: DoctorFacts): Verdict {
   const failing = kept.filter((t) => (t.settleFailure?.count ?? 0) >= settleFailuresFail);
   if (failing.length > 0) {
     return fail(`reading the token usage on the disk of ${named(failing)} failed ${settleFailuresFail} or more times in a row, the last because ${lastFailure(failing)}, so ${failing.length === 1 ? "it is" : "they are"} kept. nexus show says why, nexus retry-pylon retries a failed pylon, and nexus delete deletes a thread with its disk unread`);
+  }
+  const overdue = kept.filter((t) => t.usageSettledAt === undefined && f.now - t.archivedAt! >= settleOverdueMs);
+  if (overdue.length > 0) {
+    return fail(`${named(overdue)} ${overdue.length === 1 ? "is" : "are"} still unread ${span(settleOverdueMs)} after ${overdue.length === 1 ? "its" : "their"} archive, so ${overdue.length === 1 ? "its disk is" : "their disks are"} kept, the first as ${keptPastDay(overdue[0]!, f.now)}. Bring its node online or free room there, retry a failed pylon with nexus retry-pylon, or delete the thread with its disk and its unread usage`);
   }
   const read = kept.flatMap((t) => t.usageSettledAt ?? []);
   const oldest = f.now - Math.min(...read);

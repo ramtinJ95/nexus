@@ -123,7 +123,7 @@ test("the backup is ok while the newest is verified and under 26 hours old, warn
   expect(healthy({ backup: { unreadable: "EACCES: permission denied" } }), null, "backup", "fail", /unreadable: EACCES/);
 });
 
-test("archived disks are ok kept for a fresh backup, warn while one waits for its usage to be read, and fail after 3 failed reads in a row or once the oldest read waits on a backup over 26 hours", () => {
+test("archived disks are ok kept for a fresh backup, warn while one waits for its usage to be read, and fail after 3 failed reads in a row, once one is unread 48 hours after its archive, or once the oldest read waits on a backup over 26 hours", () => {
   const archived = (id: string, over: Partial<DoctorFacts["keptArchives"][number]> = {}): DoctorFacts["keptArchives"][number] => ({
     id: id as ThreadId, title: `thread ${id}`, status: "archived", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, archivedAt: now - 25 * hour, ...over,
   });
@@ -140,6 +140,9 @@ test("archived disks are ok kept for a fresh backup, warn while one waits for it
   expect(keptArchives(archived("th-read", { usageSettledAt: now - 27 * hour })), null, "archived-disks", "fail",
     /^1 archived disk waits past the 24 hours for a backup that begins after the token usage on it was read, the oldest read 27 h ago\. The backup check says why.*nexus-backup/);
   expect(keptArchives(archived("th-read", { usageSettledAt: now - 27 * hour, backedUpAt: now - 28 * hour })), null, "archived-disks", "fail", /the oldest read 27 h ago/);
+  expect(keptArchives(archived("th-full", { archivedAt: now - 47 * hour, settleWaiting: "infra-testbench would have 2 GiB of memory left" })), null, "archived-disks", "warn", /Its next read waits, as infra-testbench would have 2 GiB/);
+  expect(keptArchives(archived("th-full", { archivedAt: now - 48 * hour, settleWaiting: "infra-testbench would have 2 GiB of memory left" })), null, "archived-disks", "fail",
+    /^th-full \(thread th-full\) is still unread 2 days after its archive, so its disk is kept, the first as .*Its next read waits, as infra-testbench would have 2 GiB of memory left\. Bring its node online or free room there, retry a failed pylon with nexus retry-pylon, or delete the thread with its disk and its unread usage$/);
 });
 
 test("the harness's login is ok signed in and offering its model, and fails without the provider, signed out, refusing to refresh, or not offering the model", () => {

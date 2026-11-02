@@ -43,12 +43,18 @@ export interface ActivityFacts {
   settleFailure?: { reason: string; at: number; count: number };
   /** When the newest backup the control plane has seen verify began, for an archived thread, whose disk waits on one. */
   backedUpAt?: number;
+  /** Why this archive's next settle waits, such as no room on its node, while it is unsettled and waits. */
+  settleWaiting?: string;
 }
 
 /** Amp's numbers. */
 export const idlePolicy = { agentIdleMs: 5 * 60_000, humanIdleMs: 20 * 60_000 } as const;
 /** How long an archived thread keeps its pylon's disk at least. */
 export const archivedDiskMs = 24 * 60 * 60_000;
+/** An archive's usage not read this long after its archive, a day past its disk's 24 hours, will not be read on its own. */
+export const settleOverdueMs = 2 * archivedDiskMs;
+/** Settles of one archive that failed this many times in a row will not succeed on their own: its pylon failed, or its disk does not boot or read. */
+export const settleFailuresFail = 3;
 
 /**
  * Why an archived thread's disk outlives its 24 hours, or null once it may go: the token usage on it was read to its
@@ -57,7 +63,9 @@ export const archivedDiskMs = 24 * 60 * 60_000;
  */
 export function diskKept(a: ActivityFacts): string | null {
   const f = a.settleFailure;
-  if (a.usageSettledAt === undefined) return `its token usage is not read to its end yet${f === undefined ? "" : `, and reading it failed ${f.count === 1 ? "once" : `${f.count} times in a row`}, the last because ${f.reason}`}`;
+  if (a.usageSettledAt === undefined) {
+    return `its token usage is not read to its end yet${f === undefined ? "" : `, and reading it failed ${f.count === 1 ? "once" : `${f.count} times in a row`}, the last because ${f.reason}`}${a.settleWaiting === undefined ? "" : `. Its next read waits, as ${a.settleWaiting}`}`;
+  }
   if (a.backedUpAt === undefined || a.backedUpAt <= a.usageSettledAt) return "it waits for a backup that begins after its token usage was read";
   return null;
 }
@@ -65,6 +73,12 @@ export function diskKept(a: ActivityFacts): string | null {
 /** Why the archived thread's disk is kept past its 24 hours at `now`, or null while it is under them or may go. */
 export function keptPastDay(a: ActivityFacts, now: number): string | null {
   return a.status === "archived" && a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? diskKept(a) : null;
+}
+
+/** Whether the archive's usage will not be read without the person: its settles keep failing, or it is overdue. */
+export function settleStuck(a: ActivityFacts, now: number): boolean {
+  return keptPastDay(a, now) !== null && a.usageSettledAt === undefined
+    && ((a.settleFailure?.count ?? 0) >= settleFailuresFail || now - a.archivedAt! >= settleOverdueMs);
 }
 
 export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {

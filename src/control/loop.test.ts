@@ -326,7 +326,7 @@ function shiftedRegistry(path = tempDb()) {
 }
 
 /**
- * Archives the thread `ms` ago. Unless `read` is false, its usage is read to the end then and a backup begins after,
+ * Archives the thread `ms` ago. Unless `read` is false, its usage is read to the end just after and a backup begins after that,
  * as the settle and the backup feed record them, so only the 24 hours decide whether its disk goes.
  */
 async function archivedAgo(registry: Registry, shift: { ms: number }, thread: Thread, ms: number, read = true) {
@@ -334,8 +334,9 @@ async function archivedAgo(registry: Registry, shift: { ms: number }, thread: Th
   registry.setThreadStatus(thread.id, "archived");
   shift.ms = 0;
   if (!read) return;
-  registry.finishSettle(thread.id, null, Date.now() - ms);
-  registry.recordBackedUp(Date.now() - ms + 1);
+  const archivedAt = registry.thread(thread.id)!.archivedAt!;
+  registry.finishSettle(thread.id, null, archivedAt + 1);
+  registry.recordBackedUp(archivedAt + 2);
 }
 
 test("a pylon archived 23h59m ago only pauses, and no pass deletes it", async (t) => {

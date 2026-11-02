@@ -200,6 +200,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
    * and the settle is tried again from the start.
    */
   let settling: (UsageHold & { archivedAt: number }) | null = null;
+  /** Why each archive's next settle waits, held in memory as the hold is, since the settle's next step says it again. */
+  const settleWaits = new Map<ThreadId, string>();
 
   const backedUpAt = (): number | null => {
     const at = setting("backed-up-at");
@@ -286,15 +288,16 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(wait === undefined ? {} : { sessionWaiting: true }),
         ...(typeof wait?.message === "string" ? { sessionWaitingMessage: wait.message } : {}),
         ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === undefined ? {} : { usageLimit }),
-        ...(reading.has(thread.id) ? { readingUsage: true } : {}), ...(archive === undefined ? {} : archiveFacts(archive, backedUp)),
+        ...(reading.has(thread.id) ? { readingUsage: true } : {}), ...(archive === undefined ? {} : archiveFacts(archive, backedUp, settleWaits.get(thread.id))),
       };
     });
   }
 
   /** What the thread's archive row says, and when the newest backup began, which only an archived thread's disk waits on. */
-  function archiveFacts(r: Row, backedUp: number | null): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt"> {
+  function archiveFacts(r: Row, backedUp: number | null, waiting: string | undefined): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt" | "settleWaiting"> {
     return {
       archivedAt: r.archived_at as number,
+      ...(waiting === undefined || r.usage_settled_at !== null ? {} : { settleWaiting: waiting }),
       ...(r.usage_settled_at === null ? {} : { usageSettledAt: r.usage_settled_at as number }),
       ...(r.settle_failure === null ? {} : { settleFailure: { reason: r.settle_failure as string, at: r.settle_failed_at as number, count: r.settle_failures as number } }),
       ...(backedUp === null ? {} : { backedUpAt: backedUp }),
@@ -538,8 +541,14 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     settleHold: (): UsageHold | null => settling && { thread: settling.thread, phase: settling.phase, since: settling.since },
     /** A settle holds the thread's pylon, which it wants woken to read. */
     holdSettle(thread: ThreadId, now: number) {
+      settleWaits.delete(thread);
       const archivedAt = sql("SELECT archived_at FROM thread_archives WHERE thread = ?").get(thread)?.archived_at as number | undefined;
       if (archivedAt !== undefined) settling = { thread, phase: "reading", since: now, archivedAt };
+    },
+    /** Why the archive's next settle waits, or null once it does not. */
+    waitSettle(thread: ThreadId, reason: string | null) {
+      if (reason === null) settleWaits.delete(thread);
+      else settleWaits.set(thread, reason);
     },
     /** The settle lets go of the pylon it holds, once it is paused. */
     releaseSettle() { settling = null; },
