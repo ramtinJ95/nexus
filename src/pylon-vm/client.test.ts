@@ -328,6 +328,8 @@ const crashes: Record<string, (lock: string) => Promise<string[]>> = {
 	"an older recoverer was killed holding its empty recovery": async (lock) => {
 		await abandon(lock);
 		await privateDirectory(join(lock, "recovery"));
+		const minutesAgo = new Date(Date.now() - 10 * 60_000);
+		await utimes(join(lock, "recovery"), minutesAgo, minutesAgo);
 		return [];
 	},
 	"a power loss emptied the release file": async (lock) => {
@@ -494,4 +496,28 @@ test("the start sweep removes the old directories that killed takes left beside 
 	await sweepScratch(root);
 	for (const dir of [running, stopped])
 		assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")).sort(), ["launch.lock-new003", "launch.lock.recovery1", "launch.lock.recovery1-dead01"], dir);
+});
+
+test("a launch leaves a dead launch's lock to an older client that is recovering it, and shuts such clients out of a recovery of its own", async (t) => {
+	const { root, lock } = await unlaunchable(t, "pylon-upgraded");
+	await abandon(lock);
+	// Older clients guard their recovery with this, and have just made it.
+	await privateDirectory(join(lock, "recovery"));
+	await assert.rejects(run(root, { action: "start", name: "pylon-upgraded", boot: spec }), /already in progress/);
+	assert.equal(existsSync(join(lock, "owner")), true, "the launch moved a lock an older client is recovering");
+
+	await rm(join(lock, "recovery"), { recursive: true });
+	const { rename } = fs;
+	let shut: boolean | undefined;
+	t.mock.method(fs, "rename", async (from: string, to: string) => {
+		if (from === lock && basename(to).startsWith("launch.lock-")) shut ??= existsSync(join(lock, "recovery"));
+		return rename(from, to);
+	});
+	syncBuiltinESMExports();
+	t.after(() => {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+	});
+	await assert.rejects(run(root, { action: "start", name: "pylon-upgraded", boot: spec }), /EISDIR/);
+	assert.equal(shut, true, "an older client could recover the lock while the launch moved it");
 });
