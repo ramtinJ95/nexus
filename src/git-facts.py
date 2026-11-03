@@ -71,7 +71,7 @@ def observe():
         pushed = upstream if upstream in published else origin if origin in candidates else candidates[0] if len(candidates) == 1 else None
         branches.append({"name": name, "head": commit, "pushedAs": pushed.removeprefix("refs/remotes/") if pushed else None})
     # A push from elsewhere, or one cut short before git logged it, leaves origin/<name> holding only a fetch. It still
-    # counts when that fetched tip is a commit this checkout made, which no other checkout can have made.
+    # counts when that fetched tip is a commit this checkout made, which a clone, fetch or checkout never logs.
     fetched = [b for b in branches if b["pushedAs"] is None and tips.get(f"refs/remotes/origin/{b['name']}") == b["head"]]
     if fetched:
         made = git("log", "-z", "--walk-reflogs", "--no-show-signature", "--max-count=4096", "--grep-reflog=^commit", "--format=%H", *[f"refs/heads/{b['name']}" for b in fetched], *(["HEAD"] if born else []), "--")
