@@ -127,7 +127,7 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
   });
   await new Promise<void>((resolve) => server.listen(join(dir, "control.sock"), resolve));
   after(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  return { state, actions };
+  return { state, actions, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
 /** The reply to an exec that finished, as the fork's process supervisor gives it. */
@@ -1026,4 +1026,44 @@ test("a VM whose controller predates startupFailures is broken for an unknown re
   assert.deepEqual(actions, [], "nothing was stopped, recorded or removed");
   assert.equal(existsSync(join(dir, "disk.qcow2")), false);
   assert.equal(existsSync(join(dir, "nexus-checkpoint.json")), false);
+});
+
+test("a retry stops a live controller without asking its stuck guest, converges, and launches a new controller", async () => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-retry" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  const controller = await fakeController(dir, id, (action) => {
+    assert.equal(action.action, "stop", "retry must not collect sessions from the stuck guest");
+    controller.state.current = "stopped";
+    return { name: id, state: "stopped" };
+  });
+  await backend.ensurePaused(id, "ckpt-retry-1", signal(), true);
+  await backend.ensurePaused(id, "ckpt-retry-1", signal(), true);
+  assert.deepEqual(controller.actions.map((a) => a.action), ["stop"]);
+  assert.match(await readFile(join(dir, "controller.log"), "utf8"), /retry: stopped old controller \(booted at 2026-10-22T00:00:00Z\)/);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-retry-1"]]);
+  await writeFile(join(dir, "status.json"), JSON.stringify({ name: id, state: "stopped" }));
+  await controller.close();
+  // The real replacement daemon starts, but this fixture has no bootable image or QEMU guest.
+  await assert.rejects(backend.ensureRunning(bootOf(id), live, signal()), /Sandbox (controller exited|start failed)/);
+  const log = await readFile(join(dir, "controller.log"), "utf8");
+  assert.match(log, /controller \d+ started for pylon-retry/);
+  assert.ok(log.indexOf("stopped old controller") < log.indexOf("started for pylon-retry"));
+
+});
+
+test("an ordinary resume reuses a healthy controller and its boot time", async () => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-healthy" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  const controller = await fakeController(dir, id, (action) => {
+    assert.ok(action.action === "write-files" || action.action === "public-urls");
+    return {};
+  });
+  await backend.ensureRunning(bootOf(id), live, signal());
+  await backend.ensureRunning(bootOf(id), live, signal());
+  assert.deepEqual(controller.actions.map((a) => a.action), ["write-files", "public-urls", "write-files", "public-urls"]);
+  const [pylon] = await backend.list();
+  assert.equal(pylon?.vm, "running");
+  if (pylon?.vm === "running") assert.equal(pylon.bootedAt, controller.state.bootedAt);
 });

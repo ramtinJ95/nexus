@@ -2270,3 +2270,25 @@ test("a Claude launch a control plane restart cut off before it recorded a sessi
   assert.equal(registry.claudeWorker(thread.id)!.message, "Claude launch was interrupted; attach to check before starting another session");
   assert.deepEqual(sent, []);
 });
+
+test("retry of a failed job stops its still-running boot before resuming its newest disk", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the first boot runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  await until("the first spawn is settled", () => registry.pylon(thread.pylonId)?.submitted === null);
+  await settled(fake, loop);
+  const old = fake.pylons.get(thread.pylonId)!;
+  assert.equal(old.phase, "running");
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "Guest command got no answer within 40000 ms" });
+  assert.equal(registry.retryPylon(thread.pylonId), true);
+  void loop.wake(node);
+  await until("retry boots again", () => fake.submitted.length === 3 && fake.pylons.get(thread.pylonId)?.phase === "running");
+  await settled(fake, loop);
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);
+  assert.equal((fake.submitted[1] as Extract<Job, { kind: "pause" }>).retry, true);
+  const current = fake.pylons.get(thread.pylonId)!;
+  assert.equal(current.phase, "running");
+  if (current.phase === "running" && old.phase === "running") assert.notEqual(current.bootedAt, old.bootedAt);
+});

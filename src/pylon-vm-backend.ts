@@ -587,7 +587,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       }
     },
 
-    async ensurePaused(pylonId, checkpoint, signal) {
+    async ensurePaused(pylonId, checkpoint, signal, retry = false) {
       const name = instanceName(pylonId);
       for (let instance = await settledInstance(pylonId, signal); instance?.status.state !== "stopped"; instance = await settledInstance(pylonId, signal)) {
         if (instance === null) return;
@@ -607,14 +607,16 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         const sidecar = await readSidecar(pylonId);
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
-        const sessions = instance.status.state === "running"
+        const sessions = !retry && instance.status.state === "running"
           ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
         await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
           case "running": case "interrupted": case "failed":
             try {
+              if (retry) await controllerLog(instanceDir(pylonId))(`retry: stopping old controller (booted at ${instance.status.bootedAt ?? "unknown"})`);
               await sandbox({ action: "stop", name });
+              if (retry) await controllerLog(instanceDir(pylonId))(`retry: stopped old controller (booted at ${instance.status.bootedAt ?? "unknown"})`);
             } catch (err) {
               throw new JobFailure("checkpoint-failed", `${pylonId}: ${(err as Error).message}`);
             }

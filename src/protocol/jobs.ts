@@ -23,7 +23,7 @@ import { imageId, objectAs, pylonIdField, sha256, templateId } from "./fields.ts
 
 export type Job =
   | { kind: "spawn"; pylonId: PylonId; boot: BootInputs; live: LiveSpec; liveHash: LiveHash; relaunch?: false }
-  | { kind: "pause"; pylonId: PylonId; checkpoint: CheckpointId }
+  | { kind: "pause"; pylonId: PylonId; checkpoint: CheckpointId; retry?: boolean }
   | { kind: "delete"; pylonId: PylonId }
   | { kind: "build-image"; image: ImageId; recipe: ImageRecipe }
   | { kind: "build-template"; template: TemplateId; inputs: TemplateBuildInputs }
@@ -168,7 +168,7 @@ const jobSchema = z.discriminatedUnion("kind", [
     live: z.looseObject({ previews: z.array(unchecked<LiveSpec["previews"][number]>()), overlay: z.array(unchecked<LiveSpec["overlay"][number]>()) }),
     liveHash: named<LiveHash>(), relaunch: z.literal(false).exactOptional(),
   }).refine((job) => job.boot.pylonId === job.pylonId, { path: ["boot", "pylonId"], message: "differs from job.pylonId" }),
-  z.looseObject({ kind: z.literal("pause"), pylonId: pylonIdField, checkpoint: checkpointId }),
+  z.looseObject({ kind: z.literal("pause"), pylonId: pylonIdField, checkpoint: checkpointId, retry: z.boolean().exactOptional() }),
   z.looseObject({ kind: z.literal("delete"), pylonId: pylonIdField }),
   z.looseObject({ kind: z.literal("build-image"), image: imageId, recipe: objectAs<ImageRecipe>() }),
   z.looseObject({ kind: z.literal("build-template"), template: templateId, inputs: objectAs<TemplateBuildInputs>() }),

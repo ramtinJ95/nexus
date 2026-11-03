@@ -28,10 +28,11 @@ export interface VmBackend {
    */
   ensureRunning(boot: BootInputs, live: LiveSpec, signal: AbortSignal, relaunch?: boolean): Promise<void>;
   /**
-   * Record sessions, stop services, close terminals, checkpoint the disk, stop the VM. Already stopped: no-op. A disk
+   * Record sessions, stop services, close terminals, checkpoint the disk, stop the VM. Already stopped: no-op.
+   * Retry skips guest session collection so an unresponsive guest cannot prevent stopping its controller. A disk
    * with a failed setup is never checkpointed: a VM with no checkpoint is removed, and one with a checkpoint is refused.
    */
-  ensurePaused(pylonId: PylonId, checkpoint: CheckpointId, signal: AbortSignal): Promise<void>;
+  ensurePaused(pylonId: PylonId, checkpoint: CheckpointId, signal: AbortSignal, retry?: boolean): Promise<void>;
   /** Remove the VM, its disk and its logs. Already absent: no-op. */
   ensureDeleted(pylonId: PylonId, signal: AbortSignal): Promise<void>;
   /** Boot the image, clone, preSetup, `.nexus/setup` as user, stop, publish. A setup failure publishes nothing. Published already: no-op. */
