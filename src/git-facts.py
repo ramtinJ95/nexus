@@ -48,7 +48,8 @@ def observe():
         raise ValueError("checkout is not a working tree")
     branch = git("symbolic-ref", "--quiet", "HEAD", allowed=(0, 1)).removeprefix("refs/heads/") or None
     head = git("rev-parse", "--verify", "--quiet", "HEAD", allowed=(0, 1))
-    if not head:
+    born = bool(head)
+    if not born:
         head = git("hash-object", "-t", "tree", "--stdin")
     refs = git("for-each-ref", "--count=1001", "--format=%(refname)%00%(objectname)%00%(upstream)%00%(symref)%00", "refs/heads/", "refs/remotes/", raw=True)
     rows = [record.split("\0") for record in refs.split("\0\n")[:-1]]
@@ -59,6 +60,7 @@ def observe():
     # A clone, fetch or checkout writes these refs too. Only a push from this checkout logs this message.
     pushes = git("log", "-z", "--walk-reflogs", "--no-show-signature", "--fixed-strings", "--grep-reflog=update by push", "--format=%gD", *tracking, "--") if tracking else ""
     published = {entry.rpartition("@{")[0] for entry in pushes.split("\0")} & set(tracking)
+    tips = {row[0]: row[1] for row in rows if row[0] in tracking}
     branches = []
     for ref, commit, upstream, symref in rows:
         if not ref.startswith("refs/heads/"):
@@ -68,6 +70,14 @@ def observe():
         origin = f"refs/remotes/origin/{name}"
         pushed = upstream if upstream in published else origin if origin in candidates else candidates[0] if len(candidates) == 1 else None
         branches.append({"name": name, "head": commit, "pushedAs": pushed.removeprefix("refs/remotes/") if pushed else None})
+    # A push from elsewhere, or one cut short before git logged it, leaves origin/<name> holding only a fetch. It still
+    # counts when that fetched tip is a commit this checkout made, which no other checkout can have made.
+    fetched = [b for b in branches if b["pushedAs"] is None and tips.get(f"refs/remotes/origin/{b['name']}") == b["head"]]
+    if fetched:
+        made = git("log", "-z", "--walk-reflogs", "--no-show-signature", "--max-count=4096", "--grep-reflog=^commit", "--format=%H", *[f"refs/heads/{b['name']}" for b in fetched], *(["HEAD"] if born else []), "--")
+        for b in fetched:
+            if b["head"] in made.split("\0"):
+                b["pushedAs"] = f"origin/{b['name']}"
     dirty = git("status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none", dirty=True)
     return {"head": head, "branch": branch, "dirty": dirty, "branches": branches}
 

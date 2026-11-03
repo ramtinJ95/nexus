@@ -124,6 +124,35 @@ test("a branch cloned, fetched or checked out from a remote is pushed only once 
   assert.equal((await gitFacts(s.guest)).branches.find((b) => b.name === "later")?.pushedAs, "origin/later", "a push stays recorded across later fetches");
 });
 
+test("a branch pushed from another clone counts once a fetch shows origin at a commit this checkout made", async (t) => {
+  const s = await checkout(t);
+  const remote = await tempDir("nexus-git-remote-", t);
+  const other = await tempDir("nexus-git-other-", t);
+  await run("git", ["init", "--bare", "-q", "--initial-branch=main", remote]);
+  await s.git("remote", "add", "origin", remote);
+  await s.commit();
+  await s.git("push", "-q", "origin", "main");
+  await s.git("checkout", "-qb", "fix/elsewhere");
+  const head = await s.commit();
+  await s.git("branch", "fix/from-head");
+  await s.git("checkout", "-qb", "fix/same-name", "main");
+  await s.commit();
+  await s.git("checkout", "-q", "main");
+  await run("git", ["clone", "-q", remote, other]);
+  const elsewhere = (...args: string[]) => run("git", ["-C", other, "-c", "user.name=test", "-c", "user.email=test@example.com", ...args]);
+  await elsewhere("fetch", "-q", s.dir, "fix/elsewhere");
+  await elsewhere("push", "-q", "origin", "FETCH_HEAD:refs/heads/fix/elsewhere", "FETCH_HEAD:refs/heads/fix/from-head");
+  await elsewhere("checkout", "-qb", "fix/same-name", "origin/main");
+  await elsewhere("commit", "-q", "--allow-empty", "-m", "another checkout's work on the same name");
+  await elsewhere("push", "-q", "origin", "fix/same-name", "fix/same-name:theirs");
+  const pushedAs = async () => Object.fromEntries((await gitFacts(s.guest)).branches.map((b) => [b.name, b.pushedAs]));
+  assert.equal((await pushedAs())["fix/elsewhere"], null, "before a fetch, nothing shows the push");
+  await s.git("fetch", "-q", "origin");
+  await s.git("branch", "--track", "theirs", "origin/theirs");
+  assert.deepEqual(await pushedAs(), { "fix/elsewhere": "origin/fix/elsewhere", "fix/from-head": "origin/fix/from-head", "fix/same-name": null, main: "origin/main", theirs: null });
+  assert.equal((await gitFacts(s.guest)).branches.find((b) => b.name === "fix/elsewhere")?.head, head);
+});
+
 test("a push of a signed commit counts where the configuration shows signatures", async (t) => {
   const s = await checkout(t);
   const remote = await tempDir("nexus-git-remote-", t);
