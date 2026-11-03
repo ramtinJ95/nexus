@@ -382,10 +382,11 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
   await writeFile(join(dir, "etc/control.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
   const reports: any[] = [];
   const calls: string[] = [];
+  const drains: { commit: string; release?: boolean; hold?: boolean }[] = [];
   let busy = true;
   const api = async (path: string, body?: any) => {
     if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
-    if (path === "drain") return { idle: !busy, threads: busy ? ["th-builder"] : [] };
+    if (path === "drain") { drains.push(body); return { idle: !busy, threads: busy ? ["th-builder"] : [] }; }
     if (path === "report") { reports.push(body); return { ok: true }; }
     assert.fail(path);
   };
@@ -411,11 +412,15 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
     assert.equal(reports.at(-1).state, "waiting-for-idle");
     assert.match(reports.at(-1).reason, /threads: th-builder/);
     assert.ok(!calls.includes("checkout"));
+    assert.deepEqual(drains, Array.from({ length: poll + 1 }, () => ({ commit })), "waiting polls renew the lease without releasing admission");
   }
+  drains.length = 0;
   busy = false;
   reports.length = 0;
   await reconcileRole("control", config, api, boundary);
   assert.deepEqual(reports.map((r) => r.state), ["installing", "rolled-back"]);
+  assert.deepEqual(drains.filter((body) => body.release), [{ commit, release: true }]);
+  assert.deepEqual(drains.at(-1), { commit, release: true }, "the settled install releases the lease");
   assert.match(reports.at(-1).reason, /candidate API failed/);
   assert.equal(await readFile(join(dir, "units/nexus-control.service"), "utf8"), "old unit");
   assert.equal(await readlink(join(dir, "current")), `releases/${old}`);
