@@ -284,11 +284,11 @@ Gondolin's host side logs what it does with a pylon's guest when `GONDOLIN_DEBUG
 | Flag | What it logs |
 | --- | --- |
 | `exec` | `exec start` when an exec is sent to the guest, after any wait behind a file operation, and `exec done` with its exit code when the guest answers. Nothing while an exec waits, and nothing for file operations. |
-| `protocol` | Every frame the host receives from the guest (`virtio rx t=... id=...`), file_read_done, file_write_done, file_delete_done and exec_response among them, every request the host takes from its callers (`client rx type=...`), and the guest's serial console (`[qemu] stdout: ...`), which carries sandboxd's own log and the guest kernel's messages. |
+| `protocol` | Every frame the host receives from the guest (`virtio rx t=... id=...`), file_read_done, file_write_done, file_delete_done and exec_response among them, every request the host takes from its callers (`client rx type=...`), and the guest's serial console (`[qemu] stdout: ...`). The pylon image sends sandboxd's stdout and stderr to `/dev/null`, so the console shows only the guest kernel's and init's messages, not sandboxd's log. |
 | `vfs` | Operations on the host's virtio-fs mounts. |
 | `net` | The host's network stack for the guest. |
 
-For a guest that stops answering, as in #415, use `exec,protocol`: the file-operation frames and the console lines tell a stuck file operation, a stuck exec and a guest kernel problem apart. Set it in a drop-in and restart the probe:
+For a guest that stops answering, as in #415, use `exec,protocol`: it still logs every exec and file operation on the host side, so the frames tell a stuck file operation from a stuck exec, and the console shows any guest kernel problem. Set it in a drop-in and restart the probe:
 
 ```sh
 sudo mkdir -p /etc/systemd/system/nexus-probe.service.d
