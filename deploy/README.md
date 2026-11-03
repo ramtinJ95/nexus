@@ -279,16 +279,25 @@ The next deploy installs the new unit file, as it does every release, so this ne
 
 ### Debug a pylon's guest commands
 
-Gondolin logs every exec it queues, sends and gets an answer for when `GONDOLIN_DEBUG` is set. The probe passes its own `GONDOLIN_DEBUG` to each controller it starts, and the lines land in that instance's `controller.log`. Set it in a drop-in and restart the probe:
+Gondolin's host side logs what it does with a pylon's guest when `GONDOLIN_DEBUG` is set. The probe passes its own `GONDOLIN_DEBUG` to each controller it starts, and the lines land in that instance's `controller.log`. The value is a comma-separated list of flags, or `all`:
+
+| Flag | What it logs |
+| --- | --- |
+| `exec` | `exec start` when an exec is sent to the guest, after any wait behind a file operation, and `exec done` with its exit code when the guest answers. Nothing while an exec waits, and nothing for file operations. |
+| `protocol` | Every frame the host receives from the guest (`virtio rx t=... id=...`), file_read_done, file_write_done, file_delete_done and exec_response among them, every request the host takes from its callers (`client rx type=...`), and the guest's serial console (`[qemu] stdout: ...`), which carries sandboxd's own log and the guest kernel's messages. |
+| `vfs` | Operations on the host's virtio-fs mounts. |
+| `net` | The host's network stack for the guest. |
+
+For a guest that stops answering, as in #415, use `exec,protocol`: the file-operation frames and the console lines tell a stuck file operation, a stuck exec and a guest kernel problem apart. Set it in a drop-in and restart the probe:
 
 ```sh
 sudo mkdir -p /etc/systemd/system/nexus-probe.service.d
-printf '[Service]\nEnvironment=GONDOLIN_DEBUG=exec\n' | sudo tee /etc/systemd/system/nexus-probe.service.d/gondolin-debug.conf >/dev/null
+printf '[Service]\nEnvironment=GONDOLIN_DEBUG=exec,protocol\n' | sudo tee /etc/systemd/system/nexus-probe.service.d/gondolin-debug.conf >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl restart nexus-probe
 ```
 
-`exec` can be a comma-separated list of `net`, `exec`, `vfs` and `protocol`, or `all`. Only controllers started after the restart log. A running pylon keeps its old controller until its next boot, such as a wake after a pause. The log grows quickly, and the controller's rotation at 10 MiB bounds it to three files per instance. To turn it off, remove the drop-in, run `sudo systemctl daemon-reload` and restart the probe. Controllers started while it was on keep logging until their pylon's next boot.
+Only controllers started after the restart log. A running pylon keeps its old controller until its next boot, such as a wake after a pause. `protocol` logs a line per output frame, so a chatty command fills the log fast, and the controller's rotation at 10 MiB keeps only the most recent ~30 MiB per instance in `controller.log`, `controller.log.1` and `controller.log.2`. Copy `controller.log*` off the node soon after a stall. To turn it off, remove the drop-in, run `sudo systemctl daemon-reload` and restart the probe. Controllers started while it was on keep logging until their pylon's next boot.
 
 ### GitHub access for a project's agents
 
