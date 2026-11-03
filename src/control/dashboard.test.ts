@@ -634,7 +634,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
     assert.match(card.html, /<ol class="life" aria-label="Where this work is">.*<li class="life-held" aria-current="step">/s, "its steps mark where it waits on the person");
     assert.match(card.html, new RegExp(`<a class="link" href="/threads/${thread.id}">Open thread</a>`));
     const flight = page.split('id="flight"')[1]!.split('id="overview"')[0]!;
-    assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
+    assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
   }
   const land = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards.find((c) => c.thread === held.id)!;
   assert.match(land.text, /^Held review acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
@@ -2482,7 +2482,7 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${c.id}" data-peek="${c.id}">`));
   assert.match(phaseOf(thread) ?? "", /^(queued|building)$/, "an item that became a thread shows as its thread");
   assert.doesNotMatch(flight, new RegExp(`data-peek="${a.id}"`), "nor as itself");
-  assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${b.id}" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
+  assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${b.id}" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
   assert.equal(phaseOf(b.id), "planned");
   const needs = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
   const card = needs.split(`id="need-${b.id}"`)[1]!.split("</article>")[0]!;
