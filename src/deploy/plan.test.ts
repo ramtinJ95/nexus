@@ -23,10 +23,10 @@ test("probes require the desired control release to be healthy", () => {
   assert.deepEqual(planDeploy({ ...input, role: "probe", turnRunning: true }), { kind: "install", commit });
 });
 
-test("control drain refuses a running turn at the deadline, but idle wins at the deadline", () => {
+test("control drain waits past the old deadline, and installs only once idle", () => {
   assert.deepEqual(planDeploy({ ...input, turnRunning: true }), { kind: "wait", reason: "idle" });
   assert.deepEqual(planDeploy({ ...input, turnRunning: true, drainStartedAt: 40_001 }), { kind: "wait", reason: "idle" });
-  assert.deepEqual(planDeploy({ ...input, turnRunning: true, drainStartedAt: 40_000 }), { kind: "stop", reason: "agent turn still running at drain timeout" });
+  assert.deepEqual(planDeploy({ ...input, turnRunning: true, drainStartedAt: 40_000 }), { kind: "wait", reason: "idle" });
   assert.deepEqual(planDeploy({ ...input, drainStartedAt: 40_000 }), { kind: "install", commit });
 });
 
@@ -34,7 +34,7 @@ test("a failure recorded at the desired commit stops it before health or drain, 
   const healthy = { ...input, current: { commit, healthy: true } };
   for (const state of ["failed", "rolled-back"] as const) {
     const journal = { commit, state, reason: "candidate API failed" };
-    const report = { commit, state, reason: "agent turn still running at drain timeout" };
+    const report = { commit, state, reason: "build failed" };
     assert.deepEqual(planDeploy({ ...healthy, attempts: [journal] }), { kind: "stop", reason: "candidate API failed" });
     assert.deepEqual(planDeploy({ ...input, turnRunning: true, attempts: [report] }), { kind: "stop", reason: report.reason });
     assert.deepEqual(planDeploy({ ...input, attempts: [report, journal] }), { kind: "stop", reason: report.reason });
@@ -44,5 +44,14 @@ test("a failure recorded at the desired commit stops it before health or drain, 
   }
   for (const state of ["healthy", "installing", "waiting-for-idle"] as const) {
     assert.deepEqual(planDeploy({ ...input, attempts: [{ commit, state, reason: null }] }), { kind: "install", commit });
+  }
+});
+
+test("legacy busy-turn quarantine permits the same commit and newer main, but never hides an install failure", () => {
+  for (const reason of ["agent turn still running at drain timeout", "Error: agent turn still running at drain timeout"]) {
+    const busy = { commit, state: "failed" as const, reason };
+    assert.deepEqual(planDeploy({ ...input, attempts: [busy] }), { kind: "install", commit });
+    assert.deepEqual(planDeploy({ ...input, attempts: [busy], desired: { ...input.desired!, commit: "c".repeat(40) } }), { kind: "install", commit: "c".repeat(40) });
+    assert.deepEqual(planDeploy({ ...input, attempts: [busy, { ...busy, reason: "install failed" }] }), { kind: "stop", reason: "install failed" });
   }
 });

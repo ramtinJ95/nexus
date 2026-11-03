@@ -121,6 +121,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   let desired: string | null = null;
   let renewal: NodeJS.Timeout | undefined;
   let drainLost = false;
+  let keepDrain = false;
   const drain = async () => {
     if (desired === null) throw new Error("no desired release to drain");
     return api("drain", { commit: desired } satisfies DrainBody) as Promise<DrainReply>;
@@ -196,7 +197,9 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
         const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: !status.idle, drainStartedAt: start, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
         if (next.kind === "install") break;
         if (next.kind === "stop") throw new Error(next.reason);
-        await report("waiting-for-idle", desired);
+        await report("waiting-for-idle", desired, `Waiting for idle ${Math.floor((Date.now() - view.desired!.requestedAt) / 1000)}s since release request; threads: ${status.threads?.join(", ") || "unknown"}${status.entering ? "; submissions entering" : ""}`);
+        // Yield below the fixed supervisor's deadline, retaining the lease for the next 15-second poll.
+        if (Date.now() - start >= Math.min(config.drainTimeoutMs, 60_000)) { keepDrain = true; return; }
         await sleep(1000);
       }
       renewal = setInterval(() => { void drain().catch(() => { drainLost = true; }); }, 20_000);
@@ -209,7 +212,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     await report(error instanceof WaitingForControl ? "waiting-for-control" : "failed", desired, String(error).slice(-20_000));
   } finally {
     clearInterval(renewal);
-    if (role === "control") await api("drain", { commit: desired!, release: true } satisfies DrainBody).catch(() => {});
+    if (role === "control" && !keepDrain) await api("drain", { commit: desired!, release: true } satisfies DrainBody).catch(() => {});
   }
 }
 

@@ -36,10 +36,15 @@ export interface Drain { commit: string; expiresAt: number; locked?: boolean }
 /** What the control node posts to /v1/deployer/drain. */
 export interface DrainBody { commit: string; release?: boolean; hold?: boolean }
 /** `expiresAt` is null once a release has cleared the drain. */
-export interface DrainReply { idle: boolean; expiresAt: number | null }
+export interface DrainReply { idle: boolean; expiresAt: number | null; threads?: string[]; entering?: boolean }
+
+/** Old workers recorded this pre-install refusal as a failure; it says nothing about the release. */
+export function busyDrainReason(reason: string | null): boolean {
+  return reason === "agent turn still running at drain timeout" || reason === "Error: agent turn still running at drain timeout";
+}
 
 export function releaseOutcome(view: ReleaseView, commit: string): "pending" | "healthy" | "failed" | "superseded" {
   if (view.desired?.commit !== commit) return "superseded";
-  if (view.nodes.some((r) => r.target === commit && (r.state === "failed" || r.state === "rolled-back"))) return "failed";
+  if (view.nodes.some((r) => r.target === commit && (r.state === "failed" || r.state === "rolled-back") && !busyDrainReason(r.reason))) return "failed";
   return view.nodes.length > 0 && view.nodes.every((r) => r.commit === commit && r.state === "healthy") ? "healthy" : "pending";
 }

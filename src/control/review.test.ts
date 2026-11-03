@@ -3388,3 +3388,17 @@ test("one press lands a description whose statement changed after the reviewer q
   assert.equal(g.sent.length, sent, "a quote that is not in the description it came from is not asked for again");
   assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["The reviewer's quote of what could not be checked live is not in the pull request's description."] });
 });
+
+test("a fresh busy drain extends a landing past its deadline without rollback or needs-person", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  const loop = await approved(f, "nLAPTOP");
+  f.tick(31 * 60_000);
+  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "waiting-for-idle", reason: "Waiting for th-builder", observedAt: f.now });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "deploying");
+  assert.equal(f.registry.desiredRelease()?.commit, merged);
+  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: f.now });
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+});

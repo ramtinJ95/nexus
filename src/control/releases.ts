@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { TailnetNodeId } from "../ids.ts";
 import type { Registry } from "./registry.ts";
-import { fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../deploy/model.ts";
+import { busyDrainReason, fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../deploy/model.ts";
 import { command, repository } from "../deploy/install.ts";
 import { releaseName, type ReleaseInventory } from "../deploy/release-cleanup.ts";
 import { deleteOutcomeSchema } from "../protocol/cleanup.ts";
@@ -61,6 +61,7 @@ export function releaseView(registry: ReleasesRegistry, self: string | undefined
       const report = reports.find((r) => r.node === n.name && r.role === role);
       if (report === undefined) return { node: n.name, role, commit: null, target: desired?.commit ?? null, state: "pending" as const, reason: "no deployer report", observedAt: 0 };
       if (now - report.observedAt >= 90_000) return { ...report, state: "pending" as const, reason: "deployer report is stale" };
+      if (busyDrainReason(report.reason)) return { ...report, state: "pending" as const, reason: "Previous deploy waited for a busy turn; retry deployment, not a revert" };
       return report;
     });
   }) };

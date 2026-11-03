@@ -100,6 +100,7 @@ test("drain reads committed live and queued work rather than a lagging activity 
     s.fake.commit(s.thread.id);
     const result = await s.call("POST", "/v1/deployer/drain", { commit: deployCommit }, reporterHeaders);
     assert.equal(result.body.idle, false);
+    assert.deepEqual(result.body.threads, [s.thread.id]);
   }
   s.fake.transcript(s.thread.id).docs = {};
   s.fake.commit(s.thread.id);

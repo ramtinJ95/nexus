@@ -44,7 +44,7 @@ export const staleObservationMs = 5 * minute;
 export const backupMaxAgeMs = 26 * hour;
 /**
  * How long a role may take to reach a desired release before its check warns: the deadline `nexus deploy --wait` and a
- * landing give a rollout, which covers the control role's drain of up to 5 minutes, its build and its health check, and
+ * landing give a rollout outside a busy drain, its build and its health check, and
  * the probes after it.
  */
 export const rolloutMs = 30 * minute;

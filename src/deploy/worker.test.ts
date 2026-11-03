@@ -362,3 +362,65 @@ test("a probe a release behind reads the view again when control's unchanged rep
   assert.equal(JSON.parse(await readFile(join(m.dir, "control-deploy-report.json"), "utf8")).observedAt, 0, "control's report file was left as it was");
   assert.equal(await readlink(join(m.dir, "current")), `releases/${commit}`);
 });
+
+test("busy turns outlast the old timeout across polls without quarantine, then a real install failure quarantines", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRole } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-poll-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const old = "b".repeat(40);
+  for (const path of ["etc", "units", "deployer", `releases/${old}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${old}/release-commit`), old);
+  await symlink(`releases/${old}`, join(dir, "control-current"));
+  await symlink(`releases/${old}`, join(dir, "current"));
+  await writeFile(join(dir, "units/nexus-control.service"), "old unit");
+  let processCommit = old;
+  const server = createServer((_req, res) => res.end(JSON.stringify({ commit: processCommit }))).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await writeFile(join(dir, "etc/control.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
+  const reports: any[] = [];
+  const calls: string[] = [];
+  let busy = true;
+  const api = async (path: string, body?: any) => {
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "drain") return { idle: !busy, threads: busy ? ["th-builder"] : [] };
+    if (path === "report") { reports.push(body); return { ok: true }; }
+    assert.fail(path);
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = {
+    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
+    async checkout() { calls.push("checkout"); },
+    async run(program: string, args: readonly string[]) {
+      calls.push(`${program} ${args.join(" ")}`);
+      if (program === "env" && !args.includes("NEXUS_PREPARE=1")) {
+        await mkdir(join(dir, `releases/${commit}`), { recursive: true });
+        await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+      }
+      if (program === "env" && args.includes("NEXUS_PREPARE=1")) await writeFile(join(dir, "units/nexus-control.service"), "new unit");
+      // The candidate process never answers with its commit; rollback starts the previous process.
+      if (program === "systemctl" && args[0] === "restart") processCommit = old;
+      return program === "journalctl" ? "candidate API failed" : "";
+    },
+  };
+  await writeFile(join(dir, "control-deploy-report.json"), JSON.stringify({ target: commit, state: "failed", reason: "Error: agent turn still running at drain timeout" }));
+  for (let poll = 0; poll < 2; poll++) {
+    await reconcileRole("control", config, api, boundary);
+    assert.equal(reports.at(-1).state, "waiting-for-idle");
+    assert.match(reports.at(-1).reason, /threads: th-builder/);
+    assert.ok(!calls.includes("checkout"));
+  }
+  busy = false;
+  reports.length = 0;
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "rolled-back"]);
+  assert.match(reports.at(-1).reason, /candidate API failed/);
+  assert.equal(await readFile(join(dir, "units/nexus-control.service"), "utf8"), "old unit");
+  assert.equal(await readlink(join(dir, "current")), `releases/${old}`);
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${old}`);
+  calls.length = 0;
+  await reconcileRole("control", config, api, boundary);
+  assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
+});
