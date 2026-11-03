@@ -11,8 +11,8 @@ import type { ProjectId } from "../ids.ts";
 import type { SecretGrant } from "../secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, reservedNames, type HoldCode } from "./holds.ts";
-import { carryWaiver, landingHolds, landPress } from "./policy.ts";
+import { holdRule, reservedNames, type Hold, type HoldCode } from "./holds.ts";
+import { carryWaiver, headHolds, heldBy, landingHolds, landPress } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
 import { changeOf, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
 import { reviewLoop, type ReviewDeps } from "./review.ts";
@@ -1035,7 +1035,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
     maxRounds: 3, phase: { kind: "merging", authorized: null }, rounds: [round],
   });
   const pr: PrSnapshot = { pr: testPr({ repo: "ramtinJ95/nexus", number: 199, title: "", url: "" }), detail: { head: head1, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  const holds = (...paths: string[]) => landingHolds({ review, pr, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) }).map((h) => h.text);
+  const holds = (...paths: string[]) => headHolds({ review, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) }).map((h) => h.text);
   const pr199 = ["README.md", "docs/explorations/install.md", "docs/roadmap.md", ...["README.md", "loopback.py", "run.ts", "standin/apt-get", "standin/github-host-keys", "standin/journalctl", "standin/qemu",
     "standin/ssh-keyscan", "standin/systemctl", "standin/tailscale", "tailnet.ts", "transcript.txt", "tsconfig.json"].map((p) => `docs/verification/fresh-install/${p}`)];
   assert.deepEqual(holds(...pr199), []);
@@ -1048,7 +1048,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
   assert.deepEqual(holds("src/protocol/routes.ts"), ["Always needs the person: changes to login or auth, as it changes src/protocol/routes.ts."]);
   assert.deepEqual(holds("src/control/api/kit.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/api/kit.ts."]);
   const migration = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,4 @@ export const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," };
-  assert.deepEqual(landingHolds({ review, pr, nexus: true, files: [migration] }).map((h) => h.text), ["Always needs the person: anything irreversible, as it changes src/control/schema.ts."]);
+  assert.deepEqual(headHolds({ review, nexus: true, files: [migration] }).map((h) => h.text), ["Always needs the person: anything irreversible, as it changes src/control/schema.ts."]);
   assert.deepEqual(holds("src/control/schema.ts", "src/control/db.ts"), []);
 });
 
@@ -1060,13 +1060,13 @@ test("the policy's review conditions: another model, an approval with no P0 to P
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   });
   const pr: PrSnapshot = { pr: testPr({ repo: "acme/shop", number: 7, title: "", url: "", checks: "pending", conflict: true }), detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }).map((h) => h.text), [
-    "The reviewer ran the builder's own model, m.",
+  assert.deepEqual(landingHolds({ review, pr }).map((h) => h.text), [
     "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
     "The builder neither fixed nor rejected with a reason finding F2 of round 1.",
     `The pull request's head is ${head2}, not the approved ${head1}.`,
     "The branch conflicts with its base.",
     "The pull request's GitHub checks are pending.",
+    "The reviewer ran the builder's own model, m.",
   ]);
 });
 
@@ -1410,10 +1410,11 @@ test("the policy reads a live check: a failure holds, a pass needs no statement,
 
   const review = { ...f.review(), rounds: [{ ...f.review().rounds[0]!, live: { kind: "ran" as const, thread: f.liveThreads[0]!, passed: false, output: "boom" } }] };
   const pr: PrSnapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" }, detail: { ...f.snapshot.detail, mergeCommit: null } };
-  assert.deepEqual(landingHolds({ review, pr, files: [], nexus: false }), [
+  assert.deepEqual(landingHolds({ review, pr }), [
     { code: "open-findings", text: "Findings P0 to P2 are open: LIVE." },
     { code: "unanswered", text: "The builder neither fixed nor rejected with a reason finding LIVE of round 1." },
     { code: "live-failed", text: `The live check failed at ${head1}.` },
+    { code: "verify-changed", text: "The pull request changes .nexus/verify, the live check this policy relies on." },
   ]);
   assert.equal(holdRule("live-failed").waivable, false);
 });
@@ -2290,13 +2291,12 @@ test("a held reserved path holds again when landed, and lands once the person wa
 
 test("a waiver lets the landing past only the holds it names, and only at the commit it names", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head2, reservedHolds), { status: 409, message: new RegExp(`is at ${head1}, not ${head2}`) });
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, ["The pull request's GitHub checks are pending."]), { status: 409, message: /not held by/ });
 
   const image = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
   await loop.poll();
   assert.deepEqual(f.merges, []);
@@ -3176,10 +3176,50 @@ test("an approval under a stopped PR watch still learns its pull request merged 
   assert.notEqual(f.attention().at(-1), "decision");
 });
 
+const egress: Hold = { code: "reserved-path:egress", text: "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts." };
+
+test("an approved review of a Nexus pull request shows the path holds its head meets, and one press waiving them lands it", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type A = 1;\n+type A = 2;" }];
+  const loop = await approved(f, null);
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(heldBy(f.review()), [egress], "the card shows the hold the landing will meet at that head");
+  const press = landPress(f.review());
+  assert.deepEqual(press, { kind: "lands", waives: [egress], quotes: false });
+  loop.land(f.builder, "nLAPTOP", head1, [egress.text]);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "one press with the waivers the card showed merges");
+  assert.equal(f.review().phase.kind, "deploying");
+});
+
+test("an approved review of another repository's pull request has no path holds", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type A = 1;\n+type A = 2;" }];
+  const loop = await approved(f, null);
+  assert.deepEqual(heldBy(f.review()), []);
+  assert.deepEqual(landPress(f.review()), { kind: "lands", waives: [], quotes: false });
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+});
+
+test("a review approved before Nexus recorded what holds its head reads them on the next pass", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type A = 1;\n+type A = 2;" }];
+  const loop = await approved(f, null);
+  const { holds, ...round } = f.review().rounds[0]!;
+  f.registry.saveReview({ ...f.review(), rounds: [round] });
+  assert.deepEqual(heldBy(f.review()), [], "until then it shows what its record alone decides");
+  await loop.poll();
+  assert.deepEqual(f.review().rounds[0]!.holds, [egress]);
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
 test("an approval by a reviewer on the builder's own model offers no Land press, before any landing tries", async (t) => {
   const f = fixture(t);
   const loop = await approved(f, null);
-  f.registry.saveReview({ ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } });
+  const review = { ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } };
+  f.registry.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, holds: headHolds({ review, files: [], nexus: true }) }] });
   assert.equal(landPress(f.review()).kind, "stuck");
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409, message: /builder's own model/ });
   assert.deepEqual(f.review().phase, { kind: "approved" });

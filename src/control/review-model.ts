@@ -52,13 +52,16 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string }
+export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string; holds?: Hold[] }
 /**
  * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
  * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
  * change at both is the same, so no reviewer round ran for it and it counts against no limit. Its checks run as any
  * round's do, since the base under the change moved. `quotedFrom` is the digest of the description the reviewer last
  * quoted from when a landing asked it again, so a landing asks again only once the description changed since.
+ * `holds` are those `head` alone decides (policy.ts's `headHolds`), recorded once its checks pass, so the person's
+ * Land and the landing read the same ones. A round that passed its checks before Nexus recorded them gets them on
+ * the loop's next pass while it waits at approval, and from its landing otherwise.
  */
 /** The digest of a pull request's description, which a round's `quotedFrom` records. */
 export const descriptionDigest = (body: string) => createHash("sha256").update(body).digest("hex");
