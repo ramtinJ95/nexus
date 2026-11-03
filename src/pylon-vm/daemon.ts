@@ -9,7 +9,7 @@ import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime
 import { publishIdentity, readIdentity } from "./identity.ts";
 import { controllerLogLimit, rotateLog } from "./log-rotation.ts";
 import { stampLines } from "./controller-log.ts";
-import { agentError, readRecord } from "./storage.ts";
+import { agentError, existsError, readRecord } from "./storage.ts";
 import { parse } from "../parse.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 
@@ -100,11 +100,6 @@ async function main(): Promise<void> {
 		if (runsBesideQueue(action.action)) void handle(action, res);
 		else void queue.run(() => handle(action, res));
 	});
-	server.listen(socket);
-	await once(server, "listening");
-	// A failed accept leaves the server listening, and the VM lives in this process, so an exit would only break the pylon.
-	server.on("error", (error) => console.error(error));
-	await chmod(socket, 0o600);
 	server.once("close", () => {
 		void readIdentity(pidFile)
 			.then(async (identity) => {
@@ -133,6 +128,16 @@ async function main(): Promise<void> {
 	};
 	process.on("SIGTERM", shutdown);
 	process.on("SIGINT", shutdown);
+	server.listen(socket);
+	await once(server, "listening");
+	// A failed accept leaves the server listening, and the VM lives in this process, so an exit would only break the pylon.
+	server.on("error", (error) => console.error(error));
+	try {
+		await chmod(socket, 0o600);
+	} catch (error) {
+		// Shutdown can remove the socket while startup is still setting its permissions.
+		if (!ending || !existsError(error, "ENOENT")) throw error;
+	}
 }
 await main().catch((error: unknown) => {
 	console.error(error);

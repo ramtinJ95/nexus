@@ -8,7 +8,9 @@
  */
 import { constants } from "node:os";
 import http from "node:http";
-import { registerHooks } from "node:module";
+import { once } from "node:events";
+import fs from "node:fs/promises";
+import { registerHooks, syncBuiltinESMExports } from "node:module";
 import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
 
 export { lifecycleQueue, NotRunning, readIntent, runsBesideQueue } from "./runtime.ts";
@@ -40,6 +42,7 @@ export class SandboxRuntime {
 	}
 	beginShutdown(): void {}
 	async stop(): Promise<void> {
+		console.error("runtime stop");
 		if (this.name.endsWith("-full")) throw new Error("stop failed");
 		this.state = "stopped";
 	}
@@ -60,3 +63,16 @@ process.on("SIGUSR2", () => {
 	handle.onconnection(-constants.errno.ENOBUFS);
 	process.stderr.write(`injected accept error ${++injected}\n`);
 });
+
+if (process.env.NEXUS_TEST_HOLD_CHMOD === "1") {
+	const chmod = fs.chmod;
+	fs.chmod = async (...args) => {
+		if (String(args[0]).endsWith("/control.sock")) {
+			const closed = once(server!, "close");
+			console.error("socket chmod waiting");
+			await closed;
+		}
+		return chmod(...args);
+	};
+	syncBuiltinESMExports();
+}
