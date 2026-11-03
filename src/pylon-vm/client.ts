@@ -24,7 +24,7 @@ import {
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
-import { alive, publishIdentity, readIdentity } from "./identity.ts";
+import { alive, identitySchema, type ProcessIdentity, publishIdentity, readIdentity } from "./identity.ts";
 import {
 	directory,
 	existsError,
@@ -155,11 +155,13 @@ function reservedName(lock: string, name: string): boolean {
 }
 /**
  * Whether the lock's owner died. A launch killed while it wrote its owner in the lock, as launches did before takes
- * published it aside, left only the owner's temporary file.
+ * published it aside, left only the owner's temporary file. The same owner names the lock in the same text.
  */
 async function abandoned(lock: string): Promise<boolean> {
-	const owner = await readIdentity(join(lock, "owner"));
-	if (owner === null) {
+	const read = () => readFile(join(lock, "owner"), "utf8").catch((error: unknown) =>
+		existsError(error, "ENOENT") ? null : Promise.reject(error));
+	const text = await read();
+	if (text === null) {
 		const names = await readdir(lock).catch((error: unknown) =>
 			// Released since.
 			existsError(error, "ENOENT") ? null : Promise.reject(error));
@@ -167,10 +169,12 @@ async function abandoned(lock: string): Promise<boolean> {
 		if (!names.includes("owner") && names.some((name) => /^owner\.\d+\.\d+\.tmp$/.test(name))) return true;
 		throw new Error("Sandbox start ownership is unavailable. Read controller logs before retrying");
 	}
-	if (await alive(owner)) return false;
+	// An owner is renamed in whole, so only a power loss leaves one unreadable, and its process died with the host.
+	let owner: ProcessIdentity | null = null;
+	owner = identitySchema.parse(JSON.parse(text));
+	if (owner !== null && (await alive(owner))) return false;
 	// It may have released the lock to a live owner before it died, so only a lock that still names it is abandoned.
-	const now = await readIdentity(join(lock, "owner"));
-	return now !== null && now.pid === owner.pid && now.start === owner.start && now.boot === owner.boot;
+	return (await read()) === text;
 }
 /** Those clients hold their `recovery` for milliseconds, so one this old is one a client killed in its recovery left. */
 const legacyRecoveryAgeMs = 5 * 60_000;
@@ -275,10 +279,16 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 			for (const name of names)
 				if (/^launch\.lock\.recovery\d+$/.test(name))
 					reserved.add(await readFile(join(owner, name, "release"), "utf8").catch(() => ""));
-			// Only a take stalled as long could still be using one.
+			// Only a take stalled as long could still be using one. Moved away before it is removed, because a removal in
+			// place empties it first, and a stalled take could rename the empty one onto a lock and hold it without an owner.
 			for (const leaked of names)
-				if (/^launch\.lock(?:\.recovery\d+)?-[A-Za-z0-9]{6}$/.test(leaked) && !reserved.has(leaked) && (await old(join(owner, leaked))))
-					await rm(join(owner, leaked), { recursive: true, force: true });
+				if (/^launch\.lock(?:\.recovery\d+)?-[A-Za-z0-9]{6}$/.test(leaked) && !reserved.has(leaked) && (await old(join(owner, leaked)))) {
+					const trash = await mkdtemp(join(owner, "launch.lock.trash-"));
+					await rename(join(owner, leaked), trash).catch((error: unknown) => {
+						if (!existsError(error, "ENOENT")) throw error;
+					});
+					await rm(trash, { recursive: true, force: true });
+				} else if (/^launch\.lock\.trash-[A-Za-z0-9]{6}$/.test(leaked)) await rm(join(owner, leaked), { recursive: true, force: true });
 			return await held();
 		} finally {
 			await releaseLock(lock, release);
