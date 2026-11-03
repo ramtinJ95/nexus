@@ -76,8 +76,11 @@ const worker = [
 	"open(path+'/done.tmp','w').write(json.dumps({'exitCode':code,'truncated':truncated}))",
 	"os.rename(path+'/done.tmp',path+'/done')",
 ].join("\n");
-/** argv: the command's directory, then the worker's. It makes the directory and leaves the worker running on its own. */
-const launcher = "import os,subprocess,sys; os.mkdir(sys.argv[1],0o700); subprocess.Popen(['python3']+sys.argv[2:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)";
+/**
+ * argv: the command's directory, then the worker's. It makes the directory and leaves the worker running on its own,
+ * without the launch's guest command mark, so a kill of a launch that got no answer leaves the command it started.
+ */
+const launcher = "import os,subprocess,sys; os.mkdir(sys.argv[1],0o700); os.environ.pop('NEXUS_GUEST_COMMAND',None); subprocess.Popen(['python3']+sys.argv[2:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)";
 
 type Command = {
 	path: string;
