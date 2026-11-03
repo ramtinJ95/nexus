@@ -141,7 +141,7 @@ test("a branch pushed from another clone counts once a fetch shows origin at a c
   await run("git", ["clone", "-q", remote, other]);
   const elsewhere = (...args: string[]) => run("git", ["-C", other, "-c", "user.name=test", "-c", "user.email=test@example.com", ...args]);
   await elsewhere("fetch", "-q", s.dir, "fix/elsewhere");
-  await elsewhere("push", "-q", "origin", "FETCH_HEAD:refs/heads/fix/elsewhere", "FETCH_HEAD:refs/heads/fix/from-head");
+  await elsewhere("push", "-q", "origin", "FETCH_HEAD:refs/heads/fix/elsewhere", "FETCH_HEAD:refs/heads/fix/from-head", "FETCH_HEAD:refs/heads/person/fix");
   await elsewhere("checkout", "-qb", "fix/same-name", "origin/main");
   await elsewhere("commit", "-q", "--allow-empty", "-m", "another checkout's work on the same name");
   await elsewhere("push", "-q", "origin", "fix/same-name", "fix/same-name:theirs");
@@ -149,7 +149,10 @@ test("a branch pushed from another clone counts once a fetch shows origin at a c
   assert.equal((await pushedAs())["fix/elsewhere"], null, "before a fetch, nothing shows the push");
   await s.git("fetch", "-q", "origin");
   await s.git("branch", "--track", "theirs", "origin/theirs");
-  assert.deepEqual(await pushedAs(), { "fix/elsewhere": "origin/fix/elsewhere", "fix/from-head": "origin/fix/from-head", "fix/same-name": null, main: "origin/main", theirs: null });
+  await s.git("checkout", "-q", "person/fix");
+  await s.git("checkout", "-q", "main");
+  await s.git("config", "grep.patternType", "fixed");
+  assert.deepEqual(await pushedAs(), { "fix/elsewhere": "origin/fix/elsewhere", "fix/from-head": "origin/fix/from-head", "fix/same-name": null, main: "origin/main", "person/fix": null, theirs: null }, "a branch checked out from origin never borrows HEAD's commit of its tip");
   assert.equal((await gitFacts(s.guest)).branches.find((b) => b.name === "fix/elsewhere")?.head, head);
 });
 

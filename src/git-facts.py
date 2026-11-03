@@ -61,6 +61,7 @@ def observe():
     pushes = git("log", "-z", "--walk-reflogs", "--no-show-signature", "--fixed-strings", "--grep-reflog=update by push", "--format=%gD", *tracking, "--") if tracking else ""
     published = {entry.rpartition("@{")[0] for entry in pushes.split("\0")} & set(tracking)
     tips = {row[0]: row[1] for row in rows if row[0] in tracking}
+    local = {row[0] for row in rows if row[0].startswith("refs/heads/")}
     branches = []
     for ref, commit, upstream, symref in rows:
         if not ref.startswith("refs/heads/"):
@@ -71,12 +72,22 @@ def observe():
         pushed = upstream if upstream in published else origin if origin in candidates else candidates[0] if len(candidates) == 1 else None
         branches.append({"name": name, "head": commit, "pushedAs": pushed.removeprefix("refs/remotes/") if pushed else None})
     # A push from elsewhere, or one cut short before git logged it, leaves origin/<name> holding only a fetch. It still
-    # counts when that fetched tip is a commit this checkout made, which a clone, fetch or checkout never logs.
-    fetched = [b for b in branches if b["pushedAs"] is None and tips.get(f"refs/remotes/origin/{b['name']}") == b["head"]]
-    if fetched:
-        made = git("log", "-z", "--walk-reflogs", "--no-show-signature", "--max-count=4096", "--grep-reflog=^commit", "--format=%H", *[f"refs/heads/{b['name']}" for b in fetched], *(["HEAD"] if born else []), "--")
-        for b in fetched:
-            if b["head"] in made.split("\0"):
+    # counts when the entry that set the branch's tip is this checkout's commit, or created the branch from HEAD or a
+    # local branch whose reflog records committing that tip. Any other HEAD commit proves nothing for this name. At most
+    # 32 branches are read, within the deadline.
+    fetched = [b for b in branches if b["pushedAs"] is None and tips.get(f"refs/remotes/origin/{b['name']}") == b["head"]][:32]
+    sources = {}
+    for b in fetched:
+        entry = git("log", "--walk-reflogs", "--no-show-signature", "--max-count=1", "--format=%gs", f"refs/heads/{b['name']}", "--")
+        source = entry.removeprefix("branch: Created from ") if entry.startswith("branch: Created from ") else None
+        if entry.startswith("commit"):
+            b["pushedAs"] = f"origin/{b['name']}"
+        elif (source == "HEAD" and born) or (source is not None and f"refs/heads/{source}" in local):
+            sources.setdefault(source if source == "HEAD" else f"refs/heads/{source}", []).append(b)
+    for ref, claimed in sources.items():
+        made = git("log", "-z", "--walk-reflogs", "--no-show-signature", "--max-count=4096", "--basic-regexp", "--grep-reflog=^commit", "--format=%H", ref, "--").split("\0")
+        for b in claimed:
+            if b["head"] in made:
                 b["pushedAs"] = f"origin/{b['name']}"
     dirty = git("status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none", dirty=True)
     return {"head": head, "branch": branch, "dirty": dirty, "branches": branches}
