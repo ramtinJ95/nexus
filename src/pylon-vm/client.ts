@@ -172,14 +172,22 @@ async function abandoned(lock: string): Promise<boolean> {
 	const now = await readIdentity(join(lock, "owner"));
 	return now !== null && now.pid === owner.pid && now.start === owner.start && now.boot === owner.boot;
 }
+/** Those clients hold their `recovery` for milliseconds, so one this old is one a client killed in its recovery left. */
+const legacyRecoveryAgeMs = 5 * 60_000;
+const stale = (recovery: string) =>
+	stat(recovery).then((s) => Date.now() - s.mtimeMs >= legacyRecoveryAgeMs, (error: unknown) =>
+		// Its client gave up since.
+		existsError(error, "ENOENT") ? false : Promise.reject(error));
 /**
  * takeLock, or the recovery of a lock whose owner died. A recovery holds the next level's lock beside it,
  * `${base}.recovery1` for the base lock, `${base}.recovery2` for that one and so on, taken and recovered the same way,
  * so one process at a time moves a dead owner's lock aside, and one killed while it held a recovery leaves a dead owner
  * there in turn. Only a recovery moves a dead owner's lock, so what it reads in that lock stays that lock's until it
  * moves it. Beside, not inside, because a lock that moves would take a recovery still held with it, and the recovery's
- * paths would then lead into whichever lock replaced it. `check` throws why a lock whose owner died must still be kept.
- * Returns null when a live process holds the lock or its recovery.
+ * paths would then lead into whichever lock replaced it. Clients from before recovery1 guard their recovery with an
+ * empty `recovery` made inside the base lock, so a recovery of the base lock also holds that, which the dead owner's lock
+ * keeps in place, and leaves the lock to the client whose one it finds. `check` throws why a lock whose owner died must
+ * still be kept. Returns null when a live process holds the lock or its recovery.
  */
 async function holdLock(base: string, check = async () => {}, level = 0): Promise<string | null> {
 	const lock = level === 0 ? base : `${base}.recovery${level}`;
@@ -187,15 +195,24 @@ async function holdLock(base: string, check = async () => {}, level = 0): Promis
 	if (release !== null) return release;
 	const recovering = await holdLock(base, undefined, level + 1);
 	if (recovering === null) return null;
+	let shut = false;
 	try {
 		if (!(await abandoned(lock))) return null;
 		await check();
+		if (level === 0) {
+			shut = await mkdir(join(lock, "recovery"), { mode: 0o700 }).then(() => true, (error: unknown) =>
+				existsError(error, "EEXIST") ? false : Promise.reject(error));
+			if (!shut && !(await stale(join(lock, "recovery")))) return null;
+		}
 		// A power loss can leave the name empty or cut short, since nothing is synced.
 		const name = await readFile(join(lock, "release"), "utf8").catch((error: unknown) =>
 			existsError(error, "ENOENT") ? "" : Promise.reject(error));
-		await releaseLock(lock, reservedName(lock, name) ? join(dirname(lock), name) : await mkdtemp(`${lock}-`));
+		const reserved = reservedName(lock, name) ? join(dirname(lock), name) : await mkdtemp(`${lock}-`);
+		shut = false;
+		await releaseLock(lock, reserved);
 		return await takeLock(lock);
 	} finally {
+		if (shut) await rm(join(lock, "recovery"), { recursive: true, force: true });
 		await releaseLock(`${base}.recovery${level + 1}`, recovering);
 	}
 }
