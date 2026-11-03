@@ -198,11 +198,12 @@ test("a launch lock that an interrupted sweep or launch left without an owner is
 /** Who the code under a test's `caller.run` acts for, so a test can tell apart callers that share this process. */
 const caller = new AsyncLocalStorage<string>();
 /**
- * The most callers that held one launch lock at once. A caller holds it from its rename of an aside directory onto the
+ * The most callers that held one launch lock, or one of its recovery locks, at once. A caller holds it from its rename of an aside directory onto the
  * lock until its own rename of the lock away, and a rename of the lock by any other caller leaves the hold counted. A
  * hold ends as its release starts, because the take it lets in may settle first. On a full disk, a rename onto a new
  * name, which needs a new directory entry, is refused, while one onto an existing name is not.
  */
+const isLock = (name: string) => /^launch\.lock(?:\.recovery\d+)?$/.test(name);
 function holders(t: TestContext, { full = false } = {}): () => number {
 	const { rename } = fs;
 	const held = new Map<string, Set<string | undefined>>();
@@ -211,12 +212,12 @@ function holders(t: TestContext, { full = false } = {}): () => number {
 	t.mock.method(fs, "rename", async (from: string, to: string) => {
 		if (full && basename(from) === "launch.lock" && !existsSync(to))
 			throw Object.assign(new Error(`ENOSPC: no space left on device, rename '${from}' -> '${to}'`), { code: "ENOSPC" });
-		if (basename(to) === "launch.lock") {
+		if (isLock(basename(to))) {
 			await rename(from, to);
 			most = Math.max(most, holding(to).add(caller.getStore()).size);
 			return;
 		}
-		const ended = basename(from) === "launch.lock" && holding(from).delete(caller.getStore());
+		const ended = isLock(basename(from)) && holding(from).delete(caller.getStore());
 		try {
 			await rename(from, to);
 		} catch (error) {
@@ -340,6 +341,11 @@ const crashes: Record<string, (lock: string) => Promise<string[]>> = {
 		await abandon(lock, "launch.lock-de");
 		return ["launch.lock-dead01"];
 	},
+	"a power loss emptied the owner file": async (lock) => {
+		await abandon(lock);
+		await writeFile(join(lock, "owner"), "");
+		return [];
+	},
 	"an older launch was killed writing its owner in place": async (lock) => {
 		await privateDirectory(lock);
 		await writeFile(join(lock, "owner.4242.1.tmp"), '{"pid": 42');
@@ -356,7 +362,7 @@ for (const [crash, leave] of Object.entries(crashes))
 
 /**
  * Stops a caller's code at a point it reaches: as it reads `lock`'s owner, once it has read it, as it reads the lock's
- * release, or as it writes status.json once it holds the lock. `arrival` settles once it does, and `open` lets it go on.
+ * release, as it renames its aside directory onto a lock to take it, or as it writes status.json once it holds the lock. `arrival` settles once it does, and `open` lets it go on.
  */
 function gates(t: TestContext, lock: string) {
 	const stops = new Map<string, { reached: () => void; opened: Promise<void> }>();
@@ -378,6 +384,7 @@ function gates(t: TestContext, lock: string) {
 	});
 	t.mock.method(fs, "rename", async (from: string, to: string) => {
 		if (basename(to) === "status.json") await at("holds the lock");
+		if (isLock(basename(to))) await at(`takes ${basename(to)}`);
 		return rename(from, to);
 	});
 	syncBuiltinESMExports();
@@ -520,4 +527,72 @@ test("a launch leaves a dead launch's lock to an older client that is recovering
 	});
 	await assert.rejects(run(root, { action: "start", name: "pylon-upgraded", boot: spec }), /EISDIR/);
 	assert.equal(shut, true, "an older client could recover the lock while the launch moved it");
+});
+
+test("a take of a recovery lock stalled while the sweep cleared its aside directory never holds it beside another launch", async (t) => {
+	const { root, dir, lock } = await unlaunchable(t, "pylon-stalled");
+	await privateDirectory(lock);
+	await publishIdentity(join(lock, "owner"));
+	await writeFile(join(lock, "release"), "launch.lock-live01");
+	await privateDirectory(`${lock}-live01`);
+	const most = holders(t);
+	const gate = gates(t, lock);
+	const start = () => run(root, { action: "start", name: "pylon-stalled", boot: spec });
+
+	const tTakes = gate("T", "takes launch.lock.recovery1");
+	const tOwner = gate("T", "reads the owner");
+	const tResult = settled(caller.run("T", start));
+	await tTakes.arrival;
+	// The owner releases, and the take stalls for longer than the sweep keeps what takes leave.
+	await rm(lock, { recursive: true, force: true });
+	await rm(`${lock}-live01`, { recursive: true, force: true });
+	const hoursAgo = new Date(Date.now() - 2 * 60 * 60_000);
+	for (const name of await readdir(dir)) if (name.startsWith("launch.lock.recovery1-")) await utimes(join(dir, name), hoursAgo, hoursAgo);
+	const { rm: remove } = fs;
+	t.mock.method(fs, "rm", async (path: string, options?: { recursive?: boolean; force?: boolean }) => {
+		if (basename(path).startsWith("launch.lock.recovery1-") && existsSync(join(path, "owner"))) {
+			// What a removal in place does: the entries go first, and the directory last. The take resumes between.
+			for (const name of await readdir(path)) await remove(join(path, name), { recursive: true, force: true });
+			tTakes.open();
+			await Promise.race([tOwner.arrival, tResult]);
+		}
+		return remove(path, options);
+	});
+	syncBuiltinESMExports();
+	await sweepScratch(root);
+	tTakes.open();
+	await Promise.race([tOwner.arrival, tResult]);
+	// Another launch takes the lock and is killed.
+	await abandon(lock);
+	const uResult = await settled(caller.run("U", start));
+	tOwner.open();
+	await tResult;
+	assert.equal(most(), 1);
+	assert.match(uResult, /EISDIR/);
+});
+
+test("a recovery never leaves the lock an empty directory that another launch could take while the dead lock is removed", async (t) => {
+	const { root, lock } = await unlaunchable(t, "pylon-emptied");
+	await abandon(lock);
+	const most = holders(t);
+	const gate = gates(t, lock);
+	const start = () => run(root, { action: "start", name: "pylon-emptied", boot: spec });
+	const uHolds = gate("U", "holds the lock");
+	let uResult: Promise<string> | undefined;
+	const { rm: remove } = fs;
+	t.mock.method(fs, "rm", async (path: string, options?: { recursive?: boolean; force?: boolean }) => {
+		if (path === lock && uResult === undefined) {
+			// What a removal in place does: the entries go first, and the directory last.
+			for (const name of await readdir(path)) await remove(join(path, name), { recursive: true, force: true });
+			uResult = settled(caller.run("U", start));
+			await Promise.race([uHolds.arrival, uResult]);
+		}
+		return remove(path, options);
+	});
+	syncBuiltinESMExports();
+	const rResult = await settled(caller.run("R", start));
+	uHolds.open();
+	await uResult;
+	assert.equal(most(), 1);
+	assert.match(rResult, /EISDIR/);
 });
