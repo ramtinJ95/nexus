@@ -9,8 +9,7 @@ import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, ro
 import { holdRule, reservedNames } from "../holds.ts";
 import { heldBy, landPress } from "../policy.ts";
 import type { AnswerRefusal, AskedQuestion, NodeQuestion, Question } from "../questions.ts";
-import { bytesText, freedBytes, itemKey, itemText, type CleanupItem } from "../cleanup-model.ts";
-import type { DeleteOutcome } from "../../protocol/cleanup.ts";
+import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
 import { Html, html, ago, short } from "./view.ts";
 import type { LandRefusal, Context } from "./context.ts";
 import { prose } from "./markdown.ts";
@@ -88,35 +87,15 @@ export function questionCard(c: Context, q: Question): Html {
 </section>`;
 }
 
-const outcomeText = (item: CleanupItem, outcome: DeleteOutcome | undefined): Html => {
-  if (outcome === undefined) return html`<span class="dim">${item.kind === "release" ? "waits for the node's deployer" : "waits for the node"}</span>`;
-  switch (outcome.state) {
-    case "deleted": return html`deleted, freed ${bytesText(outcome.bytes)}`;
-    case "gone": return html`<span class="dim">already gone</span>`;
-    case "skipped": return html`<b>skipped</b>: ${outcome.reason}`;
-  }
-};
-
 /**
- * A node's question about what it could delete: each item and the space it takes, and the total, with Delete and
- * Keep. Once answered Delete, each item says what its delete did, deleted with the space freed, skipped with why, or
- * still waiting for the node, and the card sums what was freed.
+ * A node's open question about what it could delete: each item and the space it takes, and the total, with Delete and
+ * Keep. What an answered one did is the Cluster page's cleanup line.
  */
 export function cleanupCard(c: Context, q: NodeQuestion): Html {
-  const { items, outcomes } = q.cleanup;
+  const { items } = q.cleanup;
   const total = items.reduce((sum, i) => sum + i.bytes, 0);
-  const rows = items.map((i) => html`<tr data-item="${itemKey(i)}"><td class="wide">${itemText(i)}</td><td>${bytesText(i.bytes)}</td>${q.answer?.option === "Delete" && html`<td>${outcomeText(i, outcomes[itemKey(i)])}</td>`}</tr>`);
-  const table = html`<table class="ov cleanup-items"><thead><tr><th class="wide">What</th><th>Space</th>${q.answer?.option === "Delete" && html`<th>Outcome</th>`}</tr></thead>
-<tbody>${rows}</tbody><tfoot><tr><td class="wide">Total</td><td>${bytesText(total)}</td>${q.answer?.option === "Delete" && html`<td></td>`}</tr></tfoot></table>`;
-  if (q.answer !== null) {
-    const left = items.filter((i) => outcomes[itemKey(i)] === undefined).length;
-    const said = q.answer.option === "Delete"
-      ? `Freed ${bytesText(freedBytes(q.cleanup))}${left > 0 ? `, with ${left} ${left === 1 ? "item" : "items"} still to go` : ""}.`
-      : "Nothing was deleted. Nexus asks again once something new joins the list.";
-    return html`<section class="landing question cleanup answered" data-question="${q.id}" aria-label="Cleanup on ${q.node}">
-<div class="land-top"><h2>Cleanup on ${q.node}</h2><span class="land-meta">answered "${q.answer.option}" from ${q.answer.by}, ${ago(q.answer.at, c.now)}</span></div>
-${table}<p class="land-meta">${said}</p></section>`;
-  }
+  const table = html`<table class="ov cleanup-items"><thead><tr><th class="wide">What</th><th>Space</th></tr></thead>
+<tbody>${items.map((i) => html`<tr data-item="${itemKey(i)}"><td class="wide">${itemText(i)}</td><td>${bytesText(i.bytes)}</td></tr>`)}</tbody><tfoot><tr><td class="wide">Total</td><td>${bytesText(total)}</td></tr></tfoot></table>`;
   const refusal = c.answerRefusal(q);
   const confirmText = `Delete ${items.length === 1 ? "this item" : `these ${items.length} items`} from ${q.node}? It cannot be undone.`;
   const buttons = refusal === null

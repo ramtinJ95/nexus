@@ -2,11 +2,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cleanupPass, type CleanupPass } from "./cleanup.ts";
+import { cleanupQuestion } from "./cleanup-model.ts";
 import { observeNode } from "./test-kit.ts";
 import { testImage } from "../test-kit.ts";
 import { deployment, laptop, node, reporterHeaders, testApi } from "./api-test-kit.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
-import type { ImageId, PortableArtifactId, TailnetNodeId } from "../ids.ts";
+import type { ImageId, NodeName, PortableArtifactId, TailnetNodeId } from "../ids.ts";
 
 const [older, current] = ["img-000000000001", "img-000000000003"] as [ImageId, ImageId];
 const [r1, r2] = ["1".repeat(40), "2".repeat(40)];
@@ -17,6 +18,7 @@ const inventory = {
   running: {},
 };
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+const cleanupLine = (page: string) => /<p class="cleanup-line[^"]*">[\s\S]*?<\/p>/.exec(page)?.[0] ?? "";
 const needsCount = (page: string) => /<span class="side-count" id="needs-count" data-live>([^<]*)<\/span>/.exec(page)![1];
 
 test("the node's cleanup is a card on its page and in Needs you, and Delete deletes through its probe and its deployer", async (t) => {
@@ -70,9 +72,42 @@ test("the node's cleanup is a card on its page and in Needs you, and Delete dele
   s.callAs(laptop);
 
   const after = (await html(`/nodes/${node}`));
-  const done = textOf(after.split('id="node-cleanup"')[1]!.split('id="node-health"')[0]!);
-  assert.match(done, new RegExp(`Cleanup on ${node} answered "Delete" from ${laptop}`));
-  assert.match(done, new RegExp(`image ${older} 2\\.0 GiB deleted, freed 2\\.0 GiB release ${r1} 300\\.0 MiB deleted, freed 300\\.0 MiB`));
-  assert.match(done, /Freed 2\.3 GiB\./);
+  const section = after.split('id="node-cleanup"')[1]!.split('id="node-health"')[0]!;
+  assert.match(textOf(section), /^data-live> Cleanup Nothing on this node waits to be deleted\. <div/, "the answered question is no card on the node's section");
+  assert.doesNotMatch(after, /cleanup-items/, "nor a table anywhere on the page");
+  assert.equal(textOf(cleanupLine(after)), `Last cleanup: 2.3 GiB freed on ${node} just now`);
   assert.equal(needsCount((await html("/"))), "", "an answered cleanup waits on no one");
+});
+
+test("the Cluster page says in one line what each node's latest cleanup freed and when, and what it could not delete", async (t) => {
+  const s = await testApi(t, { deployment });
+  const testbench = "infra-testbench" as NodeName;
+  observeNode(s.registry, { node });
+  s.registry.upsertNode({ name: testbench, tailnetHost: `${testbench}.tail.ts.net`, tailnetNodeId: "nINFRA" as TailnetNodeId });
+  observeNode(s.registry, { node: testbench });
+  const hour = 3_600_000;
+  const now = Date.now();
+  const deleted = (bytes: number): DeleteOutcome => ({ state: "deleted", bytes });
+  const ask = (on: NodeName, askedAt: number, items: Parameters<typeof cleanupQuestion>[1]) => s.registry.askQuestion(cleanupQuestion(on, items, askedAt));
+  const answer = (id: string, option: "Delete" | "Keep", at: number, outcomes: Record<string, DeleteOutcome> = {}) => {
+    s.registry.answerQuestion(id, { option, by: laptop, at });
+    if (Object.keys(outcomes).length > 0) s.registry.recordCleanup(id, outcomes);
+  };
+  const old = ask(testbench, now - 50 * hour, [{ kind: "image", id: older, bytes: 9 * 1024 ** 3 }]);
+  answer(old.id, "Delete", now - 49 * hour, { [older]: deleted(9 * 1024 ** 3) });
+  const latest = ask(testbench, now - 14 * hour, [{ kind: "image", id: current, bytes: 2 * 1024 ** 3 }, { kind: "release", name: r1, commit: r1, bytes: 300 * 1024 ** 2 }, { kind: "release", name: r2, commit: r2, bytes: 1 }]);
+  answer(latest.id, "Delete", now - 13 * hour, { [current]: deleted(1.5 * 1024 ** 3), [`release-${r1}`]: { state: "skipped", reason: "a controller runs from it" } });
+  const firebat = ask(node, now - 31 * hour, [{ kind: "image", id: older, bytes: 1.2 * 1024 ** 3 }]);
+  answer(firebat.id, "Delete", now - 30 * hour, { [older]: deleted(1.2 * 1024 ** 3) });
+  answer(ask(node, now - 3 * hour, [{ kind: "image", id: current, bytes: 1 }]).id, "Keep", now - 2 * hour);
+  const open = ask(node, now - hour, [{ kind: "image", id: "img-000000000002" as ImageId, bytes: 1024 ** 3 }]);
+
+  const page = (await s.raw(`/nodes/${node}`)).body.toString();
+  assert.equal(textOf(cleanupLine(page)), `Last cleanup: 1.5 GiB freed on ${testbench} 13 h ago (1 item could not be deleted, 1 item still to go) and 1.2 GiB on ${node} 30 h ago`,
+    "the newest Delete per node, not an older one nor a Keep, with what it left");
+  assert.ok(page.indexOf(cleanupLine(page)) < page.indexOf('class="node-cards"'), "the line sits with the Nodes heading");
+  const section = page.split('id="node-cleanup"')[1]!.split('id="node-health"')[0]!;
+  assert.match(section, new RegExp(`data-question="${open.id}" data-option="Delete"`), "the open question is still its card");
+  assert.equal([...section.matchAll(/class="landing question cleanup/g)].length, 1, "and no answered question has one");
+  assert.doesNotMatch(page, /Outcome|deleted, freed/);
 });
