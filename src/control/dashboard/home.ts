@@ -156,7 +156,9 @@ const heldKey = (w: HeldWork) => w.kind === "item" ? w.item.id : w.kind === "que
  */
 function needsList(c: Context, picked: { key: string; items: readonly Item[] | null } | null): Html {
   const needs = c.needs();
-  const mark = (n: Need) => keyOf(n) === picked?.key && " picked";
+  // A thread with several cards says where its work is, and is picked, on its first.
+  const leads = new Set(needs.filter((n, i) => needs.findIndex((m) => keyOf(m) === keyOf(n)) === i));
+  const mark = (n: Need) => leads.has(n) && keyOf(n) === picked?.key && " picked";
   const itemsOf = (key: string) => key === picked?.key ? picked.items : null;
   // The picked card opens, so a link to it shows it on a fresh load. A reader's own close survives each poll's swap.
   const fold = (id: string, head: Html, body: Html, why: string, open: Part = false) => html`<details class="need-fold" id="fold-${id}"${open && " open"}><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
@@ -183,7 +185,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
   const life = lifeOfThread(c, t.id);
   const why = needWhy(n, c.now) || life.why;
   return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, itemsOf(t.id))}${body}`, why, mark(n))}
+${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${leads.has(n) && whereNow(c, n.d, life, itemsOf(t.id))}${body}`, why, mark(n))}
 </article>`;
 })}</div>`}`;
 }

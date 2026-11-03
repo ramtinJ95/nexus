@@ -672,6 +672,20 @@ test("a card's strip links the pull request its review lands, whichever pull req
   }
 });
 
+test("a thread with several cards says where its work is once, on its first card, which is the one a link to it picks", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const held = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
+  s.registry.askQuestion({ id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.fake.transcript(held.id).messages.push({ role: "user", content: "Cache the list", timestamp: 0 }, assistant([{ type: "text", text: "Opened #7." }]));
+  const { cards } = needsOf((await s.call("GET", `/?peek=${held.id}`)).text);
+  assert.deepEqual(cards.map((c) => c.kind), ["review", "question"]);
+  assert.deepEqual(cards.map((c) => (c.html.match(/class="need-ctx"/g) ?? []).length), [1, 0], "one strip, on the first card");
+  assert.deepEqual(cards.map((c) => /Latest reply/.test(c.html)), [true, false], "and one latest reply");
+  assert.deepEqual(cards.map((c) => /<article class="need need-\w+ picked"/.test(c.html)), [true, false], "only the first card is picked");
+  assert.deepEqual(cards.map((c) => /<details class="need-fold" id="fold-[^"]+" open>/.test(c.html)), [true, false], "and opened");
+});
+
 const chipOf = (page: string) => /<span class="chip-label">([^<]*)<\/span>/.exec(page)![1];
 const dockOf = (page: string) => page.split('<div class="dock">')[1]!.split('<div id="run"')[0]!;
 const actionsOf = (html: string) => [...html.matchAll(/data-action="([^"]+)"|<a [^>]*href="([^"]+)"[^>]*data-write/g)].map((m) => m[1] ?? m[2]);
