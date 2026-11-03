@@ -619,8 +619,10 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         const sidecar = await readSidecar(pylonId);
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
-        const sessions = !retry && instance.status.state === "running"
-          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
+        const sessionSignal = retry ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : undefined;
+        const sessionRun = sessionSignal === undefined ? sandbox : (action: Record<string, unknown>) => sandbox(action, sessionSignal);
+        const sessions = instance.status.state === "running"
+          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sessionRun, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
         await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.

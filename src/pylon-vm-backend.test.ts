@@ -128,8 +128,10 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
     }
   });
   await new Promise<void>((resolve) => server.listen(join(dir, "control.sock"), resolve));
-  after(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  return { state, actions, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  let closed: Promise<void> | undefined;
+  const close = () => closed ??= new Promise<void>((resolve) => server.close(() => resolve()));
+  after(close);
+  return { state, actions, close };
 }
 
 /** The reply to an exec that finished, as the fork's process supervisor gives it. */
@@ -1030,18 +1032,25 @@ test("a VM whose controller predates startupFailures is broken for an unknown re
   assert.equal(existsSync(join(dir, "nexus-checkpoint.json")), false);
 });
 
-test("a retry stops a live controller without asking its stuck guest, converges, and launches a new controller", async () => {
+test("a retry bounds session recording on a stuck guest, converges, and launches a new controller", async () => {
   const { backend, instances } = await backendWith();
   const id = "pylon-retry" as PylonId;
   const dir = await leftInstance(instances, id, "running");
+  const saved = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "saved shell" }];
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-retry-0", sessions: saved }));
   const controller = await fakeController(dir, id, (action) => {
-    assert.equal(action.action, "stop", "retry must not collect sessions from the stuck guest");
+    if (action.action === "exec") return new Promise(() => {});
+    assert.equal(action.action, "stop", "a timed-out recording must not continue guest operations");
     controller.state.current = "stopped";
     return { name: id, state: "stopped" };
   });
+  const started = Date.now();
   await backend.ensurePaused(id, "ckpt-retry-1", signal(), true);
+  assert.ok(Date.now() - started < 5000, "a stuck session read gets 3 seconds, not the normal command deadline");
   await backend.ensurePaused(id, "ckpt-retry-1", signal(), true);
-  assert.deepEqual(controller.actions.map((a) => a.action), ["stop"]);
+  assert.deepEqual(controller.actions.map((a) => a.action), ["exec", "stop"]);
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-retry-1", sessions: saved });
+  assert.match(await readFile(join(dir, "controller.log"), "utf8"), /sessions: recording failed, so the wake relaunches what the last record holds/);
   assert.match(await readFile(join(dir, "controller.log"), "utf8"), /retry: stopped old controller \(booted at 2026-10-22T00:00:00Z\)/);
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-retry-1"]]);
   await writeFile(join(dir, "status.json"), JSON.stringify({ name: id, state: "stopped" }));
@@ -1051,7 +1060,6 @@ test("a retry stops a live controller without asking its stuck guest, converges,
   const log = await readFile(join(dir, "controller.log"), "utf8");
   assert.match(log, /controller \d+ started for pylon-retry/);
   assert.ok(log.indexOf("stopped old controller") < log.indexOf("started for pylon-retry"));
-
 });
 
 test("an ordinary resume reuses a healthy controller and its boot time", async () => {
@@ -1182,4 +1190,28 @@ test("retry refuses a live process group whose controller identity does not matc
   await assert.rejects(backend.ensurePaused(id, "ckpt-wrongpid-1", signal(), true), /Cannot verify the retry controller's process group/);
   assert.equal((await groupMembers(controller.pid)).length, 2);
   assert.equal(existsSync(join(dir, "stop-seen")), false, "no request or signal reached an unverified controller");
+});
+
+test("retry records a responsive guest's sessions opened since its last pause", async () => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-retryrec" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-retryrec-1", sessions: [] }));
+  const snapshot = herdrSnapshot([{ id: "w1", label: "new shell" }], [herdrPane("w1:p1", "w1", null, "idle")]);
+  const controller = await fakeController(dir, id, (action) => {
+    if (action.action === "exec") return String(action.cmd).replace(/['\\]/g, "").includes("api snapshot") ? finished(0, herdrOk(snapshot).output) : finished(3);
+    if (action.action === "write-files") return {};
+    if (action.action === "stop") {
+      controller.state.current = "stopped";
+      return { name: id, state: "stopped" };
+    }
+    return assert.fail(`unexpected ${action.action}`);
+  });
+  await backend.ensurePaused(id, "ckpt-retryrec-2", signal(), true);
+  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "new shell" }];
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-retryrec-2", sessions: recorded });
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "sessions")]), [["stopped", recorded]]);
+  const actions = controller.actions.map((a) => a.action);
+  assert.ok(actions.includes("write-files") && actions.indexOf("write-files") < actions.indexOf("stop"), "the checkpoint holds the new session record");
+  assert.match(await readFile(join(dir, "controller.log"), "utf8"), /sessions: recorded 1 for the wake/);
 });

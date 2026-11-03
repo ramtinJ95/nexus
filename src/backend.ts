@@ -29,7 +29,7 @@ export interface VmBackend {
   ensureRunning(boot: BootInputs, live: LiveSpec, signal: AbortSignal, relaunch?: boolean): Promise<void>;
   /**
    * Record sessions, stop services, close terminals, checkpoint the disk, stop the VM. Already stopped: no-op.
-   * Retry skips guest session collection so an unresponsive guest cannot prevent stopping its controller. A disk
+   * Retry bounds guest session collection to 3 seconds so an unresponsive guest cannot prevent stopping its controller. A disk
    * with a failed setup is never checkpointed: a VM with no checkpoint is removed, and one with a checkpoint is refused.
    */
   ensurePaused(pylonId: PylonId, checkpoint: CheckpointId, signal: AbortSignal, retry?: boolean): Promise<void>;
