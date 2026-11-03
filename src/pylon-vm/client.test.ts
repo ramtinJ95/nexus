@@ -1,7 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import fs, { chmod, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { syncBuiltinESMExports } from "node:module";
@@ -193,33 +194,59 @@ test("a launch lock that an interrupted sweep or launch left without an owner is
 	assert.equal(existsSync(join(starting.dir, "launch.lock")), false, "the launch left the lock it took");
 });
 
+/** Who the code under a test's `caller.run` acts for, so a test can tell apart callers that share this process. */
+const caller = new AsyncLocalStorage<string>();
+/**
+ * The most callers that held one launch lock at once. A caller holds it from its rename of an aside directory onto the
+ * lock until its own rename of the lock away, and a rename of the lock by any other caller leaves the hold counted. A
+ * hold ends as its release starts, because the take it lets in may settle first. On a full disk, a rename onto a new
+ * name, which needs a new directory entry, is refused, while one onto an existing name is not.
+ */
+function holders(t: TestContext, { full = false } = {}): () => number {
+	const { rename } = fs;
+	const held = new Map<string, Set<string | undefined>>();
+	const holding = (lock: string) => held.get(lock) ?? held.set(lock, new Set()).get(lock)!;
+	let most = 0;
+	t.mock.method(fs, "rename", async (from: string, to: string) => {
+		if (full && basename(from) === "launch.lock" && !existsSync(to))
+			throw Object.assign(new Error(`ENOSPC: no space left on device, rename '${from}' -> '${to}'`), { code: "ENOSPC" });
+		if (basename(to) === "launch.lock") {
+			await rename(from, to);
+			most = Math.max(most, holding(to).add(caller.getStore()).size);
+			return;
+		}
+		const ended = basename(from) === "launch.lock" && holding(from).delete(caller.getStore());
+		try {
+			await rename(from, to);
+		} catch (error) {
+			if (ended) holding(from).add(caller.getStore());
+			throw error;
+		}
+	});
+	syncBuiltinESMExports();
+	t.after(() => {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+	});
+	return () => most;
+}
+
 for (const disk of ["free", "full"] as const)
-	test(`sweeps that race over the same instances never fail to take or release a launch lock, and leave none behind, on a ${disk} disk`, async (t) => {
+	test(`sweeps that race over the same instances never hold a launch lock at once, never fail to take or release one, and leave none behind, on a ${disk} disk`, async (t) => {
 		const root = await mkdtemp(join(tmpdir(), "nxc-"));
 		t.after(() => rm(root, { recursive: true, force: true }));
 		const errors = t.mock.method(console, "error", () => {});
-		if (disk === "full") {
-			const { rename } = fs;
-			// A rename onto a new name needs a new directory entry, which a full disk may refuse. Onto an existing one it does not.
-			t.mock.method(fs, "rename", (from: string, to: string) =>
-				basename(from) === "launch.lock" && !existsSync(to)
-					? Promise.reject(Object.assign(new Error(`ENOSPC: no space left on device, rename '${from}' -> '${to}'`), { code: "ENOSPC" }))
-					: rename(from, to));
-			syncBuiltinESMExports();
-			t.after(() => {
-				t.mock.restoreAll();
-				syncBuiltinESMExports();
-			});
-		}
+		const most = holders(t, { full: disk === "full" });
 		const dirs = await Promise.all(Array.from({ length: 20 }, async (_, i) => {
 			const dir = directory(root, "instances", `pylon-race${i}`);
 			await privateDirectory(dir);
 			await privateDirectory(scratchDirectory(root, dir));
 			return dir;
 		}));
-		for (let round = 0; round < 20; round++) await Promise.all(Array.from({ length: 4 }, () => sweepScratch(root)));
+		for (let round = 0; round < 20; round++) await Promise.all(Array.from({ length: 4 }, (_, i) => caller.run(`sweep ${i}`, () => sweepScratch(root))));
 		assert.deepEqual(errors.mock.calls.map((call) => call.arguments.map(String).join(" ")), []);
 		assert.deepEqual(dirs.filter((dir) => existsSync(join(dir, "launch.lock"))), []);
+		assert.equal(most(), 1);
 	});
 
 test("a launch that ends on a full disk still releases its lock, so the next launch is not refused by the probe that is still running", async (t) => {
@@ -264,4 +291,156 @@ test("a launch that recovers the lock of a launch that died releases it onto the
 	await mkdir(join(dir, "status.json"));
 	await assert.rejects(run(root, { action: "start", name: "pylon-orphaned", boot: spec }), /EISDIR/);
 	assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), []);
+});
+
+/** An instance whose launch fails at its first write after it holds the lock, so no controller is spawned. */
+async function unlaunchable(t: TestContext, name: string) {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const dir = directory(root, "instances", name);
+	await privateDirectory(dir);
+	await saveJson(join(dir, "record.json"), { version: 1, name, config: {}, createdAt: new Date().toISOString(), labels: {} });
+	await mkdir(join(dir, "status.json"));
+	return { root, dir, lock: join(dir, "launch.lock") };
+}
+const dead = async () => ({ ...(await identityOf(process.pid))!, start: "an earlier process" });
+/** What a process killed while it held `lock`, taken as takeLock takes it, left. `named` is what its release file holds. */
+async function abandon(lock: string, named = `${basename(lock)}-dead01`) {
+	await privateDirectory(lock);
+	await saveJson(join(lock, "owner"), await dead());
+	await writeFile(join(lock, "release"), named);
+	await privateDirectory(`${lock}-dead01`);
+}
+
+/** Each leaves its state on disk and names the directories the recovery cannot know to remove, which the sweep does. */
+const crashes: Record<string, (lock: string) => Promise<string[]>> = {
+	"a recoverer was killed holding the recovery": async (lock) => {
+		await abandon(lock);
+		await abandon(`${lock}.recovery`);
+		return [];
+	},
+	"an older recoverer was killed holding its empty recovery": async (lock) => {
+		await abandon(lock);
+		await privateDirectory(join(lock, "recovery"));
+		return [];
+	},
+	"a power loss emptied the release file": async (lock) => {
+		await abandon(lock, "");
+		return ["launch.lock-dead01"];
+	},
+	"a power loss cut the release file short": async (lock) => {
+		await abandon(lock, "launch.lock-de");
+		return ["launch.lock-dead01"];
+	},
+	"an older launch was killed writing its owner in place": async (lock) => {
+		await privateDirectory(lock);
+		await writeFile(join(lock, "owner.4242.1.tmp"), '{"pid": 42');
+		return [];
+	},
+};
+for (const [crash, leave] of Object.entries(crashes))
+	test(`after ${crash}, the next launch recovers the lock`, async (t) => {
+		const { root, dir, lock } = await unlaunchable(t, "pylon-crashed");
+		const left = await leave(lock);
+		await assert.rejects(run(root, { action: "start", name: "pylon-crashed", boot: spec }), /EISDIR/);
+		assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), left);
+	});
+
+test("a recovery whose lock is released and taken again while it holds the recovery, and one that finds the new owner dead, never both hold the lock", async (t) => {
+	const { root, lock } = await unlaunchable(t, "pylon-replaced");
+	await privateDirectory(lock);
+	await publishIdentity(join(lock, "owner"));
+	await writeFile(join(lock, "release"), "launch.lock-live01");
+	await privateDirectory(`${lock}-live01`);
+	const most = holders(t);
+	/** Stops `who`'s code the next time it reaches `point`. `arrival` settles once it does, and `open` lets it go on. */
+	const gates = new Map<string, { reached: () => void; opened: Promise<void> }>();
+	const gate = (who: string, point: string) => {
+		let reached!: () => void;
+		let open!: () => void;
+		const arrival = new Promise<void>((accept) => (reached = accept));
+		gates.set(`${who} ${point}`, { reached, opened: new Promise<void>((accept) => (open = accept)) });
+		return { arrival, open };
+	};
+	const at = async (point: string) => {
+		const key = `${caller.getStore()} ${point}`;
+		const stop = gates.get(key);
+		if (stop === undefined) return;
+		gates.delete(key);
+		stop.reached();
+		await stop.opened;
+	};
+	const { readFile, rename } = fs;
+	t.mock.method(fs, "readFile", async (path: string, ...rest: unknown[]) => {
+		if (path === join(lock, "owner")) await at("reads the owner");
+		if (path === join(lock, "release")) await at("reads the release");
+		return (readFile as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+	});
+	t.mock.method(fs, "rename", async (from: string, to: string) => {
+		if (basename(to) === "status.json") await at("holds the lock");
+		return rename(from, to);
+	});
+	syncBuiltinESMExports();
+	const start = () => run(root, { action: "start", name: "pylon-replaced", boot: spec });
+	const settled = (launch: Promise<unknown>) => launch.then(() => "started", (error: unknown) => String(error));
+
+	const rOwner = gate("R", "reads the owner");
+	const rHolds = gate("R", "holds the lock");
+	const cRelease = gate("C", "reads the release");
+	const r = settled(caller.run("R", start));
+	await rOwner.arrival;
+	// The live owner releases, and another launch takes the lock and is killed.
+	await rm(lock, { recursive: true, force: true });
+	await rm(`${lock}-live01`, { recursive: true, force: true });
+	await abandon(lock);
+	const c = settled(caller.run("C", start));
+	await Promise.race([cRelease.arrival, c]);
+	rOwner.open();
+	await Promise.race([rHolds.arrival, r]);
+	cRelease.open();
+	const cResult = await c;
+	rHolds.open();
+	const rResult = await r;
+	assert.match(rResult, /EISDIR/);
+	assert.match(cResult, /already in progress|EISDIR/);
+	assert.equal(most(), 1);
+});
+
+test("launches that race to recover a dead launch's lock and its dead recoverer never hold the lock at once", async (t) => {
+	const { root, dir, lock } = await unlaunchable(t, "pylon-contested");
+	const most = holders(t);
+	for (let round = 0; round < 20; round++) {
+		await abandon(lock);
+		await abandon(`${lock}.recovery`);
+		const results = await Promise.allSettled(Array.from({ length: 4 }, (_, i) => caller.run(`launch ${i}`, () => run(root, { action: "start", name: "pylon-contested", boot: spec }))));
+		const errors = results.map((result) => (result.status === "rejected" ? String(result.reason) : "started"));
+		assert.equal(errors.filter((error) => !/EISDIR|already in progress/.test(error)).join("\n"), "");
+		assert.ok(errors.some((error) => /EISDIR/.test(error)), `no launch recovered the lock: ${errors.join("; ")}`);
+		assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), []);
+	}
+	assert.equal(most(), 1);
+});
+
+test("the start sweep removes the old directories that killed takes left beside each launch lock, while it holds the lock, scratch directory or not", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "nxc-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const leaky = async (name: string) => {
+		const dir = directory(root, "instances", name);
+		await privateDirectory(dir);
+		const hoursAgo = new Date(Date.now() - 2 * 60 * 60_000);
+		await privateDirectory(join(dir, "launch.lock-old001"));
+		await privateDirectory(join(dir, "launch.lock-old002"));
+		await publishIdentity(join(dir, "launch.lock-old002", "owner"));
+		await writeFile(join(dir, "launch.lock-old002", "release"), "launch.lock-old001");
+		for (const leaked of ["launch.lock-old001", "launch.lock-old002"]) await utimes(join(dir, leaked), hoursAgo, hoursAgo);
+		// A take still in progress made it moments ago.
+		await privateDirectory(join(dir, "launch.lock-new003"));
+		return dir;
+	};
+	const running = await leaky("pylon-running");
+	await privateDirectory(scratchDirectory(root, running));
+	const stopped = await leaky("pylon-stopped");
+	await sweepScratch(root);
+	for (const dir of [running, stopped])
+		assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), ["launch.lock-new003"], dir);
 });
