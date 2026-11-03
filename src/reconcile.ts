@@ -175,11 +175,11 @@ const planRules: readonly Rule[] = [
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(last.code, `last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
   ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(last.code, `gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
   ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
+  // A failed job or interrupted retry can leave a live controller running, unavailable or stuck stopping.
+  (i) => i.retrying && i.observed !== "absent" && ["running", "booting", "stopping"].includes(i.observed.phase)
+    ? submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint, retry: true }) : null,
   // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
-  // A failed job can leave a live controller reporting running. Retry must retire that boot before applying live again.
-  (i) => i.retrying && i.observed !== "absent" && i.observed.phase === "running"
-    ? submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint, retry: true }) : null,
   // A sealed boot's transcripts are read-only and its user's processes were killed, so it runs no work: it pauses, and
   // the spawn after boots the disk again, without the seal.
   (i) => i.desired === "running" && i.observed !== "absent" && i.observed.phase === "running" && i.sealedBoot !== undefined && i.observed.bootedAt === i.sealedBoot

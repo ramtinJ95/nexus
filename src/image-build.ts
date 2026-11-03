@@ -20,6 +20,7 @@ import { z } from "zod";
 import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../images/pylon/agent-setup/manifest.ts";
 import { artifactDirectory, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "./protocol/jobs.ts";
+import { reapGroup, signalGroup } from "./process-group.ts";
 import { compare, imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "./images.ts";
 import { shellQuote } from "./shell.ts";
 import type { ImageId, NodeName } from "./ids.ts";
@@ -591,7 +592,6 @@ async function smokeBoot(assets: string, checks: readonly SmokeCheck[], id: Imag
 }
 
 const logTailBytes = 16_384;
-const killGraceMs = 10_000;
 
 /**
  * Tees the command's output to this process's stderr for the build log, and keeps its tail for the JobFailure. An abort signals the whole process group, because Gondolin's build runs docker, mke2fs
@@ -627,30 +627,6 @@ async function run(command: string, args: readonly string[], signal: AbortSignal
   }
   if (code !== 0) throw new JobFailure("backend", `${command} ${args[0]} ${killedBy === null ? `exited ${code}` : `was killed by ${killedBy}`}`, tail);
   return output;
-}
-
-/** False once no process is left in the group. */
-function signalGroup(pid: number, name: NodeJS.Signals | 0): boolean {
-  try {
-    process.kill(-pid, name);
-    return true;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ESRCH") return false;
-    throw err;
-  }
-}
-
-/** Waits out the SIGTERM grace, then SIGKILLs what is left of the group and waits for that too. */
-async function reapGroup(pid: number, command: string): Promise<void> {
-  const gone = async () => {
-    for (const end = Date.now() + killGraceMs; Date.now() < end; await delay(100)) {
-      if (!signalGroup(pid, 0)) return true;
-    }
-    return false;
-  };
-  if (await gone()) return;
-  signalGroup(pid, "SIGKILL");
-  if (!(await gone())) throw new JobFailure("backend", `processes that ${command} started outlived SIGKILL`);
 }
 
 if (import.meta.main) {

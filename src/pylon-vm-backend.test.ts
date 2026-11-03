@@ -3,10 +3,12 @@
  * died. No VM runs here: a boot that reached Gondolin would fail, so every test stops short of one. The real
  * boot path is checked by the slice test on a node (NEXUS_SLICE_BACKEND=pylon-vm).
  */
-import { after, test } from "node:test";
+import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { until } from "./test-kit.ts";
+import { spawn, spawnSync } from "node:child_process";
 import fs, { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { createServer } from "node:http";
@@ -15,7 +17,7 @@ import { PassThrough, Readable } from "node:stream";
 import type { BackendPylon } from "./backend.ts";
 import { bootHooks, createPylonVmBackend, hostNestsKvm, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { settled, type Inspection } from "./pylon-vm/contracts.ts";
-import { identityOf } from "./pylon-vm/identity.ts";
+import { groupMembers, identityOf } from "./pylon-vm/identity.ts";
 import { asUser, imageEnv, pylonGuest } from "./pylon-vm/pylon-guest.ts";
 import { saveJson } from "./json-file.ts";
 import { chatgptTokenGrant } from "./secret-grants.ts";
@@ -1066,4 +1068,118 @@ test("an ordinary resume reuses a healthy controller and its boot time", async (
   const [pylon] = await backend.list();
   assert.equal(pylon?.vm, "running");
   if (pylon?.vm === "running") assert.equal(pylon.bootedAt, controller.state.bootedAt);
+});
+
+
+/** A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown. */
+async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "silent" | "error") {
+  const child = spawn(process.execPath, ["--input-type=module", "-e", `
+    import { spawn } from "node:child_process";
+    import { once } from "node:events";
+    import { createServer } from "node:http";
+    import { writeFile, appendFile } from "node:fs/promises";
+    import { join } from "node:path";
+    import { publishIdentity } from ${JSON.stringify(new URL("./pylon-vm/identity.ts", import.meta.url).href)};
+    const dir = ${JSON.stringify(dir)}, id = ${JSON.stringify(id)};
+    process.on("SIGTERM", () => {});
+    const qemu = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); console.log("ready")'], { stdio: ["ignore", "pipe", "inherit"] });
+    await once(qemu.stdout, "data");
+    await writeFile(join(dir, "qemu.pid"), String(qemu.pid));
+    await publishIdentity(join(dir, "controller.pid"));
+    await appendFile(join(dir, "controller.log"), "controller " + process.pid + " started for " + id + "\\n");
+    let state = "running";
+    const server = createServer(async (req, res) => {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      const action = JSON.parse(body);
+      if (action.action === "inspect") {
+        res.end(JSON.stringify({ ok: true, result: { name: id, labels: { "nexus.image": ${JSON.stringify(image)} }, status: { name: id, state, bootedAt: "2026-10-22T00:00:00Z" } } }));
+      } else if (action.action === "stop") {
+        state = "stopping";
+        await writeFile(join(dir, "status.json"), JSON.stringify({ name: id, state }));
+        await writeFile(join(dir, "stop-seen"), "yes");
+        if (${JSON.stringify(stop)} === "error") res.end(JSON.stringify({ ok: false, error: "checkpoint is blocked" }));
+      } else {
+        res.end(JSON.stringify({ ok: false, error: "unexpected " + action.action }));
+      }
+    });
+    server.listen(join(dir, "control.sock"));
+    await once(server, "listening");
+    console.log("ready");
+  `], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  const exited = once(child, "exit");
+  let errors = "";
+  child.stderr.on("data", (chunk) => { errors += chunk; });
+  t.after(async () => {
+    try { process.kill(-child.pid!, "SIGKILL"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    await exited;
+  });
+  await Promise.race([once(child.stdout, "data"), exited.then(() => assert.fail(errors))]);
+  return { pid: child.pid!, exited };
+}
+
+for (const stop of ["silent", "error"] as const) test(`retry kills the controller group when stop is ${stop}, preserves the completed disk and starts another controller`, async (t) => {
+  const { backend, instances } = await backendWith();
+  const id = `pylon-${stop}` as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  await writeFile(join(dir, "disk.qcow2"), "last completed disk");
+  await writeFile(join(dir, "disk.next.qcow2"), "unfinished checkpoint");
+  const controller = await stuckController(t, dir, id, stop);
+  const qemu = Number(await readFile(join(dir, "qemu.pid"), "utf8"));
+  assert.deepEqual((await groupMembers(controller.pid)).sort((a, b) => a - b), [controller.pid, qemu].sort((a, b) => a - b));
+  const started = Date.now();
+  await backend.ensurePaused(id, "ckpt-forced-1", AbortSignal.timeout(60_000), true);
+  assert.ok(Date.now() - started < 55_000, "30 s stop deadline plus at most 20 s for group termination");
+  await controller.exited;
+  assert.deepEqual(await groupMembers(controller.pid), [], "neither controller nor QEMU stand-in can still run");
+  assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "last completed disk");
+  assert.equal(existsSync(join(dir, "retry-stop.json")), false);
+  assert.match(await readFile(join(dir, "controller.log"), "utf8"), new RegExp(`stopped old controller ${controller.pid} .* and its process group`));
+  await backend.ensurePaused(id, "ckpt-forced-1", signal(), true);
+  assert.equal(await backend.state(id), "stopped");
+  await assert.rejects(backend.ensureRunning(bootOf(id), live, signal()), /Sandbox (controller exited|start failed)/);
+  const log = await readFile(join(dir, "controller.log"), "utf8");
+  const pids = [...log.matchAll(/controller (\d+) started for/g)].map((m) => Number(m[1]));
+  assert.equal(pids.length, 2);
+  assert.notEqual(pids[0], pids[1]);
+});
+
+for (const controllerDied of [false, true]) test(`a retry whose probe died while stop hung recovers its journal and launch lock (controller died: ${controllerDied})`, async (t) => {
+  const { backend, instances, stateRoot } = await backendWith();
+  const id = "pylon-stopcrash" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  const controller = await stuckController(t, dir, id, "silent");
+  const probe = spawn(process.execPath, ["--input-type=module", "-e", `
+    import { createPylonVmBackend } from ${JSON.stringify(new URL("./pylon-vm-backend.ts", import.meta.url).href)};
+    const backend = createPylonVmBackend({ stateRoot: ${JSON.stringify(stateRoot)}, artifacts: ${JSON.stringify(artifacts)}, secrets: { value: () => undefined, names: () => [] } });
+    await backend.ensurePaused(${JSON.stringify(id)}, "ckpt-stopcrash-1", AbortSignal.timeout(60_000), true);
+  `], { stdio: "ignore" });
+  const exited = once(probe, "exit");
+  t.after(async () => { probe.kill("SIGKILL"); await exited; });
+  await until("the retry is journaled and stop reached the controller", () => existsSync(join(dir, "stop-seen")));
+  probe.kill("SIGKILL");
+  await exited;
+  assert.equal(existsSync(join(dir, "retry-stop.json")), true);
+  if (controllerDied) {
+    process.kill(controller.pid, "SIGKILL");
+    await controller.exited;
+    assert.ok((await groupMembers(controller.pid)).length > 0, "its QEMU stand-in outlives the controller");
+  }
+  // Even a spawn after lost job history must finish the interrupted stop before it can reuse this controller.
+  await assert.rejects(backend.ensureRunning(bootOf(id), live, AbortSignal.timeout(60_000)), /Sandbox (controller exited|start failed)/);
+  await controller.exited;
+  assert.deepEqual(await groupMembers(controller.pid), []);
+  assert.equal(existsSync(join(dir, "retry-stop.json")), false);
+});
+
+
+test("retry refuses a live process group whose controller identity does not match", async (t) => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-wrongpid" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  const controller = await stuckController(t, dir, id, "silent");
+  await writeFile(join(dir, "controller.pid"), JSON.stringify({ ...(await identityOf(controller.pid))!, start: "wrong-start" }));
+  await assert.rejects(backend.ensurePaused(id, "ckpt-wrongpid-1", signal(), true), /Cannot verify the retry controller's process group/);
+  assert.equal((await groupMembers(controller.pid)).length, 2);
+  assert.equal(existsSync(join(dir, "stop-seen")), false, "no request or signal reached an unverified controller");
 });
