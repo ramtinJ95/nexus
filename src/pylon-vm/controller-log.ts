@@ -1,5 +1,5 @@
-/** How a line of a controller log starts: the time it was written. */
-export const stamped = (line: string, at = new Date()) => `${at.toISOString()} ${line}`;
+/** `text` as controller log lines: each line it holds starts with the time it was written. */
+export const stamped = (text: string, at = new Date()) => text.split("\n").map((line) => `${at.toISOString()} ${line}`).join("\n");
 
 /** A controller log's line without its time, which lines written before the stamp lack. */
 export const unstamped = (line: string) => line.replace(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /, "");
