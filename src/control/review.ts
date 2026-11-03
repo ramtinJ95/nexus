@@ -221,17 +221,20 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const ranOut = (r: Review, ...items: (Hold | string)[]): Review => end(r, { ...personPhase("rounds", ...items), label: { state: "adding" } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
   /**
-   * `r` with the holds its latest round's head decides recorded, or null when the PR is at another head, which gets a
-   * round of its own. The files are read before the head is confirmed, so files of a head pushed meanwhile are not
-   * recorded as this one's.
+   * `r` with the holds its latest round's head decides against the PR's base recorded, or null when the PR is at
+   * another head, which gets a round of its own. A retargeted PR's files change at the same head, so they are read
+   * again. They are read before the head and base are confirmed, so files of a push or a retarget meanwhile are not
+   * recorded as this head's.
    */
   const recordHolds = async (r: Review): Promise<Review | null> => {
     const round = r.rounds.at(-1)!;
-    if (round.holds !== undefined) return r;
+    const { base } = (await read(r)).detail;
+    if (round.heldAt?.base === base) return r;
     const files = await github.files(r.pr.repo, r.pr.number);
     reads.delete(prKey(r));
-    if ((await read(r)).detail.head !== round.head) return null;
-    return withRound(r, { holds: headHolds({ review: r, files, nexus: deploys(r) }) });
+    const { detail } = await read(r);
+    if (detail.head !== round.head || detail.base !== base) return null;
+    return withRound(r, { heldAt: { base, holds: headHolds({ review: r, files, nexus: deploys(r) }) } });
   };
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
   const checked = async (r: Review): Promise<Review> => {
@@ -412,10 +415,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // Read while the check thread is held, so a read that fails is retried with the check's result. A landing tried
       // again keeps the round's live check, which ran at the same head.
       const verifies = state.passed && round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify");
-      checks.discard(phase.thread);
       const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
-      if (state.passed) return await checkPassed(next, verifies);
-      return gateFailed(r, next);
+      const after = state.passed ? await checkPassed(next, verifies) : gateFailed(r, next);
+      checks.discard(phase.thread);
+      return after;
     },
     async verifying(r, phase, builder) {
       const round = r.rounds.at(-1)!;
@@ -439,10 +442,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       }
       if (state.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check could not run at ${round.head}.` }, liveOutput(state.output));
       if (state.kind !== "done") return r;
-      live.discard(phase.thread);
       const next = withRound({ ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } }, { live: { kind: "ran", thread: phase.thread, passed: state.passed, output: state.output } });
-      if (state.passed) return await checked(next);
-      return gateFailed(r, next);
+      // Read while the verify pylon is held, as the check's result is.
+      const after = state.passed ? await checked(next) : gateFailed(r, next);
+      live.discard(phase.thread);
+      return after;
     },
     async merging(r, phase, builder) {
       const head = r.rounds.at(-1)!.head;
@@ -464,7 +468,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // waived too, so the person's next confirmation can name them all.
       const holds = async () => {
         if (snapshot.checksUnread) throw new Error("GitHub's checks for the head could not be read");
-        // Only a landing that began before Nexus recorded what holds its head reads them here.
+        // A landing that began before Nexus recorded what holds its head, or whose PR was retargeted since, reads them here.
         const held = await recordHolds(r);
         if (held === null) throw new Error("the pull request's head moved while its files were read");
         const all = [...unauthorized(held, builder), ...landingHolds({ review: held, pr: snapshot })];
@@ -591,7 +595,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const moved = pushedHead(r, pr) === null ? null : await pushedAfter(r, fresh ?? await read(r));
       if (moved !== null) return moved;
       // A review approved before Nexus recorded what holds its head reads them once, as its checks passing would.
-      if (r.phase.kind === "approved" && r.rounds.at(-1)!.holds === undefined) {
+      if (r.phase.kind === "approved" && r.rounds.at(-1)!.heldAt === undefined) {
         const recorded = await recordHolds(r);
         if (recorded !== null) return recorded;
       }

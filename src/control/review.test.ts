@@ -3207,12 +3207,42 @@ test("a review approved before Nexus recorded what holds its head reads them on 
   const f = fixture(t);
   f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type A = 1;\n+type A = 2;" }];
   const loop = await approved(f, null);
-  const { holds, ...round } = f.review().rounds[0]!;
+  const { heldAt, ...round } = f.review().rounds[0]!;
   f.registry.saveReview({ ...f.review(), rounds: [round] });
   assert.deepEqual(heldBy(f.review()), [], "until then it shows what its record alone decides");
   await loop.poll();
-  assert.deepEqual(f.review().rounds[0]!.holds, [egress]);
+  assert.deepEqual(f.review().rounds[0]!.heldAt, { base: "main", holds: [egress] });
   assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+test("a pull request retargeted at its approved head has its path holds read again at the landing", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  assert.deepEqual(heldBy(f.review()), []);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+  f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type A = 1;\n+type A = 2;" }];
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [egress.text] });
+  assert.deepEqual(heldBy(f.review()), [egress]);
+});
+
+test("a check that passed keeps its thread until the holds of its head are read", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  f.onFiles = () => { throw new Error("GitHub is down"); };
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "checking");
+  assert.deepEqual(f.discarded, [], "the check's result is not lost with the failed read");
+  f.onFiles = () => {};
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.equal(f.checkThreads.length, 1, "no second check ran");
+  assert.equal(f.review().rounds[0]!.check?.passed, true);
 });
 
 test("a Land press at a head whose check passed keeps that check and merges", async (t) => {
@@ -3239,7 +3269,7 @@ test("an approval by a reviewer on the builder's own model offers no Land press,
   const f = fixture(t);
   const loop = await approved(f, null);
   const review = { ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } };
-  f.registry.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, holds: headHolds({ review, files: [], nexus: true }) }] });
+  f.registry.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, heldAt: { base: "main", holds: headHolds({ review, files: [], nexus: true }) } }] });
   assert.equal(landPress(f.review()).kind, "stuck");
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409, message: /builder's own model/ });
   assert.deepEqual(f.review().phase, { kind: "approved" });

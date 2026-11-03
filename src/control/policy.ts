@@ -57,7 +57,7 @@ export const recordedHolds = (review: Review): Hold[] => [
 
 /**
  * The holds the head alone decides, which meet every landing of it whatever GitHub says: the record's, and the
- * changed files'. The loop records them on the round once its checks pass, as `holds`.
+ * changed files'. The loop records them on the round once its checks pass, as `heldAt`.
  */
 export function headHolds({ review, files, nexus }: HeadFacts): Hold[] {
   return [
@@ -80,7 +80,7 @@ function pathHolds(files: readonly ChangedFile[]): Hold[] {
 }
 
 /** The holds the latest round's head decides, as recorded, or the record's alone for a round approved before Nexus recorded them, until the loop reads them. */
-const headHeld = (review: Review): Hold[] => review.rounds.at(-1)!.holds ?? [...sameModel(review), ...recordedHolds(review)];
+const headHeld = (review: Review): Hold[] => review.rounds.at(-1)!.heldAt?.holds ?? [...sameModel(review), ...recordedHolds(review)];
 
 /**
  * What the holds currently on a review are: those its head decides, and for one held for the person, those its
@@ -89,7 +89,7 @@ const headHeld = (review: Review): Hold[] => review.rounds.at(-1)!.holds ?? [...
 export const heldBy = (review: Review): Hold[] => {
   if (review.phase.kind !== "needs-person") return headHeld(review);
   const codes = new Set(review.phase.holds.map((h) => h.code));
-  return [...review.phase.holds, ...(review.rounds.at(-1)!.holds ?? []).filter((h) => !codes.has(h.code))];
+  return [...review.phase.holds, ...(review.rounds.at(-1)!.heldAt?.holds ?? []).filter((h) => !codes.has(h.code))];
 };
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();

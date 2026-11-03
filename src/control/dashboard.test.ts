@@ -332,7 +332,7 @@ test("an approved review's card shows the path hold recorded at its head, and it
   const fix = await s.start("acme", "Fix checkout");
   const egress = "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts.";
   const review = approvedReview(fix.id, { kind: "approved" });
-  s.registry.saveReview({ ...review, rounds: [review.rounds[0]!, { ...review.rounds[1]!, holds: [{ code: "reserved-path:egress", text: egress }] }] });
+  s.registry.saveReview({ ...review, rounds: [review.rounds[0]!, { ...review.rounds[1]!, heldAt: { base: "main", holds: [{ code: "reserved-path:egress", text: egress }] } }] });
   const region = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.match(textOf(region), new RegExp(`^Approved, not landed .* ${egress.replace(/[.]/g, "\\.")} you may waive `));
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(region)![0];
