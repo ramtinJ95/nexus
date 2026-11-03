@@ -118,6 +118,17 @@ export const undeleted = (q: { cleanup: Cleanup; answer: { option: string } | nu
 export const freedBytes = (cleanup: Cleanup): number =>
   Object.values(cleanup.outcomes).reduce((sum, o) => sum + (o.state === "deleted" ? o.bytes : 0), 0);
 
+/**
+ * What a node's latest cleanup did, which is its newest question answered Delete: when, the space its deletes freed, how
+ * many items it found in use and kept, and how many still wait for the node. Null for a node that never deleted.
+ */
+export function lastCleanup(asked: readonly { cleanup: Cleanup; answer: { option: string; at: number } | null }[]) {
+  const q = asked.findLast((q) => q.answer?.option === "Delete");
+  if (q === undefined) return null;
+  const states = q.cleanup.items.map((i) => q.cleanup.outcomes[itemKey(i)]?.state);
+  return { at: q.answer!.at, freed: freedBytes(q.cleanup), skipped: states.filter((s) => s === "skipped").length, waiting: states.filter((s) => s === undefined).length };
+}
+
 export function bytesText(bytes: number): string {
   const units = ["KiB", "MiB", "GiB", "TiB"];
   let value = bytes;

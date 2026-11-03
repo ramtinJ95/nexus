@@ -1,7 +1,8 @@
 /**
- * Renders the Cluster page: a card for every node with its load, memory, disk, pylons, release and open checks, and
- * under them the picked node's detail, which `/nodes/<name>` opens: the cleanup the person is asked to confirm, what its
- * probe reads of its host's health and its pylon processes, and graphs of its history.
+ * Renders the Cluster page: a card for every node with its load, memory, disk, pylons, release and open checks, a line
+ * of what each node's latest cleanup freed, and under them the picked node's detail, which `/nodes/<name>` opens: the
+ * cleanup the person is asked to confirm, what its probe reads of its host's health and its pylon processes, and graphs
+ * of its history.
  */
 import type { NodeName, ThreadId } from "../../ids.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
@@ -12,8 +13,9 @@ import { gib, nodePylons, overcommitted } from "../placement.ts";
 import { releaseView } from "../releases.ts";
 import { utc } from "../usage.ts";
 import { seriesKey, seriesLabel, seriesOf, type Series } from "../node-metrics.ts";
+import { bytesText, lastCleanup } from "../cleanup-model.ts";
 import { charts, ranges } from "./graph-data.ts";
-import { Html, html, menu, dot, icon, type Part } from "./view.ts";
+import { Html, html, menu, dot, icon, ago, type Part } from "./view.ts";
 import type { Context } from "./context.ts";
 import { cleanupCard } from "./cards.ts";
 import { layout, statusTone } from "./shell.ts";
@@ -46,14 +48,29 @@ const graphs = (name: NodeName) => html`<section id="node-graphs" class="graphs"
 <div class="graph-plot"><p class="empty graph-empty" hidden></p></div><div class="graph-legend"></div></figure>`)}</div>
 </section>`;
 
-/** The open cleanup question, and the newest answered one with what its deletes did. */
+/** The open cleanup question, which the person answers. What an answered one did is in the cleanup line. */
 function cleanup(c: Context, name: NodeName): Html {
-  const asked = c.registry.nodeQuestions(name);
-  const shown = [asked.findLast((q) => q.answer === null), asked.findLast((q) => q.answer !== null)].filter((q) => q !== undefined);
+  const open = c.registry.nodeQuestions(name).findLast((q) => q.answer === null);
   return html`<section aria-labelledby="node-cleanup-h"><div class="ov-head"><h2 id="node-cleanup-h">Cleanup</h2></div>
 <p id="action-error" class="error" role="alert" hidden></p>
-${shown.length === 0 ? html`<p class="empty">Nothing on this node waits to be deleted.</p>` : html`<div class="cleanups">${shown.map((q) => cleanupCard(c, q))}</div>`}
+${open === undefined ? html`<p class="empty">No cleanup question waits on you.</p>` : cleanupCard(c, open)}
 </section>`;
+}
+
+const itemCount = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
+
+/** One line of what each node's latest cleanup freed and when, with any item it could not delete or still waits on. */
+function cleanupLine(c: Context, nodes: readonly NodeRecord[]): Html | false {
+  const done = nodes.flatMap((n) => {
+    const last = lastCleanup(c.registry.nodeQuestions(n.name));
+    return last === null ? [] : [{ node: n.name, ...last }];
+  });
+  if (done.length === 0) return false;
+  const parts = done.map((d, i) => {
+    const left = [d.skipped > 0 && `${itemCount(d.skipped)} could not be deleted`, d.waiting > 0 && `${itemCount(d.waiting)} still to go`].filter((x) => x !== false);
+    return html`${i > 0 && (i === done.length - 1 ? " and " : ", ")}${bytesText(d.freed)}${i === 0 && " freed"} on ${d.node} ${ago(d.at, c.now)}${left.length > 0 && html` <span class="bad-text">(${left.join(", ")})</span>`}`;
+  });
+  return html`<p class="cleanup-line dim">Last cleanup: ${parts}</p>`;
 }
 
 /**
@@ -159,6 +176,7 @@ ${health.pylons === null ? html`<p class="empty">This node's backend does not sa
     main: html`<header class="bar">${menu}<div class="crumb"><a class="crumb-p" href="/cluster">Cluster</a><span class="sep" aria-hidden="true">/</span><h1>${name}</h1></div></header>
 <div class="scroll"><div class="page page-cluster"><section class="cluster" id="cluster-nodes" aria-label="Nodes" data-live>
 <div class="ov-head"><h2>Nodes</h2><span class="count">${nodes.length}</span><span class="dim">Desired release ${c.registry.desiredRelease()?.commit.slice(0, 12) ?? "manual"}</span></div>
+${cleanupLine(c, nodes)}
 <div class="node-cards">${nodes.map((n) => nodeCard(c, n, n.name === name ? (health instanceof Error ? health : liveReading(health)) : mayRead ? recordedReading(c, n.name) : new Error("Only a deployer reads a node's health"), releases.get(n.name) ?? [], n.name === name))}</div>
 </section>
 <div class="node-detail"><h2 class="node-detail-h">${name}</h2><div class="node-live" id="node-cleanup" data-live>${cleanup(c, name)}</div><div class="node-live" id="node-health" data-live>
