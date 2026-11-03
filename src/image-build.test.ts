@@ -312,3 +312,23 @@ test("debugfs errors are its stderr without the version banner", () => {
     'sif: File not found by ext2_lookup while resolving "/x"',
   ]);
 });
+
+
+test("the init keeps SIGPIPE ignored and sends tini and sandboxd output to /dev/null without changing stdin", async () => {
+  const init = await readFile(join(pylonRecipeDir, "rootfs-init-extra.sh"), "utf8");
+  assert.match(init, /trap '' PIPE\nexec \/usr\/bin\/tini -- \/usr\/bin\/sandboxd >\/dev\/null 2>&1\n/);
+});
+
+test("the smoke boot requires both sandboxd output descriptors to be /dev/null", async () => {
+  const check = smokeChecks(await loadImageRecipe()).find((c) => c.name === "sandboxd output")!;
+  assert.ok(check);
+  assert.deepEqual(check.argv, ["sh", "-c", 'pid="$(pidof sandboxd)" && readlink "/proc/$pid/fd/1" "/proc/$pid/fd/2"']);
+  assert.equal(smokeFailure(check, 0, "/dev/null\n/dev/null\n"), undefined);
+  for (const target of ["/dev/console", "/dev/ttyS0", "/dev/tty1", "/dev/pts/0", "/var/log/sandboxd.log"]) {
+    for (const output of [`${target}\n/dev/null\n`, `/dev/null\n${target}\n`]) {
+      assert.notEqual(smokeFailure(check, 0, output), undefined);
+    }
+  }
+  assert.notEqual(smokeFailure(check, 0, "/dev/null\n"), undefined);
+  assert.notEqual(smokeFailure(check, 1, ""), undefined);
+});

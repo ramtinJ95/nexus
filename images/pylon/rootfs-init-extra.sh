@@ -18,5 +18,7 @@ runuser -u user -- setsid -f /usr/local/bin/node /usr/local/bin/nexus-outbox.ts 
 # sandboxd sets no SIGPIPE disposition, which PID 1 did not need, and as tini's child a write to an exec's closed
 # stdin would kill it and the guest. Its execs inherit the ignore, and Python, which runs a running pylon's guest
 # commands (src/pylon-vm/guest.ts), restores SIGPIPE for the commands it starts.
+# A serial console write can block forever after a lost UART interrupt. sandboxd answers every command,
+# so its output must never depend on that console. Discard it rather than fill RAM-backed /var/log.
 trap '' PIPE
-exec /usr/bin/tini -- /usr/bin/sandboxd
+exec /usr/bin/tini -- /usr/bin/sandboxd >/dev/null 2>&1
