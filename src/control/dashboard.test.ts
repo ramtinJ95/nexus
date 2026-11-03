@@ -657,6 +657,21 @@ test("a thread in Needs you has its call to action once, in its card, with where
   assert.match(page, new RegExp(`<a class="fl-row( dim)?" href="/\\?peek=${quiet.id}" data-peek="${quiet.id}" aria-current="true">`), "and its line in the work in flight previews it");
 });
 
+test("a card's strip links the pull request its review lands, whichever pull requests the PR watch follows", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const two = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(two.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
+  s.registry.savePrWatch(two.id, { links: [9, 7].map((number) => ({ pr: testPr({ repo: "acme/nexus", number, title: `PR ${number}` }), seen: [], failed: false })), commentWakes: 0, pending: null, error: null });
+  const unwatched = await s.start("acme", "Name the TTL");
+  s.registry.saveReview(approvedReview(unwatched.id, { kind: "approved" }, { id: "rv-8", reviewer: "th-reviewer-8" as ThreadId }));
+  const { cards } = needsOf((await s.call("GET", "/")).text);
+  for (const thread of [two, unwatched]) {
+    const strip = /<p class="need-facts">([\s\S]*?)<\/p>/.exec(cards.find((c) => c.thread === thread.id)!.html)![1]!;
+    assert.match(strip, /<a class="link" href="https:\/\/github\.com\/acme\/nexus\/pull\/7" [^>]*>#7<\/a>/, `${thread.title}'s strip links #7, which Land merges`);
+    assert.doesNotMatch(strip, /#9/);
+  }
+});
+
 const chipOf = (page: string) => /<span class="chip-label">([^<]*)<\/span>/.exec(page)![1];
 const dockOf = (page: string) => page.split('<div class="dock">')[1]!.split('<div id="run"')[0]!;
 const actionsOf = (html: string) => [...html.matchAll(/data-action="([^"]+)"|<a [^>]*href="([^"]+)"[^>]*data-write/g)].map((m) => m[1] ?? m[2]);

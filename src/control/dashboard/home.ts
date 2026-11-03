@@ -195,7 +195,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
  */
 function whereNow(c: Context, d: ThreadDetail, life: Life, items: readonly Item[] | null): Html {
   const r = d.review;
-  const pr = d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
+  const pr = r !== null ? r.pr : d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   const reply = items?.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
   const role = threadRole(c, d.thread.id);
   return html`<div class="need-ctx">${role.kind === "builder" ? lifeTrack(life, false) : roleLine(c, d.thread.id, role)}
