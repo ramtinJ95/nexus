@@ -306,7 +306,6 @@ export async function startService(
 	};
 	const content = [
 		"#!/bin/sh",
-		`unset ${commandMark}`,
 		`cd ${q(service.cwd)} || exit 1`,
 		...Object.entries(environment).map(
 			([key, value]) => `export ${key}=${q(value)}`,
@@ -325,6 +324,6 @@ export async function startService(
 	await vm.fs.writeFile(script, content);
 	await checked(
 		vm,
-		`setsid /bin/sh ${q(script)} </dev/null >>${q(log)} 2>&1 & echo $! > ${q(`${serviceRoot}/${name}.pid`)}`,
+		`setsid env -u ${commandMark} /bin/sh ${q(script)} </dev/null >>${q(log)} 2>&1 & echo $! > ${q(`${serviceRoot}/${name}.pid`)}`,
 	);
 }
