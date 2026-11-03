@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import childProcess, { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import fs, { chmod, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
@@ -570,3 +570,36 @@ test("a recovery never leaves the lock an empty directory that another launch co
 	assert.equal(most(), 1);
 	assert.match(rResult, /EISDIR/);
 });
+
+for (const debug of ["exec", undefined])
+	test(`a controller the probe starts gets GONDOLIN_DEBUG only when the probe has it, ${debug === undefined ? "unset" : `set to ${debug}`}`, async (t) => {
+		const root = await mkdtemp(join(tmpdir(), "nxc-"));
+		t.after(() => rm(root, { recursive: true, force: true }));
+		const dir = directory(root, "instances", "pylon-debug");
+		await privateDirectory(dir);
+		await saveJson(join(dir, "record.json"), { version: 1, name: "pylon-debug", config: {}, createdAt: new Date().toISOString(), labels: {} });
+		const before = process.env.GONDOLIN_DEBUG;
+		if (debug === undefined) delete process.env.GONDOLIN_DEBUG;
+		else process.env.GONDOLIN_DEBUG = debug;
+		process.env.NEXUS_TEST_SECRET = "s3cret";
+		t.after(() => {
+			if (before === undefined) delete process.env.GONDOLIN_DEBUG;
+			else process.env.GONDOLIN_DEBUG = before;
+			delete process.env.NEXUS_TEST_SECRET;
+		});
+		let env: NodeJS.ProcessEnv | undefined;
+		t.mock.method(childProcess, "spawn", (_command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+			env = options.env;
+			throw new Error("spawn refused");
+		});
+		syncBuiltinESMExports();
+		t.after(() => {
+			t.mock.restoreAll();
+			syncBuiltinESMExports();
+		});
+		await assert.rejects(run(root, { action: "start", name: "pylon-debug", boot: spec }), /spawn refused/);
+		const expected: NodeJS.ProcessEnv = { TMPDIR: scratchDirectory(root, dir) };
+		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME"]) if (process.env[key]) expected[key] = process.env[key];
+		if (debug !== undefined) expected.GONDOLIN_DEBUG = debug;
+		assert.deepEqual(env, expected);
+	});

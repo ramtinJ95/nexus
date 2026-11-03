@@ -353,7 +353,7 @@ async function launch(
 		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
 		await rm(controlSocket(dir), { force: true });
 		const env: NodeJS.ProcessEnv = {};
-		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME"])
+		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME", "GONDOLIN_DEBUG"])
 			if (process.env[key]) env[key] = process.env[key];
 		// Gondolin puts the running disk's overlay and its sockets in the temporary directory. The system one is
 		// often a tmpfs, where every byte a pylon writes to its disk would take host memory until the next pause.
