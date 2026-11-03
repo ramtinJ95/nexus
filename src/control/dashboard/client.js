@@ -3,7 +3,7 @@
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-import { coordinator, notificationChannel, needSelectors, noticeText, noticeUrl } from "./notifications.js";
+import { coordinator, notificationChannel, noticeText, noticeUrl } from "./notifications.js";
 import { api } from "./request.js";
 import { el, end, follow, pollMs, recordVisit, refreshNow, stream, tick, toggled } from "./page.js";
 import { paneKey, pickPane, setOpen } from "./nav.js";
@@ -61,26 +61,6 @@ document.addEventListener("visibilitychange", () => {
   if (changesPane !== null && canRead(factsNow())) void readChanges();
 });
 
-/**
- * Brings the inbox card a notice opened into view, or the inbox when that card is gone. A notice can come before the
- * poll that brings its card, so the page is read once more before it settles for the inbox.
- */
-async function showNeed() {
-  const selectors = needSelectors(location.hash);
-  if (selectors === null) return;
-  const find = () => selectors.map((s) => document.querySelector(s)).find((found) => found !== null) ?? null;
-  if (find() === null && document.getElementById("needs-you") !== null) await refreshNow();
-  const card = find() ?? document.getElementById("needs-you");
-  for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
-  card?.classList.add("picked");
-  // Opened as the reader's own toggle is, so a poll's swap keeps it open.
-  const fold = card?.querySelector(".need-fold");
-  if (fold) toggled.set(fold.id, fold.open = true);
-  card?.scrollIntoView({ block: "start" });
-  card?.focus({ preventScroll: true });
-}
-void showNeed();
-addEventListener("hashchange", () => void showNeed());
 // On a phone the link is in the drawer, which a jump within the page would leave open over the inbox.
 document.addEventListener("click", (event) => {
   if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) setOpen(null);

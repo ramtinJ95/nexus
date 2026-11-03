@@ -1,22 +1,25 @@
 // The home page's two sides: the phone's switch between Needs you and the work in flight, the way the stack lists the
 // work, and the preview, which the page renders from `?peek=` so a poll keeps it fresh. Picking a line swaps the
 // preview in place without leaving home. Work in Needs you previews in its card instead: picking its line brings the
-// card into view, and opening the card reads its latest reply into it.
-import { afterSwap, refreshAfter, toggled } from "./page.js";
+// card into view, as a notice's link does, and opening the card reads its latest reply into it.
+import { afterSwap, refreshAfter, refreshNow, toggled } from "./page.js";
+import { needSelectors } from "./notifications.js";
 
 const split = document.getElementById("split");
 const desk = matchMedia("(min-width: 761px)");
 const viewKey = "nexus.flight-view";
 
 const cardOf = (key) => document.querySelector(`.need[data-thread="${key}"],.need[data-peek-key="${key}"]`);
+const keyOf = (card) => card.dataset.thread ?? card.dataset.peekKey;
 
 /** Brings work's card in Needs you into view, opened and marked, as a notice's link does. */
 function pick(card) {
   document.getElementById("side-needs").checked = true;
   for (const picked of document.querySelectorAll(".need.picked")) picked.classList.remove("picked");
   card.classList.add("picked");
+  // Opened as the reader's own toggle is, so a poll's swap keeps it open.
   const fold = card.querySelector(".need-fold");
-  toggled.set(fold.id, fold.open = true);
+  if (fold) toggled.set(fold.id, fold.open = true);
   card.scrollIntoView({ block: "start" });
   card.focus({ preventScroll: true });
 }
@@ -38,18 +41,31 @@ function peek(key) {
 if (split !== null) {
   const view = document.getElementById(`view-${localStorage.getItem(viewKey)}`);
   if (view !== null) view.checked = true;
-  const showSide = () => {
+  /**
+   * Brings the inbox card a notice opened into view, or the inbox when that card is gone. A notice can come before the
+   * poll that brings its card, so the page is read once more before it settles for the inbox.
+   */
+  const showSide = async () => {
     const side = location.hash === "#in-flight" ? "flight" : location.hash.startsWith("#needs-you") ? "needs" : null;
     if (side !== null) document.getElementById(`side-${side}`).checked = true;
-    // A notice opens its card by this hash, and picking the card is what reads its latest reply into it.
-    const picked = /^#needs-you:([\w-]+):/.exec(location.hash)?.[1];
-    if (cardOf(picked)) peek(picked);
+    const selectors = needSelectors(location.hash);
+    if (selectors === null) return;
+    const find = () => selectors.map((s) => document.querySelector(s)).find((found) => found !== null);
+    if (!find()) await refreshNow();
+    const card = find();
+    pick(card ?? document.getElementById("needs-you"));
+    // Picking the card is what reads its latest reply into it.
+    if (card) peek(keyOf(card));
   };
-  showSide();
+  void showSide();
   addEventListener("hashchange", showSide);
-  // A link to work in Needs you, opened afresh, brings its card into view, as picking its line does.
-  const picked = cardOf(new URL(location.href).searchParams.get("peek"));
-  if (picked && !location.hash.startsWith("#needs-you")) pick(picked);
+  // A link to work in Needs you, opened afresh, brings the card the server picked for it into view, and names that
+  // card's work in the address, as an item that became a thread is the thread's work.
+  const picked = document.querySelector(".need.picked");
+  if (picked && !location.hash.startsWith("#needs-you")) {
+    pick(picked);
+    peek(keyOf(picked));
+  }
   // A link to the hash the page is already at fires no hashchange.
   document.addEventListener("click", (event) => {
     if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) document.getElementById("side-needs").checked = true;
@@ -62,8 +78,7 @@ if (split !== null) {
     const opening = event.target.closest(".need-sum");
     // Only the reader's opening of a card picks it: a poll's swap reopens folds too, and picks nothing.
     if (link === null && opening !== null && !opening.parentElement.open) {
-      const need = opening.closest(".need");
-      const key = need.dataset.thread ?? need.dataset.peekKey;
+      const key = keyOf(opening.closest(".need"));
       if (key !== undefined) peek(key);
     }
     if (link === null || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
