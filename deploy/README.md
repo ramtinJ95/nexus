@@ -277,6 +277,19 @@ A node whose encrypted root waits for its unlock over SSH, such as `infra-testbe
 
 The next deploy installs the new unit file, as it does every release, so this needs no step by hand.
 
+### Debug a pylon's guest commands
+
+Gondolin logs every exec it queues, sends and gets an answer for when `GONDOLIN_DEBUG` is set. The probe passes its own `GONDOLIN_DEBUG` to each controller it starts, and the lines land in that instance's `controller.log`. Set it in a drop-in and restart the probe:
+
+```sh
+sudo mkdir -p /etc/systemd/system/nexus-probe.service.d
+printf '[Service]\nEnvironment=GONDOLIN_DEBUG=exec\n' | sudo tee /etc/systemd/system/nexus-probe.service.d/gondolin-debug.conf >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl restart nexus-probe
+```
+
+`exec` can be a comma-separated list of `net`, `exec`, `vfs` and `protocol`, or `all`. Only controllers started after the restart log. A running pylon keeps its old controller until its next boot, such as a wake after a pause. The log grows quickly, and the controller's rotation at 10 MiB bounds it to three files per instance. To turn it off, remove the drop-in, run `sudo systemctl daemon-reload` and restart the probe. Controllers started while it was on keep logging until their pylon's next boot.
+
 ### GitHub access for a project's agents
 
 A project that grants `GH_TOKEN` to `api.github.com` and `github.com`, as `nexus project add --secret GH_TOKEN:api.github.com,github.com` and the dashboard's GitHub access do, lets its agents create GitHub repositories with `gh` and push to them over HTTPS. This is how a scratch project's work is kept. The installer asks for the token on every machine. To add it by hand on a node that runs the project's threads, append it to `/etc/nexus/secrets.env` and restart the probe:
