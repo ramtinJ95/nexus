@@ -19,7 +19,7 @@ const name = "pylon-t1";
 const spec = { resources: { cpus: 1, memoryGiB: 1 }, allowedHosts: [], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null };
 
 /** The real daemon.ts over an instance directory, with fake-runtime.ts in place of the VM, and its scratch directory made as a launch makes it. */
-async function launched(t: TestContext, instance = name) {
+async function launched(t: TestContext, instance = name, holdChmod = false) {
 	const root = await mkdtemp(join(tmpdir(), "nxd-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const dir = directory(root, "instances", instance);
@@ -32,7 +32,7 @@ async function launched(t: TestContext, instance = name) {
 	const child = spawn(
 		process.execPath,
 		["--import", fileURLToPath(new URL("./fake-runtime.ts", import.meta.url)), fileURLToPath(new URL("./daemon.ts", import.meta.url)), dir],
-		{ stdio: ["pipe", "ignore", "pipe"] },
+		{ stdio: ["pipe", "ignore", "pipe"], env: { ...process.env, NEXUS_TEST_HOLD_CHMOD: holdChmod ? "1" : "" } },
 	);
 	t.after(() => child.kill("SIGKILL"));
 	let log = "";
@@ -182,3 +182,22 @@ test("a controller retired by a failed stop leaves the scratch directory and con
 	assert.equal(existsSync(c.scratch), true, "the retired controller removed the scratch directory of the controller after it");
 	assert.equal((await readIdentity(join(c.dir, "controller.pid")))?.pid, process.pid, "the retired controller removed the controller.pid of the controller after it");
 });
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+	for (const instance of [name, "pylon-full"]) {
+		test(`${signal} during socket chmod cleans up ${instance}`, { timeout: 30_000 }, async (t) => {
+			const c = await launched(t, instance, true);
+			while (!c.log().includes("socket chmod waiting")) {
+				assert.equal(c.child.exitCode, null, c.log());
+				await delay(10);
+			}
+			c.child.kill(signal);
+			assert.equal(await c.exited, 0, c.log());
+			assert.match(c.log(), /runtime stop/);
+			if (instance === "pylon-full") assert.match(c.log(), /ENOSPC/);
+			assert.equal(existsSync(join(c.dir, "control.sock")), false);
+			assert.equal(existsSync(c.scratch), false);
+			assert.equal(existsSync(join(c.dir, "controller.pid")), false);
+		});
+	}
+}
