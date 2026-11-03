@@ -86,3 +86,12 @@ export async function alive(identity: ProcessIdentity): Promise<boolean> {
 	const now = await identityOf(identity.pid);
 	return now !== null && now.start === identity.start && now.boot === identity.boot;
 }
+
+/** Zombies hold no VM or open files; an orphaned one can wait for the host's init to reap it. */
+export async function groupMembers(group: number): Promise<number[]> {
+	const { stdout } = await execFileAsync("ps", ["-axo", "pid=,pgid=,stat="], { timeout: 1000, maxBuffer: 8 << 20 });
+	return stdout.trim().split("\n").flatMap((line) => {
+		const [pid, pgid, state] = line.trim().split(/\s+/);
+		return Number(pgid) === group && state !== undefined && !state.startsWith("Z") ? [Number(pid)] : [];
+	});
+}

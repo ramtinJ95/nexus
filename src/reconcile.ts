@@ -175,6 +175,9 @@ const planRules: readonly Rule[] = [
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(last.code, `last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
   ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(last.code, `gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
   ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
+  // A failed job or interrupted retry can leave a live controller running, unavailable or stuck stopping.
+  (i) => i.retrying && i.observed !== "absent" && ["running", "booting", "stopping"].includes(i.observed.phase)
+    ? submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint, retry: true }) : null,
   // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
   // A sealed boot's transcripts are read-only and its user's processes were killed, so it runs no work: it pauses, and

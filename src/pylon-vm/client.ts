@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync } from "node:fs";
 import {
+	appendFile,
 	constants,
 	copyFile,
 	mkdir,
@@ -17,6 +18,7 @@ import http from "node:http";
 import { basename, dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import {
 	type Action,
 	actionSchema,
@@ -24,7 +26,7 @@ import {
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
-import { alive, identitySchema, type ProcessIdentity, publishIdentity, readIdentity } from "./identity.ts";
+import { alive, groupMembers, identityOf, identitySchema, type ProcessIdentity, publishIdentity, readIdentity } from "./identity.ts";
 import {
 	directory,
 	existsError,
@@ -32,6 +34,7 @@ import {
 	readLogTail,
 	readRecord,
 } from "./storage.ts";
+import { reapGroup, signalGroup } from "../process-group.ts";
 import { saveJson } from "../json-file.ts";
 
 /** sun_path holds 104 bytes on macOS and 108 on Linux, including the terminating NUL. The shorter rules. */
@@ -322,6 +325,7 @@ async function launch(
 	signal?: AbortSignal,
 ): Promise<unknown> {
 	signal?.throwIfAborted();
+	if (existsSync(join(dir, "retry-stop.json"))) throw new Error("Retry stop is unfinished; finish it before starting the sandbox");
 	const running = await liveness(dir, name, signal);
 	if (running !== absent) return running;
 	if (await controllerAlive(dir))
@@ -349,6 +353,7 @@ async function launch(
 			"Sandbox start or recovery is already in progress. Retry inspect shortly",
 		);
 	try {
+		if (existsSync(join(dir, "retry-stop.json"))) throw new Error("Retry stop is unfinished; finish it before starting the sandbox");
 		// The boot's resources, so the node counts what a VM still coming up holds.
 		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
 		await rm(controlSocket(dir), { force: true });
@@ -547,6 +552,70 @@ export async function run(
 	if (action.action === "stop") return settle(dir);
 	if (action.action === "inspect") return offline(dir);
 	throw new Error(`${action.name} is not running. Use start first`);
+}
+/** Stop gets 30 s; group termination then gets 10 s before SIGKILL and 10 s to confirm exit. */
+export async function stopForRetry(root: string, name: string, signal: AbortSignal): Promise<void> {
+	await privateRoot(root);
+	const dir = directory(root, "instances", name);
+	await readRecord(dir);
+	signal.throwIfAborted();
+	const lock = join(dir, "launch.lock");
+	const release = await holdLock(lock);
+	if (release === null) throw new Error("Sandbox start or recovery is already in progress. Retry stop shortly");
+	const journal = join(dir, "retry-stop.json");
+	const log = (line: string) => appendFile(join(dir, "controller.log"), `${new Date().toISOString()} retry: ${line}\n`, { mode: 0o600 });
+	try {
+		const saved = await readFile(journal, "utf8").catch((error: unknown) => {
+			if (existsError(error, "ENOENT")) return null;
+			throw error;
+		});
+		let owner = saved === null ? null : z.object({ controller: identitySchema, members: z.array(identitySchema) }).parse(JSON.parse(saved));
+		if (owner === null) {
+			const controller = await readIdentity(join(dir, "controller.pid"));
+			if (controller !== null) {
+				const members = await groupMembers(controller.pid);
+				if (members.length > 0) {
+					if (!(await alive(controller)) || !members.includes(controller.pid)) throw new Error("Cannot verify the retry controller's process group; refusing to kill it");
+					const identities = await Promise.all(members.map(identityOf));
+					owner = { controller, members: identities.filter((id) => id !== null) };
+					// Persist before stop: a probe crash must not lose the QEMU identities when its controller exits first.
+					await saveJson(journal, owner);
+				}
+			}
+		}
+		if (owner !== null) {
+			const current = await readIdentity(join(dir, "controller.pid"));
+			if (current !== null && (current.pid !== owner.controller.pid || current.start !== owner.controller.start || current.boot !== owner.controller.boot))
+				throw new Error("The controller changed during retry stop; refusing to stop another boot");
+		}
+		try {
+			const reply = await send(dir, { action: "stop", name }, AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
+			if (reply === absent && owner === null) await settle(dir);
+		} catch (error) {
+			if (owner === null) throw error;
+			await log(`stop failed or timed out for controller ${owner.controller.pid}: ${error instanceof Error ? error.message : String(error)}; terminating its process group`);
+		}
+		if (owner !== null) {
+			const { controller, members } = owner;
+			const checkedSignal = async (name: NodeJS.Signals | 0): Promise<boolean> => {
+				const current = await groupMembers(controller.pid);
+				if (current.length === 0) return false;
+				if (name === 0) return true;
+				if (!(await Promise.all(members.filter((id) => current.includes(id.pid)).map(alive))).some(Boolean))
+					throw new Error(`Cannot verify controller ${controller.pid}'s remaining process group; refusing to kill it`);
+				return signalGroup(controller.pid, name);
+			};
+			await checkedSignal("SIGTERM");
+			await reapGroup(controller.pid, `controller ${controller.pid}`, checkedSignal);
+			await log(`stopped old controller ${controller.pid} (start ${controller.start}, host boot ${controller.boot}) and its process group`);
+			await rm(controlSocket(dir), { force: true });
+			await rm(join(dir, "controller.pid"), { force: true });
+		}
+		await settle(dir);
+		await rm(journal, { force: true });
+	} finally {
+		await releaseLock(lock, release);
+	}
 }
 /**
  * Stop without a controller. An instance whose controller died settles as stopped on its last completed

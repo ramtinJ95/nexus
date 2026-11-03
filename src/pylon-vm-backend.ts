@@ -30,8 +30,8 @@ import { publicUrls } from "./public-urls.ts";
 import { requiredArtifacts } from "./reconcile.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "./session-wake.ts";
 import { checkoutDir, sessionHarnessSchema } from "./session-harness.ts";
-import { controlSocket, run, socketPathLimit } from "./pylon-vm/client.ts";
-import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
+import { controlSocket, run, socketPathLimit, stopForRetry } from "./pylon-vm/client.ts";
+import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
 import { listenHostBridge, type HostBridge } from "./host-bridge.ts";
 import { asUser, controllerLog, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-vm/pylon-guest.ts";
@@ -553,6 +553,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     async ensureRunning(bootInputs, live, signal, relaunch = true) {
       const { pylonId } = bootInputs;
       const name = instanceName(pylonId);
+      if (existsSync(join(instanceDir(pylonId), "retry-stop.json"))) await stopForRetry(stateRoot, name, signal);
       for (;;) {
         const instance = await settledInstance(pylonId, signal);
         if (instance === null) {
@@ -587,9 +588,20 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       }
     },
 
-    async ensurePaused(pylonId, checkpoint, signal) {
+    async ensurePaused(pylonId, checkpoint, signal, retry = false) {
       const name = instanceName(pylonId);
-      for (let instance = await settledInstance(pylonId, signal); instance?.status.state !== "stopped"; instance = await settledInstance(pylonId, signal)) {
+      const forPause = async (): Promise<Pick<Inspection, "status"> | null> => {
+        if (!retry) return settledInstance(pylonId, signal);
+        try {
+          return await inspect(pylonId, AbortSignal.any([signal, AbortSignal.timeout(1000)]));
+        } catch {
+          signal.throwIfAborted();
+          const status = await readJson(join(instanceDir(pylonId), "status.json"));
+          return { status: statusSchema.parse(status) };
+        }
+      };
+      if (existsSync(join(instanceDir(pylonId), "retry-stop.json"))) await stopForRetry(stateRoot, name, signal);
+      for (let instance = await forPause(); instance?.status.state !== "stopped"; instance = await forPause()) {
         if (instance === null) return;
         signal.throwIfAborted();
         // A disk with a failed setup is never saved. Without a completed checkpoint nothing on the pylon is the user's, so the
@@ -607,14 +619,19 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         const sidecar = await readSidecar(pylonId);
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
+        const sessionSignal = retry ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : undefined;
+        const sessionRun = sessionSignal === undefined ? sandbox : (action: Record<string, unknown>) => sandbox(action, sessionSignal);
         const sessions = instance.status.state === "running"
-          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
+          ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sessionRun, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
         await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
-          case "running": case "interrupted": case "failed":
+          case "running": case "interrupted": case "failed": case "starting": case "stopping": case "unavailable":
             try {
-              await sandbox({ action: "stop", name });
+              if (retry) await controllerLog(instanceDir(pylonId))(`retry: stopping old controller (booted at ${instance.status.bootedAt ?? "unknown"})`);
+              if (retry) await stopForRetry(stateRoot, name, signal);
+              else await sandbox({ action: "stop", name });
+              if (retry) await controllerLog(instanceDir(pylonId))(`retry: stopped old controller (booted at ${instance.status.bootedAt ?? "unknown"})`);
             } catch (err) {
               throw new JobFailure("checkpoint-failed", `${pylonId}: ${(err as Error).message}`);
             }
