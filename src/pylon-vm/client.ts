@@ -148,6 +148,51 @@ async function releaseLock(lock: string, release: string): Promise<void> {
 	}
 	await rm(release, { recursive: true, force: true });
 }
+/** Whether `name` is one that mkdtemp(`${lock}-`) makes. */
+function reservedName(lock: string, name: string): boolean {
+	const prefix = `${basename(lock)}-`;
+	return name.startsWith(prefix) && /^[A-Za-z0-9]{6}$/.test(name.slice(prefix.length));
+}
+/**
+ * Whether the lock's owner died. A launch killed while it wrote its owner in the lock, as launches did before takes
+ * published it aside, left only the owner's temporary file.
+ */
+async function abandoned(lock: string): Promise<boolean> {
+	const owner = await readIdentity(join(lock, "owner"));
+	if (owner !== null) return !(await alive(owner));
+	const names = await readdir(lock).catch((error: unknown) =>
+		// Released since.
+		existsError(error, "ENOENT") ? null : Promise.reject(error));
+	if (names === null) return false;
+	if (names.some((name) => /^owner\.\d+\.\d+\.tmp$/.test(name))) return true;
+	throw new Error("Sandbox start ownership is unavailable. Read controller logs before retrying");
+}
+/**
+ * takeLock, or the recovery of a lock whose owner died. A recovery holds `${lock}.recovery`, a lock beside it that is
+ * taken and recovered the same way, so one process at a time moves a dead owner's lock aside, and one killed while it
+ * held the recovery leaves a dead owner there in turn. Only a recovery moves a dead owner's lock, so what it reads in
+ * that lock stays that lock's until it moves it. Beside, not inside, because a lock that moves would take a recovery
+ * still held with it, and the recovery's paths would then lead into whichever lock replaced it. `check` throws why a
+ * lock whose owner died must still be kept. Returns null when a live process holds the lock or its recovery.
+ */
+async function holdLock(lock: string, check = async () => {}): Promise<string | null> {
+	const release = await takeLock(lock);
+	if (release !== null) return release;
+	const recovery = `${lock}.recovery`;
+	const recovering = await holdLock(recovery);
+	if (recovering === null) return null;
+	try {
+		if (!(await abandoned(lock))) return null;
+		await check();
+		// A power loss can leave the name empty or cut short, since nothing is synced.
+		const name = await readFile(join(lock, "release"), "utf8").catch((error: unknown) =>
+			existsError(error, "ENOENT") ? "" : Promise.reject(error));
+		await releaseLock(lock, reservedName(lock, name) ? join(dirname(lock), name) : await mkdtemp(`${lock}-`));
+		return await takeLock(lock);
+	} finally {
+		await releaseLock(recovery, recovering);
+	}
+}
 /** A missing identity file means the process has not published itself yet, or is gone. */
 async function published(file: string): Promise<boolean> {
 	const identity = await readIdentity(file);
@@ -251,44 +296,16 @@ async function launch(
 			`Sandbox controller ${daemonPath} is missing`,
 		);
 	const lock = join(dir, "launch.lock");
-	let release = await takeLock(lock);
-	if (release === null) {
-		const recovery = join(lock, "recovery");
-		try {
-			await mkdir(recovery, { mode: 0o700 });
-		} catch {
+	const release = await holdLock(lock, async () => {
+		if (await controllerAlive(dir))
 			throw new Error(
-				"Sandbox start or recovery is already in progress. Retry inspect shortly",
+				"Sandbox controller is still starting. Retry inspect shortly",
 			);
-		}
-		try {
-			const owner = await readIdentity(join(lock, "owner"));
-			if (owner === null)
-				throw new Error(
-					"Sandbox start ownership is unavailable. Read controller logs before retrying",
-				);
-			if (await alive(owner))
-				throw new Error(
-					"Sandbox start is already in progress. Retry inspect shortly",
-				);
-			if (await controllerAlive(dir))
-				throw new Error(
-					"Sandbox controller is still starting. Retry inspect shortly",
-				);
-			const reserved = await readFile(join(lock, "release"), "utf8").then(
-				(name) => join(dirname(lock), basename(name)),
-				(error: unknown) => (existsError(error, "ENOENT") ? mkdtemp(`${lock}-`) : Promise.reject(error)),
-			);
-			await releaseLock(lock, reserved);
-			release = await takeLock(lock);
-			if (release === null)
-				throw new Error(
-					"Sandbox start is already in progress. Retry inspect shortly",
-				);
-		} finally {
-			await rm(recovery, { recursive: true, force: true });
-		}
-	}
+	});
+	if (release === null)
+		throw new Error(
+			"Sandbox start or recovery is already in progress. Retry inspect shortly",
+		);
 	try {
 		// The boot's resources, so the node counts what a VM still coming up holds.
 		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
