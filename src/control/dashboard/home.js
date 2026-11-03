@@ -51,7 +51,10 @@ if (split !== null) {
     const selectors = needSelectors(location.hash);
     if (selectors === null) return;
     const find = () => selectors.map((s) => document.querySelector(s)).find((found) => found !== null);
+    const at = location.href;
     if (!find()) await refreshNow();
+    // The reader's own pick while the page was read again stands.
+    if (location.href !== at) return;
     const card = find();
     pick(card ?? document.getElementById("needs-you"));
     // Picking the card is what reads its latest reply into it.

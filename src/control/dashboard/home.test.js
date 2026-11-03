@@ -72,6 +72,7 @@ function setPage(href, cards) {
   return root;
 }
 const store = new Map();
+let reply = () => Promise.reject(new Error("offline"));
 Object.assign(globalThis, {
   Element, HTMLAnchorElement: Element, HTMLImageElement: Element, EventSource: { OPEN: 1 },
   CSS: { escape: (s) => s },
@@ -80,7 +81,7 @@ Object.assign(globalThis, {
   localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) },
   matchMedia: () => ({ matches: true }),
   addEventListener: (type, listener) => { listeners[type] = listener; },
-  fetch: (url) => { fetched.push(`${url.pathname}${url.search}`); return Promise.reject(new Error("offline")); },
+  fetch: (url) => { fetched.push(`${url.pathname}${url.search}`); return reply(); },
   document: {
     root: new Element("html"),
     getElementById(id) { return [...this.root.all()].find((el) => el.id === id) ?? null; },
@@ -122,4 +123,20 @@ test("a notice's link opens its card and reads its latest reply", async () => {
   assert.equal(noticed.scrolled, 1);
   assert.ok(!other.classList.has("picked") && !other.querySelector(".need-fold").open);
   assert.deepEqual(replaced, ["/?peek=th-3"], "and picking it reads its latest reply");
+});
+
+test("a reader's pick while a notice waits for its card is the one that stands", async (t) => {
+  const pending = [];
+  reply = () => new Promise((_, reject) => pending.push(reject));
+  t.after(() => { reply = () => Promise.reject(new Error("offline")); });
+  const root = setPage("/#needs-you:th-5:decision", [card("th-6", false)]);
+  await load();
+  await settled();
+  document.getElementById("split").listeners.click({ target: root.querySelector(".need-sum"), button: 0 });
+  for (let i = 0; i < 3; i++) {
+    for (const reject of pending.splice(0)) reject(new Error("offline"));
+    await settled();
+  }
+  assert.deepEqual(replaced, ["/?peek=th-6"], "the address keeps the reader's pick");
+  assert.equal(document.getElementById("needs-you").scrolled, 0, "and the inbox does not jump to the notice's card");
 });
