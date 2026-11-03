@@ -168,7 +168,7 @@ export function createFactReader({ backend, log, redacted, pylons, pylon, relink
           pylonId, phase: "running", liveHash: current?.liveHash ?? null, bootedAt: p.bootedAt,
           bootedFrom: { image: p.image, checkpoint: p.checkpoint },
           services: serviceFacts, listening: ports, previews: current?.published ?? [], sessions: sessionFacts, git: checkout, declaredOutputs: outputs,
-          attachedClients,
+          attachedClients, ...(p.notAnswering ? { notAnswering: p.notAnswering } : {}),
         };
       }
     }

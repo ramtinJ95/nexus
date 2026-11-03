@@ -85,6 +85,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    ...p.notAnswering === undefined ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${t.id}\` and \`nexus unarchive ${t.id}\` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and \`nexus retry-pylon ${t.id}\` resumes its last saved disk, losing the changes since, so push or copy what you can first`],
     ...kept === null ? [] : [`disk: kept past its 24 hours, as ${kept}`],
     ...t.status !== "archived" || t.usageUnread === undefined ? [] : [`usage: unread, as ${t.usageUnread}, so ${p.actualState === "absent" ? "its disk went" : "its disk goes 24 hours after the archive"} without it`],
     ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],

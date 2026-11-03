@@ -95,6 +95,17 @@ test("the controller logs each server error after it listens, and keeps serving"
 	assert.equal(existsSync(join(dir, "controller.pid")), false);
 });
 
+test("every line of the controller log starts with the time it was written, and each controller's start is a line of its own", async (t) => {
+	const { child, inspect, failAccept, log } = await controller(t);
+	assert.equal(await inspect(), "running");
+	await failAccept(1);
+	const lines = log().split("\n").filter((line) => line !== "");
+	for (const line of lines) assert.match(line, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z /, `a line with no timestamp:\n${log()}`);
+	assert.ok(lines.some((line) => / controller \d+ started for pylon-t1$/.test(line)), `no start line:\n${log()}`);
+	assert.ok(lines.some((line) => / injected accept error 1$/.test(line)));
+	child.kill("SIGTERM");
+});
+
 test("a body over 8 MiB is refused with a reply, and the controller keeps serving", async (t) => {
 	const { post, inspect } = await controller(t);
 	const refused = await post(JSON.stringify({ action: "inspect", name, padding: "x".repeat(8 << 20) }));

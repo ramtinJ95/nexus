@@ -247,6 +247,8 @@ export const statusSchema = z.strictObject({
 		.union([z.string().uuid(), z.number().int().positive()])
 		.optional(),
 	recovery: z.string().optional(),
+	/** Set while the guest's last guest commands, at least 3 in a row, got no answer. Absent from controllers that predate it. */
+	notAnswering: z.strictObject({ since: z.string(), timeouts: z.number().int() }).optional(),
 });
 export const replySchema = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown() }),

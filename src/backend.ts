@@ -14,7 +14,7 @@
  */
 import type { Readable } from "node:stream";
 import type { CheckpointId, ImageId, NodeName, PortableArtifactId, PylonId, TemplateId } from "./ids.ts";
-import type { BrokenCause, PausedSession, ServiceFact } from "./protocol/observations.ts";
+import type { BrokenCause, GuestNotAnswering, PausedSession, ServiceFact } from "./protocol/observations.ts";
 import type { ByteStream } from "./protocol/streams.ts";
 import type { BootInputs, LiveSpec, OverlayFile } from "./spawn.ts";
 import type { ServiceDecl, ServiceName } from "./services-file.ts";
@@ -78,7 +78,7 @@ interface BackendPylonBase {
 
 /** A pylon's VM state, with what each state carries. */
 export type BackendVm =
-  | { vm: "running"; bootedAt: string }
+  | { vm: "running"; bootedAt: string; notAnswering?: GuestNotAnswering }
   /**
    * `sessions` is what its last pause recorded, which the backend keeps beside the checkpoint because the checkpoint
    * cannot be read while paused. Null when that pause recorded none.

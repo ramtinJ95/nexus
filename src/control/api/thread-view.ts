@@ -46,6 +46,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(project, pylon.boot.dotfiles.repo)),
       id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
       actualState, retryRefused: retryRefusal(observed),
+      ...(observed !== "absent" && observed.phase === "running" && observed.notAnswering ? { notAnswering: observed.notAnswering } : {}),
     };
   }
 

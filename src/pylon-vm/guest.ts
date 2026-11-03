@@ -8,37 +8,60 @@ import { installFileCommand, shellQuote as q } from "../shell.ts";
  * Gondolin refuses a command once 64 are outstanding, and counts one until the guest answers it, also after the host
  * stopped waiting (sandbox/server-ops.js, handleExec; exec.js, rejectExecSession). They are counted here the same way.
  * While the VM runs, its commands may hold only `runningSlots`, and the next waits for one to free, so that the
- * commands a stop runs always find room.
+ * commands a stop runs always find room. Gondolin has no way to cancel a command it sent, and sandboxd answers one only
+ * once its process exited and its stdout and stderr closed (sandboxd/main.zig), so a command that got no answer gives
+ * its slot back only when its guest processes end. Each carries `commandMark` in its env, which the processes it starts
+ * inherit, so a reap can find and kill them. A launched worker, a service and the relay drop it, as they hold none of
+ * its output and outlive it on purpose. One reap runs at a time, in one of the slots a stop keeps.
  */
 const gondolinSlots = 64;
 const runningSlots = 48;
-type Slots = { outstanding: number; limit: number; waiting: Set<{ start(): void; refuse(error: Error): void }> };
+const commandMark = "NEXUS_GUEST_COMMAND";
+/** Guest commands in a row that got no answer, past which the guest counts as not answering until it answers one. */
+const unansweredLimit = 3;
+type Slots = {
+	outstanding: number;
+	limit: number;
+	waiting: Set<{ start(): void; refuse(error: Error): void }>;
+	/** The commands that got no answer and that no reap has tried to kill yet. */
+	stuck: Set<string>;
+	reaping: boolean;
+	/** The guest commands in a row that got no answer, and when the first of them started. */
+	unanswered: { count: number; since: string } | null;
+};
 const slots = new WeakMap<VM, Slots>();
+let commandCount = 0;
 function slotsOf(vm: VM): Slots {
 	let held = slots.get(vm);
-	if (held === undefined) slots.set(vm, (held = { outstanding: 0, limit: runningSlots, waiting: new Set() }));
+	if (held === undefined) slots.set(vm, (held = { outstanding: 0, limit: runningSlots, waiting: new Set(), stuck: new Set(), reaping: false, unanswered: null }));
 	return held;
 }
-function takeSlot(held: Slots, signal: AbortSignal): Promise<void> {
+function takeSlot(held: Slots, id: string, waitMs: number): Promise<void> {
 	if (held.waiting.size === 0 && held.outstanding < held.limit) {
 		held.outstanding += 1;
 		return Promise.resolve();
 	}
+	const queued = Date.now();
+	console.error(`guest command ${id} waits for a slot, ${held.outstanding} of ${held.limit} held`);
 	return new Promise((start, refuse) => {
 		const waiter = {
 			start() {
-				signal.removeEventListener("abort", expire);
+				clearTimeout(expiry);
 				held.outstanding += 1;
+				console.error(`guest command ${id} got a slot after ${Date.now() - queued} ms`);
 				start();
 			},
-			refuse,
+			refuse(error: Error) {
+				clearTimeout(expiry);
+				refuse(error);
+			},
 		};
-		const expire = () => {
+		const expiry = setTimeout(() => {
 			held.waiting.delete(waiter);
-			refuse(signal.reason);
-		};
+			console.error(`guest command ${id} got no slot within ${waitMs} ms`);
+			refuse(new Error(`Guest command was not started: no command slot freed within ${waitMs} ms, as ${held.outstanding} earlier guest commands hold them until the guest answers`));
+		}, waitMs);
 		held.waiting.add(waiter);
-		signal.addEventListener("abort", expire, { once: true });
 	});
 }
 function giveSlot(held: Slots): void {
@@ -55,24 +78,101 @@ export function freeReservedSlots(vm: VM): void {
 	for (const waiter of held.waiting) waiter.refuse(new Error("Guest command was not started, because the VM stopped running while it waited for a command slot"));
 	held.waiting.clear();
 }
+/** Since when the VM's guest has not answered its last guest commands, or undefined while it answers. */
+export function notAnswering(vm: VM): { since: string; timeouts: number } | undefined {
+	const unanswered = slots.get(vm)?.unanswered;
+	return unanswered && unanswered.count >= unansweredLimit ? { since: unanswered.since, timeouts: unanswered.count } : undefined;
+}
 
-/** Runs `run` while it holds one of the VM's command slots. Its wait ends after `waitMs`, but the slot is held until the guest answers. */
-async function counted<T>(vm: VM, waitMs: number, run: () => Promise<T>): Promise<T> {
+/**
+ * Runs `run` in a slot `held` counts, with `id` in the env it gives, and waits until `deadline` for the guest's answer.
+ * The slot is held until the guest answers. Only a command that is not a reap counts toward or clears `unanswered`,
+ * and joins `stuck` when it got no answer.
+ */
+async function answered<T>(vm: VM, held: Slots, id: string, deadline: number, budgetMs: number, run: (env: Record<string, string>) => Promise<T>, reaps: boolean): Promise<T> {
+	const started = Date.now();
+	let late = false;
+	const answer = run({ [commandMark]: id }).finally(() => {
+		giveSlot(held);
+		if (!late) return;
+		held.stuck.delete(id);
+		console.error(`guest command ${id} answered and released its slot ${Date.now() - started} ms after it started`);
+	});
+	let expiry: NodeJS.Timeout | undefined;
+	const expired = new Promise<"expired">((accept) => (expiry = setTimeout(accept, Math.max(0, deadline - started), "expired")));
+	const outcome = await Promise.race([answer.then((value) => ({ value }), (error: unknown) => ({ error })), expired]).finally(() => clearTimeout(expiry));
+	if (outcome !== "expired") {
+		if (reaps && held.unanswered !== null) {
+			if (held.unanswered.count >= unansweredLimit) console.error(`guest: answers again, after ${held.unanswered.count} guest commands in a row got no answer`);
+			held.unanswered = null;
+		}
+		if ("error" in outcome) throw outcome.error;
+		return outcome.value;
+	}
+	late = true;
+	console.error(`guest command ${id} got no answer within ${budgetMs} ms and keeps its slot, ${held.outstanding} of ${held.limit} held`);
+	if (!reaps) {
+		console.error(`guest: reaps wait until reap ${id} answers, so the commands that get no answer meanwhile keep their slots`);
+		throw new Error(`Guest command got no answer within ${budgetMs} ms (${id} in the controller log)`);
+	}
+	held.unanswered = { count: (held.unanswered?.count ?? 0) + 1, since: held.unanswered?.since ?? new Date(started).toISOString() };
+	if (held.unanswered.count === unansweredLimit) console.error(`guest: not answering, as ${unansweredLimit} guest commands in a row got no answer since ${held.unanswered.since}`);
+	held.stuck.add(id);
+	reap(vm, held);
+	throw new Error(`Guest command got no answer within ${budgetMs} ms (${id} in the controller log). It keeps its command slot until the guest answers, and it may still have run or may run later, so check what it does before retrying it`);
+}
+/**
+ * Runs `run` while it holds one of the VM's command slots. Its wait for a slot and for the guest's answer share one
+ * deadline, `waitMs` from its start, so a slow slot never lets a command start later than that.
+ */
+async function counted<T>(vm: VM, waitMs: number, run: (env: Record<string, string>) => Promise<T>): Promise<T> {
 	const held = slotsOf(vm);
-	// Not Gondolin's signal, whose abort would end the wait and leave the command running uncounted.
-	const expiry = AbortSignal.timeout(waitMs);
-	const expired = new Promise<never>((_, reject) =>
-		expiry.addEventListener("abort", () => reject(new Error(`Guest command got no answer within ${waitMs} ms. Once started, it holds a command slot until it answers`)), { once: true }),
+	const id = `g${++commandCount}`;
+	const deadline = Date.now() + waitMs;
+	await takeSlot(held, id, waitMs);
+	return answered(vm, held, id, deadline, waitMs, run, true);
+}
+
+/** Kills every guest process whose env carries one of the marks named after the script, and prints how many it killed. */
+const reaper = [
+	"import os,signal,sys",
+	`marks={('${commandMark}='+i).encode() for i in sys.argv[1:]}`,
+	"killed=set()",
+	"for attempt in range(3):",
+	" found=False",
+	" for name in os.listdir('/proc'):",
+	"  if not name.isdigit() or int(name) in killed or int(name)==os.getpid(): continue",
+	"  try:",
+	"   if marks.isdisjoint(open('/proc/'+name+'/environ','rb').read().split(b'\\0')): continue",
+	"   os.kill(int(name),signal.SIGKILL); killed.add(int(name)); found=True",
+	"  except OSError: pass",
+	" if not found: break",
+	"print(len(killed))",
+].join("\n");
+/** Kills the guest processes of the stuck commands, in a slot past `runningSlots`, unless a reap still holds one or the VM stops. */
+function reap(vm: VM, held: Slots): void {
+	if (held.reaping || held.stuck.size === 0 || held.limit !== runningSlots) return;
+	const ids = [...held.stuck];
+	held.stuck.clear();
+	held.reaping = true;
+	held.outstanding += 1;
+	const id = `g${++commandCount}`;
+	const run = (env: Record<string, string>) =>
+		vm.exec(["python3", "-c", reaper, ...ids], { cwd: "/", env }).finally(() => {
+			held.reaping = false;
+			setImmediate(() => reap(vm, held));
+		});
+	answered(vm, held, id, Date.now() + 13000, 13000, run, false).then(
+		(result) => console.error(`guest command ${id} killed ${result.stdout.trim() || "no"} guest processes of ${ids.join(" ")}`),
+		(error: unknown) => console.error(`guest command ${id} could not kill the guest processes of ${ids.join(" ")}: ${error instanceof Error ? error.message : String(error)}`),
 	);
-	await Promise.race([takeSlot(held, expiry), expired]);
-	return Promise.race([run().finally(() => giveSlot(held)), expired]);
 }
 /**
  * Runs `argv` in the guest as it is, with no shell and no watchdog, so only for a command that ends on its own within
- * `timeoutMs`. Nothing stops it in the guest after that.
+ * `timeoutMs`. Nothing stops it in the guest after that but a reap.
  */
 export function direct(vm: VM, argv: string[], timeoutMs = 3000): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-	return counted(vm, timeoutMs + 10000, async () => await vm.exec(argv, { cwd: "/" }));
+	return counted(vm, timeoutMs + 10000, async (env) => await vm.exec(argv, { cwd: "/", env }));
 }
 export async function execute(
 	vm: VM,
@@ -112,9 +212,10 @@ export async function execute(
 		" result={'state':'timed-out'}",
 		"sys.stderr.write(json.dumps(result))",
 	].join("\n");
-	const result = await counted(vm, timeoutMs + 10000, async () =>
+	const result = await counted(vm, timeoutMs + 10000, async (env) =>
 		await vm.exec(["python3", "-c", watchdog, cmd, String(timeoutMs / 1000)], {
 			cwd,
+			env,
 			stdout: sink,
 			stderr: "buffer",
 		}),
@@ -235,6 +336,6 @@ export async function startService(
 	await vm.fs.writeFile(script, content);
 	await checked(
 		vm,
-		`setsid /bin/sh ${q(script)} </dev/null >>${q(log)} 2>&1 & echo $! > ${q(`${serviceRoot}/${name}.pid`)}`,
+		`setsid env -u ${commandMark} /bin/sh ${q(script)} </dev/null >>${q(log)} 2>&1 & echo $! > ${q(`${serviceRoot}/${name}.pid`)}`,
 	);
 }

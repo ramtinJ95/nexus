@@ -280,6 +280,18 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   assert.deepEqual(disk({ ...dayOld, thread: { ...unfailed, usageSettledAt: 1, backedUpAt: 2 } }), []);
 });
 
+test("show says a pylon's guest is not answering, since when and what to do, and nothing while it answers", async (t) => {
+  const s = await setup(t);
+  const { id } = await s.json(["start", "--project", "acme", "--title", "Mute guest"]);
+  const detail: ThreadDetail = await s.json(["show", id]);
+  const guest = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("guest:"));
+  assert.deepEqual(guest(detail), []);
+  const since = new Date(Date.now() - 3 * 60_000).toISOString();
+  assert.deepEqual(guest({ ...detail, pylon: { ...detail.pylon, notAnswering: { since, timeouts: 5 } } }), [
+    `guest: not answering since 3m ago, as its last 5 guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${id}\` and \`nexus unarchive ${id}\` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and \`nexus retry-pylon ${id}\` resumes its last saved disk, losing the changes since, so push or copy what you can first`,
+  ]);
+});
+
 test("show says an archived thread's usage is unread when its pylon could not be read, before and after its disk goes", async (t) => {
   const s = await setup(t);
   const { id } = await s.json(["start", "--project", "acme", "--title", "Failed spike"]);

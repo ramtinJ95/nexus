@@ -445,7 +445,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       case "starting": case "unavailable": return { vm: "booting" };
       case "running":
         if (status.startupError === undefined) {
-          return status.bootedAt === undefined ? { vm: "broken", detail: "the controller reports running with no boot time", cause: "controller" } : { vm: "running", bootedAt: status.bootedAt };
+          return status.bootedAt === undefined ? { vm: "broken", detail: "the controller reports running with no boot time", cause: "controller" } : { vm: "running", bootedAt: status.bootedAt, ...(status.notAnswering ? { notAnswering: status.notAnswering } : {}) };
         }
         if (failureUnknown(status)) return { vm: "broken", detail: status.startupError, cause: "unknown" };
         if (!setupFailed(status)) return { vm: "broken", detail: status.startupError, cause: "services" };

@@ -254,6 +254,24 @@ test("a stop checkpoints although reads whose waits ran out still hold command s
 	await access(join(dir, "disk.qcow2"));
 });
 
+test("a guest whose commands got no answer three times in a row reports it is not answering, until a command is answered", async (t) => {
+	const { fake, runtime } = await runningOnAFakeVm(t, /^$/, "queued", undefined, (cmd) => cmd.startsWith("head -c") || cmd.includes("/environ"));
+	const inspect = async () => ((await runtime.handle({ action: "inspect", name: "pylon-a" } as Action)) as { status: { notAnswering?: { since: string; timeouts: number } } }).status;
+	const started = Date.now();
+	for (const read of await Promise.allSettled(reading(fake.vm, 2, 0))) assert.equal(read.status, "rejected");
+	assert.equal((await inspect()).notAnswering, undefined, "two timeouts are not yet a guest that does not answer");
+	await assert.rejects(reading(fake.vm, 1, 0)[0]!, /got no answer/);
+	const { notAnswering } = await inspect();
+	assert.ok(notAnswering !== undefined && notAnswering.timeouts === 3, `the status says the guest is not answering: ${JSON.stringify(notAnswering)}`);
+	assert.ok(Math.abs(Date.parse(notAnswering.since) - started) < 1000, "since the first of them started");
+	fake.answer();
+	await delay(50);
+	assert.deepEqual((await inspect()).notAnswering, notAnswering, "late answers and the kill's own answer do not clear it");
+	assert.equal((await execute(fake.vm, "true", "/", 1000)).exitCode, 0);
+	assert.equal((await inspect()).notAnswering, undefined, "an answered command clears it");
+	fake.answer();
+});
+
 /** Opens the guest terminal, a real listener on the host, and closes it after the test even when the code under test does not. */
 async function openTerminal(runtime: SandboxRuntime, t: { after(fn: () => Promise<void>): void }) {
 	const reply = await runtime.handle({ action: "shell", name: "pylon-a", user: "user" } as Action);

@@ -120,7 +120,11 @@ export interface RunningFacts {
   declaredOutputs: readonly DeclaredOutput[];
   /** The Herdr clients attached to the pylon's session, such as `nexus attach`, counted as human presence. */
   attachedClients: number;
+  /** Set while the pylon's guest gives no answer to its guest commands. Absent while it answers, and from a probe that predates it. */
+  notAnswering?: GuestNotAnswering;
 }
+/** Since when the guest's last guest commands, `timeouts` of them in a row and at least 3, got no answer. */
+export interface GuestNotAnswering { since: string; timeouts: number }
 
 /**
  * `unrouted` says why a preview's port has no route into the pylon while it has none, such as a pylon VM relay port
@@ -189,7 +193,7 @@ const olderPylonSchema = z.discriminatedUnion("phase", [
     pylonId: pylonIdField, phase: z.literal("running"), liveHash: unchecked<LiveHash | null>(), bootedAt: unchecked<string>(),
     bootedFrom: unchecked<RunningFacts["bootedFrom"]>(), services: unchecked<RunningFacts["services"]>(), listening: unchecked<RunningFacts["listening"]>(),
     previews: unchecked<readonly OlderPreview[]>(), sessions: unchecked<readonly (SessionFact | OlderSession)[] | null>(), git: unchecked<GitFacts | null>(),
-    declaredOutputs: unchecked<readonly DeclaredOutput[]>(), attachedClients: unchecked<number>(),
+    declaredOutputs: unchecked<readonly DeclaredOutput[]>(), attachedClients: unchecked<number>(), notAnswering: unchecked<GuestNotAnswering>().exactOptional(),
   }),
 ]) satisfies z.ZodType<OlderPylonObservation>;
 

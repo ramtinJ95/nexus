@@ -5,6 +5,7 @@ import type { Submission } from "@earendil-works/pi-durable";
 import type { Attention } from "./attention.ts";
 import type { ActualState, DesiredPhase } from "../reconcile.ts";
 import type { BootInputs } from "../spawn.ts";
+import type { GuestNotAnswering } from "../protocol/observations.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { SessionHarness } from "../session-harness.ts";
 import type { ClaudeSent, Output, Preview, Session, Thread } from "./thread-store.ts";
@@ -35,6 +36,8 @@ export interface ThreadDetail {
     resources: BootInputs["resources"];
     /** Why a retry of the pylon, as its node last reported it, cannot help. Null when a retry can. */
     retryRefused: string | null;
+    /** Set while its node reports the running pylon's guest gives no answer to its guest commands. */
+    notAnswering?: GuestNotAnswering;
   };
   sessions: readonly Session[];
   previews: readonly Preview[];

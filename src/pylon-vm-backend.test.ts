@@ -107,10 +107,10 @@ const field = (p: BackendPylon | undefined, key: "cause" | "logTail" | "sessions
 
 /**
  * A controller on the instance's control socket, as daemon.ts listens, answering each action from `answer`.
- * It always answers inspect with the instance in `state.current`, booted at `state.bootedAt`.
+ * It always answers inspect with the instance in `state.current`, booted at `state.bootedAt`, with `state.notAnswering` when set.
  */
 async function fakeController(dir: string, pylonId: string, answer: (action: Record<string, unknown>) => unknown = () => assert.fail("unexpected action")) {
-  const state: { current: string; bootedAt?: string } = { current: "running", bootedAt: "2026-10-22T00:00:00Z" };
+  const state: { current: string; bootedAt?: string; notAnswering?: { since: string; timeouts: number } } = { current: "running", bootedAt: "2026-10-22T00:00:00Z" };
   const actions: Record<string, unknown>[] = [];
   const server = createServer(async (req, res) => {
     let body = "";
@@ -118,7 +118,7 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
     const action = JSON.parse(body) as Record<string, unknown>;
     try {
       const result = action.action === "inspect"
-        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 }, ...state.bootedAt === undefined ? {} : { bootedAt: state.bootedAt } } }
+        ? { name: pylonId, labels: { "nexus.image": image }, status: { name: pylonId, state: state.current, resources: { cpus: 2, memoryGiB: 4 }, ...state.bootedAt === undefined ? {} : { bootedAt: state.bootedAt }, ...state.notAnswering === undefined ? {} : { notAnswering: state.notAnswering } } }
         : (actions.push(action), await answer(action));
       res.end(JSON.stringify({ ok: true, result }));
     } catch (err) {
@@ -390,6 +390,28 @@ test("a controller that reports running with no boot time is one broken pylon, a
   assert.deepEqual(event.observation.pylons.map((p) => [p.pylonId, p.phase]), [["pylon-healthy", "running"], ["pylon-unbooted", "broken"]]);
 });
 
+test("a controller whose guest gives no answer to its commands is a running pylon that is not answering, in the backend's list and the probe's snapshot", async (t) => {
+  const { backend, instances } = await backendWith();
+  const notAnswering = { since: "2026-10-22T00:05:00.000Z", timeouts: 4 };
+  (await fakeController(await leftInstance(instances, "pylon-mute", "running"), "pylon-mute")).state.notAnswering = notAnswering;
+  await fakeController(await leftInstance(instances, "pylon-talks", "running"), "pylon-talks");
+  const answering = (p: object) => "notAnswering" in p ? p.notAnswering : undefined;
+  assert.deepEqual((await backend.list()).map((p) => [p.pylonId, p.vm, answering(p)]), [["pylon-mute", "running", notAnswering], ["pylon-talks", "running", undefined]]);
+
+  const controlPlane = "nCONTROL" as TailnetNodeId;
+  const probe = await startProbe({
+    node: "mute-node" as NodeName, host: "127.0.0.1", port: 0, auth: { controlPlane, peers: [] }, whois: async () => controlPlane,
+    backend, secrets: nodeSecrets({ value: () => undefined, names: () => [] }), log: () => {},
+  });
+  t.after(() => probe.close());
+  const client = connectProbe("mute-node" as NodeName, "127.0.0.1", "nPROBE" as TailnetNodeId, { port: probe.port, whois: async () => "nPROBE" as TailnetNodeId });
+  const reads = new AbortController();
+  t.after(() => reads.abort());
+  const event: ProbeEvent | undefined = (await client.observe(reads.signal)[Symbol.asyncIterator]().next()).value;
+  assert.ok(event?.type === "snapshot");
+  assert.deepEqual(event.observation.pylons.map((p) => [p.pylonId, p.phase, answering(p)]), [["pylon-mute", "running", notAnswering], ["pylon-talks", "running", undefined]]);
+});
+
 test("a pylon holds its CPUs and memory while its VM is up, from launch on, and its disk until it is deleted", async () => {
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-up", "running", 16);
@@ -626,7 +648,7 @@ test("a pause records the sessions while the guest runs, before it stops the VM,
   await backend.ensurePaused("pylon-rec" as PylonId, "ckpt-rec-1", signal());
   assert.deepEqual(controller.actions.map((a) => a.action), ["exec", "stop"]);
   assert.match(String(controller.actions[0]!.cmd).replace(/['\\]/g, ""), /^runuser -l user -c cd \/home\/user && herdr --session nexus api snapshot$/);
-  assert.equal(await readFile(join(dir, "controller.log"), "utf8"), "sessions: no Herdr server runs, so the last record stands\n");
+  assert.match(await readFile(join(dir, "controller.log"), "utf8"), /^\d{4}-\d\d-\d\dT[\d:.]+Z sessions: no Herdr server runs, so the last record stands\n$/);
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-rec-1"]]);
 });
 

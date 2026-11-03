@@ -273,6 +273,7 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
 </dl>
 <code class="id">${pylon.id}</code>
 ${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed.split("\n")[0]}</p>`}
+${pylon.notAnswering !== undefined && html`<p class="error">The guest has not answered its last ${pylon.notAnswering.timeouts} commands, since ${ago(Date.parse(pylon.notAnswering.since), now)}. Archive and unarchive the thread to give it a fresh VM. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first.</p>`}
 </section>
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
 ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
