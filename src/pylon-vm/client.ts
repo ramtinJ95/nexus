@@ -173,18 +173,19 @@ async function abandoned(lock: string): Promise<boolean> {
 	return now !== null && now.pid === owner.pid && now.start === owner.start && now.boot === owner.boot;
 }
 /**
- * takeLock, or the recovery of a lock whose owner died. A recovery holds `${lock}.recovery`, a lock beside it that is
- * taken and recovered the same way, so one process at a time moves a dead owner's lock aside, and one killed while it
- * held the recovery leaves a dead owner there in turn. Only a recovery moves a dead owner's lock, so what it reads in
- * that lock stays that lock's until it moves it. Beside, not inside, because a lock that moves would take a recovery
- * still held with it, and the recovery's paths would then lead into whichever lock replaced it. `check` throws why a
- * lock whose owner died must still be kept. Returns null when a live process holds the lock or its recovery.
+ * takeLock, or the recovery of a lock whose owner died. A recovery holds the next level's lock beside it,
+ * `${base}.recovery1` for the base lock, `${base}.recovery2` for that one and so on, taken and recovered the same way,
+ * so one process at a time moves a dead owner's lock aside, and one killed while it held a recovery leaves a dead owner
+ * there in turn. Only a recovery moves a dead owner's lock, so what it reads in that lock stays that lock's until it
+ * moves it. Beside, not inside, because a lock that moves would take a recovery still held with it, and the recovery's
+ * paths would then lead into whichever lock replaced it. `check` throws why a lock whose owner died must still be kept.
+ * Returns null when a live process holds the lock or its recovery.
  */
-async function holdLock(lock: string, check = async () => {}): Promise<string | null> {
+async function holdLock(base: string, check = async () => {}, level = 0): Promise<string | null> {
+	const lock = level === 0 ? base : `${base}.recovery${level}`;
 	const release = await takeLock(lock);
 	if (release !== null) return release;
-	const recovery = `${lock}.recovery`;
-	const recovering = await holdLock(recovery);
+	const recovering = await holdLock(base, undefined, level + 1);
 	if (recovering === null) return null;
 	try {
 		if (!(await abandoned(lock))) return null;
@@ -195,7 +196,7 @@ async function holdLock(lock: string, check = async () => {}): Promise<string | 
 		await releaseLock(lock, reservedName(lock, name) ? join(dirname(lock), name) : await mkdtemp(`${lock}-`));
 		return await takeLock(lock);
 	} finally {
-		await releaseLock(recovery, recovering);
+		await releaseLock(`${base}.recovery${level + 1}`, recovering);
 	}
 }
 /** A missing identity file means the process has not published itself yet, or is gone. */
@@ -252,9 +253,14 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		// A launch holds it, or one that died left it, which the next launch recovers.
 		if (release === null) return false;
 		try {
+			const names = await readdir(owner);
+			const reserved = new Set([basename(release)]);
+			for (const name of names)
+				if (/^launch\.lock\.recovery\d+$/.test(name))
+					reserved.add(await readFile(join(owner, name, "release"), "utf8").catch(() => ""));
 			// Only a take stalled as long could still be using one.
-			for (const leaked of await readdir(owner))
-				if (reservedName(lock, leaked) && join(owner, leaked) !== release && (await old(join(owner, leaked))))
+			for (const leaked of names)
+				if (/^launch\.lock(?:\.recovery\d+)?-[A-Za-z0-9]{6}$/.test(leaked) && !reserved.has(leaked) && (await old(join(owner, leaked))))
 					await rm(join(owner, leaked), { recursive: true, force: true });
 			return await held();
 		} finally {
