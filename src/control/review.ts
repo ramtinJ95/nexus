@@ -39,7 +39,7 @@ import type { ThreadId } from "../ids.ts";
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, descriptionDigest, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
   landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, quoteSchema, reviewerApproved, roundsSpent, settledKinds, verdictSchema,
-  type Finding, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Waiver,
+  type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Waiver,
 } from "./review-model.ts";
 import type { StartRequest } from "./start-request.ts";
 
@@ -196,6 +196,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
   /** When the loop last read each capped held review's PR itself, in place of the PR watch. A restart reads it again. */
   const cappedReads = new Map<string, number>();
+  /** When the loop last read the holds of each approved review's head that had none recorded, at most once per PR watch interval. */
+  const holdReads = new Map<string, number>();
   /** The check thread or verify pylon `phase` holds, and the runs it is one of. */
   const gateThread = (phase: Phase): { thread: ThreadId; runs: CheckRuns } | null =>
     (phase.kind === "checking" || phase.kind === "verifying") && phase.thread !== null ? { thread: phase.thread, runs: phase.kind === "checking" ? checks : live } : null;
@@ -221,24 +223,25 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const ranOut = (r: Review, ...items: (Hold | string)[]): Review => end(r, { ...personPhase("rounds", ...items), label: { state: "adding" } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
   /**
-   * `r` with the holds its latest round's head decides against the PR's base recorded, or null when the PR is at
-   * another head, which gets a round of its own. A retargeted PR's files change at the same head, so they are read
+   * `r` with the holds its latest round's head decides against the PR's base recorded, and those holds, or null when
+   * the PR is at another head, which gets a round of its own. A retargeted PR's files change at the same head, so they are read
    * again. They are read before the head and base are confirmed, so files of a push or a retarget meanwhile are not
    * recorded as this head's.
    */
-  const recordHolds = async (r: Review): Promise<Review | null> => {
+  const recordHolds = async (r: Review): Promise<{ review: Review; heldAt: HeldAt } | null> => {
     const round = r.rounds.at(-1)!;
     const { base } = (await read(r)).detail;
-    if (round.heldAt?.base === base) return r;
+    if (round.heldAt?.base === base) return { review: r, heldAt: round.heldAt };
     const files = await github.files(r.pr.repo, r.pr.number);
     reads.delete(prKey(r));
     const { detail } = await read(r);
     if (detail.head !== round.head || detail.base !== base) return null;
-    return withRound(r, { heldAt: { base, holds: headHolds({ review: r, files, nexus: deploys(r) }) } });
+    const heldAt = { base, holds: headHolds({ review: r, files, nexus: deploys(r) }) };
+    return { review: withRound(r, { heldAt }), heldAt };
   };
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
   const checked = async (r: Review): Promise<Review> => {
-    const next = await recordHolds(r) ?? r;
+    const next = (await recordHolds(r))?.review ?? r;
     return { ...next, phase: r.land === null ? { kind: "approved" } : { kind: "merging", authorized: null } };
   };
   /** Past the check at the round's head: the live check runs where the head has a `.nexus/verify` and none ran there yet. */
@@ -469,9 +472,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const holds = async () => {
         if (snapshot.checksUnread) throw new Error("GitHub's checks for the head could not be read");
         // A landing that began before Nexus recorded what holds its head, or whose PR was retargeted since, reads them here.
-        const held = await recordHolds(r);
-        if (held === null) throw new Error("the pull request's head moved while its files were read");
-        const all = [...unauthorized(held, builder), ...landingHolds({ review: held, pr: snapshot })];
+        const recorded = await recordHolds(r);
+        if (recorded === null) throw new Error("the pull request's head moved while its files were read");
+        const { review: held, heldAt } = recorded;
+        const all = [...unauthorized(held, builder), ...landingHolds({ review: held, pr: snapshot, heldAt })];
         const left = unwaived(held, all);
         const { review, why } = left.length && held.waiver !== null && held.waiver.head !== head ? carryWaiver(held, await changeAt(held, snapshot.detail.base, head), all) : { review: held, why: null };
         return { all, left: unwaived(review, all), review, why: why === null ? [] : [why] };
@@ -483,7 +487,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
         if (phase.authorized !== head) {
           const { all, left, review, why } = await holds();
-          if (left.length) return toPerson(r, "outside", `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...why, ...all);
+          if (left.length) return toPerson(review, "outside", `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...why, ...all);
           landing = review;
         }
         commit = snapshot.detail.mergeCommit;
@@ -493,17 +497,17 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
         const { all, left, review, why } = await holds();
-        if (left.length === 1 && left[0]!.code === "conflict") return rebase(r, snapshot.detail.base);
+        if (left.length === 1 && left[0]!.code === "conflict") return rebase(review, snapshot.detail.base);
         // A quote the description lost since the reviewer gave it is asked for again, once per description.
         if (left.length === 1 && left[0]!.code === "not-checked-live" && staleQuote(r.rounds.at(-1)!, snapshot.detail.body)) return { ...review, phase: { kind: "quoting", asked: null } };
-        if (left.length) return toPerson(r, "policy", ...why, ...all);
+        if (left.length) return toPerson(review, "policy", ...why, ...all);
         if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         reads.delete(prKey(r));
         if (merged.kind !== "merged") {
           // GitHub may learn of a conflict only when asked to merge.
           if (merged.kind === "refused" && (await read(r)).pr.conflict === true) return rebase(r, snapshot.detail.base);
-          return toPerson(r, "policy", merged.kind === "denied"
+          return toPerson(review, "policy", merged.kind === "denied"
             ? `The control plane's GitHub token cannot merge (${merged.message}). Merging needs a token with write access to ${r.pr.repo}'s contents and pull requests, which only the person can grant.`
             : `GitHub refused the merge: ${merged.message}`);
         }
@@ -594,10 +598,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
       const moved = pushedHead(r, pr) === null ? null : await pushedAfter(r, fresh ?? await read(r));
       if (moved !== null) return moved;
-      // A review approved before Nexus recorded what holds its head reads them once, as its checks passing would.
-      if (r.phase.kind === "approved" && r.rounds.at(-1)!.heldAt === undefined) {
+      // A review approved before Nexus recorded what holds its head reads them, as its checks passing would. A head
+      // GitHub shows moved meanwhile is a push after the approval, whatever the PR watch read.
+      if (r.phase.kind === "approved" && r.rounds.at(-1)!.heldAt === undefined && now() - (holdReads.get(r.id) ?? -Infinity) >= prWatchMs) {
+        holdReads.set(r.id, now());
         const recorded = await recordHolds(r);
-        if (recorded !== null) return recorded;
+        if (recorded !== null) return recorded.review;
+        const snapshot = await read(r);
+        const gone = outside(r, snapshot.pr.state) ?? await pushedAfter(r, snapshot);
+        if (gone !== null) return gone;
       }
     }
     // A failed call throws, so the pass retries it. GitHub adds a label the PR has already as a no-op.

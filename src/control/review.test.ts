@@ -1060,7 +1060,7 @@ test("the policy's review conditions: another model, an approval with no P0 to P
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   });
   const pr: PrSnapshot = { pr: testPr({ repo: "acme/shop", number: 7, title: "", url: "", checks: "pending", conflict: true }), detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  assert.deepEqual(landingHolds({ review, pr }).map((h) => h.text), [
+  assert.deepEqual(landingHolds({ review, pr, heldAt: { base: "main", holds: headHolds({ review, files: [], nexus: false }) } }).map((h) => h.text), [
     "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
     "The builder neither fixed nor rejected with a reason finding F2 of round 1.",
     `The pull request's head is ${head2}, not the approved ${head1}.`,
@@ -1410,7 +1410,7 @@ test("the policy reads a live check: a failure holds, a pass needs no statement,
 
   const review = { ...f.review(), rounds: [{ ...f.review().rounds[0]!, live: { kind: "ran" as const, thread: f.liveThreads[0]!, passed: false, output: "boom" } }] };
   const pr: PrSnapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" }, detail: { ...f.snapshot.detail, mergeCommit: null } };
-  assert.deepEqual(landingHolds({ review, pr }), [
+  assert.deepEqual(landingHolds({ review, pr, heldAt: review.rounds[0]!.heldAt! }), [
     { code: "open-findings", text: "Findings P0 to P2 are open: LIVE." },
     { code: "unanswered", text: "The builder neither fixed nor rejected with a reason finding LIVE of round 1." },
     { code: "live-failed", text: `The live check failed at ${head1}.` },
@@ -3211,8 +3211,47 @@ test("a review approved before Nexus recorded what holds its head reads them on 
   f.registry.saveReview({ ...f.review(), rounds: [round] });
   assert.deepEqual(heldBy(f.review()), [], "until then it shows what its record alone decides");
   await loop.poll();
-  assert.deepEqual(f.review().rounds[0]!.heldAt, { base: "main", holds: [egress] });
+  assert.deepEqual(heldBy(f.review()), [egress], "the card shows the path hold");
+  assert.deepEqual(landPress(f.review()), { kind: "lands", waives: [egress], quotes: false });
   assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+test("a review approved before Nexus recorded its holds, under a stopped PR watch, whose head moved reads GitHub a bounded number of times", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  const { heldAt, ...round } = f.review().rounds[0]!;
+  f.registry.saveReview({ ...f.review(), rounds: [round] });
+  pushed(f, head2);
+  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  let files = 0;
+  f.onFiles = () => { files++; };
+  const polls = f.polls;
+  for (let i = 0; i < 8; i++) {
+    await loop.poll();
+    f.tick(15_000);
+  }
+  assert.equal(f.review().rounds.at(-1)!.head, head2, "the moved head GitHub showed gets its own round");
+  assert.equal(files, 1);
+  assert.ok(f.polls - polls <= 6, `${f.polls - polls} reads of the PR in 8 passes`);
+});
+
+test("a review approved before Nexus recorded its holds reads them at most once per PR watch interval while GitHub fails", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  const { heldAt, ...round } = f.review().rounds[0]!;
+  f.registry.saveReview({ ...f.review(), rounds: [round] });
+  let files = 0;
+  f.onFiles = () => { files++; throw new Error("GitHub is down"); };
+  for (let i = 0; i < 8; i++) {
+    await loop.poll();
+    f.tick(15_000);
+  }
+  assert.equal(files, 1, "eight passes in two minutes read the files once");
+  f.tick(120_000);
+  f.onFiles = () => { files++; };
+  await loop.poll();
+  assert.equal(files, 2);
+  assert.notEqual(f.review().rounds[0]!.heldAt, undefined);
 });
 
 test("a pull request retargeted at its approved head has its path holds read again at the landing", async (t) => {
@@ -3226,6 +3265,20 @@ test("a pull request retargeted at its approved head has its path holds read aga
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [egress.text] });
   assert.deepEqual(heldBy(f.review()), [egress]);
+});
+
+test("a retargeted landing held for the person shows the holds read at the new base, not those recorded at the old one", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type A = 1;\n+type A = 2;" }];
+  const loop = await approved(f, null);
+  assert.deepEqual(heldBy(f.review()), [egress]);
+  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null } });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.deepEqual(heldBy(f.review()).map((h) => h.text), reservedHolds, "the egress hold the old base's files met is gone");
 });
 
 test("a check that passed keeps its thread until the holds of its head are read", async (t) => {
@@ -3252,6 +3305,19 @@ test("a Land press at a head whose check passed keeps that check and merges", as
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
   assert.equal(f.checkThreads.length, 1, "no check thread started for the press");
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a landing held for checks that later pass lands on the next press at the same head with no second check", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] });
+  const loop = f.loop();
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.checkThreads.length, 1, "the press kept the check that passed at that head");
   assert.deepEqual(f.merges, [head1]);
 });
 

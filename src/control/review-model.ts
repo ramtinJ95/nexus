@@ -52,7 +52,9 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string; heldAt?: { base: string; holds: Hold[] } }
+export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string; heldAt?: HeldAt }
+/** The holds a round's head alone decides, read from the PR's files against `base`. */
+export interface HeldAt { base: string; holds: Hold[] }
 /**
  * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
  * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the

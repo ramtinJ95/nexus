@@ -13,11 +13,13 @@
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, changedPaths, descriptionDigest, findingsOf, type Change, type Review, type Round } from "./review-model.ts";
+import { answered, blocks, changedPaths, descriptionDigest, findingsOf, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;
   pr: PrSnapshot;
+  /** The holds the latest round's head decides, as the loop recorded them against the PR's base now. */
+  heldAt: HeldAt;
 }
 
 /** What the approved head alone decides its holds from: the review's record and the PR's files at that head. */
@@ -153,7 +155,7 @@ const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
     if (quoted === null) return [hold("not-checked-live", "No live check ran, and the pull request does not say what could not be checked live.")];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : [hold("not-checked-live", "The reviewer's quote of what could not be checked live is not in the pull request's description.")];
   },
-  ({ review }) => headHeld(review),
+  ({ heldAt }) => heldAt.holds,
 ];
 
 /** Why the policy holds this landing for the person, or nothing when an agent may merge and deploy it. */
