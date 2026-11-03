@@ -13,11 +13,18 @@
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, changedPaths, descriptionDigest, findingsOf, type Change, type Review, type Round } from "./review-model.ts";
+import { answered, blocks, changedPaths, descriptionDigest, findingsOf, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;
   pr: PrSnapshot;
+  /** The holds the latest round's head decides, as the loop recorded them against the PR's base now. */
+  heldAt: HeldAt;
+}
+
+/** What the approved head alone decides its holds from: the review's record and the PR's files at that head. */
+export interface HeadFacts {
+  review: Review;
   files: readonly ChangedFile[];
   /** Whether the PR is Nexus's own, whose paths this module knows. */
   nexus: boolean;
@@ -50,8 +57,42 @@ export const recordedHolds = (review: Review): Hold[] => [
   ...(review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => hold(`reserved:${r.case}`, `${personOnly}${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`)),
 ];
 
-/** What the holds currently on a review are: those its landing met, or else those its record alone decides. */
-export const heldBy = (review: Review): Hold[] => review.phase.kind === "needs-person" ? review.phase.holds : [...sameModel(review), ...recordedHolds(review)];
+/**
+ * The holds the head alone decides, which meet every landing of it whatever GitHub says: the record's, and the
+ * changed files'. The loop records them on the round once its checks pass, as `heldAt`.
+ */
+export function headHolds({ review, files, nexus }: HeadFacts): Hold[] {
+  return [
+    ...sameModel(review),
+    ...recordedHolds(review),
+    ...files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [hold("check-changed", "The pull request changes .nexus/check, the check this policy relies on.")] : [],
+    ...files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [hold("verify-changed", "The pull request changes .nexus/verify, the live check this policy relies on.")] : [],
+    ...nexus ? pathHolds(files) : [],
+  ];
+}
+
+function pathHolds(files: readonly ChangedFile[]): Hold[] {
+  const hits = new Map<ReservedCase, string[]>();
+  for (const file of files) {
+    for (const path of [file.path, ...file.previous === null ? [] : [file.previous]]) {
+      for (const rule of reservedPaths) if (rule.matches(path, file.patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
+    }
+  }
+  return [...hits].map(([c, paths]) => hold(`reserved-path:${c}`, `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`));
+}
+
+/** The holds the latest round's head decides, as recorded, or the record's alone for a round approved before Nexus recorded them, until the loop reads them. */
+const headHeld = (review: Review): Hold[] => review.rounds.at(-1)!.heldAt?.holds ?? [...sameModel(review), ...recordedHolds(review)];
+
+/**
+ * What the holds currently on a review are: those its head decides, and for one held for the person, those its
+ * landing met, or what held it first.
+ */
+export const heldBy = (review: Review): Hold[] => {
+  if (review.phase.kind !== "needs-person") return headHeld(review);
+  const codes = new Set(review.phase.holds.map((h) => h.code));
+  return [...review.phase.holds, ...(review.rounds.at(-1)!.heldAt?.holds ?? []).filter((h) => !codes.has(h.code))];
+};
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 /** The reviewer's quote of what could not be checked live at the round, or null when it quoted nothing long enough to count. */
@@ -80,7 +121,6 @@ export function landPress(review: Review): LandPress {
 }
 
 const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
-  ({ review }) => sameModel(review),
   ({ review }) => {
     const round = review.rounds.at(-1)!;
     if (round.verdict?.verdict !== "approve") return [hold("not-approved", "The reviewer has not approved the latest commits.")];
@@ -115,19 +155,7 @@ const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
     if (quoted === null) return [hold("not-checked-live", "No live check ran, and the pull request does not say what could not be checked live.")];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : [hold("not-checked-live", "The reviewer's quote of what could not be checked live is not in the pull request's description.")];
   },
-  ({ review }) => recordedHolds(review),
-  ({ files }) => files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [hold("check-changed", "The pull request changes .nexus/check, the check this policy relies on.")] : [],
-  ({ files }) => files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [hold("verify-changed", "The pull request changes .nexus/verify, the live check this policy relies on.")] : [],
-  ({ files, nexus }) => {
-    if (!nexus) return [];
-    const hits = new Map<ReservedCase, string[]>();
-    for (const file of files) {
-      for (const path of [file.path, ...file.previous === null ? [] : [file.previous]]) {
-        for (const rule of reservedPaths) if (rule.matches(path, file.patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
-      }
-    }
-    return [...hits].map(([c, paths]) => hold(`reserved-path:${c}`, `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`));
-  },
+  ({ heldAt }) => heldAt.holds,
 ];
 
 /** Why the policy holds this landing for the person, or nothing when an agent may merge and deploy it. */

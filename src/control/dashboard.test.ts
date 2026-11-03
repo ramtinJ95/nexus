@@ -327,6 +327,18 @@ test("a review held for the person says why on its builder's page, and a deploye
   assert.deepEqual(landed, [fix.id]);
 });
 
+test("an approved review's card shows the path hold recorded at its head, and its Land waives it", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const egress = "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts.";
+  const review = approvedReview(fix.id, { kind: "approved" });
+  s.registry.saveReview({ ...review, rounds: [review.rounds[0]!, { ...review.rounds[1]!, heldAt: { base: "main", holds: [{ code: "reserved-path:egress", text: egress }] } }] });
+  const region = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.match(textOf(region), new RegExp(`^Approved, not landed .* ${egress.replace(/[.]/g, "\\.")} you may waive `));
+  const button = /<button [^>]*data-action="land"[^>]*>/.exec(region)![0];
+  assert.match(textOf(/data-confirm="([^"]*)"/.exec(button)![1]!), /waiving the hold the merge policy reserves for you\?/);
+});
+
 test("a held landing whose live check passed says so with its output, and the review's line says how the live check went", async (t) => {
   const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
@@ -778,7 +790,7 @@ test("a landing shows its steps as the review moves through them, until it lands
   const merge = "4".repeat(40);
   const { live: _, ...unchecked } = approvedReview(fix.id, { kind: "approved" }).rounds[1]!;
   assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }, { rounds: [unchecked] }), {
-    states: "now todo todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, or its kept result for that commit is read.` });
+    states: "now todo todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, unless it passed there already.` });
   assert.equal((await steps({ kind: "merging", authorized: head })).states, "done skipped now todo todo", "a head with no .nexus/verify skips the live check");
   assert.equal((await steps({ kind: "merging", authorized: null, waiting: "rv-other deploys" })).text,
     `Landing #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Waiting while rv-other deploys, since landings deploy one at a time, then merging ${head.slice(0, 12)}.`);

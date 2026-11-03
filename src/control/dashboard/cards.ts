@@ -192,7 +192,7 @@ ${top(title)}
   return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`;
 })}</ol>
 ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from the description as it is now, what could not be checked live at ${short(r.rounds.at(-1)!.head)}, then .nexus/check runs there.</p>`
-  : phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, or its kept result for that commit is read.</p>`
+  : phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, unless it passed there already.</p>`
   : phase.kind === "verifying" ? html`<p class="land-note">${phase.thread === null && phase.refused !== undefined ? html`No node can take the verify pylon yet: ${phase.refused}` : html`.nexus/verify runs at ${short(r.rounds.at(-1)!.head)} in a verify pylon${phase.thread !== null && html`, <a href="/threads/${phase.thread}">${phase.thread}</a>`}.`}</p>`
   : phase.kind === "merging" && phase.waiting !== undefined ? html`<p class="land-note">Waiting while ${phase.waiting}, since landings deploy one at a time, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
   : phase.kind === "merging" ? html`<p class="land-note">Checking the merge policy again with what GitHub says now, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
