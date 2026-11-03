@@ -24,10 +24,13 @@ function pick(card) {
   card.focus({ preventScroll: true });
 }
 
-function peek(key) {
+/** Previews `key`, or for work in Needs you picks its card, `card` naming which of a thread's cards so a poll keeps it. */
+function peek(key, card) {
   const url = new URL(location.href);
   if (key === "") url.searchParams.delete("peek");
   else url.searchParams.set("peek", key);
+  if (card) url.searchParams.set("card", card);
+  else url.searchParams.delete("card");
   if (url.href === location.href) return;
   history.replaceState(history.state, "", url);
   split.classList.toggle("peeking", key !== "" && !cardOf(key));
@@ -58,7 +61,7 @@ if (split !== null) {
     const card = find();
     pick(card ?? document.getElementById("needs-you"));
     // Picking the card is what reads its latest reply into it.
-    if (card) peek(keyOf(card));
+    if (card) peek(keyOf(card), card.id);
   };
   void showSide();
   addEventListener("hashchange", showSide);
@@ -67,7 +70,7 @@ if (split !== null) {
   const picked = document.querySelector(".need.picked");
   if (picked && !location.hash.startsWith("#needs-you")) {
     pick(picked);
-    peek(keyOf(picked));
+    peek(keyOf(picked), new URL(location.href).searchParams.has("card") && picked.id);
   }
   // A link to the hash the page is already at fires no hashchange.
   document.addEventListener("click", (event) => {
@@ -81,8 +84,8 @@ if (split !== null) {
     const opening = event.target.closest(".need-sum");
     // Only the reader's opening of a card picks it: a poll's swap reopens folds too, and picks nothing.
     if (link === null && opening !== null && !opening.parentElement.open) {
-      const key = keyOf(opening.closest(".need"));
-      if (key !== undefined) peek(key);
+      const need = opening.closest(".need");
+      if (keyOf(need) !== undefined) peek(keyOf(need), need.id);
     }
     if (link === null || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     // On a phone a Needs you card's thread link opens the thread, as the card it heads is the preview there.
@@ -95,7 +98,7 @@ if (split !== null) {
     }
     const card = head === null && cardOf(link.dataset.peek);
     if (card) pick(card);
-    peek(link.dataset.peek);
+    peek(link.dataset.peek, head?.closest(".need").id);
   });
   // A card that goes, as its answer takes it off, leaves its work's preview to show.
   afterSwap(() => split.classList.toggle("peeking", document.getElementById("peek").childElementCount > 0));

@@ -97,7 +97,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
   return [
     ["GET", /^\/$/, async (_, r) => {
       const c = context(r.caller);
-      return ok(home(c, {}, await peekOf(c, r.query.get("peek"))));
+      return ok(home(c, {}, await peekOf(c, r.query.get("peek")), r.query.get("card")));
     }],
     ["GET", /^\/threads\/new$/, (_, r) => ok(home(context(r.caller), { start: { project: r.query.get("project") } }))],
     ["GET", /^\/projects\/new$/, (_, r) => ok(home(context(r.caller), { addProject: true }))],

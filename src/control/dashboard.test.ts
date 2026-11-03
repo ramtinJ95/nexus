@@ -686,6 +686,25 @@ test("a thread with several cards says where its work is once, on its first card
   assert.deepEqual(cards.map((c) => /<details class="need-fold" id="fold-[^"]+" open>/.test(c.html)), [true, false], "and opened");
 });
 
+test("a thread's card the person picked keeps the mark and the strip across a poll, and a review card without the strip still links its pull request", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const held = await s.start("acme", "Cache the list");
+  s.registry.askQuestion({ id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() - 60_000 });
+  s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
+  s.fake.transcript(held.id).messages.push({ role: "user", content: "Cache the list", timestamp: 0 }, assistant([{ type: "text", text: "Opened #7." }]));
+  const pr = /<a class="link" href="https:\/\/github\.com\/acme\/nexus\/pull\/7" [^>]*>#7<\/a>/;
+  const first = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards;
+  assert.deepEqual(first.map((c) => c.kind), ["question", "review"], "the question waited first");
+  assert.match(first[1]!.html, pr, "the review's card links the pull request Land merges, though the strip is on the question's");
+  const review = first[1]!.id;
+  const { cards } = needsOf((await s.call("GET", `/?peek=${held.id}&card=${review}`)).text);
+  assert.deepEqual(cards.map((c) => /<article class="need need-\w+ picked"/.test(c.html)), [false, true], "the card the person picked stays picked");
+  assert.deepEqual(cards.map((c) => /<details class="need-fold" id="fold-[^"]+" open>/.test(c.html)), [false, true], "and open");
+  assert.deepEqual(cards.map((c) => (c.html.match(/class="need-ctx"/g) ?? []).length), [0, 1], "with the strip");
+  assert.deepEqual(cards.map((c) => /Latest reply/.test(c.html)), [false, true]);
+  assert.equal([...cards[1]!.html.matchAll(new RegExp(pr, "g"))].length, 1, "which links the pull request once");
+});
+
 const chipOf = (page: string) => /<span class="chip-label">([^<]*)<\/span>/.exec(page)![1];
 const dockOf = (page: string) => page.split('<div class="dock">')[1]!.split('<div id="run"')[0]!;
 const actionsOf = (html: string) => [...html.matchAll(/data-action="([^"]+)"|<a [^>]*href="([^"]+)"[^>]*data-write/g)].map((m) => m[1] ?? m[2]);

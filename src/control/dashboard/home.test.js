@@ -47,11 +47,11 @@ function matchesChain(el, chain) {
   return false;
 }
 
-/** The home page with one thread's card in Needs you, marked picked when the server picked it. */
-function card(thread, picked) {
+/** A thread's card in Needs you, marked picked when the server picked it. */
+function card(thread, picked, kind = "review", attention = "decision") {
   const head = new Element("summary", { class: "need-sum" });
-  return new Element("article", { class: `need need-review${picked ? " picked" : ""}`, id: `need-${thread}-review`, dataset: { thread, attention: "decision" } }, [
-    new Element("details", { class: "need-fold", id: `fold-need-${thread}-review`, open: picked }, [head]),
+  return new Element("article", { class: `need need-${kind}${picked ? " picked" : ""}`, id: `need-${thread}-${kind}`, dataset: { thread, attention } }, [
+    new Element("details", { class: "need-fold", id: `fold-need-${thread}-${kind}`, open: picked }, [head]),
   ]);
 }
 const replaced = [];
@@ -75,7 +75,6 @@ const store = new Map();
 let reply = () => Promise.reject(new Error("offline"));
 Object.assign(globalThis, {
   Element, HTMLAnchorElement: Element, HTMLImageElement: Element, EventSource: { OPEN: 1 },
-  CSS: { escape: (s) => s },
   location: {},
   history: { state: null, replaceState: (_, __, url) => { replaced.push(`${url.pathname}${url.search}`); Object.assign(location, { href: url.href }); } },
   localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) },
@@ -100,7 +99,7 @@ test("a malformed peek in the address leaves the home page's handlers working", 
   const split = document.getElementById("split");
   assert.ok(split.listeners?.click, "the page's clicks are handled");
   split.listeners.click({ target: root.querySelector(".need-sum"), button: 0 });
-  assert.deepEqual(replaced, ["/?peek=th-1"], "opening a card picks it");
+  assert.deepEqual(replaced, ["/?peek=th-1&card=need-th-1-review"], "opening a card picks it");
 });
 
 test("a link to an item that became a carded thread brings the thread's card into view and reads its latest reply", async () => {
@@ -122,7 +121,17 @@ test("a notice's link opens its card and reads its latest reply", async () => {
   assert.ok(noticed.classList.has("picked") && noticed.querySelector(".need-fold").open, "the notice's card is picked and open");
   assert.equal(noticed.scrolled, 1);
   assert.ok(!other.classList.has("picked") && !other.querySelector(".need-fold").open);
-  assert.deepEqual(replaced, ["/?peek=th-3"], "and picking it reads its latest reply");
+  assert.deepEqual(replaced, ["/?peek=th-3&card=need-th-3-review"], "and picking it reads its latest reply");
+});
+
+test("a notice for a thread's second card names that card, so the poll the pick starts keeps it marked", async () => {
+  const root = setPage("/#needs-you:th-7:failed", [card("th-7", false), card("th-7", false, "thread", "failed")]);
+  await load();
+  await settled();
+  const [first, noticed] = root.querySelectorAll(".need");
+  assert.ok(noticed.classList.has("picked") && !first.classList.has("picked"), "the notice's card is the one picked");
+  assert.deepEqual(replaced, ["/?peek=th-7&card=need-th-7-thread"], "and the address names it for the server to mark");
+  assert.deepEqual(fetched, ["/?peek=th-7&card=need-th-7-thread"]);
 });
 
 test("a reader's pick while a notice waits for its card is the one that stands", async (t) => {
@@ -137,6 +146,6 @@ test("a reader's pick while a notice waits for its card is the one that stands",
     for (const reject of pending.splice(0)) reject(new Error("offline"));
     await settled();
   }
-  assert.deepEqual(replaced, ["/?peek=th-6"], "the address keeps the reader's pick");
+  assert.deepEqual(replaced, ["/?peek=th-6&card=need-th-6-review"], "the address keeps the reader's pick");
   assert.equal(document.getElementById("needs-you").scrolled, 0, "and the inbox does not jump to the notice's card");
 });
