@@ -141,7 +141,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
  *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
  *    subreaper and as PID 1, nexus-kvm giving user /dev/kvm, which needs a build node that passes nested
- *    virtualization through, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
+ *    virtualization through, sandboxd stdout and stderr on /dev/null, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
  * 5. The store hashes the directory, writes image.json and renames it in (ArtifactDirectory.publish).
  * A crash leaves only the .partial, which the next attempt removes. An image the store holds is the finished
  * image, because its ID names its inputs.
@@ -492,6 +492,11 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "PID 1 reaps orphans",
       argv: ["sh", "-c", 'ps -o comm= -p 1; pid="$( (sleep 0 >/dev/null & echo $!) )"; sleep 1; ps -o stat= -p "$pid" || echo reaped'],
       expect: "tini\nreaped\n",
+    },
+    {
+      name: "sandboxd output",
+      argv: ["sh", "-c", 'pid="$(pidof sandboxd)" && readlink "/proc/$pid/fd/1" "/proc/$pid/fd/2"'],
+      expect: "/dev/null\n/dev/null\n",
     },
     {
       name: "baked dotfiles",

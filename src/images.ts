@@ -45,7 +45,9 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "./ids.ts";
  * - rootfs-init-extra.sh: run as root by Gondolin's /init before sandboxd. It sets the hostname pylon and
  *   writes /etc/hostname and /etc/hosts, because Gondolin sets no hostname and sudo warns without one. It then
  *   execs tini as PID 1 with sandboxd as its child, so every orphan in the guest is reaped, and ignores SIGPIPE
- *   first, which sandboxd does not handle and as PID 1 never received.
+ *   first, which sandboxd does not handle and as PID 1 never received. Both processes discard stdout and stderr
+ *   to /dev/null: a lost serial UART interrupt can block a console write forever and stall every guest command.
+ *   stdin is unchanged. sandboxd logs no longer appear with GONDOLIN_DEBUG=protocol.
  * - nexus-kvm: run as root by the pylon-vm controller on every boot of a pylon whose boot spec asks for
  *   nestedVirtualization (src/pylon-vm/runtime.ts). It loads kvm_intel or kvm_amd for the guest's CPU, with kvm and
  *   irqbypass, and overlay, and opens /dev/kvm to user, or fails the boot with the reason. An ordinary pylon never runs it.
