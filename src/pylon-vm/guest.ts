@@ -11,8 +11,8 @@ import { installFileCommand, shellQuote as q } from "../shell.ts";
  * commands a stop runs always find room. Gondolin has no way to cancel a command it sent, and sandboxd answers one only
  * once its process exited and its stdout and stderr closed (sandboxd/main.zig), so a command that got no answer gives
  * its slot back only when its guest processes end. Each carries `commandMark` in its env, which the processes it starts
- * inherit, so a reap can find and kill them. A launched worker and a service drop it, as they hold none of its output and
- * outlive it on purpose. One reap runs at a time, in one of the slots a stop keeps.
+ * inherit, so a reap can find and kill them. A launched worker, a service and the relay drop it, as they hold none of
+ * its output and outlive it on purpose. One reap runs at a time, in one of the slots a stop keeps.
  */
 const gondolinSlots = 64;
 const runningSlots = 48;
@@ -85,40 +85,52 @@ export function notAnswering(vm: VM): { since: string; timeouts: number } | unde
 }
 
 /**
- * Runs `run` in a slot `held` counts, with `id` in the env it gives, and waits at most `waitMs` for the guest's answer.
- * The slot is held until the guest answers. A command that got no answer joins `stuck` unless it is a reap.
+ * Runs `run` in a slot `held` counts, with `id` in the env it gives, and waits until `deadline` for the guest's answer.
+ * The slot is held until the guest answers. Only a command that is not a reap counts toward or clears `unanswered`,
+ * and joins `stuck` when it got no answer.
  */
-async function answered<T>(vm: VM, held: Slots, id: string, waitMs: number, run: (env: Record<string, string>) => Promise<T>, reaps: boolean): Promise<T> {
+async function answered<T>(vm: VM, held: Slots, id: string, deadline: number, budgetMs: number, run: (env: Record<string, string>) => Promise<T>, reaps: boolean): Promise<T> {
 	const started = Date.now();
 	let late = false;
 	const answer = run({ [commandMark]: id }).finally(() => {
 		giveSlot(held);
-		if (held.unanswered !== null && held.unanswered.count >= unansweredLimit) console.error(`guest: answers again, after ${held.unanswered.count} guest commands in a row got no answer`);
-		held.unanswered = null;
 		if (!late) return;
 		held.stuck.delete(id);
 		console.error(`guest command ${id} answered and released its slot ${Date.now() - started} ms after it started`);
 	});
 	let expiry: NodeJS.Timeout | undefined;
-	const expired = new Promise<"expired">((accept) => (expiry = setTimeout(accept, waitMs, "expired")));
-	const outcome = await Promise.race([answer.then((value) => ({ value })), expired]).finally(() => clearTimeout(expiry));
-	if (outcome !== "expired") return outcome.value;
-	late = true;
-	held.unanswered = { count: (held.unanswered?.count ?? 0) + 1, since: held.unanswered?.since ?? new Date(started).toISOString() };
-	console.error(`guest command ${id} got no answer within ${waitMs} ms and keeps its slot, ${held.outstanding} of ${held.limit} held`);
-	if (held.unanswered.count === unansweredLimit) console.error(`guest: not answering, as ${unansweredLimit} guest commands in a row got no answer since ${held.unanswered.since}`);
-	if (reaps) {
-		held.stuck.add(id);
-		reap(vm, held);
+	const expired = new Promise<"expired">((accept) => (expiry = setTimeout(accept, Math.max(0, deadline - started), "expired")));
+	const outcome = await Promise.race([answer.then((value) => ({ value }), (error: unknown) => ({ error })), expired]).finally(() => clearTimeout(expiry));
+	if (outcome !== "expired") {
+		if (reaps && held.unanswered !== null) {
+			if (held.unanswered.count >= unansweredLimit) console.error(`guest: answers again, after ${held.unanswered.count} guest commands in a row got no answer`);
+			held.unanswered = null;
+		}
+		if ("error" in outcome) throw outcome.error;
+		return outcome.value;
 	}
-	throw new Error(`Guest command got no answer within ${waitMs} ms (${id} in the controller log). It holds a command slot until it answers, so Nexus kills its guest processes`);
+	late = true;
+	console.error(`guest command ${id} got no answer within ${budgetMs} ms and keeps its slot, ${held.outstanding} of ${held.limit} held`);
+	if (!reaps) {
+		console.error(`guest: reaps wait until reap ${id} answers, so the commands that get no answer meanwhile keep their slots`);
+		throw new Error(`Guest command got no answer within ${budgetMs} ms (${id} in the controller log)`);
+	}
+	held.unanswered = { count: (held.unanswered?.count ?? 0) + 1, since: held.unanswered?.since ?? new Date(started).toISOString() };
+	if (held.unanswered.count === unansweredLimit) console.error(`guest: not answering, as ${unansweredLimit} guest commands in a row got no answer since ${held.unanswered.since}`);
+	held.stuck.add(id);
+	reap(vm, held);
+	throw new Error(`Guest command got no answer within ${budgetMs} ms (${id} in the controller log). It keeps its command slot until the guest answers, and it may still have run or may run later, so check what it does before retrying it`);
 }
-/** Runs `run` while it holds one of the VM's command slots. It waits at most `waitMs` for a slot, then at most `waitMs` for the guest's answer. */
+/**
+ * Runs `run` while it holds one of the VM's command slots. Its wait for a slot and for the guest's answer share one
+ * deadline, `waitMs` from its start, so a slow slot never lets a command start later than that.
+ */
 async function counted<T>(vm: VM, waitMs: number, run: (env: Record<string, string>) => Promise<T>): Promise<T> {
 	const held = slotsOf(vm);
 	const id = `g${++commandCount}`;
+	const deadline = Date.now() + waitMs;
 	await takeSlot(held, id, waitMs);
-	return answered(vm, held, id, waitMs, run, true);
+	return answered(vm, held, id, deadline, waitMs, run, true);
 }
 
 /** Kills every guest process whose env carries one of the marks named after the script, and prints how many it killed. */
@@ -150,7 +162,7 @@ function reap(vm: VM, held: Slots): void {
 			held.reaping = false;
 			setImmediate(() => reap(vm, held));
 		});
-	answered(vm, held, id, 13000, run, false).then(
+	answered(vm, held, id, Date.now() + 13000, 13000, run, false).then(
 		(result) => console.error(`guest command ${id} killed ${result.stdout.trim() || "no"} guest processes of ${ids.join(" ")}`),
 		(error: unknown) => console.error(`guest command ${id} could not kill the guest processes of ${ids.join(" ")}: ${error instanceof Error ? error.message : String(error)}`),
 	);

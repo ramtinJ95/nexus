@@ -1315,7 +1315,7 @@ Each line of a controller log starts with the time it was written, and each cont
 A running pylon whose guest gave no answer to at least 3 guest commands in a row is `running` all the same, since its VM runs, but its `notAnswering` says since when and how many, until the guest answers one. `show` prints it under the pylon line, and the dashboard by the composer and in the Pylon pane:
 
 ```text
-guest: not answering since 3m ago, as its last 5 guest commands got no answer, so messages, files and diffs fail. `nexus archive th-0123456789ab` and `nexus unarchive th-0123456789ab` give it a fresh VM. A pause the guest does not answer either breaks the pylon, and `nexus retry-pylon th-0123456789ab` then resumes its last saved disk
+guest: not answering since 3m ago, as its last 5 guest commands got no answer, so messages, files and diffs fail. `nexus archive th-0123456789ab` and `nexus unarchive th-0123456789ab` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and `nexus retry-pylon th-0123456789ab` resumes its last saved disk, losing the changes since, so push or copy what you can first
 ```
 
 A failed send does not count toward the 5 failed attempts after which the planner gives up on a pylon: only failed jobs, such as a spawn or a pause, count.

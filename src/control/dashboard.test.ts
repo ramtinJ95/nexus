@@ -930,7 +930,7 @@ test("a running pylon whose node reports its guest not answering says so in its 
   report({ since, timeouts: 5 });
   assert.deepEqual((JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail).pylon.notAnswering, { since, timeouts: 5 });
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.match(page, /The pylon's guest has not answered its commands since 3 min ago ?, so a message may fail\. Archive and unarchive the thread to give it a fresh VM\./);
+  assert.match(page, /The pylon's guest has not answered its commands since 3 min ago ?, so a message may fail\. Archive and unarchive the thread to give it a fresh VM\. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first\./);
   assert.match(page, /The guest has not answered its last 5 commands, since 3 min ago ?\./);
   report();
   assert.equal("notAnswering" in (JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail).pylon, false);

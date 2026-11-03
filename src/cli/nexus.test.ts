@@ -288,7 +288,7 @@ test("show says a pylon's guest is not answering, since when and what to do, and
   assert.deepEqual(guest(detail), []);
   const since = new Date(Date.now() - 3 * 60_000).toISOString();
   assert.deepEqual(guest({ ...detail, pylon: { ...detail.pylon, notAnswering: { since, timeouts: 5 } } }), [
-    `guest: not answering since 3m ago, as its last 5 guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${id}\` and \`nexus unarchive ${id}\` give it a fresh VM. A pause the guest does not answer either breaks the pylon, and \`nexus retry-pylon ${id}\` then resumes its last saved disk`,
+    `guest: not answering since 3m ago, as its last 5 guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${id}\` and \`nexus unarchive ${id}\` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and \`nexus retry-pylon ${id}\` resumes its last saved disk, losing the changes since, so push or copy what you can first`,
   ]);
 });
 

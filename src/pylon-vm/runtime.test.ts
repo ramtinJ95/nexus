@@ -262,8 +262,11 @@ test("a guest whose commands got no answer three times in a row reports it is no
 	assert.equal((await inspect()).notAnswering, undefined, "two timeouts are not yet a guest that does not answer");
 	await assert.rejects(reading(fake.vm, 1, 0)[0]!, /got no answer/);
 	const { notAnswering } = await inspect();
-	assert.ok(notAnswering !== undefined && notAnswering.timeouts >= 3, `the status says the guest is not answering: ${JSON.stringify(notAnswering)}`);
+	assert.ok(notAnswering !== undefined && notAnswering.timeouts === 3, `the status says the guest is not answering: ${JSON.stringify(notAnswering)}`);
 	assert.ok(Math.abs(Date.parse(notAnswering.since) - started) < 1000, "since the first of them started");
+	fake.answer();
+	await delay(50);
+	assert.deepEqual((await inspect()).notAnswering, notAnswering, "late answers and the kill's own answer do not clear it");
 	assert.equal((await execute(fake.vm, "true", "/", 1000)).exitCode, 0);
 	assert.equal((await inspect()).notAnswering, undefined, "an answered command clears it");
 	fake.answer();

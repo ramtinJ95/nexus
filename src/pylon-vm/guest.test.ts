@@ -37,3 +37,17 @@ test("a command that got no answer has its guest processes killed, so its slot f
 	assert.ok(lines.some((line) => line.startsWith(`guest command ${named} answered and released its slot`)), `the log has its release:\n${lines.join("\n")}`);
 	assert.ok(lines.some((line) => new RegExp(`^guest command g\\d+ killed \\d+ guest processes of .*\\b${named}\\b`).test(line)), `the log has the kill:\n${lines.join("\n")}`);
 });
+
+test("a command that gets a slot late has only what is left of its deadline, and its error says it may still have run", async () => {
+	const fake = fakeVm(undefined, undefined, sleeping);
+	const held = holdAll(fake.vm, 60000);
+	for (const command of held) void command.catch(() => {});
+	const started = Date.now();
+	const late = direct(fake.vm, ["sleep", "1"], 0);
+	setTimeout(() => fake.answer(), 5000);
+	await assert.rejects(late, /got no answer within 10000 ms .*may still have run or may run later, so check what it does before retrying it/);
+	const elapsed = Date.now() - started;
+	assert.ok(elapsed < 11000, `the wait for a slot and for the answer share one deadline, but it took ${elapsed} ms`);
+	await Promise.allSettled(held);
+	fake.answer();
+});

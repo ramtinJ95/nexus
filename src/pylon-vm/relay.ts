@@ -91,7 +91,7 @@ export async function startRelay(vm: VM): Promise<void> {
 	const loop = 'while :; do python3 -c "$0" "$1" "$2" "$3" 2>>"$3"; echo "relay exited $?, restarting in 1s" >>"$3"; sleep 1; done';
 	await checked(vm, `rm -f ${q(relayLog)} ${q(relayStatus)}`);
 	await writeRelayMap(vm, 0, new Map());
-	await checked(vm, `setsid /bin/sh -c ${q(loop)} ${q(relayScript)} ${q(relayMap)} ${q(relayStatus)} ${q(relayLog)} </dev/null >/dev/null 2>&1 &`);
+	await checked(vm, `setsid env -u NEXUS_GUEST_COMMAND /bin/sh -c ${q(loop)} ${q(relayScript)} ${q(relayMap)} ${q(relayStatus)} ${q(relayLog)} </dev/null >/dev/null 2>&1 &`);
 }
 
 /** Replaces the map, from app port to relay port, in one rename, so the relay never reads half of it. */
