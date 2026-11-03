@@ -210,7 +210,9 @@ export const scratchSweepAgeMs = 60 * 60_000;
  * Removes the scratch directories older than scratchSweepAgeMs that no running controller owns: those a controller
  * killed outright left, and those of instances destroyed or controllers stopped before a controller removed its own.
  * It holds an instance's launch lock while it checks and removes that instance's directory, so no launch remakes the
- * directory in between. A directory it cannot check or remove is logged and kept. Returns the names it removed.
+ * directory in between. Holding each instance's lock, with a scratch directory or not, it also removes the directories
+ * that takes killed partway left beside the lock. A directory it cannot check or remove is logged and kept. Returns the
+ * scratch names it removed.
  */
 export async function sweepScratch(root: string, now = Date.now()): Promise<string[]> {
 	const names = async (path: string) => {
@@ -234,14 +236,8 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		});
 		return modified !== null && now - modified >= scratchSweepAgeMs;
 	};
-	const sweep = async (name: string) => {
-		const path = join(root, "tmp", name);
-		const owner = owners.get(path);
-		if (owner === undefined) {
-			if (!(await old(path))) return false;
-			await rm(path, { recursive: true, force: true });
-			return true;
-		}
+	/** Holds the instance's launch lock while `held` runs, and removes what takes killed partway left beside it. */
+	const holding = async (owner: string, held: () => Promise<boolean>) => {
 		const lock = join(owner, "launch.lock");
 		const release = await takeLock(lock).catch((error: unknown) => {
 			// Its instance is gone.
@@ -251,12 +247,29 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		// A launch holds it, or one that died left it, which the next launch recovers.
 		if (release === null) return false;
 		try {
-			if (await controllerAlive(owner) || !(await old(path))) return false;
-			await rm(path, { recursive: true, force: true });
-			return true;
+			// Only a take stalled as long could still be using one.
+			for (const leaked of await readdir(owner))
+				if (reservedName(lock, leaked) && join(owner, leaked) !== release && (await old(join(owner, leaked))))
+					await rm(join(owner, leaked), { recursive: true, force: true });
+			return await held();
 		} finally {
 			await releaseLock(lock, release);
 		}
+	};
+	const sweep = async (name: string) => {
+		const path = join(root, "tmp", name);
+		const owner = owners.get(path);
+		if (owner === undefined) {
+			if (!(await old(path))) return false;
+			await rm(path, { recursive: true, force: true });
+			return true;
+		}
+		owners.delete(path);
+		return holding(owner, async () => {
+			if (await controllerAlive(owner) || !(await old(path))) return false;
+			await rm(path, { recursive: true, force: true });
+			return true;
+		});
 	};
 	const swept: string[] = [];
 	for (const name of await names(join(root, "tmp")))
@@ -265,6 +278,12 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		} catch (error) {
 			// One unreadable controller.pid, or a full disk refusing the lock, keeps only that directory.
 			console.error(`scratch sweep kept ${name}:`, error);
+		}
+	for (const owner of owners.values())
+		try {
+			await holding(owner, async () => false);
+		} catch (error) {
+			console.error(`scratch sweep kept what takes left beside the launch lock of ${owner}:`, error);
 		}
 	return swept;
 }
