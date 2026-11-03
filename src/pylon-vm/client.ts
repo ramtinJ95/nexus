@@ -171,7 +171,9 @@ async function abandoned(lock: string): Promise<boolean> {
 	}
 	// An owner is renamed in whole, so only a power loss leaves one unreadable, and its process died with the host.
 	let owner: ProcessIdentity | null = null;
-	owner = identitySchema.parse(JSON.parse(text));
+	try {
+		owner = identitySchema.parse(JSON.parse(text));
+	} catch {}
 	if (owner !== null && (await alive(owner))) return false;
 	// It may have released the lock to a live owner before it died, so only a lock that still names it is abandoned.
 	return (await read()) === text;
