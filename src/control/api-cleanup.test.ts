@@ -66,6 +66,9 @@ test("the node's cleanup is a card on its page and in Needs you, and Delete dele
   assert.equal(answered.status, 200);
   await pass.poll();
   assert.deepEqual(dropped, [[older]]);
+  const pending = (await html(`/nodes/${node}`));
+  assert.equal(textOf(cleanupLine(pending)), `Last cleanup: 2.0 GiB freed on ${node} just now (1 item still to go)`, "the release the deployer has not deleted yet");
+  assert.doesNotMatch(pending, /waits to be deleted/, "and the section does not say nothing waits");
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.deepEqual((await report({ inventory })).body, { delete: [r1] });
   assert.deepEqual((await report({ inventory: { ...inventory, releases: inventory.releases.slice(1) }, outcomes: { [r1]: { state: "deleted", bytes: 300 * 1024 ** 2 } } })).body, { delete: [] });
@@ -73,7 +76,7 @@ test("the node's cleanup is a card on its page and in Needs you, and Delete dele
 
   const after = (await html(`/nodes/${node}`));
   const section = after.split('id="node-cleanup"')[1]!.split('id="node-health"')[0]!;
-  assert.match(textOf(section), /^data-live> Cleanup Nothing on this node waits to be deleted\. <div/, "the answered question is no card on the node's section");
+  assert.match(textOf(section), /^data-live> Cleanup No cleanup question waits on you\. <div/, "the answered question is no card on the node's section");
   assert.doesNotMatch(after, /cleanup-items/, "nor a table anywhere on the page");
   assert.equal(textOf(cleanupLine(after)), `Last cleanup: 2.3 GiB freed on ${node} just now`);
   assert.equal(needsCount((await html("/"))), "", "an answered cleanup waits on no one");

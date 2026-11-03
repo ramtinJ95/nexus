@@ -53,7 +53,7 @@ function cleanup(c: Context, name: NodeName): Html {
   const open = c.registry.nodeQuestions(name).findLast((q) => q.answer === null);
   return html`<section aria-labelledby="node-cleanup-h"><div class="ov-head"><h2 id="node-cleanup-h">Cleanup</h2></div>
 <p id="action-error" class="error" role="alert" hidden></p>
-${open === undefined ? html`<p class="empty">Nothing on this node waits to be deleted.</p>` : cleanupCard(c, open)}
+${open === undefined ? html`<p class="empty">No cleanup question waits on you.</p>` : cleanupCard(c, open)}
 </section>`;
 }
 
