@@ -634,7 +634,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
     assert.match(card.html, /<ol class="life" aria-label="Where this work is">.*<li class="life-held" aria-current="step">/s, "its steps mark where it waits on the person");
     assert.match(card.html, new RegExp(`<a class="link" href="/threads/${thread.id}">Open thread</a>`));
     const flight = page.split('id="flight"')[1]!.split('id="overview"')[0]!;
-    assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
+    assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
   }
   const land = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards.find((c) => c.thread === held.id)!;
   assert.match(land.text, /^Held review acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
@@ -655,6 +655,65 @@ test("a thread in Needs you has its call to action once, in its card, with where
   assert.match(page, /<div class="split peeking" id="split">/);
   assert.match(page.split('id="peek"')[1]!.split('id="in-flight"')[0]!, new RegExp(`<section class="peek" aria-labelledby="peek-h" data-peek-key="${quiet.id}">`), "work that needs nothing keeps its preview");
   assert.match(page, new RegExp(`<a class="fl-row( dim)?" href="/\\?peek=${quiet.id}" data-peek="${quiet.id}" aria-current="true">`), "and its line in the work in flight previews it");
+});
+
+test("a card's strip links the pull request its review lands, whichever pull requests the PR watch follows", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const two = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(two.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
+  s.registry.savePrWatch(two.id, { links: [9, 7].map((number) => ({ pr: testPr({ repo: "acme/nexus", number, title: `PR ${number}` }), seen: [], failed: false })), commentWakes: 0, pending: null, error: null });
+  const unwatched = await s.start("acme", "Name the TTL");
+  s.registry.saveReview(approvedReview(unwatched.id, { kind: "approved" }, { id: "rv-8", reviewer: "th-reviewer-8" as ThreadId }));
+  const { cards } = needsOf((await s.call("GET", "/")).text);
+  for (const thread of [two, unwatched]) {
+    const strip = /<p class="need-facts">([\s\S]*?)<\/p>/.exec(cards.find((c) => c.thread === thread.id)!.html)![1]!;
+    assert.match(strip, /<a class="link" href="https:\/\/github\.com\/acme\/nexus\/pull\/7" [^>]*>#7<\/a>/, `${thread.title}'s strip links #7, which Land merges`);
+    assert.doesNotMatch(strip, /#9/);
+  }
+});
+
+test("a thread with several cards says where its work is once, on its first card, which is the one a link to it picks", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const held = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
+  s.registry.askQuestion({ id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.fake.transcript(held.id).messages.push({ role: "user", content: "Cache the list", timestamp: 0 }, assistant([{ type: "text", text: "Opened #7." }]));
+  const { cards } = needsOf((await s.call("GET", `/?peek=${held.id}`)).text);
+  assert.deepEqual(cards.map((c) => c.kind), ["review", "question"]);
+  assert.deepEqual(cards.map((c) => (c.html.match(/class="need-ctx"/g) ?? []).length), [1, 0], "one strip, on the first card");
+  assert.deepEqual(cards.map((c) => /Latest reply/.test(c.html)), [true, false], "and one latest reply");
+  assert.deepEqual(cards.map((c) => /<article class="need need-\w+ picked"/.test(c.html)), [true, false], "only the first card is picked");
+  assert.deepEqual(cards.map((c) => /<details class="need-fold" id="fold-[^"]+" open>/.test(c.html)), [true, false], "and opened");
+});
+
+test("a thread's card the person picked keeps the mark and the strip across a poll, and a review card without the strip still links its pull request", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const held = await s.start("acme", "Cache the list");
+  s.registry.askQuestion({ id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() - 60_000 });
+  s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
+  s.fake.transcript(held.id).messages.push({ role: "user", content: "Cache the list", timestamp: 0 }, assistant([{ type: "text", text: "Opened #7." }]));
+  const pr = /<a class="link" href="https:\/\/github\.com\/acme\/nexus\/pull\/7" [^>]*>#7<\/a>/;
+  const first = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards;
+  assert.deepEqual(first.map((c) => c.kind), ["question", "review"], "the question waited first");
+  assert.match(first[1]!.html, pr, "the review's card links the pull request Land merges, though the strip is on the question's");
+  const review = first[1]!.id;
+  const { cards } = needsOf((await s.call("GET", `/?peek=${held.id}&card=${review}`)).text);
+  assert.deepEqual(cards.map((c) => /<article class="need need-\w+ picked"/.test(c.html)), [false, true], "the card the person picked stays picked");
+  assert.deepEqual(cards.map((c) => /<details class="need-fold" id="fold-[^"]+" open>/.test(c.html)), [false, true], "and open");
+  assert.deepEqual(cards.map((c) => (c.html.match(/class="need-ctx"/g) ?? []).length), [0, 1], "with the strip");
+  assert.deepEqual(cards.map((c) => /Latest reply/.test(c.html)), [false, true]);
+  assert.equal([...cards[1]!.html.matchAll(new RegExp(pr, "g"))].length, 1, "which links the pull request once");
+});
+
+test("a card's strip links the thread's open pull request once its review ended", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const thread = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(thread.id, { kind: "landed", commit: head }));
+  s.registry.savePrWatch(thread.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 8, title: "TTL" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  s.registry.askQuestion({ id: "qn-ttl", thread: thread.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  const strip = /<p class="need-facts">([\s\S]*?)<\/p>/.exec(needsOf((await s.call("GET", "/")).text).cards.find((c) => c.thread === thread.id)!.html)![1]!;
+  assert.match(strip, /href="https:\/\/github\.com\/acme\/nexus\/pull\/8" [^>]*>#8<\/a><\/span>/, "the open #8, without the ended review's round");
+  assert.doesNotMatch(strip, /#7/);
 });
 
 const chipOf = (page: string) => /<span class="chip-label">([^<]*)<\/span>/.exec(page)![1];
@@ -2453,7 +2512,7 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${c.id}" data-peek="${c.id}">`));
   assert.match(phaseOf(thread) ?? "", /^(queued|building)$/, "an item that became a thread shows as its thread");
   assert.doesNotMatch(flight, new RegExp(`data-peek="${a.id}"`), "nor as itself");
-  assert.match(flight, new RegExp(`<a class="fl-row fl-needs" href="/\\?peek=${b.id}" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
+  assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${b.id}" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
   assert.equal(phaseOf(b.id), "planned");
   const needs = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
   const card = needs.split(`id="need-${b.id}"`)[1]!.split("</article>")[0]!;

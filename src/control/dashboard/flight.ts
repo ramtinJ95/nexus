@@ -84,7 +84,7 @@ export const peekHref = (key: string) => `/?peek=${encodeURIComponent(key)}`;
 /** A line of the stack, a link to its preview, which for work in Needs you is its card there. */
 function line(l: Line, peeked: string | null): Html {
   const [label, tone] = l.state;
-  return html`<li><a class="fl-row${l.dim && " dim"}${l.carded && " fl-needs"}" href="${peekHref(l.key)}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span><span class="fl-why">${l.life.why}</span><span class="fl-when">${l.carded ? html`<span class="tag tag-bad">needs you</span>` : l.when}</span></a></li>`;
+  return html`<li><a class="fl-row${l.dim && " dim"}" href="${peekHref(l.key)}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span><span class="fl-why">${l.life.why}</span><span class="fl-when">${l.carded ? html`<span class="tag tag-bad">needs you</span>` : l.when}</span></a></li>`;
 }
 
 /** The phases in order, each with its lines, as `flightRows` places them. */

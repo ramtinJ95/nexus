@@ -6,7 +6,7 @@ import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
-import { cannotLand, roundsSpent, type Review } from "../review-model.ts";
+import { cannotLand, roundsSpent, settledKinds, type Review } from "../review-model.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
@@ -21,9 +21,9 @@ import type { Item } from "./items.ts";
  * Two columns: on the left what waits on the person, each a line that opens to its card, and on the right the work in
  * flight by phase, or by project as the full table of every thread, under the preview of the one the person picked.
  * What waits on the person says so only in its card: its line in the work in flight leads there, and picking it
- * marks the card and gives it the latest reply in place of a preview.
+ * marks the card and gives it the latest reply in place of a preview. `card` names which of the thread's cards was picked.
  */
-export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, peek: Peek | null = null): Html {
+export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, peek: Peek | null = null, card: string | null = null): Html {
   const cards = needCards(c);
   const placed = flightRows(flightLines(c), cards);
   // An item that became a thread is that thread's work, and its card is the thread's.
@@ -38,7 +38,7 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, p
 <div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
 <div class="split${peek !== null && !carded && " peeking"}" id="split">
 <p id="action-error" class="error split-error" role="alert" hidden></p>
-<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, carded ? { key: peeked, items: peek?.kind === "thread" ? peek.items : null } : null)}</section>
+<section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, carded ? { key: peeked, card, items: peek?.kind === "thread" ? peek.items : null } : null)}</section>
 <div class="split-peek" id="peek" data-live>${peekView(c, carded ? null : peek)}</div>
 <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
 <div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${flying}</span>
@@ -154,9 +154,12 @@ const heldKey = (w: HeldWork) => w.kind === "item" ? w.item.id : w.kind === "que
  * opening in place to where its work is and the card its thread's page shows where there is one, or for held work to
  * what moves it on. The work the person picked is marked, and its card has the latest reply `picked` read.
  */
-function needsList(c: Context, picked: { key: string; items: readonly Item[] | null } | null): Html {
+function needsList(c: Context, picked: { key: string; card: string | null; items: readonly Item[] | null } | null): Html {
   const needs = c.needs();
-  const mark = (n: Need) => keyOf(n) === picked?.key && " picked";
+  // A thread with several cards says where its work is, and is picked, on the card the person picked, or else its first.
+  const lead = (key: string | null) => needs.find((n) => keyOf(n) === key && key === picked?.key && needId(n) === picked.card) ?? needs.find((n) => keyOf(n) === key);
+  const leads = new Set(needs.filter((n) => lead(keyOf(n)) === n));
+  const mark = (n: Need) => leads.has(n) && keyOf(n) === picked?.key && " picked";
   const itemsOf = (key: string) => key === picked?.key ? picked.items : null;
   // The picked card opens, so a link to it shows it on a fresh load. A reader's own close survives each poll's swap.
   const fold = (id: string, head: Html, body: Html, why: string, open: Part = false) => html`<details class="need-fold" id="fold-${id}"${open && " open"}><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
@@ -183,7 +186,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
   const life = lifeOfThread(c, t.id);
   const why = needWhy(n, c.now) || life.why;
   return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
-${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${whereNow(c, n.d, life, itemsOf(t.id))}${body}`, why, mark(n))}
+${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${leads.has(n) ? whereNow(c, n.d, life, itemsOf(t.id)) : n.kind === "review" && html`<p class="need-facts">${prFact(n.d.review!.pr, n.d.review)}</p>`}${body}`, why, mark(n))}
 </article>`;
 })}</div>`}`;
 }
@@ -194,15 +197,19 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
  * once the person picked it, as reading it costs a read of the conversation.
  */
 function whereNow(c: Context, d: ThreadDetail, life: Life, items: readonly Item[] | null): Html {
-  const r = d.review;
-  const pr = d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
+  // A review still under way names the pull request Land merges. One that ended may be of an older one.
+  const r = d.review !== null && !settledKinds.some((k) => k === d.review!.phase.kind) ? d.review : null;
+  const pr = r?.pr ?? d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   const reply = items?.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
   const role = threadRole(c, d.thread.id);
   return html`<div class="need-ctx">${role.kind === "builder" ? lifeTrack(life, false) : roleLine(c, d.thread.id, role)}
-<p class="need-facts">${pr !== undefined && html`<span><a class="link" href="${pr.url}" target="_blank" rel="noreferrer" title="${pr.title}">#${pr.number}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">round ${roundsSpent(r)} of ${r.maxRounds}</span>`}</span>`}<span>${state(...actualBadge[d.pylon.actualState])} <span class="dim">on</span> ${d.pylon.node}</span><a class="link" href="/threads/${d.thread.id}">Open thread</a></p>
+<p class="need-facts">${pr !== undefined && prFact(pr, r)}<span>${state(...actualBadge[d.pylon.actualState])} <span class="dim">on</span> ${d.pylon.node}</span><a class="link" href="/threads/${d.thread.id}">Open thread</a></p>
 ${reply?.kind === "agent" && html`<p class="need-reply"><span class="dim">Latest reply${d.thread.lastReplyAt !== null && html` ${ago(d.thread.lastReplyAt, c.now)}`}</span> ${inline(reply.text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim())}</p>`}
 </div>`;
 }
+
+/** A pull request's link, with its review's round while the review is under way. */
+const prFact = (pr: { url: string; title: string; number: number }, r: Review | null) => html`<span><a class="link" href="${pr.url}" target="_blank" rel="noreferrer" title="${pr.title}">#${pr.number}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">round ${roundsSpent(r)} of ${r.maxRounds}</span>`}</span>`;
 
 /** What the card is, and what it shows: a review, question or nudge as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
 function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
