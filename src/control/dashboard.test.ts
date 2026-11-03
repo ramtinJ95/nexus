@@ -705,6 +705,17 @@ test("a thread's card the person picked keeps the mark and the strip across a po
   assert.equal([...cards[1]!.html.matchAll(new RegExp(pr, "g"))].length, 1, "which links the pull request once");
 });
 
+test("a card's strip links the thread's open pull request once its review ended", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const thread = await s.start("acme", "Cache the list");
+  s.registry.saveReview(approvedReview(thread.id, { kind: "landed", commit: head }));
+  s.registry.savePrWatch(thread.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 8, title: "TTL" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  s.registry.askQuestion({ id: "qn-ttl", thread: thread.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  const strip = /<p class="need-facts">([\s\S]*?)<\/p>/.exec(needsOf((await s.call("GET", "/")).text).cards.find((c) => c.thread === thread.id)!.html)![1]!;
+  assert.match(strip, /href="https:\/\/github\.com\/acme\/nexus\/pull\/8" [^>]*>#8<\/a><\/span>/, "the open #8, without the ended review's round");
+  assert.doesNotMatch(strip, /#7/);
+});
+
 const chipOf = (page: string) => /<span class="chip-label">([^<]*)<\/span>/.exec(page)![1];
 const dockOf = (page: string) => page.split('<div class="dock">')[1]!.split('<div id="run"')[0]!;
 const actionsOf = (html: string) => [...html.matchAll(/data-action="([^"]+)"|<a [^>]*href="([^"]+)"[^>]*data-write/g)].map((m) => m[1] ?? m[2]);
