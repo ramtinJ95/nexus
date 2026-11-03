@@ -317,7 +317,12 @@ async function abandon(lock: string, named = `${basename(lock)}-dead01`) {
 const crashes: Record<string, (lock: string) => Promise<string[]>> = {
 	"a recoverer was killed holding the recovery": async (lock) => {
 		await abandon(lock);
-		await abandon(`${lock}.recovery`);
+		await abandon(`${lock}.recovery1`);
+		return [];
+	},
+	"thirty recoverers were killed, each while it recovered the one before": async (lock) => {
+		await abandon(lock);
+		for (let level = 1; level <= 30; level++) await abandon(`${lock}.recovery${level}`);
 		return [];
 	},
 	"an older recoverer was killed holding its empty recovery": async (lock) => {
@@ -453,7 +458,7 @@ test("launches that race to recover a dead launch's lock and its dead recoverer 
 	const most = holders(t);
 	for (let round = 0; round < 20; round++) {
 		await abandon(lock);
-		await abandon(`${lock}.recovery`);
+		await abandon(`${lock}.recovery1`);
 		const results = await Promise.allSettled(Array.from({ length: 4 }, (_, i) => caller.run(`launch ${i}`, () => run(root, { action: "start", name: "pylon-contested", boot: spec }))));
 		const errors = results.map((result) => (result.status === "rejected" ? String(result.reason) : "started"));
 		assert.equal(errors.filter((error) => !/EISDIR|already in progress/.test(error)).join("\n"), "");
@@ -477,6 +482,10 @@ test("the start sweep removes the old directories that killed takes left beside 
 		for (const leaked of ["launch.lock-old001", "launch.lock-old002"]) await utimes(join(dir, leaked), hoursAgo, hoursAgo);
 		// A take still in progress made it moments ago.
 		await privateDirectory(join(dir, "launch.lock-new003"));
+		// What a recovery's take killed partway left, and a recoverer killed while it held its recovery.
+		await privateDirectory(join(dir, "launch.lock.recovery1-old004"));
+		await abandon(join(dir, "launch.lock.recovery1"));
+		for (const leaked of ["launch.lock.recovery1-old004", "launch.lock.recovery1-dead01"]) await utimes(join(dir, leaked), hoursAgo, hoursAgo);
 		return dir;
 	};
 	const running = await leaky("pylon-running");
@@ -484,5 +493,5 @@ test("the start sweep removes the old directories that killed takes left beside 
 	const stopped = await leaky("pylon-stopped");
 	await sweepScratch(root);
 	for (const dir of [running, stopped])
-		assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), ["launch.lock-new003"], dir);
+		assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")).sort(), ["launch.lock-new003", "launch.lock.recovery1", "launch.lock.recovery1-dead01"], dir);
 });
