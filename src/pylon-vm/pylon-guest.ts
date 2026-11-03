@@ -14,6 +14,7 @@ import type { PylonId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 import type { PylonLog } from "../session-wake.ts";
 import { statusSchema } from "./contracts.ts";
+import { stamped } from "./controller-log.ts";
 import { shellQuote as q } from "../shell.ts";
 import { existsError } from "./storage.ts";
 
@@ -21,7 +22,7 @@ import { existsError } from "./storage.ts";
 export const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`cd ${q(cwd)} && ${script}`)}`;
 
 /** The instance's controller log, which `logs` without a service reads. The controller appends to it too. */
-export const controllerLog = (dir: string): PylonLog => (line) => appendFile(join(dir, "controller.log"), `${line}\n`, { mode: 0o600 });
+export const controllerLog = (dir: string): PylonLog => (line) => appendFile(join(dir, "controller.log"), `${stamped(line)}\n`, { mode: 0o600 });
 
 /** gondolin build writes gondolin.json's env here, for login shells. sandboxd's execs get the same env directly. */
 export const imageEnv = "/etc/profile.d/gondolin-image-env.sh";

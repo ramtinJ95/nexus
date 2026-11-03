@@ -20,6 +20,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { BootInputs } from "./spawn.ts";
 import type { CheckpointId, PylonId } from "./ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
+import { unstamped } from "./pylon-vm/controller-log.ts";
 
 const [imageArg, stateArg, roundsArg, readersArg] = process.argv.slice(2);
 if (imageArg === undefined || stateArg === undefined) throw new Error("usage: node src/pylon-vm-stop-race.check.ts <image directory> <state root> [rounds] [readers]");
@@ -58,7 +59,7 @@ const closedUnder = "Closing the VM under guest actions";
 /** The controller's log lines that match `line`. The controller appends to its log across boots. */
 async function logged(line: string | RegExp): Promise<string[]> {
   const log = await readFile(join(stateRoot, "instances", pylonId, "controller.log"), "utf8");
-  return log.split("\n").filter((l) => (typeof line === "string" ? l.startsWith(line) : line.test(l)));
+  return log.split("\n").map(unstamped).filter((l) => (typeof line === "string" ? l.startsWith(line) : line.test(l)));
 }
 /** Resolves once the pinned command has started, so the exec carrying it is in the controller. */
 async function running(marker: string, pin: Promise<Read>): Promise<void> {

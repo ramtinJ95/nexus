@@ -34,6 +34,7 @@ import type { JobId, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
 import type { Job } from "./protocol/jobs.ts";
 import { connectProbe } from "./protocol/client.ts";
 import { checkBackend, checkBoot } from "./pylon-vm-check-kit.ts";
+import { unstamped } from "./pylon-vm/controller-log.ts";
 import { envelope } from "./reconcile.ts";
 import { snapshot } from "./tick.ts";
 import { herdrSession, sessionFacts, sessionsFile } from "./sessions.ts";
@@ -196,7 +197,7 @@ try {
   step("WOKEN");
 
   const log = await readFile(join(stateRoot, "instances", pylonId, "controller.log"), "utf8");
-  const lines = log.split("\n").filter((l) => l.startsWith("sessions: "));
+  const lines = log.split("\n").map(unstamped).filter((l) => l.startsWith("sessions: "));
   step("SESSION_LOG_LINES", lines);
   assert.ok(lines.includes(`sessions: recorded ${harnesses.length} for the wake`), "the pause recorded every session");
   const outcomes = harnesses.map((h) => lines.find((l) => l.includes(`"check ${h}" (${h})`)));

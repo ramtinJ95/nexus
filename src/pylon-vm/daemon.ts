@@ -8,14 +8,19 @@ import { type Action, actionSchema, bootSchema } from "./contracts.ts";
 import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
 import { controllerLogLimit, rotateLog } from "./log-rotation.ts";
+import { stampLines } from "./controller-log.ts";
 import { agentError, readRecord } from "./storage.ts";
 import { parse } from "../parse.ts";
 import { BodyTooLarge, readBody } from "../request-body.ts";
 
 async function main(): Promise<void> {
+	stampLines(process.stdout);
+	stampLines(process.stderr);
 	const dir = process.argv[2];
 	if (!dir) throw new Error("Instance directory required");
 	const record = await readRecord(dir);
+	// The log is opened for appending, so it holds every controller this instance had, and this line tells them apart.
+	console.error(`controller ${process.pid} started for ${record.name}`);
 	const pidFile = join(dir, "controller.pid");
 	await publishIdentity(pidFile);
 	// The scratch directory goes first: once controller.pid is gone, a launch may make both again for its own controller,
