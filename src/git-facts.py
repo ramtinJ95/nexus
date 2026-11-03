@@ -80,10 +80,11 @@ def observe():
     for b in fetched:
         entry = git("log", "--walk-reflogs", "--no-show-signature", "--max-count=1", "--format=%gs", f"refs/heads/{b['name']}", "--")
         source = entry.removeprefix("branch: Created from ") if entry.startswith("branch: Created from ") else None
+        source = source if source is None or source == "HEAD" or source.startswith("refs/") else f"refs/heads/{source}"
         if entry.startswith("commit"):
             b["pushedAs"] = f"origin/{b['name']}"
-        elif (source == "HEAD" and born) or (source is not None and f"refs/heads/{source}" in local):
-            sources.setdefault(source if source == "HEAD" else f"refs/heads/{source}", []).append(b)
+        elif (source == "HEAD" and born) or source in local:
+            sources.setdefault(source, []).append(b)
     for ref, claimed in sources.items():
         made = git("log", "-z", "--walk-reflogs", "--no-show-signature", "--max-count=4096", "--basic-regexp", "--grep-reflog=^commit", "--format=%H", ref, "--").split("\0")
         for b in claimed:
