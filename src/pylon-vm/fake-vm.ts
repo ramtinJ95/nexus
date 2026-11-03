@@ -13,7 +13,9 @@
  *
  * Its commands are admitted as Gondolin's are (sandbox/server-ops.js, handleExec): at most 64 at once, each counted
  * from its request until the guest answers it, also while it waits behind a file write. One that `hangs` is answered only by `answer`, or failed by the VM's close. An abort ends
- * the host's wait and nothing else (exec.js, rejectExecSession), so the command keeps its slot.
+ * the host's wait and nothing else (exec.js, rejectExecSession), so the command keeps its slot. A command whose argv reads
+ * `/proc/<pid>/environ` is a reap: it ends, as by SIGKILL, every hanging command whose env carries
+ * `NEXUS_GUEST_COMMAND` set to one of its later arguments, and prints how many it ended.
  */
 import { writeFile } from "node:fs/promises";
 import type { VM } from "@earendil-works/gondolin";
@@ -56,7 +58,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 	const reads: string[] = [];
 	const closed: string[] = [];
 	const refused: string[] = [];
-	const hanging = new Set<(error?: Error) => void>();
+	const hanging = new Map<(error?: Error | "killed") => void, string | undefined>();
 	let outstanding = 0;
 	let peak = 0;
 	const release = (write: Write, error?: Error) => {
@@ -72,10 +74,10 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 	const close = () => {
 		closed.push("vm");
 		for (const write of [...held]) if (write.phase !== "queued") release(write, new Error("sandbox closed"));
-		for (const answer of hanging) answer(new Error("sandbox closed"));
+		for (const answer of [...hanging.keys()]) answer(new Error("sandbox closed"));
 	};
 	const vm = {
-		async exec(argv: string[], options?: { signal?: AbortSignal }) {
+		async exec(argv: string[], options?: { signal?: AbortSignal; env?: Record<string, string> }) {
 			const shell = watched(argv);
 			const cmd = shell ?? argv.join(" ");
 			if (outstanding >= 64) {
@@ -87,15 +89,23 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 			const run = (async () => {
 				while (!slotFree()) await new Promise<void>((wake) => slotWaiters.add(wake));
 				commands.push(cmd);
+				let killed = false;
 				if (hangs(cmd))
 					await new Promise<void>((accept, reject) => {
-						const answer = (error?: Error) => {
+						const answer = (error?: Error | "killed") => {
 							hanging.delete(answer);
-							if (error) reject(error);
+							if (error === "killed") killed = true;
+							if (error instanceof Error) reject(error);
 							else accept();
 						};
-						hanging.add(answer);
+						hanging.set(answer, options?.env?.NEXUS_GUEST_COMMAND);
 					});
+				if (killed) return { exitCode: 137, signal: 9, stdout: "", stderr: "" };
+				if (shell === undefined && argv[2]?.includes("/environ")) {
+					const ended = [...hanging].filter(([, id]) => id !== undefined && argv.slice(3).includes(id));
+					for (const [answer] of ended) answer("killed");
+					return { exitCode: 0, stdout: `${ended.length}\n`, stderr: "" };
+				}
 				const exitCode = fails(cmd) ? 1 : 0;
 				if (shell === undefined) return { exitCode, stdout: "", stderr: "" };
 				return { exitCode: 0, stdout: "", stderr: JSON.stringify({ state: "exited", exitCode }) };
@@ -145,7 +155,7 @@ export function fakeVm(hold: (path: string) => WritePhase | undefined = () => un
 				: new Promise<void>((accept) => waiters.push({ suffix, accept })),
 		answer: () => {
 			for (const write of [...held]) release(write);
-			for (const answer of [...hanging]) answer();
+			for (const answer of [...hanging.keys()]) answer();
 		},
 		checkpoints,
 		commands,
