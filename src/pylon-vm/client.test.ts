@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import fs, { chmod, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
@@ -346,27 +347,17 @@ for (const [crash, leave] of Object.entries(crashes))
 		assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("launch.lock")), left);
 	});
 
-test("a recovery whose lock is released and taken again while it holds the recovery, and one that finds the new owner dead, never both hold the lock", async (t) => {
-	const { root, lock } = await unlaunchable(t, "pylon-replaced");
-	await privateDirectory(lock);
-	await publishIdentity(join(lock, "owner"));
-	await writeFile(join(lock, "release"), "launch.lock-live01");
-	await privateDirectory(`${lock}-live01`);
-	const most = holders(t);
-	/** Stops `who`'s code the next time it reaches `point`. `arrival` settles once it does, and `open` lets it go on. */
-	const gates = new Map<string, { reached: () => void; opened: Promise<void> }>();
-	const gate = (who: string, point: string) => {
-		let reached!: () => void;
-		let open!: () => void;
-		const arrival = new Promise<void>((accept) => (reached = accept));
-		gates.set(`${who} ${point}`, { reached, opened: new Promise<void>((accept) => (open = accept)) });
-		return { arrival, open };
-	};
+/**
+ * Stops a caller's code at a point it reaches: as it reads `lock`'s owner, once it has read it, as it reads the lock's
+ * release, or as it writes status.json once it holds the lock. `arrival` settles once it does, and `open` lets it go on.
+ */
+function gates(t: TestContext, lock: string) {
+	const stops = new Map<string, { reached: () => void; opened: Promise<void> }>();
 	const at = async (point: string) => {
 		const key = `${caller.getStore()} ${point}`;
-		const stop = gates.get(key);
+		const stop = stops.get(key);
 		if (stop === undefined) return;
-		gates.delete(key);
+		stops.delete(key);
 		stop.reached();
 		await stop.opened;
 	};
@@ -374,15 +365,34 @@ test("a recovery whose lock is released and taken again while it holds the recov
 	t.mock.method(fs, "readFile", async (path: string, ...rest: unknown[]) => {
 		if (path === join(lock, "owner")) await at("reads the owner");
 		if (path === join(lock, "release")) await at("reads the release");
-		return (readFile as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+		const read = await (readFile as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+		if (path === join(lock, "owner")) await at("has read the owner");
+		return read;
 	});
 	t.mock.method(fs, "rename", async (from: string, to: string) => {
 		if (basename(to) === "status.json") await at("holds the lock");
 		return rename(from, to);
 	});
 	syncBuiltinESMExports();
+	return (who: string, point: string) => {
+		let reached!: () => void;
+		let open!: () => void;
+		const arrival = new Promise<void>((accept) => (reached = accept));
+		stops.set(`${who} ${point}`, { reached, opened: new Promise<void>((accept) => (open = accept)) });
+		return { arrival, open };
+	};
+}
+const settled = (launch: Promise<unknown>) => launch.then(() => "started", (error: unknown) => String(error));
+
+test("a recovery whose lock is released and taken again while it holds the recovery, and one that finds the new owner dead, never both hold the lock", async (t) => {
+	const { root, lock } = await unlaunchable(t, "pylon-replaced");
+	await privateDirectory(lock);
+	await publishIdentity(join(lock, "owner"));
+	await writeFile(join(lock, "release"), "launch.lock-live01");
+	await privateDirectory(`${lock}-live01`);
+	const most = holders(t);
+	const gate = gates(t, lock);
 	const start = () => run(root, { action: "start", name: "pylon-replaced", boot: spec });
-	const settled = (launch: Promise<unknown>) => launch.then(() => "started", (error: unknown) => String(error));
 
 	const rOwner = gate("R", "reads the owner");
 	const rHolds = gate("R", "holds the lock");
@@ -401,9 +411,41 @@ test("a recovery whose lock is released and taken again while it holds the recov
 	const cResult = await c;
 	rHolds.open();
 	const rResult = await r;
+	assert.equal(most(), 1);
 	assert.match(rResult, /EISDIR/);
 	assert.match(cResult, /already in progress|EISDIR/);
+});
+
+test("a recovery that read an owner which released the lock to a live launch and then died leaves that launch's lock alone", async (t) => {
+	const { root, lock } = await unlaunchable(t, "pylon-handed-on");
+	const owner = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+	t.after(() => owner.kill("SIGKILL"));
+	await privateDirectory(lock);
+	await saveJson(join(lock, "owner"), (await identityOf(owner.pid!))!);
+	await writeFile(join(lock, "release"), "launch.lock-live01");
+	await privateDirectory(`${lock}-live01`);
+	const most = holders(t);
+	const gate = gates(t, lock);
+	const start = () => run(root, { action: "start", name: "pylon-handed-on", boot: spec });
+
+	const rOwner = gate("R", "has read the owner");
+	const bHolds = gate("B", "holds the lock");
+	const r = settled(caller.run("R", start));
+	await rOwner.arrival;
+	// The owner releases, another launch takes the lock, and the owner is killed.
+	await rm(lock, { recursive: true, force: true });
+	await rm(`${lock}-live01`, { recursive: true, force: true });
+	const b = settled(caller.run("B", start));
+	await bHolds.arrival;
+	owner.kill("SIGKILL");
+	await once(owner, "exit");
+	rOwner.open();
+	const rResult = await r;
+	bHolds.open();
+	const bResult = await b;
 	assert.equal(most(), 1);
+	assert.match(rResult, /already in progress/);
+	assert.match(bResult, /EISDIR/);
 });
 
 test("launches that race to recover a dead launch's lock and its dead recoverer never hold the lock at once", async (t) => {
