@@ -8,6 +8,7 @@ import {
 	checked,
 	execute,
 	freeReservedSlots,
+	notAnswering,
 	readGuestFile,
 	serviceRoot,
 	stagingRoot,
@@ -300,6 +301,7 @@ export class SandboxRuntime {
 		return this.vm;
 	}
 	private status() {
+		const guest = this.vm && this.state === "running" ? notAnswering(this.vm) : undefined;
 		return {
 			name: this.record.name,
 			state: this.state,
@@ -312,6 +314,7 @@ export class SandboxRuntime {
 			setupRecorded: this.setupRecorded,
 			...(this.resumePid ? { resumePid: this.resumePid } : {}),
 			...(this.recovery ? { recovery: this.recovery } : {}),
+			...(guest ? { notAnswering: guest } : {}),
 		};
 	}
 	/** The status this controller last wrote. While it runs, nothing else writes status.json, so an equal one is not written again. */

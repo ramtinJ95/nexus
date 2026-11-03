@@ -6,6 +6,7 @@ import { request } from "node:http";
 import { itemThread, type PipelineItem } from "./pipeline.ts";
 import type { QueuedThread } from "./queue.ts";
 import type { Thread } from "./thread-store.ts";
+import type { ThreadDetail } from "./wire.ts";
 import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Review } from "./review-model.ts";
 import type { ReviewLoop } from "./review.ts";
@@ -916,6 +917,24 @@ test("an offline node shows its pylons as unknown, and the last observation as s
   assert.match(textOf(await nodeHeads(s)), /rj-firebat offline/);
   const pylon = textOf(sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "pylon-h"));
   assert.match(pylon, /Observed unknown Node rj-firebat offline Last seen just now \(stale\)/);
+});
+
+test("a running pylon whose node reports its guest not answering says so in its detail, by the composer and in the pylon pane, until its node reports it answers", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const since = new Date(Date.now() - 3 * 60_000).toISOString();
+  const report = (notAnswering?: { since: string; timeouts: number }) => s.registry.ingested(testObservation(node, { pylons: [runningPylon(fix.pylonId, {
+    liveHash: s.registry.pylon(fix.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null }, ...notAnswering === undefined ? {} : { notAnswering },
+  })] }), []);
+  s.observe(fix);
+  report({ since, timeouts: 5 });
+  assert.deepEqual((JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail).pylon.notAnswering, { since, timeouts: 5 });
+  const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.match(page, /The pylon's guest has not answered its commands since 3 min ago ?, so a message may fail\. Archive and unarchive the thread to give it a fresh VM\./);
+  assert.match(page, /The guest has not answered its last 5 commands, since 3 min ago ?\./);
+  report();
+  assert.equal("notAnswering" in (JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail).pylon, false);
+  assert.doesNotMatch(textOf((await s.call("GET", `/threads/${fix.id}`)).text), /has not answered/);
 });
 
 test("the thread page shows a paused session as resuming on wake, or on unarchive, and a failed one with why", async (t) => {
