@@ -3402,3 +3402,20 @@ test("a fresh busy drain extends a landing past its deadline without rollback or
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
 });
+
+for (const reason of ["agent turn still running at drain timeout", "Error: agent turn still running at drain timeout"]) test(`a persisted busy-timeout rollback advises retry rather than reverting: ${reason}`, async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  const loop = await approved(f, "nLAPTOP");
+  const why = `The deploy of ${merged} failed: node control failed (${reason}).`;
+  f.registry.saveReview({ ...f.review(), phase: { kind: "rolling-back", commit: merged, previous, why, requested: false, deadline: f.now + 30 * 60_000 } });
+  await loop.poll();
+  assert.equal(f.registry.desiredRelease()?.commit, previous);
+  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: f.now });
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
+    why,
+    `Rolled back to the previous release, ${previous}, which every service reports healthy.`,
+    `${merged} is still on the default branch. The busy turn did not test the commit; retry deployment rather than revert it.`,
+  ] });
+});
