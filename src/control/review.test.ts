@@ -3215,6 +3215,26 @@ test("a review approved before Nexus recorded what holds its head reads them on 
   assert.deepEqual(f.review().phase, { kind: "approved" });
 });
 
+test("a Land press at a head whose check passed keeps that check and merges", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  assert.equal(f.checkThreads.length, 1);
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.checkThreads.length, 1, "no check thread started for the press");
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a Land press on a round with no check runs it before merging", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  f.registry.saveReview({ ...f.review(), rounds: [{ ...f.review().rounds[0]!, check: null }] });
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.checkThreads.length, 2, "the press ran the check");
+  assert.deepEqual(f.merges, [head1]);
+});
+
 test("an approval by a reviewer on the builder's own model offers no Land press, before any landing tries", async (t) => {
   const f = fixture(t);
   const loop = await approved(f, null);

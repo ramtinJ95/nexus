@@ -398,6 +398,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
     async checking(r, phase, builder) {
       const round = r.rounds.at(-1)!;
+      // The check clones the head commit alone, so one that passed there is kept, as the live check is.
+      if (phase.thread === null && round.check?.passed === true) return await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify"));
       if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
       if (phase.thread === null) return await endedOnGitHub(r) ?? { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
       const state = checks.poll(phase.thread, round.head);
@@ -765,7 +767,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
     /**
      * Lands an approved review, or tries again one the policy held, such as after the PR's description changed or the
-     * person granted the merge token. It runs the check again first, which finds its result kept for the same head.
+     * person granted the merge token. A check that passed at the head is kept, and one that did not runs again first.
      * A PR that already merged is held by the policy, so a land never deploys twice. `head`, when given, is the commit
      * the person confirmed, so a review that moved on meanwhile is not landed in its place. The holds the person
      * `waive`s, each one the review has now and the policy lets them waive, no longer hold the landing at that head, and

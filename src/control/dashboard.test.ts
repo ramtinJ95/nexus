@@ -790,7 +790,7 @@ test("a landing shows its steps as the review moves through them, until it lands
   const merge = "4".repeat(40);
   const { live: _, ...unchecked } = approvedReview(fix.id, { kind: "approved" }).rounds[1]!;
   assert.deepEqual(await steps({ kind: "checking", startedAt: 0, thread: null }, { rounds: [unchecked] }), {
-    states: "now todo todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, or its kept result for that commit is read.` });
+    states: "now todo todo todo todo", text: `Landing #7 Cache ↗ Check Live check Merge Deploy Landed .nexus/check runs at ${head.slice(0, 12)}, unless it passed there already.` });
   assert.equal((await steps({ kind: "merging", authorized: head })).states, "done skipped now todo todo", "a head with no .nexus/verify skips the live check");
   assert.equal((await steps({ kind: "merging", authorized: null, waiting: "rv-other deploys" })).text,
     `Landing #7 Cache ↗ Check Live check (no .nexus/verify) Merge Deploy Landed Waiting while rv-other deploys, since landings deploy one at a time, then merging ${head.slice(0, 12)}.`);
