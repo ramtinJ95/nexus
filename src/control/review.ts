@@ -522,6 +522,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const outcome = releaseOutcome(view, phase.commit);
       if (outcome === "healthy") return { ...r, phase: { kind: "landed", commit: phase.commit } };
       if (outcome === "superseded") return toPerson(r, "deploy", `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
+      if (outcome === "pending" && view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) {
+        return { ...r, phase: { ...phase, deadline: now() + deployMs } };
+      }
       if (outcome === "pending" && now() < phase.deadline) return r;
       const why = outcome === "failed"
         ? `The deploy of ${phase.commit} failed: ${failedNodes(view, phase.commit)}.`
@@ -533,9 +536,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (!phase.requested) return requestRelease(r, phase, phase.previous, `nexus review ${r.id} rollback`);
       const view = releaseView(registry, release.self, now());
       const outcome = releaseOutcome(view, phase.previous);
-      const revert = `${phase.commit} is still on the default branch, so revert it before the next deploy.`;
+      const revert = phase.why.includes("agent turn still running at drain timeout")
+        ? `${phase.commit} is still on the default branch. The busy turn did not test the commit; retry deployment rather than revert it.`
+        : `${phase.commit} is still on the default branch, so revert it before the next deploy.`;
       if (outcome === "healthy") return toPerson(r, "deploy", phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
       if (outcome === "superseded") return toPerson(r, "deploy", phase.why, `Another release, ${view.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
+      if (outcome === "pending" && view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) {
+        return { ...r, phase: { ...phase, deadline: now() + deployMs } };
+      }
       if (outcome === "pending" && now() < phase.deadline) return r;
       const failed = outcome === "failed"
         ? failedNodes(view, phase.previous)

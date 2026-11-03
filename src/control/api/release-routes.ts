@@ -10,16 +10,17 @@ import { ok, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined; cleanup?: CleanupPass | undefined }): readonly RouteEntry[] {
   const { registry, agents, draining, gate } = kit;
 
-  async function turnsRunning(): Promise<boolean> {
-    if (gate.busy()) return true;
+  async function busyTurns() {
+    const entering = gate.busy();
+    const threads: string[] = [];
     for (const t of registry.harnessThreads()) {
       if (t.status === "deleted") continue;
       const { docs } = await agents.harness.view(t);
       const live = docs["pi.live"];
       const inbox = docs["pi.inbox"];
-      if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) return true;
+      if (live?.run !== undefined || (Array.isArray(inbox?.items) && inbox.items.length > 0)) threads.push(t.id);
     }
-    return gate.busy();
+    return { threads, entering: entering || gate.busy() };
   }
 
   return [
@@ -52,9 +53,10 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
       const body = parse(z.strictObject({ commit: commitSchema, release: z.boolean().optional(), hold: z.boolean().optional() }), await r.body());
       if (body.commit !== registry.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
       registry.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000, locked: registry.drain()?.locked ?? false });
-      const idle = body.release ? false : !await turnsRunning();
+      const busy = body.release ? { threads: [], entering: false } : await busyTurns();
+      const idle = !body.release && !busy.entering && busy.threads.length === 0;
       if (body.hold && idle) registry.setDrain({ commit: body.commit, expiresAt: Date.now() + 120_000, locked: true });
-      return ok({ idle, expiresAt: registry.drain()?.expiresAt ?? null });
+      return ok({ idle, ...body.release ? {} : busy, expiresAt: registry.drain()?.expiresAt ?? null });
     }],
   ];
 }
