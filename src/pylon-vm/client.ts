@@ -24,7 +24,7 @@ import {
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
-import { alive, publishIdentity, readIdentity } from "./identity.ts";
+import { alive, identitySchema, type ProcessIdentity, publishIdentity, readIdentity } from "./identity.ts";
 import {
 	directory,
 	existsError,
@@ -148,6 +148,63 @@ async function releaseLock(lock: string, release: string): Promise<void> {
 	}
 	await rm(release, { recursive: true, force: true });
 }
+/** Whether `name` is one that mkdtemp(`${lock}-`) makes. */
+function reservedName(lock: string, name: string): boolean {
+	const prefix = `${basename(lock)}-`;
+	return name.startsWith(prefix) && /^[A-Za-z0-9]{6}$/.test(name.slice(prefix.length));
+}
+/**
+ * Whether the lock's owner died. A launch killed while it wrote its owner in the lock, as launches did before takes
+ * published it aside, left only the owner's temporary file. The same owner names the lock in the same text.
+ */
+async function abandoned(lock: string): Promise<boolean> {
+	const read = () => readFile(join(lock, "owner"), "utf8").catch((error: unknown) =>
+		existsError(error, "ENOENT") ? null : Promise.reject(error));
+	const text = await read();
+	if (text === null) {
+		const names = await readdir(lock).catch((error: unknown) =>
+			// Released since.
+			existsError(error, "ENOENT") ? null : Promise.reject(error));
+		if (names === null) return false;
+		if (!names.includes("owner") && names.some((name) => /^owner\.\d+\.\d+\.tmp$/.test(name))) return true;
+		throw new Error("Sandbox start ownership is unavailable. Read controller logs before retrying");
+	}
+	// An owner is renamed in whole, so only a power loss leaves one unreadable, and its process died with the host.
+	let owner: ProcessIdentity | null = null;
+	try {
+		owner = identitySchema.parse(JSON.parse(text));
+	} catch {}
+	if (owner !== null && (await alive(owner))) return false;
+	// It may have released the lock to a live owner before it died, so only a lock that still names it is abandoned.
+	return (await read()) === text;
+}
+/**
+ * takeLock, or the recovery of a lock whose owner died. A recovery holds the next level's lock beside it,
+ * `${base}.recovery1` for the base lock, `${base}.recovery2` for that one and so on, taken and recovered the same way,
+ * so one process at a time moves a dead owner's lock aside, and one killed while it held a recovery leaves a dead owner
+ * there in turn. Only a recovery moves a dead owner's lock, so what it reads in that lock stays that lock's until it
+ * moves it. Beside, not inside, because a lock that moves would take a recovery still held with it, and the recovery's
+ * paths would then lead into whichever lock replaced it. `check` throws why a lock whose owner died must still be kept.
+ * Returns null when a live process holds the lock or its recovery.
+ */
+async function holdLock(base: string, check = async () => {}, level = 0): Promise<string | null> {
+	const lock = level === 0 ? base : `${base}.recovery${level}`;
+	const release = await takeLock(lock);
+	if (release !== null) return release;
+	const recovering = await holdLock(base, undefined, level + 1);
+	if (recovering === null) return null;
+	try {
+		if (!(await abandoned(lock))) return null;
+		await check();
+		// A power loss can leave the name empty or cut short, since nothing is synced.
+		const name = await readFile(join(lock, "release"), "utf8").catch((error: unknown) =>
+			existsError(error, "ENOENT") ? "" : Promise.reject(error));
+		await releaseLock(lock, reservedName(lock, name) ? join(dirname(lock), name) : await mkdtemp(`${lock}-`));
+		return await takeLock(lock);
+	} finally {
+		await releaseLock(`${base}.recovery${level + 1}`, recovering);
+	}
+}
 /** A missing identity file means the process has not published itself yet, or is gone. */
 async function published(file: string): Promise<boolean> {
 	const identity = await readIdentity(file);
@@ -165,7 +222,9 @@ export const scratchSweepAgeMs = 60 * 60_000;
  * Removes the scratch directories older than scratchSweepAgeMs that no running controller owns: those a controller
  * killed outright left, and those of instances destroyed or controllers stopped before a controller removed its own.
  * It holds an instance's launch lock while it checks and removes that instance's directory, so no launch remakes the
- * directory in between. A directory it cannot check or remove is logged and kept. Returns the names it removed.
+ * directory in between. Holding each instance's lock, with a scratch directory or not, it also removes the directories
+ * that takes killed partway left beside the lock. A directory it cannot check or remove is logged and kept. Returns the
+ * scratch names it removed.
  */
 export async function sweepScratch(root: string, now = Date.now()): Promise<string[]> {
 	const names = async (path: string) => {
@@ -189,14 +248,8 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		});
 		return modified !== null && now - modified >= scratchSweepAgeMs;
 	};
-	const sweep = async (name: string) => {
-		const path = join(root, "tmp", name);
-		const owner = owners.get(path);
-		if (owner === undefined) {
-			if (!(await old(path))) return false;
-			await rm(path, { recursive: true, force: true });
-			return true;
-		}
+	/** Holds the instance's launch lock while `held` runs, and removes what takes killed partway left beside it. */
+	const holding = async (owner: string, held: () => Promise<boolean>) => {
 		const lock = join(owner, "launch.lock");
 		const release = await takeLock(lock).catch((error: unknown) => {
 			// Its instance is gone.
@@ -206,12 +259,40 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		// A launch holds it, or one that died left it, which the next launch recovers.
 		if (release === null) return false;
 		try {
-			if (await controllerAlive(owner) || !(await old(path))) return false;
-			await rm(path, { recursive: true, force: true });
-			return true;
+			const names = await readdir(owner);
+			const reserved = new Set([basename(release)]);
+			for (const name of names)
+				if (/^launch\.lock\.recovery\d+$/.test(name))
+					reserved.add(await readFile(join(owner, name, "release"), "utf8").catch(() => ""));
+			// Only a take stalled as long could still be using one. Moved away before it is removed, because a removal in
+			// place empties it first, and a stalled take could rename the empty one onto a lock and hold it without an owner.
+			for (const leaked of names)
+				if (/^launch\.lock(?:\.recovery\d+)?-[A-Za-z0-9]{6}$/.test(leaked) && !reserved.has(leaked) && (await old(join(owner, leaked)))) {
+					const trash = await mkdtemp(join(owner, "launch.lock.trash-"));
+					await rename(join(owner, leaked), trash).catch((error: unknown) => {
+						if (!existsError(error, "ENOENT")) throw error;
+					});
+					await rm(trash, { recursive: true, force: true });
+				} else if (/^launch\.lock\.trash-[A-Za-z0-9]{6}$/.test(leaked)) await rm(join(owner, leaked), { recursive: true, force: true });
+			return await held();
 		} finally {
 			await releaseLock(lock, release);
 		}
+	};
+	const sweep = async (name: string) => {
+		const path = join(root, "tmp", name);
+		const owner = owners.get(path);
+		if (owner === undefined) {
+			if (!(await old(path))) return false;
+			await rm(path, { recursive: true, force: true });
+			return true;
+		}
+		owners.delete(path);
+		return holding(owner, async () => {
+			if (await controllerAlive(owner) || !(await old(path))) return false;
+			await rm(path, { recursive: true, force: true });
+			return true;
+		});
 	};
 	const swept: string[] = [];
 	for (const name of await names(join(root, "tmp")))
@@ -220,6 +301,12 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		} catch (error) {
 			// One unreadable controller.pid, or a full disk refusing the lock, keeps only that directory.
 			console.error(`scratch sweep kept ${name}:`, error);
+		}
+	for (const owner of owners.values())
+		try {
+			await holding(owner, async () => false);
+		} catch (error) {
+			console.error(`scratch sweep kept what takes left beside the launch lock of ${owner}:`, error);
 		}
 	return swept;
 }
@@ -251,44 +338,16 @@ async function launch(
 			`Sandbox controller ${daemonPath} is missing`,
 		);
 	const lock = join(dir, "launch.lock");
-	let release = await takeLock(lock);
-	if (release === null) {
-		const recovery = join(lock, "recovery");
-		try {
-			await mkdir(recovery, { mode: 0o700 });
-		} catch {
+	const release = await holdLock(lock, async () => {
+		if (await controllerAlive(dir))
 			throw new Error(
-				"Sandbox start or recovery is already in progress. Retry inspect shortly",
+				"Sandbox controller is still starting. Retry inspect shortly",
 			);
-		}
-		try {
-			const owner = await readIdentity(join(lock, "owner"));
-			if (owner === null)
-				throw new Error(
-					"Sandbox start ownership is unavailable. Read controller logs before retrying",
-				);
-			if (await alive(owner))
-				throw new Error(
-					"Sandbox start is already in progress. Retry inspect shortly",
-				);
-			if (await controllerAlive(dir))
-				throw new Error(
-					"Sandbox controller is still starting. Retry inspect shortly",
-				);
-			const reserved = await readFile(join(lock, "release"), "utf8").then(
-				(name) => join(dirname(lock), basename(name)),
-				(error: unknown) => (existsError(error, "ENOENT") ? mkdtemp(`${lock}-`) : Promise.reject(error)),
-			);
-			await releaseLock(lock, reserved);
-			release = await takeLock(lock);
-			if (release === null)
-				throw new Error(
-					"Sandbox start is already in progress. Retry inspect shortly",
-				);
-		} finally {
-			await rm(recovery, { recursive: true, force: true });
-		}
-	}
+	});
+	if (release === null)
+		throw new Error(
+			"Sandbox start or recovery is already in progress. Retry inspect shortly",
+		);
 	try {
 		// The boot's resources, so the node counts what a VM still coming up holds.
 		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
