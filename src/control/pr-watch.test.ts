@@ -850,6 +850,59 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   assert.deepEqual(starts, ["th-after"], "the queued thread starts once the builder's own PR merges");
 });
 
+test("a PR whose branch another clone pushed links to the thread whose checkout made its head, not to a same-named branch", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const dir = await tempDir("nexus-pr-watch-git-", t);
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+  const git = async (cwd: string, ...args: string[]) => (await promisify(execFile)("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd, env, encoding: "utf8" })).stdout.trim();
+  await git(dir, "init", "-q", "--bare", "--initial-branch=main", "remote.git");
+  await git(dir, "clone", "-q", "remote.git", "seed");
+  await git(join(dir, "seed"), "commit", "-q", "--allow-empty", "-m", "main");
+  await git(join(dir, "seed"), "push", "-q", "origin", "HEAD:main");
+  const prs = new Map<string, PrSnapshot>();
+  const github = {
+    async find(_repo: string, branch: string, state = "open") { const s = prs.get(branch); return s !== undefined && (state === "all" || s.pr.state === "open") ? [s.pr.number] : []; },
+    async poll(_repo: string, number: number) { return structuredClone([...prs.values()].find((s) => s.pr.number === number)!); },
+  };
+  const watcher = prWatcher({ registry: f.registry, github, inbox: f.inbox() });
+  async function thread(id: string) {
+    await git(dir, "clone", "-q", "remote.git", id);
+    const checkout = join(dir, id);
+    const thread = f.add(id, true, null);
+    const pylonId = f.registry.thread(thread)!.pylonId;
+    const guest = fakeGuest(() => { throw new Error("unused"); });
+    guest.exec = async (argv) => ({ exitCode: 0, output: (await promisify(execFile)(argv[0]!, argv.slice(1), { cwd: checkout, env, encoding: "utf8" })).stdout, truncated: false });
+    let previous: PylonObservation | "absent" = "absent";
+    async function observe() {
+      const pylon = runningPylon(pylonId, { liveHash: "hash" as LiveHash, git: await gitFacts(guest) });
+      f.registry.ingested(null, ingest({ type: "pylon", pylon }, f.node, new Map([[pylonId, previous]]), Date.now()));
+      previous = pylon;
+    }
+    await observe();
+    return { thread, checkout, observe };
+  }
+  const builder = await thread("th-builder");
+  const namesake = await thread("th-namesake");
+  await git(builder.checkout, "checkout", "-qb", "fix/cleanup-daily");
+  await git(builder.checkout, "commit", "-q", "--allow-empty", "-m", "the builder's work");
+  await git(namesake.checkout, "checkout", "-qb", "fix/cleanup-daily");
+  await git(namesake.checkout, "commit", "-q", "--allow-empty", "-m", "another thread's work under the same name");
+  // As a subagent's own clone of the checkout pushes the branch, so the checkout's reflog records no push.
+  await git(dir, "clone", "-q", builder.checkout, "subagent");
+  await git(join(dir, "subagent"), "push", "-q", join(dir, "remote.git"), "fix/cleanup-daily");
+  prs.set("fix/cleanup-daily", { pr: testPr({ number: 409, title: "daily cleanup", checks: "passing" }), detail: { head: await git(builder.checkout, "rev-parse", "HEAD"), branch: "fix/cleanup-daily", base: "main", body: "", mergeCommit: null }, failures: [], comments: [] });
+
+  await builder.observe();
+  await watcher.poll();
+  assert.deepEqual(f.registry.prWatch(builder.thread)?.links ?? [], [], "before its checkout fetches, nothing shows the branch reached GitHub");
+  for (const c of [builder, namesake]) { await git(c.checkout, "fetch", "-q", "origin"); await c.observe(); }
+  await watcher.poll();
+  assert.deepEqual(f.registry.prWatch(builder.thread)?.links.map((l) => l.pr.number), [409]);
+  assert.deepEqual(f.registry.outputs(builder.thread).filter((o) => o.kind === "branch").map((o) => o.ref), ["origin/fix/cleanup-daily"]);
+  assert.deepEqual(f.registry.prWatch(namesake.thread)?.links ?? [], [], "a same-named branch that does not hold the PR's head links nothing");
+  assert.deepEqual(f.registry.outputs(namesake.thread).filter((o) => o.kind === "branch"), []);
+});
+
 test("a pass reads no archived or deleted thread that no queued thread waits for", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   const archived = f.add("th-archived");
