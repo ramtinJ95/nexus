@@ -159,13 +159,18 @@ function reservedName(lock: string, name: string): boolean {
  */
 async function abandoned(lock: string): Promise<boolean> {
 	const owner = await readIdentity(join(lock, "owner"));
-	if (owner !== null) return !(await alive(owner));
-	const names = await readdir(lock).catch((error: unknown) =>
-		// Released since.
-		existsError(error, "ENOENT") ? null : Promise.reject(error));
-	if (names === null) return false;
-	if (names.some((name) => /^owner\.\d+\.\d+\.tmp$/.test(name))) return true;
-	throw new Error("Sandbox start ownership is unavailable. Read controller logs before retrying");
+	if (owner === null) {
+		const names = await readdir(lock).catch((error: unknown) =>
+			// Released since.
+			existsError(error, "ENOENT") ? null : Promise.reject(error));
+		if (names === null) return false;
+		if (!names.includes("owner") && names.some((name) => /^owner\.\d+\.\d+\.tmp$/.test(name))) return true;
+		throw new Error("Sandbox start ownership is unavailable. Read controller logs before retrying");
+	}
+	if (await alive(owner)) return false;
+	// It may have released the lock to a live owner before it died, so only a lock that still names it is abandoned.
+	const now = await readIdentity(join(lock, "owner"));
+	return now !== null && now.pid === owner.pid && now.start === owner.start && now.boot === owner.boot;
 }
 /**
  * takeLock, or the recovery of a lock whose owner died. A recovery holds `${lock}.recovery`, a lock beside it that is
