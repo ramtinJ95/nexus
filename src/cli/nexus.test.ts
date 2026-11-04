@@ -1691,6 +1691,24 @@ test("review --cancel ends the thread's running review through its route, and pr
   assert.equal(asked.length, 2, "a refused flag sends nothing");
 });
 
+test("land --waive sends the head and the holds the dashboard's Land press would waive, and land alone sends neither", async (t) => {
+  const asked: unknown[][] = [];
+  const reviews = { land(builder: ThreadId, by: string, head?: string, waive?: readonly string[]) { asked.push([builder, by, head, waive]); return s.registry.review(builder)!; } } as never as ReviewLoop;
+  const s = await setup(t, { reviews });
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
+  const head = "1".repeat(40);
+  const egress = { code: "reserved-path:egress" as const, text: "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts." };
+  const round = { head, verdict: { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "ok" }, live: { kind: "ran" as const, thread: "th-0123456789ab" as ThreadId, passed: true, output: "ok" }, answers: null };
+  const held = testReview({ builder: thread.id, phase: { kind: "approved" }, rounds: [{ ...round, heldAt: { base: "main", holds: [egress] } }] });
+  s.registry.saveReview(held);
+  assert.equal((await s.nexus(["land", thread.id, "--waive"])).code, 0);
+  assert.equal((await s.nexus(["land", thread.id])).code, 0);
+  s.registry.saveReview({ ...held, rounds: [{ ...round, heldAt: { base: "main", holds: [] } }] });
+  assert.equal((await s.nexus(["land", thread.id, "--waive"])).code, 0);
+  assert.deepEqual(asked, [[thread.id, laptop, head, [egress.text]], [thread.id, laptop, undefined, undefined], [thread.id, laptop, head, undefined]],
+    "the press waives the path hold at the head it read, a review held by nothing waivable sends its head alone, and land alone sends neither");
+});
+
 test("project edit replaces supplied grants and preserves omitted settings", async (t) => {
   const repo = "https://github.com/example/repo.git";
   const s = await setup(t);

@@ -1,9 +1,10 @@
 /** Landing and releasing: `release`, `review`, `land`, `deploy` and the image commands. */
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../deploy/model.ts";
-import type { ImagesCurrent } from "../../control/wire.ts";
+import type { ImagesCurrent, ThreadDetail } from "../../control/wire.ts";
 import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
 import type { ImageOperation } from "../../control/image-store.ts";
 import type { Review } from "../../control/review-model.ts";
+import { landPress } from "../../control/policy.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, thread, int, table, pollUntil } from "../kit.ts";
 import { reviewText } from "../thread-text.ts";
@@ -64,6 +65,15 @@ const imageCommand = (path: string, args: Command["args"], body: (positionals: r
   },
 });
 
+/** What the dashboard's Land press sends for the thread's review as it is now: its head, and the holds the press waives. */
+async function pressOf(api: Api, id: string): Promise<{ head?: string; waive?: string[] }> {
+  const { review } = await api("GET", thread(id)) as ThreadDetail;
+  if (review === null) return {};
+  const press = landPress(review);
+  const head = review.rounds.at(-1)!.head;
+  return press.kind === "lands" && press.waives.length > 0 ? { head, waive: press.waives.map((h) => h.text) } : { head };
+}
+
 export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
     args: [0, 0],
@@ -88,9 +98,9 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     },
   },
   land: {
-    args: [1, 1],
-    async run(api, [id]) {
-      const r = await api("POST", `${thread(id!)}/land`, {}) as Review;
+    args: [1, 1], options: { waive: { type: "boolean" } },
+    async run(api, [id], v) {
+      const r = await api("POST", `${thread(id!)}/land`, v.waive === true ? await pressOf(api, id!) : {}) as Review;
       return { json: r, text: `Landing ${reviewText(r)}` };
     },
   },
