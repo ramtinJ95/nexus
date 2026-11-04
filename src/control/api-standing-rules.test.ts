@@ -1,16 +1,24 @@
 /** Standing rules: a project's Markdown that each builder thread it starts gets with its first message. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { ProjectId } from "../ids.ts";
-import { project, testApi } from "./api-test-kit.ts";
+import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
+import { checkGate, verifyGate } from "./gate.ts";
+import type { PipelineItem } from "./pipeline.ts";
+import type { QueuedThread } from "./queue.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadDetail, ThreadRow } from "./wire.ts";
+import type { ImageId, ProjectId, ThreadId } from "../ids.ts";
+import { node, project, image, observeNode, testApi, withImage, withQueue } from "./api-test-kit.ts";
 
 const rules = "- Run npm test before you push.\n- Keep commits small.";
+const section = (text: string) => `\n\n## Standing rules for this project\n\n${text}`;
 type Api = Awaited<ReturnType<typeof testApi>>;
 const setRules = async (s: Api, standingRules: string | null) => {
   const edited = await s.call("PATCH", "/v1/projects/acme", { standingRules });
   assert.equal(edited.status, 200, JSON.stringify(edited.body));
   return edited.body.standingRules;
 };
+const revisionOf = async (s: Api, id: string) => ((await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail).thread.standingRulesRevision;
 
 test("a person sets, changes and clears a project's standing rules, and each change counts a revision that never goes back", async (t) => {
   const s = await testApi(t);
@@ -41,4 +49,127 @@ test("a person sets, changes and clears a project's standing rules, and each cha
 
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "plain" })).status, 201);
   assert.deepEqual((await s.call("PATCH", "/v1/projects/plain", { standingRules: null })).body, { ...project, id: "plain" }, "clearing rules never set leaves none");
+});
+
+test("a Claude worker's first prompt carries the project's standing rules after its brief, and the thread records their revision", async (t) => {
+  const s = await withImage(t);
+  const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Before", claude: "fix the bug" });
+  assert.equal(s.registry.claudeWorker(plain.body.id)!.prompt, "/poteto-mode fix the bug");
+  assert.equal(await revisionOf(s, plain.body.id), undefined, "a project without rules gives none");
+
+  await setRules(s, rules);
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Ruled", claude: "fix the bug" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.equal(s.registry.claudeWorker(started.body.id)!.prompt, `/poteto-mode fix the bug${section(rules)}`);
+  assert.equal((started.body as Thread).standingRulesRevision, 1);
+  assert.equal(await revisionOf(s, started.body.id), 1);
+  assert.equal(((await s.call("GET", "/v1/threads")).body as ThreadRow[]).find((r) => r.id === started.body.id)?.standingRulesRevision, 1, "the thread's row has it too");
+  const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Named", claude: "/poteto-mode fix it" });
+  assert.equal(s.registry.claudeWorker(named.body.id)!.prompt, `/poteto-mode fix it${section(rules)}`);
+
+  await setRules(s, "- Rebase first.");
+  assert.equal(s.registry.claudeWorker(started.body.id)!.prompt, `/poteto-mode fix the bug${section(rules)}`, "a started thread keeps what it got");
+  assert.equal(await revisionOf(s, started.body.id), 1);
+  assert.equal(await revisionOf(s, plain.body.id), undefined, "a thread started before the rules gets none later");
+});
+
+test("a Claude prompt that the project's standing rules push past 16384 characters is refused before anything starts", async (t) => {
+  const s = await withImage(t);
+  const long = "r".repeat(8_192);
+  await setRules(s, long);
+  const room = 16_384 - "/poteto-mode ".length - section(long).length;
+  const fits = await s.call("POST", "/v1/threads", { project: "acme", title: "Fits", claude: "b".repeat(room) });
+  assert.equal(fits.status, 201, JSON.stringify(fits.body));
+  assert.equal(s.registry.claudeWorker(fits.body.id)!.prompt.length, 16_384);
+  const over = await s.call("POST", "/v1/threads", { project: "acme", title: "Over", claude: "b".repeat(room + 1) });
+  assert.equal(over.status, 400);
+  assert.match(over.body.error, /Claude prompt including \/poteto-mode and project acme's standing rules exceeds 16384 characters/);
+  assert.equal(s.registry.threads().length, 1, "the refused start made no thread");
+  await setRules(s, null);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Cleared", claude: "b".repeat(room + 1) })).status, 201, "without rules the brief fits");
+});
+
+test("a Nexus agent thread's first message carries the rules it recorded, and a repeat of its start sends that text again after the rules change", async (t) => {
+  const s = await withImage(t);
+  await setRules(s, rules);
+  const body = { project: "acme", title: "Brief", message: "Fix the checkout bug.", requestId: "start:1" };
+  const first = await s.call("POST", "/v1/threads", body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  const id = (first.body as Thread).id;
+  assert.equal((first.body as Thread).standingRulesRevision, 1);
+  assert.deepEqual(s.fake.transcript(id).messages.map((m) => m.content), [`Fix the checkout bug.${section(rules)}`]);
+
+  await setRules(s, "- Rebase first.");
+  const again = await s.call("POST", "/v1/threads", body);
+  assert.equal((again.body as Thread).id, id);
+  assert.deepEqual(s.calls.filter((c) => c[0] === "send").map((c) => c[2]), [`Fix the checkout bug.${section(rules)}`, `Fix the checkout bug.${section(rules)}`], "the repeat sends what the first did");
+  assert.equal(await revisionOf(s, id), 1);
+
+  assert.equal((await s.call("POST", `/v1/threads/${id}/messages`, { text: "Also the cart.", requestId: "msg:1" })).status, 202);
+  assert.equal(s.fake.transcript(id).messages.at(-1)!.content, "Also the cart.", "a later message carries none");
+
+  const next = await s.call("POST", "/v1/threads", { project: "acme", title: "Next", message: "Fix the cart." });
+  assert.equal((next.body as Thread).standingRulesRevision, 2);
+  assert.equal(s.fake.transcript((next.body as Thread).id).messages[0]!.content, `Fix the cart.${section("- Rebase first.")}`);
+
+  const bare = await s.call("POST", "/v1/threads", { project: "acme", title: "No brief" });
+  assert.equal((bare.body as Thread).standingRulesRevision, undefined, "a Nexus agent thread with no first message has no brief to carry them");
+  assert.equal(await revisionOf(s, (bare.body as Thread).id), undefined);
+});
+
+test("a queued thread gets the rules as they are when it starts, not when it was queued", async (t) => {
+  const s = await withQueue(t);
+  const queued = (await s.call("POST", "/v1/threads", { project: "acme", title: "Then", after: [s.first.id], message: "Fix the next bug." })).body as QueuedThread;
+  assert.equal(queued.prompt, "Fix the next bug.");
+  await setRules(s, rules);
+  const started = await s.call("POST", `/v1/threads/${queued.id}/start`);
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  assert.deepEqual(s.calls.at(-1), ["send", queued.id, `Fix the next bug.${section(rules)}`, `queued:${queued.id}`, "followUp"]);
+  assert.equal(await revisionOf(s, queued.id), 1);
+
+  const claude = (await s.call("POST", "/v1/threads", { project: "acme", title: "Later", after: [s.first.id], claude: "Fix it" })).body as QueuedThread;
+  assert.equal((await s.call("POST", `/v1/threads/${claude.id}/start`)).status, 201);
+  assert.equal(s.registry.claudeWorker(claude.id)!.prompt, `/poteto-mode Fix it${section(rules)}`);
+  assert.equal(await revisionOf(s, claude.id), 1);
+});
+
+test("a pipeline item's thread gets the rules with its brief, and a planning thread's first message carries none", async (t) => {
+  const s = await testApi(t, { pipeline: true });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.setCurrentImage(image.id as ImageId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 200);
+  await setRules(s, rules);
+
+  const item = (await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." })).body as PipelineItem;
+  await s.queue!.poll();
+  const thread = ((await s.call("GET", `/v1/items/${item.id}`)).body as PipelineItem).thread as ThreadId | null;
+  assert.ok(thread !== null && s.registry.thread(thread) !== undefined, "the item's thread started");
+  assert.equal(s.fake.transcript(thread).messages[0]!.content, `Build A.${section(rules)}`);
+  assert.equal(await revisionOf(s, thread), 1);
+
+  const plan = await s.call("POST", "/v1/threads", { project: "acme", title: "Plan", planning: true, message: "Plan the wave." });
+  assert.equal(plan.status, 201, JSON.stringify(plan.body));
+  const first = s.fake.transcript(plan.body.id).messages[0]!.content as string;
+  assert.ok(first.endsWith("\n\nPlan the wave."), "the guide, then the person's message as written");
+  assert.ok(!first.includes(rules), "its builders get the rules on their own");
+  assert.equal(await revisionOf(s, plan.body.id), undefined);
+});
+
+test("the review loop's reviewers and check and live-check threads get no standing rules", async (t) => {
+  const s = await withImage(t);
+  await setRules(s, rules);
+  const builder = (await s.call("POST", "/v1/threads", { project: "acme", title: "Builder", message: "Build it." })).body as Thread;
+  observeNode(s, node, { total: 64, committed: 0 }, { nestedVirtualization: true });
+  // The starts the review loop makes, of a Claude reviewer and a Nexus agent one, which the loop sends its request itself.
+  const claudeReviewer = await s.startThread({ project: "acme", title: "Review of #1", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5", raw: true }, reviewerCaller);
+  assert.equal(s.registry.claudeWorker(claudeReviewer.id)!.prompt, "Review PR #1.");
+  const harnessReviewer = await s.startThread({ project: "acme", title: "Review of #1", branch: "main" }, reviewerCaller);
+  const head = "a".repeat(40);
+  const check = await s.startThread(checkGate.request(builder, "main", head), checkCaller);
+  const verify = await s.startThread(verifyGate.request(builder, "main", head), verifyCaller);
+  for (const started of [claudeReviewer, harnessReviewer, check, verify]) {
+    assert.equal(started.standingRulesRevision, undefined, started.title);
+    assert.equal(await revisionOf(s, started.id), undefined, started.title);
+  }
 });

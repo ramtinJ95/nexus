@@ -19,6 +19,7 @@ import type { Thread } from "./thread-store.ts";
 import { checkStart, newThreadId, resourcesOf } from "./threads.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
+import { withStandingRules } from "./standing-rules.ts";
 
 type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
@@ -116,7 +117,7 @@ const statusName = (status: QueuedRecord["status"]) => status === "archived" ? "
 export const refusedRetryMs = 10 * 60_000;
 
 export function threadQueue(options: {
-  registry: QueueRegistry;
+  registry: QueueRegistry & Pick<Registry, "standingRulesOf">;
   startThread: (request: StartRequest, caller: string, id?: ThreadId) => Promise<Thread>;
   /** A human message, the harness's followUp. A repeated request ID answers with the first submission. */
   send: (thread: ThreadId, text: string, requestId: string) => Promise<unknown>;
@@ -140,7 +141,7 @@ export function threadQueue(options: {
     if (record?.status !== "started" || record.firstMessage !== "pending" || record.message === null) return;
     const t = registry.thread(id);
     if (t === undefined || t.status === "archived" || t.status === "deleted") return;
-    await send(id, record.message, `queued:${id}`);
+    await send(id, withStandingRules(record.message, registry.standingRulesOf(id)), `queued:${id}`);
     registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" });
   }
 
@@ -149,7 +150,7 @@ export function threadQueue(options: {
     if (record?.status !== "queued") throw new HttpError(409, `thread ${id} is no longer queued`);
     let t: Thread;
     try {
-      t = await gate.run(() => startThread(record.request, record.startedBy, id));
+      t = await gate.run(() => startThread(record.message === null ? record.request : { ...record.request, message: record.message }, record.startedBy, id));
     } catch (err) {
       const message = (err as Error).message;
       const now = registry.queuedThread(id);
