@@ -49,9 +49,9 @@ export interface ProbeClient {
   wakeDeployer?(): Promise<void>;
   /**
    * POST /v1/pylons/{id}/git: has a snapshot read the pylon's git again, past the probe's reuse of its last read, and
-   * answers once that snapshot is published, with when it was observed: null while nothing observes the node.
+   * answers once that snapshot is published, with when it was observed. It fails when none was published.
    */
-  readGit?(pylonId: PylonId): Promise<string | null>;
+  readGit?(pylonId: PylonId): Promise<string>;
 }
 
 /**

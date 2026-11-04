@@ -38,5 +38,5 @@ export interface ProbeAuthConfig {
 export const peersSchema = z.array(tailnetNodeIdSchema).max(1_000);
 
 /** POST /v1/pylons/{id}/git's answer: when the snapshot that read the pylon's git again was observed, by the probe's clock. */
-export interface GitReadReply { observedAt: string | null }
-export const gitReadReplySchema = z.looseObject({ observedAt: z.iso.datetime().nullable() }) satisfies z.ZodType<GitReadReply>;
+export interface GitReadReply { observedAt: string }
+export const gitReadReplySchema = z.looseObject({ observedAt: z.iso.datetime() }) satisfies z.ZodType<GitReadReply>;

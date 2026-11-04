@@ -2010,6 +2010,12 @@ test("a git read again is answered once a snapshot that read it is published, th
   await assert.rejects(client.readGit!("pylon-gone" as PylonId), { code: "not-running" });
 });
 
+test("a git read again with nothing observing the node fails, rather than answer with an older snapshot", async (t) => {
+  const { client, fake } = await setup(t);
+  fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+  await assert.rejects(client.readGit!(pylonId), /503/);
+});
+
 test("a deployer wake writes the file the deployer's path unit watches, and a probe with none refuses it", async (t) => {
   const dir = await tempDir("nexus-deployer-wake-", t);
   const file = join(dir, "deployer-wake");

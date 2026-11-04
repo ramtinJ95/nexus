@@ -416,12 +416,15 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
    * A full snapshot rather than a pylon event, because a pylon event cannot say that a pylon is gone. Calls while one
    * is read share one more read after it, which runs in the read queue, so it sees each link or unlink queued before it.
    */
+  /** The latest published snapshot's time, and how many have been published. */
   let publishedAt: string | null = null;
+  let published = 0;
   const publisher = singleFlight(async () => {
     if (observers.size === 0) return;
     // Observers that cannot get the new state lose their link, so they reconnect for a fresh snapshot.
     await snapshot().then((observation) => {
       publishedAt = observation.observedAt;
+      published++;
       emit({ type: "snapshot", observation });
     }, (err: Error) => { for (const o of observers) o.drop(err); });
   }, () => shutdown.signal.aborted);
@@ -555,10 +558,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const pylonId = decodeURIComponent(match[1]!) as PylonId;
       const vm = await backend.state(pylonId);
       if (vm !== "running") return send(res, 409, `${pylonId} is ${vm}, not running`);
-      // In the read queue, so no read in flight stores a git read from before the drop.
-      await betweenReads(async () => { delete pylons.get(pylonId)?.git; });
+      // In the read queue, so no read in flight stores a git read from before the drop, and every snapshot published
+      // after it reads git again.
+      const before = await betweenReads(async () => { delete pylons.get(pylonId)?.git; return published; });
       await publishSnapshot();
-      return send(res, 200, JSON.stringify({ observedAt: publishedAt } satisfies GitReadReply), "application/json");
+      if (published === before) return send(res, 503, "no snapshot was published, as nothing observes this node or the read failed");
+      return send(res, 200, JSON.stringify({ observedAt: publishedAt! } satisfies GitReadReply), "application/json");
     },
   }, {
     path: /^\/v1\/manifests\/([^/]+)$/,

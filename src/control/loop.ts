@@ -241,7 +241,7 @@ export function startLoop(options: LoopOptions): Loop {
     const link = links.get(node);
     if (link === undefined) return;
     const at = await link.probe.readGit?.(pylonId);
-    if (at != null) await observed(link, at, waitMs);
+    if (at !== undefined) await observed(link, at, waitMs);
   }
 
   /** Settles once the link has ingested the snapshot its probe observed at `since`, or a later one. */
