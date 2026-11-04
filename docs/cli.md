@@ -192,7 +192,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `agentTurnRunning` | `boolean` | A turn of the Nexus agent runs |
 | `sessionTurnRunning` | optional `true` | A turn of a session in the pylon runs, as its hooks report, such as the Claude worker's. A Claude worker thread works while this is present |
 | `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning` |
-| `awaitedUntil` | optional `number` | Until when a review keeps the builder's pylon up while its reviewer reads a round, so findings find it awake. Present only in that phase, while the reviewer's model has not failed, and for 30 minutes after the request reached the reviewer at most |
+| `awaitedUntil` | optional `number` | Until when a review keeps the builder's pylon up while its reviewer reads a round and until the findings are delivered, so they find it awake. Present only then, while the reviewer's model has not failed, and for 30 minutes after the request reached the reviewer at most |
 | `sessionWaiting` | optional `true` | A session in the pylon waits for input, such as a permission prompt |
 | `sessionWaitingMessage` | optional `string` | What the latest waiting session's report said, such as "A background command was still running after 2 hours" |
 | `working` | `boolean` | A turn of the Nexus agent or of a session in the pylon runs: `agentTurnRunning` or `sessionTurnRunning`. `threads` prints `working` for it, and `show` `agent working` |

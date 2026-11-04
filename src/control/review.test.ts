@@ -300,7 +300,13 @@ test("a builder's pylon stays up while its reviewer reads a round, so its findin
   f.tick(idlePolicy.agentIdleMs + 3 * 60_000);
   assert.equal(builder(), "running", "a reviewer that reads for 8 minutes finds the builder up");
   f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
-  await loop.poll();
+  const read = f.holdPolls(0);
+  const pass = loop.poll();
+  await read.entered;
+  assert.equal(f.review().outbox?.to, "builder");
+  assert.equal(builder(), "running", "findings that wait on GitHub before they go still find the builder up");
+  read.release();
+  await pass;
   assert.equal(f.sent.at(-1)!.to, f.builder);
   assert.equal(f.registry.thread(f.builder)!.awaitedUntil, undefined, "the findings went, so the review awaits the builder no more");
 

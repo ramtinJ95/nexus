@@ -24,7 +24,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     participant: {
       needsPerson: (thread: ThreadId) => waitsOnPerson(recordOf<Review>("reviews", "builder", thread)),
       awaitedUntil: (threads: readonly ThreadId[]) => new Map(sql(`SELECT record FROM reviews WHERE builder IN (SELECT value FROM json_each(?))
-        AND json_extract(record, '$.phase.kind') = 'reviewing'`).all(JSON.stringify(threads)).map((r) => storedReview(json<Review>(r.record)))
+        AND json_extract(record, '$.phase.kind') IN ('reviewing', 'fixing')`).all(JSON.stringify(threads)).map((r) => storedReview(json<Review>(r.record)))
         .flatMap((r) => { const until = builderAwaitedUntil(r); return until === null ? [] : [[r.builder, until] as const]; })),
     },
     review: storedReviewOf,
