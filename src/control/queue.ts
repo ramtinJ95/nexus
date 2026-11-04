@@ -161,7 +161,8 @@ export function threadQueue(options: {
       throw err;
     }
     await deliver(id).catch((err: unknown) => log(`queued thread ${id} started, but its first message was not sent yet: ${(err as Error).message}`));
-    return t;
+    const revision = registry.thread(id)?.standingRulesRevision;
+    return revision === undefined ? t : { ...t, standingRulesRevision: revision };
   }
 
   /** A start in flight is shared, so two passes and a start-queued start the thread once. */

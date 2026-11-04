@@ -168,6 +168,7 @@ test("a queued thread gets the rules as they are when it starts, not when it was
   const started = await s.call("POST", `/v1/threads/${queued.id}/start`);
   assert.equal(started.status, 201, JSON.stringify(started.body));
   assert.deepEqual(s.calls.at(-1), ["send", queued.id, `Fix the next bug.${section(rules)}`, `queued:${queued.id}`, "followUp"]);
+  assert.equal((started.body as Thread).standingRulesRevision, 1, "the start answers the revision its delivered message carried");
   assert.equal(await revisionOf(s, queued.id), 1);
 
   const claude = (await s.call("POST", "/v1/threads", { project: "acme", title: "Later", after: [s.first.id], claude: "Fix it" })).body as QueuedThread;
