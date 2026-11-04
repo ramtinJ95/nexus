@@ -66,6 +66,11 @@ export interface LoopOptions {
 export interface Loop {
   /** Ticks every pylon on the node. Resolves once a pass that began after this call has finished. */
   wake(node: NodeName): Promise<void>;
+  /**
+   * Has the node's probe read the pylon's git again, past its reuse of the last read, and settles once the registry
+   * holds that read, or after `waitMs` without it.
+   */
+  readGit(node: NodeName, pylonId: PylonId, waitMs?: number): Promise<void>;
   /** Follows one more node's probe, such as a node that joined. A node already followed keeps its probe. */
   follow(probe: ProbeClient): void;
   close(): Promise<void>;
@@ -80,6 +85,7 @@ interface Link {
   snapshots: number;
   passes: SingleFlight;
   offline: NodeJS.Timeout | null;
+  waiters: Set<{ since: string; done: () => void }>;
 }
 
 export function startLoop(options: LoopOptions): Loop {
@@ -99,7 +105,7 @@ export function startLoop(options: LoopOptions): Loop {
     const stored = registry.node(probe.node);
     if (stored === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
     if (links.has(probe.node) || shutdown.signal.aborted) return;
-    const link: Link = { probe, up: false, last: stored.observation, snapshots: 0, passes: singleFlight(() => pass(probe.node, link), () => shutdown.signal.aborted), offline: null };
+    const link: Link = { probe, up: false, last: stored.observation, snapshots: 0, passes: singleFlight(() => pass(probe.node, link), () => shutdown.signal.aborted), offline: null, waiters: new Set() };
     links.set(probe.node, link);
     linkDown(probe.node, link);
     followers.push(follow(probe.node, link));
@@ -231,6 +237,23 @@ export function startLoop(options: LoopOptions): Loop {
     return links.get(node)?.passes.rerun() ?? Promise.resolve();
   }
 
+  async function readGit(node: NodeName, pylonId: PylonId, waitMs = 10_000): Promise<void> {
+    const link = links.get(node);
+    if (link === undefined) return;
+    const at = await link.probe.readGit?.(pylonId);
+    if (at != null) await observed(link, at, waitMs);
+  }
+
+  /** Settles once the link has ingested the snapshot its probe observed at `since`, or a later one. */
+  function observed(link: Link, since: string, waitMs: number): Promise<void> {
+    if (shutdown.signal.aborted || (link.last !== null && since <= link.last.observedAt)) return Promise.resolve();
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const waiter = { since, done: () => { clearTimeout(giveUp); link.waiters.delete(waiter); resolve(); } };
+    const giveUp = setTimeout(waiter.done, waitMs).unref();
+    link.waiters.add(waiter);
+    return promise;
+  }
+
   function linkDown(node: NodeName, link: Link) {
     link.up = false;
     link.offline ??= setTimeout(() => { link.offline = null; registry.markOffline(node); }, offlineAfterMs);
@@ -274,6 +297,7 @@ export function startLoop(options: LoopOptions): Loop {
           if (event.type === "snapshot") {
             link.snapshots++;
             linkUp(link);
+            for (const w of link.waiters) if (w.since <= event.observation.observedAt) w.done();
           }
           void wake(node);
         }
@@ -293,11 +317,15 @@ export function startLoop(options: LoopOptions): Loop {
 
   return {
     wake,
+    readGit,
     follow: followProbe,
     async close() {
       shutdown.abort();
       clearInterval(timer);
-      for (const link of links.values()) if (link.offline !== null) clearTimeout(link.offline);
+      for (const link of links.values()) {
+        if (link.offline !== null) clearTimeout(link.offline);
+        for (const w of link.waiters) w.done();
+      }
       await Promise.all([...followers, ...[...links.values()].map((link) => link.passes.settled())]);
     },
   };

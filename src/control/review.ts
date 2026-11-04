@@ -20,7 +20,7 @@
 import { randomBytes } from "node:crypto";
 import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "../agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
-import { singleFlight } from "../single-flight.ts";
+import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../secret-grants.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
@@ -186,8 +186,9 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
 export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
   const { registry, github, inbox, agentState, checks, live, release, log } = deps;
   const now = deps.now ?? Date.now;
-  const passes = singleFlight(pass);
-  const poll = passes.join;
+  let closed = false;
+  const passes = scopedFlight(pass, () => closed);
+  const poll = passes.poll;
 
   /** Whether the agent replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
   const answeredSince = (state: AgentState) => state.ended !== null || state.replied;
@@ -695,9 +696,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** Reviewers begin() has started and not yet saved a review for. */
   let beginning = 0;
 
-  async function pass() {
+  /** A pass over the reviews whose builder, reviewer or gate thread `only` names, or over every review and the sweeps. */
+  async function pass(only: ReadonlySet<ThreadId> | null) {
     reads = new Map();
     const reviews = registry.reviewsToStep(settledKinds);
+    if (only !== null) return await stepEach(reviews.filter((r) => [r.builder, r.reviewer, gateThread(r.phase)?.thread].some((id) => id !== undefined && only.has(id))));
     // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
     // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.
     const held = new Set(reviews.flatMap((r) => gateThread(r.phase)?.thread ?? []));
@@ -714,6 +717,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         deps.wake(t);
       }
     }
+    await stepEach(reviews);
+  }
+
+  async function stepEach(reviews: readonly Review[]) {
     for (const stored of reviews) {
       let r = stored;
       try {
@@ -773,8 +780,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   return {
     poll,
+    /** Steps the reviews thread `id` takes part in now rather than at the next poll, as after its turn or its check ended. */
+    wake: passes.wake,
     deploys,
-    close: passes.settled,
+    async close() {
+      closed = true;
+      await passes.settled();
+    },
 
     /** Starts a review of the builder's open PR: the reviewer thread, its first request, and the record. */
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {

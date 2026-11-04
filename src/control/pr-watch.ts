@@ -5,7 +5,7 @@ import type { Registry } from "./registry.ts";
 import type { StoredThread, Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 import type { PrWatchState } from "./pr-watch-store.ts";
-import { singleFlight } from "../single-flight.ts";
+import { scopedFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "../agent-protocol.ts";
 import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
 
@@ -27,9 +27,13 @@ const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.s
 
 /**
  * `linked` hears of each PR the watch links that is open at its first read, before the link is saved, so a failed
- * call is made again on the next pass.
+ * call is made again on the next pass. `fresh` has the thread's pushed branches read again, past the probe's reuse of
+ * its git read, and recorded, before a turn end's pass reads them.
  */
-export function prWatcher(options: { registry: PrWatchRegistry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox; linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined }) {
+export function prWatcher(options: {
+  registry: PrWatchRegistry; github: Pick<GitHub, "find" | "poll"> | null; inbox: Inbox;
+  linked?: ((t: Thread, pr: PullRequest) => Promise<void>) | undefined; fresh?: ((t: Thread) => Promise<void>) | undefined;
+}) {
   const { registry, github, inbox } = options;
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);
@@ -40,9 +44,9 @@ export function prWatcher(options: { registry: PrWatchRegistry; github: Pick<Git
   }
   let started = 0;
   let finished = 0;
-  async function tick() {
+  async function tick(only: ReadonlySet<ThreadId> | null) {
     if (github === null) return;
-    const pass = ++started;
+    const pass = only === null ? ++started : null;
     const finds = new Map<string, Promise<number[]>>();
     const polls = new Map<string, Promise<PrSnapshot>>();
     const poll = (repo: string, number: number) => {
@@ -95,6 +99,7 @@ export function prWatcher(options: { registry: PrWatchRegistry; github: Pick<Git
     const watched = registry.storedThreads({ status: ["active", "idle"] });
     const waitedOn = [...awaited].filter((id) => !watched.some((t) => t.id === id)).flatMap((id) => registry.thread(id) ?? []);
     for (const t of [...watched, ...waitedOn]) {
+      if (only !== null && !only.has(t.id)) continue;
       // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
       if (registry.isReviewer(t.id)) continue;
       // Before the state is read, so the watch's own save keeps what it records.
@@ -157,10 +162,31 @@ export function prWatcher(options: { registry: PrWatchRegistry; github: Pick<Git
         failed(t.id, "PR watch could not read GitHub or deliver its message; it will retry.");
       }
     }
-    finished = pass;
+    if (pass !== null) finished = pass;
   }
-  const ticks = singleFlight(tick);
-  /** The number of the latest pass to start, and of the latest to finish. Passes run one at a time, in order. */
+  let closed = false;
+  const ticks = scopedFlight(tick, () => closed);
+  /**
+   * The number of the latest pass over every thread to start, and of the latest to finish. Passes run one at a time, in
+   * order.
+   */
   const passes = () => ({ started, finished });
-  return { close: ticks.settled, poll: ticks.join, passes };
+  const ending = new Set<Promise<void>>();
+  /** Reads thread `id`'s pull requests now rather than at the next poll, as after its turn ended. */
+  function turnEnded(id: ThreadId): Promise<void> {
+    const t = registry.thread(id);
+    if (closed || github === null || !active(t) || registry.isReviewer(id)) return Promise.resolve();
+    // The poll still reads branches a failed read missed.
+    const run = (options.fresh?.(t!) ?? Promise.resolve()).catch(() => undefined).then(() => ticks.wake(id));
+    ending.add(run);
+    const done = () => { ending.delete(run); };
+    run.then(done, done);
+    return run;
+  }
+  async function close() {
+    closed = true;
+    await Promise.allSettled(ending);
+    await ticks.settled();
+  }
+  return { close, poll: ticks.poll, passes, turnEnded };
 }

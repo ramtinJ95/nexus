@@ -2311,3 +2311,37 @@ for (const phase of ["booting", "stopping"] as const) test(`retry recovers a con
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);
   assert.equal((fake.submitted[1] as Extract<Job, { kind: "pause" }>).retry, true);
 });
+
+test("a git read again settles once the registry holds the snapshot that read it, not an older one", async (t) => {
+  const registry = seedRegistry(openRegistry(":memory:"), { nodes: [node] });
+  t.after(() => registry.close());
+  const queued: ProbeEvent[] = [];
+  let push: (() => void) | null = null;
+  const send = (event: ProbeEvent) => { queued.push(event); push?.(); };
+  const asked: PylonId[] = [];
+  const probe = {
+    node,
+    async *observe(signal: AbortSignal) {
+      while (!signal.aborted) {
+        while (queued.length > 0) yield queued.shift()!;
+        await new Promise<void>((resolve) => { push = resolve; signal.addEventListener("abort", () => resolve(), { once: true }); });
+      }
+    },
+    async readGit(pylonId: PylonId) {
+      asked.push(pylonId);
+      return "2026-11-04T10:00:01.000Z";
+    },
+  } as unknown as ProbeClient;
+  const loop = startLoop({ registry, probes: [probe], ingest: realIngest, previewPorts, intervalMs: 60_000, log: assert.fail });
+  t.after(() => loop.close());
+  send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:00.000Z" }) });
+  await until("the first snapshot is ingested", () => registry.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.000Z");
+  const read = watch(loop.readGit(node, "pylon-th-1" as PylonId));
+  send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:00.500Z" }) });
+  await until("the older snapshot is ingested", () => registry.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.500Z");
+  assert.equal(await read(), false, "an older snapshot holds the old git read");
+  send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:01.000Z" }) });
+  await until("the read settles", read);
+  assert.equal(registry.node(node)?.observation?.observedAt, "2026-11-04T10:00:01.000Z");
+  assert.deepEqual(asked, ["pylon-th-1"]);
+});
