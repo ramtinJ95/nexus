@@ -6,7 +6,7 @@ import { runningCommit } from "../deploy/health.ts";
  * memory only. Everything durable is the backend's, so a restart loses nothing a later job cannot rebuild.
  */
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -23,7 +23,7 @@ import { parsePylonCommand, type CommandResult, type PylonCommand } from "../pro
 import { notAnswering, parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropRequest } from "../protocol/cleanup.ts";
-import { peersSchema, probePort, routeAuth, type ProbeAuthConfig } from "../protocol/routes.ts";
+import { peersSchema, probePort, routeAuth, type GitReadReply, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
 import { onePerClaudeSession } from "../session-wake.ts";
 import type { Whois } from "../tailscale.ts";
@@ -68,6 +68,8 @@ export interface ProbeOptions {
   listeningPollMs?: number;
   /** The node's shutdown record, in the probe's state directory (see shutdown.ts). Omitted: it lives in memory only. */
   shutdownFile?: string;
+  /** The file whose change starts the node's deployer, through deploy/nexus-deployer.path. Omitted: a wake is refused. */
+  deployerWakeFile?: string;
   /** The paths Nexus writes to besides the backend's storage, whose filesystems the node reports. */
   watched?: readonly string[];
 }
@@ -414,10 +416,14 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
    * A full snapshot rather than a pylon event, because a pylon event cannot say that a pylon is gone. Calls while one
    * is read share one more read after it, which runs in the read queue, so it sees each link or unlink queued before it.
    */
+  let publishedAt: string | null = null;
   const publisher = singleFlight(async () => {
     if (observers.size === 0) return;
     // Observers that cannot get the new state lose their link, so they reconnect for a fresh snapshot.
-    await snapshot().then((observation) => emit({ type: "snapshot", observation }), (err: Error) => { for (const o of observers) o.drop(err); });
+    await snapshot().then((observation) => {
+      publishedAt = observation.observedAt;
+      emit({ type: "snapshot", observation });
+    }, (err: Error) => { for (const o of observers) o.drop(err); });
   }, () => shutdown.signal.aborted);
   const publishSnapshot = (): Promise<void> => publisher.rerun();
 
@@ -544,6 +550,17 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       return send(res, 200, JSON.stringify(result), "application/json");
     },
   }, {
+    path: /^\/v1\/pylons\/([^/]+)\/git$/,
+    async POST(_req, res, match) {
+      const pylonId = decodeURIComponent(match[1]!) as PylonId;
+      const vm = await backend.state(pylonId);
+      if (vm !== "running") return send(res, 409, `${pylonId} is ${vm}, not running`);
+      // In the read queue, so no read in flight stores a git read from before the drop.
+      await betweenReads(async () => { delete pylons.get(pylonId)?.git; });
+      await publishSnapshot();
+      return send(res, 200, JSON.stringify({ observedAt: publishedAt } satisfies GitReadReply), "application/json");
+    },
+  }, {
     path: /^\/v1\/manifests\/([^/]+)$/,
     async GET(_req, res, match) {
       const id = decodeURIComponent(match[1]!);
@@ -583,6 +600,17 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       }
       if (next.join() !== peers.join()) log(`peers: ${next.join(", ") || "none"}, from the control plane`);
       peers = next;
+      return void res.writeHead(204).end();
+    },
+  }, {
+    path: /^\/v1\/deployer\/wake$/, notAllowed: "",
+    async POST(_req, res) {
+      if (options.deployerWakeFile === undefined) return send(res, 404, "this probe wakes no deployer");
+      try {
+        await writeFile(options.deployerWakeFile, `${new Date().toISOString()}\n`);
+      } catch (err) {
+        return send(res, 503, `the deployer's wake file could not be written: ${(err as Error).message}`);
+      }
       return void res.writeHead(204).end();
     },
   }, {

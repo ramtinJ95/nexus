@@ -14,7 +14,7 @@ import { nodeSecrets, parseProbeConfig, parseSecretsEnv, probeAuth } from "./con
 import { readControlPlane } from "../deploy/control-plane.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
-import type { DeclaredOutput, GitFacts, ProbeEvent, ServiceFact } from "../protocol/observations.ts";
+import type { DeclaredOutput, GitFacts, NodeObservation, ProbeEvent, ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
@@ -33,7 +33,7 @@ import { sessionsFile } from "../sessions.ts";
 import { gitPollMs } from "../git-facts.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
-import { until } from "../test-kit.ts";
+import { tempDir, until } from "../test-kit.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;
@@ -1979,6 +1979,46 @@ test("a branch pushed just after a git read reaches the snapshots only once that
   assert.deepEqual(await branches(), [], "a snapshot reuses the read from before the push");
   now += 1;
   assert.deepEqual(await branches(), ["origin/feat/x"]);
+});
+
+test("a git read again is answered once a snapshot that read it is published, though the last read is younger than gitPollMs", async (t) => {
+  const now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const before: GitFacts = { head: "a".repeat(40), branch: "feat/x", dirty: false, branches: [{ name: "feat/x", head: "a".repeat(40), pushedAs: null }] };
+  let facts = before;
+  const guest = fakeGuest((argv, herdr) => {
+    if (argv[0] === "python3" && argv[2]?.includes("for-each-ref")) return { exitCode: 0, output: JSON.stringify(facts) };
+    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
+    if (argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
+    return { exitCode: 1, output: "" };
+  });
+  const { client, fake } = await setup(t, {}, guest);
+  fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
+  const events = client.observe(AbortSignal.timeout(10_000))[Symbol.asyncIterator]();
+  const snapshot = async () => {
+    for (let next = await events.next(); !next.done; next = await events.next()) if (next.value.type === "snapshot") return next.value.observation;
+    return assert.fail("missing snapshot");
+  };
+  const pushed = (o: NodeObservation) => o.pylons.flatMap((p) => p.phase === "running" ? p.git?.branches.flatMap((b) => b.pushedAs ?? []) ?? [] : []);
+  assert.deepEqual(pushed(await snapshot()), []);
+  facts = { ...before, branches: [{ ...before.branches[0]!, pushedAs: "origin/feat/x" }] };
+  const at = await client.readGit!(pylonId);
+  let next = await snapshot();
+  while (next.observedAt !== at) next = await snapshot();
+  assert.deepEqual(pushed(next), ["origin/feat/x"]);
+  await assert.rejects(client.readGit!("pylon-gone" as PylonId), { code: "not-running" });
+});
+
+test("a deployer wake writes the file the deployer's path unit watches, and a probe with none refuses it", async (t) => {
+  const dir = await tempDir("nexus-deployer-wake-", t);
+  const file = join(dir, "deployer-wake");
+  const { client } = await setup(t, { deployerWakeFile: file });
+  await client.wakeDeployer!();
+  const first = await readFile(file, "utf8");
+  assert.ok(!Number.isNaN(Date.parse(first.trim())), "the file holds the time of the wake");
+  const { client: without } = await setup(t);
+  await assert.rejects(without.wakeDeployer!(), /404/);
 });
 
 test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind later snapshots", { timeout: 60_000 }, async (t) => {
