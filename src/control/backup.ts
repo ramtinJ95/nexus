@@ -25,7 +25,7 @@ export const kept = 7;
 const manifestFile = "manifest.json";
 const backupName = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/;
 /** Restore refuses while any of these runs. The deployer can restart the control plane, and a backup can prune the one restored. */
-const stoppedUnits = ["nexus-control.service", "nexus-deployer.service", "nexus-deployer.timer", "nexus-backup.service", "nexus-backup.timer"] as const;
+const stoppedUnits = ["nexus-control.service", "nexus-deployer.service", "nexus-deployer.timer", "nexus-deployer.path", "nexus-backup.service", "nexus-backup.timer"] as const;
 
 type Kind = "sqlite" | "file";
 /** One thing a backup copies: `name` is its path inside the backup, `path` where it lives. */
@@ -294,7 +294,7 @@ async function host(args: string[]) {
     } else {
       const manifest = await restore({ root: backupRoot, name: argument!, unitState: systemctlState });
       for (const entry of manifest.entries) console.log(`restored ${entry.path}`);
-      console.log("Start the control plane with sudo systemctl start nexus-control.service, then sudo systemctl start nexus-deployer.timer nexus-backup.timer");
+      console.log("Start the control plane with sudo systemctl start nexus-control.service, then sudo systemctl start nexus-deployer.timer nexus-deployer.path nexus-backup.timer");
     }
   } catch (err) {
     console.error(`backup: ${(err as Error).message}`);

@@ -29,4 +29,5 @@ chown root:root /etc/nexus/deployer.json
 chmod 0600 /etc/nexus/deployer.json
 install_unit "$repo/deploy/nexus-deployer.service" nexus-deployer.service
 install_unit "$repo/deploy/nexus-deployer.timer" nexus-deployer.timer
-systemctl start nexus-deployer.timer
+install_unit "$repo/deploy/nexus-deployer.path" nexus-deployer.path
+systemctl start nexus-deployer.timer nexus-deployer.path

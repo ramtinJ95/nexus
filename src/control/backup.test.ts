@@ -173,6 +173,13 @@ test("restore refuses while the control plane or the deployer runs, and refuses 
   assert.ok(m.registry.project("before" as ProjectId), "nothing was restored");
 });
 
+test("restore refuses while the path unit that starts the deployer on a wake is active", async (t) => {
+  const m = await controlPlane(t);
+  await m.run(m.day(1));
+  const unitState = async (u: string) => u === "nexus-deployer.path" ? "active" : "inactive";
+  await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState }), /nexus-deployer\.path is active/);
+});
+
 test("a restore that cannot put back every file changes none of them", async (t) => {
   const m = await controlPlane(t);
   await m.run(m.day(1));
