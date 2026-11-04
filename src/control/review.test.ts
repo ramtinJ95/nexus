@@ -1056,6 +1056,7 @@ test("a path that holds for what its patch changes holds for a change to what it
   const review = testReview({ builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 199, url: "", title: "", branch: "f" }, models: { builder: "a", reviewer: "b" }, maxRounds: 3, phase: { kind: "approved" },
     rounds: [{ head: head1, verdict: { token: "x", verdict: "approve", findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "" }, live: { kind: "absent" }, answers: null }] });
   const holds = (path: string, ...lines: string[]) => headHolds({ review, nexus: true, files: [{ path, previous: null, patch: ["@@ -1,3 +1,3 @@ export function f(", ...lines].join("\n") }] }).map((h) => h.code);
+  const patched = (path: string, patch: string, previous: string | null = null) => headHolds({ review, nexus: true, files: [{ path, previous, patch }] }).map((h) => h.code);
   // Each line is from a merged pull request the paths held for nothing reserved: #435, #441, #430, #412, #408, #440, #432.
   assert.deepEqual(holds("deploy/README.md", "+### Debug a pylon's guest commands"), []);
   assert.deepEqual(holds("src/pylon-vm/client.ts", `-for (const key of ["PATH", "HOME"])`, `+for (const key of ["PATH", "HOME", "GONDOLIN_DEBUG"])`), []);
@@ -1065,11 +1066,13 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(holds("src/control/threads.ts", `+type ThreadsRegistry = Pick<Registry, "latestHealthSample" | "node">;`), []);
   assert.deepEqual(holds("src/control/project.ts", "-export const defaultProjectResources = { cpus: 2, memoryGiB: 6 };", "+export const defaultProjectResources = { cpus: 2, memoryGiB: 4 };"), []);
   assert.deepEqual(holds("src/deploy/plan.ts", `-return { kind: "stop", reason: "agent turn still running at drain timeout" };`), []);
-  assert.deepEqual(holds("src/pylon-vm/runtime.ts", "+const guest = this.vm ? notAnswering(this.vm) : undefined;"), []);
+  assert.deepEqual(holds("src/pylon-vm/guest.ts", "+const unansweredLimit = 3;"), []);
 
   assert.deepEqual(holds("deploy/install.sh", "+echo ok"), ["reserved-path:secrets"], "a deploy script holds whatever it changes");
   assert.deepEqual(holds("src/control/threads.ts", "+allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfilesRepo]),"), ["reserved-path:egress"]);
   assert.deepEqual(holds("src/control/project.ts", `+  claude: ["api.anthropic.com", "claude.ai"],`), ["reserved-path:egress"], "a host the allowlist gains");
+  assert.deepEqual(holds("src/pylon-vm/client.ts", `+await saveJson(join(dir, "status.json"), { state: "starting" });`), [], "a quoted file name is no host");
+  assert.deepEqual(patched("src/pylon-vm/client.ts", "@@ -1,3 +1,3 @@\n \t\t// a pylon's disk would take host memory\n-\t\tconst a = 1;\n+\t\tconst a = 2;\n \t * the allowlist's hosts"), [], "a comment beside the change changes nothing");
   assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function pylonLive(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), [], "the hunk's header names no host");
   assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function liveHosts(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), ["reserved-path:egress"], "the hunk's header says the change is in the hosts");
   assert.deepEqual(holds("src/pylon-vm/network.ts", "+export const x = 1;"), ["reserved-path:egress"]);
@@ -1083,6 +1086,12 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(holds("src/control/api.ts", "-    if (req.method !== \"GET\") requireJson(req);"), ["reserved-path:auth"], "the API's admission of every request");
   assert.deepEqual(holds("src/pylon-vm/runtime.ts", "+\t\t\thttpHooks: {},"), ["reserved-path:egress"], "a hook that replaces the allowlist's");
   assert.deepEqual(holds("src/probe/redact.ts", "-const minValueLength = 8;", "+const minValueLength = 32;"), ["reserved-path:secrets"], "what keeps granted secrets out of the probe's logs");
+  assert.deepEqual(patched("src/control/api/thread-routes.ts", `@@ -40,4 +40,5 @@ export function threadRoutes(\n     const t = thread(m[1]!);\n+    if (r.query.has("debug")) return ok(dump(t));\n     personOnly(r.caller, "read a thread");`), ["reserved-path:auth"], "a line added beside a guard it gets around, which only the context names");
+  assert.deepEqual(patched("src/probe/server.ts", `@@ -640,3 +640,4 @@ export async function startProbe(options: ProbeOptions) {\n+    if (url.searchParams.has("debug")) return backend.guest(id).stream(["sh"]);\n     if (!await authorized(req, "/v1/pylons")) return send(res, 403, "caller is not the tailnet node this route allows");`), ["reserved-path:auth"], "an unauthenticated shell into a pylon, above the probe's guard");
+  assert.deepEqual(patched("src/probe/server.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;"), ["reserved-path:auth"], "the probe's request guard holds whatever it changes");
+  assert.deepEqual(patched("src/pylon-vm/runtime.ts", "@@ -190,3 +190,4 @@ export class SandboxRuntime {\n \t\t\t...network,\n+\t\t\tvfs: { mounts: { \"/root/.config\": new RealFSProvider(homedir()) } },"), ["reserved-path:egress"], "host files mounted into the guest, where the VM is built");
+  assert.deepEqual(patched("src/pylon-vm/relay.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "src/pylon-vm/relay.test.ts"), ["reserved-path:egress", "reserved-path:auth"], "a test renamed into code that ships brings a body its patch does not show, so it holds as a file with no patch does");
+  assert.deepEqual(patched("src/pylon-vm/relay.test.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "src/pylon-vm/old.test.ts"), [], "a test renamed to a test is still a test");
   assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/pylon-vm/client.ts", previous: null, patch: "" }, { path: "src/control/api/sse.ts", previous: null, patch: "" }] }).map((h) => h.code),
     ["reserved-path:egress", "reserved-path:auth"], "a file GitHub shows no patch for may change anything");
 });

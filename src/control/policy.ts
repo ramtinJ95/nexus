@@ -34,16 +34,19 @@ export interface HeadFacts {
 const names = (path: string, pattern: RegExp) => !path.startsWith("docs/") && pattern.test(path);
 
 /**
- * Whether `patch` changes a line that names `words`, or a line in a hunk whose header, the code around it, names them.
- * GitHub shows no patch for a file too large to diff, which may change anything.
+ * Whether a hunk of `patch` names `words` in any line of code it shows, its context and header included, since a line
+ * added beside a guard can get around it without naming it. Comments change nothing. GitHub shows no patch for a file
+ * too large to diff, which may change anything.
  */
-const changes = (patch: string, words: RegExp) => patch === "" || patch.split("\n").some((line) => /^[-+@]/.test(line) && words.test(line));
+const changes = (patch: string, words: RegExp) => patch === "" || patch.split("\n").some((line) => !/^[-+ ]\s*(\/\/|\/\*|\*(\s|\/|$))/.test(line) && words.test(line));
 
+/** A test or a note, which does not ship. */
+const unshipped = /\.test\.ts$|\.md$/;
 /** Code that ships from a folder, as a test or a note there does not. */
-const shipsFrom = (path: string, ...folders: string[]) => folders.some((f) => path.startsWith(f)) && !/\.test\.ts$|\.md$/.test(path);
+const shipsFrom = (path: string, ...folders: string[]) => folders.some((f) => path.startsWith(f)) && !unshipped.test(path);
 
-/** Words a change to the allowlist, its hosts or the guest's network names, and a quoted host name, such as an entry in loginHosts. */
-const egressWords = /host|allow|egress|network|\bnet\b|dns|proxy|firewall|tls|\bip|socks|ssh|secret|grant|login|bridge|hook|intercept|portal|publicUrl|\bport|["'`][a-z0-9.-]+\.[a-z]{2,}["'`]/i;
+/** Words a change to the allowlist, its hosts or the guest's network names, and a quoted host name, such as an entry in loginHosts, but not a file's. */
+const egressWords = /host|allow|egress|network|\bnet\b|dns|proxy|firewall|tls|\bip|socks|ssh|secret|grant|login|bridge|hook|intercept|portal|publicUrl|\bport|["'`][a-z0-9.-]+\.(?!(json|[cm]?[jt]s|md|log|sock|sh|txt|ya?ml|html|css|py|pid|conf|service|timer|env|lock|gz|img|qcow2)["'`])[a-z]{2,}["'`]/i;
 const modeWords = /chmod|chown|umask|0o[0-7]{3}/;
 const authWords = new RegExp(`whois|caller|allowed|person|deployer|mayLand|canDeploy|isPerson|isReporter|admit|access|trust|peer|identity|auth|token|bearer|40[13]|control.?(plane|node)|tailnet|login|join|refuse|secret|redact|\\bopen:|${modeWords.source}`, "i");
 
@@ -54,9 +57,9 @@ const authWords = new RegExp(`whois|caller|allowed|person|deployer|mayLand|canDe
  */
 const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
   { case: "secrets", matches: (p) => names(p, /secret|credential/i) || p === "src/probe/redact.ts" || shipsFrom(p, "deploy/") },
-  { case: "egress", matches: (p, patch) => p === "src/pylon-vm/host-bridge.ts" || names(p, /network|egress|allowlist/i)
+  { case: "egress", matches: (p, patch) => ["src/pylon-vm/host-bridge.ts", "src/pylon-vm/runtime.ts"].includes(p) || names(p, /network|egress|allowlist/i)
     || ((["src/control/project.ts", "src/control/overlay.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || shipsFrom(p, "src/pylon-vm")) && changes(patch, egressWords)) },
-  { case: "auth", matches: (p, patch) => ["src/control/api.ts", "src/control/login.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts", "src/protocol/routes.ts", "src/control/api/access.ts", "src/control/api/kit.ts", "src/control/api/pylon-access.ts", "src/probe/config.ts", "src/deploy/control-plane.ts", "src/deploy/http.ts"].includes(p) || names(p, /auth|login|whois/i)
+  { case: "auth", matches: (p, patch) => ["src/control/api.ts", "src/control/login.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts", "src/protocol/routes.ts", "src/control/api/access.ts", "src/control/api/kit.ts", "src/control/api/pylon-access.ts", "src/probe/config.ts", "src/probe/server.ts", "src/deploy/control-plane.ts", "src/deploy/http.ts"].includes(p) || names(p, /auth|login|whois/i)
     || ((["src/control/main.ts", "src/control/releases.ts"].includes(p) || shipsFrom(p, "src/control/api/", "src/probe/", "src/deploy/")) && changes(patch, authWords))
     || (shipsFrom(p, "src/pylon-vm") && changes(patch, modeWords)) },
   { case: "tailnet", matches: (p) => names(p, /tailnet|tailscale/i) },
@@ -92,8 +95,10 @@ export function headHolds({ review, files, nexus }: HeadFacts): Hold[] {
 function pathHolds(files: readonly ChangedFile[]): Hold[] {
   const hits = new Map<ReservedCase, string[]>();
   for (const file of files) {
+    // A test or note renamed into code that ships brings a body its patch does not show.
+    const patch = file.previous !== null && unshipped.test(file.previous) && !unshipped.test(file.path) ? "" : file.patch;
     for (const path of [file.path, ...file.previous === null ? [] : [file.previous]]) {
-      for (const rule of reservedPaths) if (rule.matches(path, file.patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
+      for (const rule of reservedPaths) if (rule.matches(path, patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
     }
   }
   return [...hits].map(([c, paths]) => hold(`reserved-path:${c}`, `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`));
