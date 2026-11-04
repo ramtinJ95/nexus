@@ -4,9 +4,9 @@
  *
  * Most conditions read what the review loop recorded. The reserved cases come from two places that must both be
  * clear: the reviewer's classification, and, for Nexus's own pull requests, the changed paths. Text in the PR can
- * mislead the reviewer but cannot change its paths, so the path list is drawn wide: a path that might touch a
- * reserved case holds the landing for the person, who can merge it themselves. It is a list, so a reserved change in
- * a file it does not name still rests on the reviewer alone.
+ * mislead the reviewer but cannot change its paths or its patch, so the path rules are drawn wide: a file, or a
+ * patch's words, that might touch a reserved case holds the landing for the person, who can merge it themselves. They
+ * are a list, so a reserved change in a file they do not name still rests on the reviewer alone.
  *
  * The holds that always need the person are theirs to waive, by pressing Land on the dashboard. Every other condition
  * is one no person can waive: it clears only when what failed changes.
@@ -34,13 +34,31 @@ export interface HeadFacts {
 const names = (path: string, pattern: RegExp) => !path.startsWith("docs/") && pattern.test(path);
 
 /**
- * Nexus paths that may touch a reserved case. A registry migration counts as irreversible even when it adds only: a
- * control plane refuses a registry newer than its code, so a rollback past one cannot start.
+ * Whether `patch` changes a line that names `words`, or a line in a hunk whose header, the code around it, names them.
+ * GitHub shows no patch for a file too large to diff, which may change anything.
+ */
+const changes = (patch: string, words: RegExp) => patch === "" || patch.split("\n").some((line) => /^[-+@]/.test(line) && words.test(line));
+
+/** Code that ships from a folder, as a test or a note there does not. */
+const shipsFrom = (path: string, ...folders: string[]) => folders.some((f) => path.startsWith(f)) && !/\.test\.ts$|\.md$/.test(path);
+
+/** Words a change to the allowlist, its hosts or the guest's network names, and a quoted host name, such as an entry in loginHosts. */
+const egressWords = /host|allow|egress|network|\bnet\b|dns|proxy|firewall|tls|\bip|socks|ssh|secret|grant|login|bridge|portal|publicUrl|\bport|["'`][a-z0-9.-]+\.[a-z]{2,}["'`]/i;
+const modeWords = /chmod|chown|umask|0o[0-7]{3}/;
+const authWords = new RegExp(`whois|caller|allowed|person|deployer|mayLand|canDeploy|isPerson|isReporter|admit|access|trust|peer|identity|auth|token|bearer|40[13]|control.?(plane|node)|tailnet|login|join|refuse|\\bopen:|${modeWords.source}`, "i");
+
+/**
+ * Nexus paths that may touch a reserved case, each a file whose every change might, or code whose patch names what the
+ * case guards. A registry migration counts as irreversible even when it adds only: a control plane refuses a registry
+ * newer than its code, so a rollback past one cannot start.
  */
 const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
-  { case: "secrets", matches: (p) => names(p, /secret|credential/i) || p.startsWith("deploy/") },
-  { case: "egress", matches: (p) => ["src/control/project.ts", "src/control/overlay.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || p.startsWith("src/pylon-vm") || names(p, /network|egress|allowlist/i) },
-  { case: "auth", matches: (p) => ["src/control/api.ts", "src/control/main.ts", "src/control/login.ts", "src/control/releases.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts", "src/protocol/routes.ts"].includes(p) || p.startsWith("src/control/api/") || p.startsWith("src/probe/") || p.startsWith("src/deploy/") || names(p, /auth|login|whois/i) },
+  { case: "secrets", matches: (p) => names(p, /secret|credential/i) || shipsFrom(p, "deploy/") },
+  { case: "egress", matches: (p, patch) => p === "src/pylon-vm/host-bridge.ts" || names(p, /network|egress|allowlist/i)
+    || ((["src/control/project.ts", "src/control/overlay.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || shipsFrom(p, "src/pylon-vm")) && changes(patch, egressWords)) },
+  { case: "auth", matches: (p, patch) => ["src/control/login.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts", "src/protocol/routes.ts", "src/control/api/access.ts", "src/control/api/kit.ts", "src/control/api/pylon-access.ts", "src/probe/config.ts", "src/deploy/control-plane.ts", "src/deploy/http.ts"].includes(p) || names(p, /auth|login|whois/i)
+    || ((["src/control/api.ts", "src/control/main.ts", "src/control/releases.ts"].includes(p) || shipsFrom(p, "src/control/api/", "src/probe/", "src/deploy/")) && changes(patch, authWords))
+    || (shipsFrom(p, "src/pylon-vm") && changes(patch, modeWords)) },
   { case: "tailnet", matches: (p) => names(p, /tailnet|tailscale/i) },
   { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/agent-setup.ts" },
   { case: "irreversible", matches: (p, patch) => ["src/control/registry.ts", "src/control/schema.ts"].includes(p) && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },
