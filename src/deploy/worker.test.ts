@@ -134,6 +134,74 @@ test("polling reconciles a desired control release, reports rollback and leaves 
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
 });
 
+test("a failed deploy that migrated the registry stays on its release with a backup taken first, and a rollback past the migration is refused before it switches", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRole } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-migration-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const old = "b".repeat(40);
+  for (const path of ["etc", "units", "deployer", `releases/${old}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${old}/release-commit`), old);
+  await symlink(`releases/${old}`, join(dir, "control-current"));
+  await writeFile(join(dir, "units/nexus-control.service"), "old unit");
+  // Neither release ever answers health with its own commit, so every install fails its health check.
+  const server = createServer((_req, res) => res.end(JSON.stringify({ commit: "c".repeat(40) }))).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await writeFile(join(dir, "etc/control.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
+  let desired = commit;
+  let schema = 3;
+  const reports: any[] = [];
+  const calls: string[] = [];
+  const api = async (path: string, body?: any) => {
+    if (path === "release") return { desired: { commit: desired, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "drain") { if (body.hold) calls.push("drain hold"); return { idle: true }; }
+    if (path === "report") { reports.push(body); return { ok: true }; }
+    assert.fail(path);
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = {
+    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
+    async checkout() {},
+    async run(program: string, args: readonly string[]) {
+      const release = args.find((a) => a.startsWith("NEXUS_COMMIT="))?.slice("NEXUS_COMMIT=".length);
+      if (program === "env" && !args.includes("NEXUS_PREPARE=1")) {
+        await mkdir(join(dir, `releases/${release}`), { recursive: true });
+        await writeFile(join(dir, `releases/${release}/release-commit`), release!);
+      }
+      if (program === "env" && args.includes("NEXUS_PREPARE=1")) calls.push(`activate ${release}`);
+      if (program === "systemctl" && args[0] === "restart") {
+        calls.push(`restart ${await readlink(join(dir, "control-current"))}`);
+        if (await readlink(join(dir, "control-current")) === `releases/${commit}`) schema = 4;
+      }
+      return "";
+    },
+    registry: {
+      version: async () => schema,
+      known: async (release: string) => release === `releases/${commit}` ? 4 : 3,
+      backUp: async () => { calls.push(`backup at ${schema}`); return "2026-11-04T00-00-00Z"; },
+    },
+  };
+
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(calls, ["drain hold", "backup at 3", `activate ${commit}`, `restart releases/${commit}`], "the backup comes after the drain seals and before the link moves");
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "failed"]);
+  assert.match(reports.at(-1).reason, /not rolled back: the registry is at schema version 4, and the previous release, releases\/b{40}, applies only 3 migrations/);
+  assert.match(reports.at(-1).reason, /restore backup 2026-11-04T00-00-00Z, taken just before it,/);
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
+  assert.equal(JSON.parse(await readFile(join(dir, "control-deploy.json"), "utf8")).backup, "2026-11-04T00-00-00Z");
+
+  calls.length = 0;
+  desired = old;
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(calls, ["drain hold"], "a release older than the registry never backs up, switches or restarts");
+  assert.equal(reports.at(-1).state, "failed");
+  assert.equal(reports.at(-1).target, old);
+  assert.match(reports.at(-1).reason, new RegExp(`release ${old} applies 3 registry migrations, but the registry is at schema version 4`));
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
+});
+
 test("a rolled-back install stays quarantined by its journal after its report is cleared, without draining control", async (t) => {
   const { reconcileRole } = await import("./worker.ts");
   const dir = await mkdtemp(join(tmpdir(), "nexus-journal-quarantine-"));

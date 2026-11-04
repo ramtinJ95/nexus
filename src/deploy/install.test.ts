@@ -51,6 +51,36 @@ test("failed health rolls back, keeps journal tail, and leaves the attempt that 
   assert.equal(await installer.recover(), null, "a finished install has nothing to recover");
 });
 
+test("a failed install whose previous release could not start keeps the target running and says why", async (t) => {
+  const { prefix, boundary, installer, calls } = await fixture(t);
+  boundary.healthy = async () => false;
+  boundary.readyData = async (target) => { calls.push(`ready:${target}`); return "2026-11-04T00-00-00Z"; };
+  boundary.rollbackRefused = async (transaction) => `${transaction.previous} cannot open the registry; backup ${transaction.backup}`;
+  const result = await installer.install(commit);
+  assert.equal(result.state, "failed");
+  assert.equal(result.backup, "2026-11-04T00-00-00Z");
+  assert.match(result.reason!, /health check failed\nservice failed to bind\nnot rolled back: releases\/old cannot open the registry; backup 2026-11-04T00-00-00Z$/);
+  assert.equal(await readlink(join(prefix, "control-current")), `releases/${commit}`);
+  assert.deepEqual(calls, [`prepare:${commit}`, `ready:releases/${commit}`, "restart", "journal"], "the previous release never restarts");
+  assert.deepEqual(await installer.observed(), result);
+});
+
+test("an install whose data cannot be readied never switches, and a refusal that cannot be read does not roll back", async (t) => {
+  const { prefix, boundary, installer } = await fixture(t);
+  boundary.readyData = async () => { throw new Error("the backup before the migration did not succeed"); };
+  await assert.rejects(installer.install(commit), /backup before the migration/);
+  assert.equal(await readlink(join(prefix, "control-current")), "releases/old");
+  assert.equal(await installer.observed(), null);
+  boundary.readyData = async () => null;
+  boundary.healthy = async () => false;
+  boundary.rollbackRefused = async () => { throw new Error("registry unreadable"); };
+  const result = await installer.install(commit);
+  assert.equal(result.state, "failed");
+  assert.equal(result.backup, undefined);
+  assert.match(result.reason!, /not rolled back: whether the previous release can start could not be read: Error: registry unreadable$/);
+  assert.equal(await readlink(join(prefix, "control-current")), `releases/${commit}`);
+});
+
 test("restart failure also restores the previous release", async (t) => {
   const { prefix, boundary, installer } = await fixture(t);
   boundary.restart = async () => {
