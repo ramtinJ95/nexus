@@ -154,7 +154,33 @@ The pure planner in `src/deploy/plan.ts` upgrades control before probes. A machi
 
 The supervisor serializes both roles and manual installers with one root-owned lock. Git lives in `/opt/nexus/deployer/repo`, not a person's checkout. Build uses `deploy/release.sh`, producing `/opt/nexus/releases/<full commit>` with the dashboard client bundled into it and the whole image recipe, `images/pylon/`, which `nexus image build` reads from the release the control plane runs. Preparing a release already ran `npm ci` on the node, so the node reaches the npm registry as before. It now also installs the dev dependencies, esbuild's platform package among them, builds the client and prunes them, and any of these failing stops the release before it is published. Then the normal role installer performs its upgrade steps in preparation mode: no config or secret replacement, no independent link switch or restart. Control uses `control-current`; probe uses `current`. An atomic transaction records the old link before switching. The worker saves the service unit too, restarts, and requires both an active unit and the local API's `/v1/health` answering with the candidate process's commit. `healthTimeoutMs` defaults to 60000 and is bounded to 1000–60000; HTTP response bodies and service commands have deadlines.
 
-On failure, or recovery of an interrupted transaction, it restores the old link and service unit, restarts, checks the old service's health, and reports `rolled-back` with the journal tail. Failed rollback is reported as `failed`, not success. The on-disk journal uses atomic rename for process-interruption recovery; it is not a filesystem/power-loss guarantee. Database and harness data are not reverted: releases must keep storage migrations backward-compatible with the previous release. Reverting data would discard accepted user work; an incompatible migration can require manual recovery even after the code link is restored.
+On failure, or recovery of an interrupted transaction, it restores the old link and service unit, restarts, checks the old service's health, and reports `rolled-back` with the journal tail. Failed rollback is reported as `failed`, not success. The on-disk journal uses atomic rename for process-interruption recovery; it is not a filesystem/power-loss guarantee. Database and harness data are not reverted automatically, since that would discard accepted user work. A rollback past a registry migration cannot work at all, so the deployer refuses it, as the next section says.
+
+### A failed deploy past a registry migration
+
+The control plane refuses to open a registry whose schema version, its `user_version`, is newer than the migrations its code applies (`src/control/db.ts`). Every migration raises that version, so a release from before a migration cannot start on the registry after it. Moving the link back after such a deploy fails would only crash-loop the previous release: its control plane exits on start, and systemd starts it again every 5 seconds.
+
+The control role's deployer now compares the registry's version, read through a read-only connection, with the migrations in each release's `src/control/schema.ts`:
+
+- A release that migrates the registry gets a backup first. Once the drain is sealed, so no turn starts or receives a message, the deployer runs `nexus-backup.service`, the [daily backup](#daily-backup)'s unit, and waits for it. It names the backup in the journal, `/opt/nexus/control-deploy.json`, as `backup`. A backup that fails stops the install before the link moves.
+- When that release then fails its health check, the deployer does not move the link back. Control stays on the migrated release, the only one that can open the registry, and the deployer reports `failed` with the journal tail, then `not rolled back:`, the versions, and the backup's name. It releases the drain, so a control plane that answers takes work again. The release is quarantined like any failed one.
+- A release older than the registry, such as the previous release a landing rolls back to, is refused after its build and before the link moves or anything restarts, and reports `failed` with the versions. A landing then says the rollback failed too, with that reason, and hands the fleet to the person.
+
+The person picks one of two ways on. Deploying a fixed commit keeps everything the control plane recorded since the migration, and its own rollback goes to the migrated release, which can start. Restoring the backup goes back to the previous release and discards everything recorded after the backup: threads, messages, reviews, and the conversations in the harness's storage. The drain held from the backup until the failed health check, at most `healthTimeoutMs`, so only what control did in that window, and whatever it took in after the deployer released the drain, is lost. To restore, on the control node, with the backup and the previous release the report names:
+
+```sh
+sudo systemctl stop nexus-deployer.timer nexus-deployer.service nexus-backup.timer nexus-backup.service nexus-control.service
+sudo node /opt/nexus/control-current/src/control/backup.ts restore <backup>
+sudo ln -sfn releases/<previous commit> /opt/nexus/control-current
+sudo cp /opt/nexus/control-deploy.unit /etc/systemd/system/nexus-control.service
+sudo systemctl daemon-reload
+# A refused rollback's report would hold the previous commit back as failed.
+sudo rm -f /opt/nexus/control-deploy-report.json
+sudo systemctl start nexus-control.service nexus-deployer.timer nexus-backup.timer
+nexus deploy <previous commit> --wait
+```
+
+The backup counts among the 7 the daily backup keeps, so it is gone after a week of daily runs. A release from before `src/control/schema.ts`, or a registry the control plane has not made yet, takes no backup and is never refused.
 
 GitHub reports this repository as **public**. HTTPS fetches need no credentials. Child commands receive a minimal environment with no inherited `GH_TOKEN`, root deployer token, npm config or git user config. If the repository becomes private, do not put credentials in its URL or run builds with GH_TOKEN: fetch-only credential support must be added before automatic upgrades will work.
 
@@ -584,7 +610,7 @@ Discovery watches `origin/` branch outputs for projects with a github.com reposi
 
 The review loop (`nexus review`) uses the same token file and is off without it. A review that stops at approval only reads, as the PR watch does. A landing (`nexus review --land` or `nexus land`) also merges, with `PUT /repos/<repo>/pulls/<n>/merge`, which needs write access to the repository's contents and pull requests. A classic token with the `repo` scope, as described above, has it. A fine-grained or otherwise read-only token does not, and a landing then holds for the person with GitHub's answer instead of merging. Widening the token is a credential change, which the [merge policy](../docs/merge-policy.md) reserves for the person: install the wider token in `/etc/nexus/github-token` as above and restart the control plane. Merges then appear on GitHub as the token's owner.
 
-Landing a Nexus pull request deploys it, so the caller who asks for the landing must be in `deployers`, as for `nexus deploy`. The control plane then sets the desired release itself, recorded as requested by `nexus review <id>`, and rolls back to the previous desired release if the fleet does not report healthy within 30 minutes, then waits for the rollback to report healthy before saying so. `.nexus/check` runs in a short-lived check thread of the same project, and Nexus's own runs `npm ci`, so a project whose reviews land needs `registry.npmjs.org` among its allowed hosts.
+Landing a Nexus pull request deploys it, so the caller who asks for the landing must be in `deployers`, as for `nexus deploy`. The control plane then sets the desired release itself, recorded as requested by `nexus review <id>`, and rolls back to the previous desired release if the fleet does not report healthy within 30 minutes, then waits for the rollback to report healthy before saying so. A deploy that migrated the registry is not rolled back, as [A failed deploy past a registry migration](#a-failed-deploy-past-a-registry-migration) says, so its landing hands the fleet to the person. `.nexus/check` runs in a short-lived check thread of the same project, and Nexus's own runs `npm ci`, so a project whose reviews land needs `registry.npmjs.org` among its allowed hosts.
 
 ### A Claude worker's shepherdr reviewer
 
