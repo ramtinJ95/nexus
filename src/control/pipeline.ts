@@ -73,6 +73,7 @@ export function threadPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase
     const name = (thread: ThreadId) => registry.thread(thread)?.title ?? registry.queuedThread(thread)?.title ?? thread;
     const blocked = view.waits.find((w) => w.state === "blocked");
     if (blocked !== undefined) return phase("held", `blocked by ${name(blocked.thread)}: ${blocked.why}`);
+    if (queued.refused !== undefined) return phase("held", `did not start: ${view.lastError}`);
     const waiting = view.waits.find((w) => w.state === "waiting");
     if (waiting !== undefined) return phase("queued", `waits for ${name(waiting.thread)}: ${waiting.why}`);
     return phase("queued", view.lastError === null ? "starts on the queue's next pass" : `did not start yet: ${view.lastError}`);

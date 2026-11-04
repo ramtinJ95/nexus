@@ -167,7 +167,7 @@ A save replaces the stored record only when it is still the record the pass read
 
 ## Queued thread records
 
-`queued_threads` stores one JSON record per thread queued with `nexus start --after`, keyed by the ID the thread gets when it starts. `QueuedRecord` in `src/control/queue-store.ts` is the shape, and `QueuedThread` in `src/control/queue.ts` is the API's view of one that has not started.
+`queued_threads` stores one JSON record per thread queued with `nexus start --after`, keyed by the ID the thread gets when it starts. `QueuedRecord` in `src/control/queue-store.ts` is the shape, and `QueuedThread` in `src/control/queue.ts` is the API's view of one that has not started. A record's `refused`, `{ at }`, says a start was refused for a branch the remote does not have, which makes it `blocked`. The next attempt clears it or sets it again.
 
 - `id`, `title`, `project`, `startedBy` (who queued it, the thread's `startedBy` once it starts) and `createdAt` (when it was queued).
 - `after` holds the predecessor thread IDs, without repeats, each a thread or another queued record when it was queued.

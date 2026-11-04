@@ -72,7 +72,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     }
     if (inputs !== null) return { project, inputs };
     if (request.branch === undefined) return { fresh: `the remote has no branch ${branch}` };
-    throw new HttpError(400, `the remote of project ${project.id} has no branch ${branch}. Push it first, or start without a branch (leave out --branch) to start from ${project.defaultBranch}, and the agent creates its own branch`);
+    throw new HttpError(400, `branch ${branch} does not exist on the remote of project ${project.id}. Push it first, or start from the project's default branch, ${project.defaultBranch}, by naming no branch, and the agent creates its own`, "no-branch");
   }
 
   /**
@@ -137,7 +137,8 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.
       const disk: SetupRead | null = resources.diskGiB === project.resources.diskGiB ? null
         : { fresh: `the start asked for a ${resources.diskGiB} GiB disk, and this project's templates have ${project.resources.diskGiB} GiB` };
-      // Another disk still reads a branch the start names, since the read is what refuses one the remote does not have.
+      // Another disk uses no template, but still waits on the read of a branch the start names, since the read is what
+      // refuses one the remote does not have.
       const fetched = disk === null || request.branch !== undefined ? await readSetup(project, request, branch) : null;
       const read: SetupRead = disk ?? fetched!;
 

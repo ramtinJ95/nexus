@@ -56,7 +56,8 @@ export function projectMirror(options: { githubToken: string | null }): ProjectM
 }
 
 function gitEnv(url: string, githubToken: string | null): NodeJS.ProcessEnv {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: "https:file" };
+  // In the C locale, so a missing branch reads as the `couldn't find remote ref` that setupInputs matches.
+  const env = { ...process.env, LC_ALL: "C", LANGUAGE: "", GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: "https:file" };
   if (githubToken === null || !url.startsWith("https://github.com/")) return env;
   const basic = Buffer.from(`x-access-token:${githubToken}`).toString("base64");
   return { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}` };

@@ -23,6 +23,11 @@ export interface QueuedRecord {
   startNow: { by: string; at: number } | null;
   /** Why the latest start attempt failed, such as no node with room or a deploy drain. Cleared by the start. */
   lastError: string | null;
+  /**
+   * When a start was refused for a branch the remote does not have, which only a push or the person changes. The queue
+   * holds it for the person, and reads again only after a wait or when the person starts it now.
+   */
+  refused?: { at: number };
   startedAt: number | null;
   firstMessage: "pending" | "sent" | null;
 }

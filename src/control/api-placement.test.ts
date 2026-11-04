@@ -9,6 +9,7 @@ import { stoppedPylon } from "../test-kit.ts";
 import type { NodeName } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import { node, project, image, observeNode, testApi, withImage } from "./api-test-kit.ts";
+import { refusedRetryMs } from "./queue.ts";
 
 test("--node auto boots the pylon on the node with the most memory left after it, and the thread records why", async (t) => {
   const s = await withImage(t);
@@ -210,12 +211,14 @@ test("a start whose setup cannot be read boots fresh and says why, and only a fu
   assert.equal(pinned.setup?.how, "fresh");
 });
 
+const gone = "branch feat/gone does not exist on the remote of project acme. Push it first, or start from the project's default branch, main, by naming no branch, and the agent creates its own";
+
 test("a start that names a branch the remote does not have is refused before it boots anything, and one that names none boots fresh", async (t) => {
   const s = await withImage(t);
   observeNode(s, node, { total: 64, committed: 0 });
   s.remoteReads(async () => null);
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Gone", branch: "feat/gone" });
-  assert.deepEqual(refused, { status: 400, body: { error: "the remote of project acme has no branch feat/gone. Push it first, or start without a branch (leave out --branch) to start from main, and the agent creates its own branch" } });
+  assert.deepEqual(refused, { status: 400, body: { error: gone, code: "no-branch" } });
   assert.deepEqual([s.registry.threads().length, s.fake.calls.filter(([kind]) => kind === "start").length, s.woken, s.registry.reserved(node)], [0, 0, [], []], "no thread, conversation, wake or room is left of it");
 
   const unnamed = (await s.call("POST", "/v1/threads", { project: "acme", title: "Default" })).body as Thread;
@@ -226,19 +229,31 @@ test("a start that names a branch the remote does not have is refused before it 
   assert.equal(s.registry.threads().length, 1);
 });
 
-test("a pipeline item whose branch the remote does not have stays queued and says why", async (t) => {
+test("a pipeline item whose branch the remote does not have is held for the person, and the queue reads it again only after a wait or when the person starts it", async (t) => {
   const s = await testApi(t, { pipeline: true });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   s.registry.setCurrentImage(image.id as ImageId);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 200);
-  s.remoteReads(async () => null);
+  s.remoteReads(async (_, ref) => "branch" in ref && ref.branch === "feat/gone" ? null : { commit: "1".repeat(40), setupBlob: null });
   const item = (await s.call("POST", "/v1/items", { project: "acme", title: "Gone", message: "Build it.", branch: "feat/gone" })).body as { id: string };
+  const next = (await s.call("POST", "/v1/items", { project: "acme", title: "Next", message: "Build it too." })).body as { id: string };
+  for (let i = 0; i < 3; i++) await s.queue!.poll();
+  const gones = () => s.reads.filter((r) => "branch" in r && r.branch === "feat/gone").length;
+  assert.deepEqual((await s.call("GET", `/v1/items/${item.id}`)).body.phase, { kind: "held", why: `did not start: ${gone}` });
+  assert.equal(gones(), 1, "a pass does not read a refused branch again");
+  assert.deepEqual(s.registry.threads().map((th) => th.title), ["Next"], "the start queued after it is not held up");
+  const queued = (await s.call("GET", "/v1/queued")).body as { id: string; blocked: boolean; lastError: string }[];
+  assert.deepEqual(queued.map((q) => [q.blocked, q.lastError]), [[true, gone]]);
+
+  const record = s.registry.queuedThreads().find((q) => q.status === "queued")!;
+  s.registry.saveQueued({ ...record, refused: { at: Date.now() - refusedRetryMs } });
   await s.queue!.poll();
-  assert.deepEqual((await s.call("GET", `/v1/items/${item.id}`)).body.phase, {
-    kind: "queued", why: "did not start yet: the remote of project acme has no branch feat/gone. Push it first, or start without a branch (leave out --branch) to start from main, and the agent creates its own branch",
-  });
-  assert.deepEqual(s.registry.threads(), []);
+  assert.equal(gones(), 2, "once the wait is over, a pass reads it again");
+  assert.equal((await s.call("POST", `/v1/threads/${record.id}/start`)).status, 400, "the person's start-queued reads it at once");
+  assert.equal(gones(), 3);
+  s.remoteReads(async () => ({ commit: "1".repeat(40), setupBlob: null }));
+  assert.equal((await s.call("POST", `/v1/threads/${record.id}/start`)).status, 201, "a pushed branch starts");
 });
 
 test("two overlapping --node auto starts take different rooms, and a start that fails gives its room back", async (t) => {

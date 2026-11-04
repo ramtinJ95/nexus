@@ -148,7 +148,7 @@ const queuedState = (q: QueuedThread) => q.status === "archived" ? "cancelled" :
 const waitText = (w: Wait) => `${w.state === "waiting" ? "waits for" : w.state === "landed" ? "landed" : "blocked by"} ${w.thread}: ${w.why}`;
 export const queuedRow = (q: QueuedThread) => {
   const next = q.waits.find((w) => w.state === "blocked") ?? q.waits.find((w) => w.state === "waiting");
-  return [q.id, queuedState(q), next === undefined ? `starting${q.lastError === null ? "" : `: ${clip(q.lastError, 80)}`}` : waitText(next), `node ${q.node}`, q.project, ago(q.createdAt), q.title];
+  return [q.id, queuedState(q), next === undefined ? `${q.blocked ? "refused" : "starting"}${q.lastError === null ? "" : `: ${clip(q.lastError, 80)}`}` : waitText(next), `node ${q.node}`, q.project, ago(q.createdAt), q.title];
 };
 
 export function queuedText(q: QueuedThread): string {
