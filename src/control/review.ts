@@ -140,13 +140,15 @@ function nextRound(r: Review, previous: Round, token: string, base: string): str
   const answered = previous.answers !== null ? `The builder answered your findings:\n${previous.answers.map((a) => `${a.id}: ${a.action}. ${a.reason}`).join("\n")}`
     : retargeted && head === previous.head ? `The pull request's base changed from ${previous.base} to ${base} after you approved ${previous.head}.`
     : `New commits were pushed to the branch after you approved ${previous.head}.`;
-  // A rebase rewrites the commits, so a diff from the old head would show the base's own changes as the builder's.
-  const rewritten = previous.conflict !== undefined || previous.answers === null;
+  const alsoRetargeted = retargeted && !(previous.answers === null && head === previous.head) ? ` The pull request's base also changed from ${previous.base} to ${base}.` : "";
+  // A rebase rewrites the commits, so a diff from the old head would show the base's own changes as the builder's, and
+  // after a retarget it would leave out what the new base adds to the merge.
+  const rewritten = retargeted || previous.conflict !== undefined || previous.answers === null;
   const review = head === previous.head ? retargeted ? `Review the head against the new base:\n  git fetch origin && git checkout --detach ${head}\n  git diff origin/${base}...${head}` : `It pushed nothing, so the head is still ${head}.`
     : rewritten ? `Review the new head against the base, and compare its commits with the ones you reviewed:\n  git fetch origin && git checkout --detach ${head}\n  git diff origin/${base}...${head}\n  git range-diff origin/${base} ${previous.head} ${head}`
     : `Review the new commits:\n  git fetch origin && git checkout --detach ${head}\n  git diff ${previous.head}..${head}`;
   return `${reviewPrefix}
-Round ${n} of at most ${r.maxRounds}. ${answered}
+Round ${n} of at most ${r.maxRounds}. ${answered}${alsoRetargeted}
 
 ${review}
 Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "${token}".`;

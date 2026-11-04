@@ -3378,6 +3378,25 @@ test("a pull request retargeted after its approval does not land on it: the land
   }
 });
 
+test("fixes pushed to a pull request retargeted meanwhile are reviewed against the new base, not as commits on the old head", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+  pushed(f, head2);
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  const asked = f.sent.at(-1)!.message.text;
+  assert.match(asked, /The pull request's base also changed from main to release\./);
+  assert.match(asked, /git diff origin\/release\.\.\.2{40}/);
+  assert.doesNotMatch(asked, /git diff 1{40}\.\.2{40}/, "the builder's commits alone leave out what the new base adds");
+});
+
 test("a landing the person waived, retargeted at the same head, needs the person's waiver again after its new round", async (t) => {
   const f = fixture(t);
   f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
