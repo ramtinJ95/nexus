@@ -1072,7 +1072,9 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(holds("src/control/threads.ts", "+allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfilesRepo]),"), ["reserved-path:egress"]);
   assert.deepEqual(holds("src/control/project.ts", `+  claude: ["api.anthropic.com", "claude.ai"],`), ["reserved-path:egress"], "a host the allowlist gains");
   assert.deepEqual(holds("src/pylon-vm/client.ts", `+await saveJson(join(dir, "status.json"), { state: "starting" });`), [], "a quoted file name is no host");
-  assert.deepEqual(patched("src/pylon-vm/client.ts", "@@ -1,3 +1,3 @@\n \t\t// a pylon's disk would take host memory\n-\t\tconst a = 1;\n+\t\tconst a = 2;\n \t * the allowlist's hosts"), [], "a comment beside the change changes nothing");
+  assert.deepEqual(patched("src/pylon-vm/client.ts", "@@ -1,3 +1,3 @@\n \t\t// a pylon's disk would take host memory\n-\t\tconst a = 1;\n+\t\tconst a = 2;\n \t/* the allowlist's hosts */"), [], "a line that is only a comment changes nothing");
+  assert.deepEqual(holds("src/pylon-vm/daemon.ts", "+\t/* temporary */ await chmod(socket, 0o777);"), ["reserved-path:auth"], "code after a comment on its line");
+  assert.deepEqual(holds("src/control/api/thread-routes.ts", "+  * authorized() {"), ["reserved-path:auth"], "a generator's line, which starts with a star");
   assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function pylonLive(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), [], "the hunk's header names no host");
   assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function liveHosts(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), ["reserved-path:egress"], "the hunk's header says the change is in the hosts");
   assert.deepEqual(holds("src/pylon-vm/network.ts", "+export const x = 1;"), ["reserved-path:egress"]);
@@ -1091,6 +1093,7 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(patched("src/probe/server.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;"), ["reserved-path:auth"], "the probe's request guard holds whatever it changes");
   assert.deepEqual(patched("src/pylon-vm/runtime.ts", "@@ -190,3 +190,4 @@ export class SandboxRuntime {\n \t\t\t...network,\n+\t\t\tvfs: { mounts: { \"/root/.config\": new RealFSProvider(homedir()) } },"), ["reserved-path:egress"], "host files mounted into the guest, where the VM is built");
   assert.deepEqual(patched("src/pylon-vm/relay.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "src/pylon-vm/relay.test.ts"), ["reserved-path:egress", "reserved-path:auth"], "a test renamed into code that ships brings a body its patch does not show, so it holds as a file with no patch does");
+  assert.deepEqual(patched("src/pylon-vm/relay.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "docs/verification/relay.ts"), ["reserved-path:egress", "reserved-path:auth"], "so does code moved in from where nothing held it");
   assert.deepEqual(patched("src/pylon-vm/relay.test.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "src/pylon-vm/old.test.ts"), [], "a test renamed to a test is still a test");
   assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/pylon-vm/client.ts", previous: null, patch: "" }, { path: "src/control/api/sse.ts", previous: null, patch: "" }] }).map((h) => h.code),
     ["reserved-path:egress", "reserved-path:auth"], "a file GitHub shows no patch for may change anything");

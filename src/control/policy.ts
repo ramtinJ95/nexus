@@ -35,15 +35,13 @@ const names = (path: string, pattern: RegExp) => !path.startsWith("docs/") && pa
 
 /**
  * Whether a hunk of `patch` names `words` in any line of code it shows, its context and header included, since a line
- * added beside a guard can get around it without naming it. Comments change nothing. GitHub shows no patch for a file
+ * added beside a guard can get around it without naming it. A line that is only a comment changes nothing. GitHub shows no patch for a file
  * too large to diff, which may change anything.
  */
-const changes = (patch: string, words: RegExp) => patch === "" || patch.split("\n").some((line) => !/^[-+ ]\s*(\/\/|\/\*|\*(\s|\/|$))/.test(line) && words.test(line));
+const changes = (patch: string, words: RegExp) => patch === "" || patch.split("\n").some((line) => !/^[-+ ]\s*(\/\/.*|\/\*.*\*\/\s*)$/.test(line) && words.test(line));
 
-/** A test or a note, which does not ship. */
-const unshipped = /\.test\.ts$|\.md$/;
 /** Code that ships from a folder, as a test or a note there does not. */
-const shipsFrom = (path: string, ...folders: string[]) => folders.some((f) => path.startsWith(f)) && !unshipped.test(path);
+const shipsFrom = (path: string, ...folders: string[]) => folders.some((f) => path.startsWith(f)) && !/\.test\.ts$|\.md$/.test(path);
 
 /** Words a change to the allowlist, its hosts or the guest's network names, and a quoted host name, such as an entry in loginHosts, but not a file's. */
 const egressWords = /host|allow|egress|network|\bnet\b|dns|proxy|firewall|tls|\bip|socks|ssh|secret|grant|login|bridge|hook|intercept|portal|publicUrl|\bport|["'`][a-z0-9.-]+\.(?!(json|[cm]?[jt]s|md|log|sock|sh|txt|ya?ml|html|css|py|pid|conf|service|timer|env|lock|gz|img|qcow2)["'`])[a-z]{2,}["'`]/i;
@@ -95,8 +93,8 @@ export function headHolds({ review, files, nexus }: HeadFacts): Hold[] {
 function pathHolds(files: readonly ChangedFile[]): Hold[] {
   const hits = new Map<ReservedCase, string[]>();
   for (const file of files) {
-    // A test or note renamed into code that ships brings a body its patch does not show.
-    const patch = file.previous !== null && unshipped.test(file.previous) && !unshipped.test(file.path) ? "" : file.patch;
+    // A file moved here, from a test, a note or anywhere else nothing held, brings a body its patch does not show.
+    const patch = file.previous === null ? file.patch : "";
     for (const path of [file.path, ...file.previous === null ? [] : [file.previous]]) {
       for (const rule of reservedPaths) if (rule.matches(path, patch)) hits.set(rule.case, [...new Set([...hits.get(rule.case) ?? [], path])]);
     }
