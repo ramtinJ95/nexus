@@ -382,7 +382,7 @@ export function liveNote(r: Review): string | null {
   }
   if (round.live?.kind === "absent") return `no live check: ${head} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live`;
   if (round.live?.kind === "ran") return `live check ${round.live.passed ? "passed" : "failed"} at ${head}`;
-  return round.check?.passed === true && reviewerApproved(round) ? `no live check ran at ${head}` : null;
+  return round.check?.passed === true ? `no live check ran at ${head}` : null;
 }
 export const checkOutput = (output: string) => `The check's output:\n${output}`;
 export const liveOutput = (output: string) => `The live check's output:\n${output}`;
