@@ -814,6 +814,17 @@ test("a wake steps only the reviews its thread takes part in, at once", async (t
   assert.equal(f.registry.review(second)!.phase.kind, "fixing");
 });
 
+test("a wake after close steps nothing, as from a check whose stream ends while the control plane stops", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  await loop.close();
+  const polls = f.polls;
+  await loop.wake(f.builder);
+  assert.equal(f.polls, polls);
+});
+
 test("landings deploy one at a time: the second merges once the first is healthy, and rolls back to the first's commit", async (t) => {
   const f = fixture(t);
   released(f, previous);

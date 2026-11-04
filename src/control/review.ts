@@ -187,6 +187,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const { registry, github, inbox, agentState, checks, live, release, log } = deps;
   const now = deps.now ?? Date.now;
   const passes = scopedFlight(pass);
+  let closed = false;
   const poll = passes.poll;
 
   /** Whether the agent replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
@@ -780,9 +781,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   return {
     poll,
     /** Steps the reviews thread `id` takes part in now rather than at the next poll, as after its turn or its check ended. */
-    wake: passes.wake,
+    // A check's stream can end after close, and its wake then finds the registry closed.
+    wake: (id: ThreadId) => closed ? Promise.resolve() : passes.wake(id),
     deploys,
-    close: passes.settled,
+    async close() {
+      closed = true;
+      await passes.settled();
+    },
 
     /** Starts a review of the builder's open PR: the reviewer thread, its first request, and the record. */
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {
