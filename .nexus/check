@@ -1,6 +1,12 @@
 #!/bin/sh
 # The typecheck and the full test suite, which the review loop runs at an approved head before a landing.
 # A pylon booted from a template has the packages its .nexus/resume installed after the checkout, so the check installs only when they are not recorded.
+# That boot waits at most 10 s for resume, whose install may still be staged in .nexus-install, so the check waits up to 5 minutes for it rather than install beside it.
+i=0
+while [ -e .nexus-install ] && [ "$i" -lt 300 ]; do
+  sleep 1
+  i=$((i + 1))
+done
 # Exit 75 tells the review loop the failure was transient, such as a registry timeout, so it runs the check again.
 "$(dirname "$0")/resume" --installed || npm ci --no-audit --no-fund || exit 75
 logs=$(mktemp -d) || exit 1
@@ -18,13 +24,14 @@ show() {
   echo "==> $1 exited $3"
   cat "$logs/$2"
 }
-# The review loop keeps only the output's last 6,000 bytes, so a failed step prints after a passed one.
-if [ "$typecheck" -ne 0 ] && [ "$tests" -eq 0 ]; then
-  show "npm test" test 0
+# The review loop keeps only the output's last 6,000 bytes. A failed typecheck prints last, since its errors are short and the tests' output is long, and a failed test run after a passed typecheck.
+if [ "$typecheck" -ne 0 ]; then
+  show "npm test" test "$tests"
   show "npm run typecheck" typecheck "$typecheck"
-  exit "$typecheck"
+else
+  show "npm run typecheck" typecheck "$typecheck"
+  show "npm test" test "$tests"
 fi
-show "npm run typecheck" typecheck "$typecheck"
-show "npm test" test "$tests"
-[ "$tests" -eq 0 ] || exit "$tests"
-exit "$typecheck"
+echo "==> npm run typecheck exited $typecheck, npm test exited $tests"
+[ "$typecheck" -eq 0 ] || exit "$typecheck"
+exit "$tests"
