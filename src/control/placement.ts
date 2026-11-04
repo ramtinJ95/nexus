@@ -1,5 +1,5 @@
 import type { BootInputs } from "../spawn.ts";
-import type { NodeName, PylonId } from "../ids.ts";
+import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { diskRefusal } from "../disk-space.ts";
 import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
@@ -55,6 +55,9 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
   const { left, pending } = roomLeft(registry, node.name, o, c, need.resources);
+  const held = heldRoom(registry, node.name, Date.now());
+  pending.memoryGiB -= held;
+  left.memoryGiB += held;
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
@@ -71,6 +74,45 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const short = diskShort(c, left, need.resources);
   if (short !== null) return refused(short);
   return { node: node.name, left };
+}
+
+/**
+ * The pylons on `node` that run only because a review holds them up for its findings. Their room is other work's to
+ * take: placement counts it as free, and `freeHeldRoom` pauses them once the node needs it.
+ */
+function heldOnly(registry: PlacementRegistry, node: NodeName, now: number) {
+  return registry.pylonsWithThreadsOn(node).filter(({ pylon, thread: { awaitedUntil, ...unheld } }) => pylon.failed === null && awaitedUntil !== undefined
+    && desiredPhase({ ...unheld, awaitedUntil }, now) === "running" && desiredPhase(unheld, now) === "paused");
+}
+const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => heldOnly(registry, node, now).reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
+
+/**
+ * Releases the review holds on `node` while the rest of its work leaves it short of memory: committed past its size,
+ * or with less free than the headroom a start keeps, so a held pylon pauses for a start or a wake that took its room.
+ * The soonest to end goes first. Returns the threads whose holds it released.
+ */
+export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releaseHold">, node: NodeName): ThreadId[] {
+  const record = registry.nodes().find((n) => n.name === node);
+  const o = record?.state === "online" ? record.observation : null;
+  if (o == null || o.capacity === null) return [];
+  const now = Date.now();
+  const held = heldOnly(registry, node, now).sort((a, b) => a.thread.awaitedUntil! - b.thread.awaitedUntil!);
+  if (held.length === 0) return [];
+  const { left, pending } = roomLeft(registry, node, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 });
+  const free = freeMemory(registry, node, o, o.capacity, now);
+  // A pylon still up that is to pause, as one whose hold went on an earlier pass, gives its room back soon.
+  const up = new Set(o.pylons.filter((p) => p.phase !== "stopped" && !(p.phase === "broken" && p.cause === "controller")).map((p) => p.pylonId));
+  const pausing = registry.pylonsWithThreadsOn(node).filter(({ pylon, thread }) => up.has(pylon.pylonId) && !["running", "reading"].includes(desiredPhase(thread, now)))
+    .reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
+  let short = Math.max(-left.memoryGiB, free === null ? 0 : memoryHeadroomGiB - (free.availableGiB - free.untouchedGiB - pending.memoryGiB)) - pausing;
+  const released: ThreadId[] = [];
+  for (const { pylon, thread } of held) {
+    if (short <= 0) break;
+    registry.releaseHold(thread.id, thread.awaitedUntil!);
+    released.push(thread.id);
+    short -= pylon.boot.resources.memoryGiB;
+  }
+  return released;
 }
 
 /**
