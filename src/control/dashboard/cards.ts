@@ -263,10 +263,7 @@ ${again && refusal !== null && html`<p class="error">${landRefusals[refusal](c.c
 export const cancelReview = (thread: ThreadId, r: Review, look: string) => cancellable(r)
   && html`<button type="button" class="btn ${look}" data-action="cancel-review" data-thread="${thread}" data-confirm="Cancel review ${r.id} of pull request #${r.pr.number}?${r.phase.kind === "needs-person" && " It stops waiting on you."} Its reviewer thread is archived, and this thread stays as it is.">Cancel review</button>`;
 
-/**
- * Above the landing card, for a builder that ended its turns short of a pull request after two nudges: Nexus stopped
- * nudging it and waits on the person, whose message makes the thread theirs. `id` names its elements, as `landing`'s.
- */
+/** For a Claude worker whose turns kept dying after Nexus resumed them, which waits on the person. `id` as `landing`'s. */
 export function resumeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
   const resume = c.registry.claudeResume(t.id);
   if (resume?.state !== "person") return null;
@@ -277,6 +274,10 @@ export function resumeCard(c: Context, t: Thread, id = (name: string) => name): 
 </section>`;
 }
 
+/**
+ * Above the landing card, for a builder that ended its turns short of a pull request after two nudges: Nexus stopped
+ * nudging it and waits on the person, whose message makes the thread theirs. `id` names its elements, as `landing`'s.
+ */
 export function nudgeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
   if (c.registry.nudge(t.id)?.state !== "person") return null;
   return html`<section class="landing nudge" aria-labelledby="${id("nudge-h")}">
