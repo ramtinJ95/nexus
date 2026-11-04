@@ -241,8 +241,8 @@ test("the review loop's reviewers and check and live-check threads get no standi
   assert.equal(s.registry.claudeWorker(claudeReviewer.id)!.prompt, "Review PR #1.");
   const harnessReviewer = await s.startThread({ project: "acme", title: "Review of #1", branch: "main" }, reviewerCaller);
   const head = "a".repeat(40);
-  const check = await s.startThread(checkGate.request(builder, "main", head), checkCaller);
-  const verify = await s.startThread(verifyGate.request(builder, "main", head), verifyCaller);
+  const check = await s.startThread(checkGate.request(builder, "main", head, 2), checkCaller);
+  const verify = await s.startThread(verifyGate.request(builder, "main", head, 2), verifyCaller);
   for (const started of [claudeReviewer, harnessReviewer, check, verify]) {
     assert.equal(started.standingRulesRevision, undefined, started.title);
     assert.equal(await revisionOf(s, started.id), undefined, started.title);
