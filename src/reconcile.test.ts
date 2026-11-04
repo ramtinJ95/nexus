@@ -211,6 +211,9 @@ test("desiredPhase", () => {
     [{ lastAgentActivityAt: now - idlePolicy.agentIdleMs }, "paused"],
     [{ lastHumanActivityAt: now - idlePolicy.humanIdleMs + 1 }, "running"],
     [{ lastHumanActivityAt: now - idlePolicy.humanIdleMs }, "paused"],
+    [{ awaitedUntil: now + 1 }, "running"],
+    [{ awaitedUntil: now }, "paused"],
+    [{ status: "archived", awaitedUntil: now + 1 }, "paused"],
     [{}, "paused"],
   ];
   for (const [f, expected] of cases) assert.equal(desiredPhase(facts(f), now), expected, JSON.stringify(f));

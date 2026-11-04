@@ -30,6 +30,8 @@ export interface ActivityFacts {
   status: ThreadStatus;
   sessionTurnRunning?: boolean;
   sessionActiveUntil?: number;
+  /** A feature expects to message the thread's agent before this, such as a review whose reviewer is reading its pull request. */
+  awaitedUntil?: number;
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
   lastAgentActivityAt: number; // pi-durable turns, Claude hooks and other observed sessions in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
@@ -92,7 +94,7 @@ export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
       : a.readingUsage === true ? "reading" : "paused";
   }
   // A preview hit on a paused pylon updates lastHumanActivityAt, which is what wakes it.
-  const busy = a.agentTurnRunning || (a.sessionActiveUntil ?? 0) > now
+  const busy = a.agentTurnRunning || (a.sessionActiveUntil ?? 0) > now || (a.awaitedUntil ?? 0) > now
     || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs
     || now - a.lastHumanActivityAt < idlePolicy.humanIdleMs;
   return busy ? "running" : "paused";

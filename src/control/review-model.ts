@@ -213,6 +213,16 @@ export const settledKinds = ["landed", "merged", "closed", "cancelled"] as const
 /** Phases a pass never moves on from. A new review or a land request starts the thread over. */
 export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
 export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
+/**
+ * How long after its request reached the reviewer a round keeps the builder's pylon up, so findings find it awake rather
+ * than paused for 25 seconds of waking, and a reviewer that never answers holds no memory for the hours until the person.
+ */
+export const builderAwaitedMs = 30 * 60_000;
+/**
+ * Until when `r` keeps its builder's pylon up: while its reviewer reads a round, which may end in findings for the
+ * builder. Never while its reviewer's model fails, it waits on the person or it ended.
+ */
+export const builderAwaitedUntil = (r: Review): number | null => r.phase.kind === "reviewing" && r.phase.failing === undefined ? r.since + builderAwaitedMs : null;
 /** Whether the review waits on the person: held for them, or stopped at an approval that only their Land merges. */
 export const waitsOnPerson = (r: Review | null) => needsPerson(r) || r?.phase.kind === "approved";
 /** What a landing that authorized its merge, or is deploying or rolling back, does now, or null for any other review. */

@@ -23,6 +23,7 @@ import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transc
 import { tempDir, watch } from "../test-kit.ts";
 import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "../agent-protocol.ts";
+import { desiredPhase, idlePolicy } from "../reconcile.ts";
 import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./start-request.ts";
 import { HttpError } from "./http-error.ts";
@@ -285,6 +286,53 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => [(e.payload.phase as { kind: string }).kind, e.payload.round]),
     [["reviewing", 1], ["fixing", 1], ["reviewing", 2], ["checking", 2], ["approved", 2]]);
   assert.equal(f.registry.thread(f.builder)!.lastHumanActivityAt, 1, "nothing in the loop is human activity");
+});
+
+test("a builder's pylon stays up while its reviewer reads a round, so its findings need no wake, and never while the review waits on the person", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  const builder = () => desiredPhase(f.registry.thread(f.builder)!, f.now);
+  f.tick(idlePolicy.humanIdleMs);
+  assert.equal(builder(), "paused", "the builder has been idle longer than the idle policy allows");
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.tick(idlePolicy.agentIdleMs + 3 * 60_000);
+  assert.equal(builder(), "running", "a reviewer that reads for 8 minutes finds the builder up");
+  f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.sent.at(-1)!.to, f.builder);
+  assert.equal(f.registry.thread(f.builder)!.awaitedUntil, undefined, "the findings went, so the review awaits the builder no more");
+
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  f.tick(29 * 60_000);
+  assert.equal(builder(), "running", "each round keeps it up");
+  f.tick(2 * 60_000);
+  assert.equal(builder(), "paused", "a reviewer that reads for over 30 minutes holds the builder's memory no longer");
+  f.reply(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.equal(builder(), "paused", "an approval that waits for the person's Land holds nothing up");
+
+  const g = fixture(t);
+  const failing = g.loop();
+  g.tick(idlePolicy.humanIdleMs);
+  await failing.start(g.builder, { land: null, rounds: 1 });
+  await failing.poll();
+  g.failedTurn(g.review().reviewer, "Request timed out.");
+  await failing.poll();
+  assert.equal(g.review().phase.kind, "reviewing");
+  assert.equal(desiredPhase(g.registry.thread(g.builder)!, g.now), "paused", "nor while the reviewer's model fails");
+  g.tick(2 * 60_000);
+  await failing.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
+  await failing.poll();
+  assert.equal(g.review().phase.kind, "needs-person");
+  assert.equal(desiredPhase(g.registry.thread(g.builder)!, g.now), "paused", "nor once the review is held for the person");
 });
 
 test("rounds that run out, and agents that never answer in the block, end with the person's attention", async (t) => {

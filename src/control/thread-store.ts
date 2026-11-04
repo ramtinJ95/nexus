@@ -173,6 +173,8 @@ function pylonRow(r: Row): StoredPylon {
 export interface ThreadParticipant {
   /** Whether the feature waits on the person for the thread, which makes its attention a decision. */
   needsPerson?(thread: ThreadId): boolean;
+  /** Until when the feature expects to message each of `threads` that it waits to message, so their pylons stay up for it. */
+  awaitedUntil?(threads: readonly ThreadId[]): ReadonlyMap<ThreadId, number>;
   /** The thread was archived or deleted, so its pylon pauses. */
   closed?(thread: ThreadId): void;
   /** The thread's Claude worker, its transcript or its status changed. */
@@ -276,6 +278,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const archived = new Map(sql("SELECT * FROM thread_archives WHERE thread IN (SELECT value FROM json_each(?))").all(ids).map((r) => [r.thread as ThreadId, r]));
     const backedUp = backedUpAt();
     const limits = usageLimits(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)));
+    const awaited = participants.flatMap((p) => [...p.awaitedUntil?.(rows.map((r) => r.id as ThreadId)) ?? []]);
     return rows.map((row): Thread => {
       const thread = threadRow(row);
       const working = (live.get(thread.id)?.at ?? null) as number | null;
@@ -283,11 +286,12 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.get(thread.id)?.since].filter((at): at is number => typeof at === "number");
       const usageLimit = limits.get(thread.id);
       const archive = archived.get(thread.id);
+      const awaitedUntil = Math.max(...awaited.filter(([id]) => id === thread.id).map(([, at]) => at));
       return {
         ...thread, working: thread.agentTurnRunning || working !== null,
         ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(wait === undefined ? {} : { sessionWaiting: true }),
         ...(typeof wait?.message === "string" ? { sessionWaitingMessage: wait.message } : {}),
-        ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === undefined ? {} : { usageLimit }),
+        ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(awaitedUntil === -Infinity ? {} : { awaitedUntil }), ...(usageLimit === undefined ? {} : { usageLimit }),
         ...(reading.has(thread.id) ? { readingUsage: true } : {}), ...(archive === undefined ? {} : archiveFacts(archive, backedUp, settleWaits.get(thread.id))),
       };
     });
