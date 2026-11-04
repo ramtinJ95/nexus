@@ -23,7 +23,7 @@ export interface OpenedSession { herdrPane: string; harness: SessionHarness; tit
 
 export interface ThreadDetail {
   claudeWorker?: { model: string | null; state: string; message?: string };
-  /** Nexus resuming the Claude worker after its turns died, or null. A control plane older than 0.63.0 sends none. */
+  /** Nexus resuming the Claude worker after its turns died, or null. A control plane older than 0.64.0 sends none. */
   resume?: ClaudeResume | null;
   attention: Attention;
   seenAt: number | null;
