@@ -1,13 +1,13 @@
 /** Auto placement weighs a node by the memory its host has free, as well as by what its pylons have committed. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { NodeName, PylonId } from "../ids.ts";
+import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { HealthSample } from "./node-metrics.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { Room, StoredPylon, Thread } from "./thread-store.ts";
 import { testCapacity, testObservation } from "../test-kit.ts";
 import { HttpError } from "./http-error.ts";
-import { placeAuto, placeNear, weighNodes } from "./placement.ts";
+import { freeHeldRoom, placeAuto, placeNear, weighNodes } from "./placement.ts";
 import { observeNode, withImage } from "./api-test-kit.ts";
 
 const image = "img-0123456789ab";
@@ -22,11 +22,13 @@ interface FakeNode {
   pylonVm?: true | undefined;
   /** VMs the probe reports and commits but the registry has not placed, as the health read names them. */
   orphans?: { id: string; residentGiB: number }[];
-  pylons?: { id: string; memoryGiB: number; residentGiB: number; observed?: false; read?: false }[];
+  /** `held` is a builder idle past the idle policy whose review holds it up for its findings. */
+  pylons?: { id: string; memoryGiB: number; residentGiB: number; observed?: false; read?: false; held?: true }[];
 }
 
 function fakeRegistry(nodes: FakeNode[]) {
   const now = Date.now();
+  const released = new Set<string>();
   const record = (n: FakeNode): NodeRecord => {
     const capacity = testCapacity({ memoryGiB: n.total, committedMemoryGiB: n.committed, diskFreeGiB: 200,
       ...n.pylonVm && { disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 200, pylons: true }] } });
@@ -48,8 +50,11 @@ function fakeRegistry(nodes: FakeNode[]) {
     // Each pylon's thread is active, so one its node has yet to report is about to boot there.
     pylonsWithThreadsOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
       pylon: { pylonId: `pylon-${p.id}` as PylonId, failed: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as unknown as StoredPylon,
-      thread: { status: "active", agentTurnRunning: false, working: false, lastAgentActivityAt: now, lastHumanActivityAt: now } as unknown as Thread,
+      thread: { id: p.id, status: "active", agentTurnRunning: false, working: false, ...p.held
+        ? { lastAgentActivityAt: now - 3_600_000, lastHumanActivityAt: now - 3_600_000, ...!released.has(p.id) && { awaitedUntil: now + 600_000 } }
+        : { lastAgentActivityAt: now, lastHumanActivityAt: now } } as unknown as Thread,
     })),
+    releaseHold: (thread: ThreadId) => { released.add(thread); },
     reserved: (name: NodeName): Room[] => { const r = byName.get(name)?.reserved; return r === undefined ? [] : [{ cpus: 0, memoryGiB: r, diskGiB: 0 }]; },
   };
 }
@@ -174,4 +179,31 @@ test("a pylon that boots after the node's health read holds all its memory until
   s.registry.recordHealthSample("infra-testbench", { at: Date.now() + 5_000, values: { memAvailable: 9.5, [`pylonResident:${(first.body as Thread).pylonId}:${(first.body as Thread).id}`]: 0.5 } });
   const named = await second();
   assert.equal(named.status, 201, `a read that names it counts only the 3.5 GiB it has yet to touch: ${JSON.stringify(named.body)}`);
+});
+
+test("a start takes the room of a builder its review only holds up, and the node's next pass releases that hold", () => {
+  const registry = fakeRegistry([{ name: "rj-firebat", total: 22.8, committed: 20, pylons: [
+    { id: "busy", memoryGiB: 16, residentGiB: 16 }, { id: "held", memoryGiB: 4, residentGiB: 4, held: true },
+  ] }]);
+  assert.equal(placeAuto(registry, need()).node, "rj-firebat", "the held builder's 4 GiB count as room, so a new pylon fits beside it");
+  assert.deepEqual(freeHeldRoom(registry, "rj-firebat" as NodeName), [], "nothing is released while nothing took the room");
+  const started = fakeRegistry([{ name: "rj-firebat", total: 22.8, committed: 20, reserved: 4, pylons: [
+    { id: "busy", memoryGiB: 16, residentGiB: 16 }, { id: "held", memoryGiB: 4, residentGiB: 4, held: true },
+  ] }]);
+  assert.deepEqual(freeHeldRoom(started, "rj-firebat" as NodeName), ["held"], "the start took its room, so its hold goes and it pauses");
+  assert.deepEqual(freeHeldRoom(started, "rj-firebat" as NodeName), [], "a released hold is released once");
+  const two = fakeRegistry([{ name: "rj-firebat", total: 22.8, committed: 20, reserved: 4, pylons: [
+    { id: "busy", memoryGiB: 12, residentGiB: 12 }, { id: "held-1", memoryGiB: 4, residentGiB: 4, held: true }, { id: "held-2", memoryGiB: 4, residentGiB: 4, held: true },
+  ] }]);
+  assert.equal(freeHeldRoom(two, "rj-firebat" as NodeName).length, 1);
+  assert.deepEqual(freeHeldRoom(two, "rj-firebat" as NodeName), [], "a pass while the released builder still pauses releases no other");
+});
+
+test("a node whose free memory falls under the headroom releases its held builders, soonest first, until it has the room", () => {
+  const registry = fakeRegistry([{ name: "a", total: 31.2, committed: 12, free: 0.5, pylons: [
+    { id: "busy", memoryGiB: 4, residentGiB: 4 }, { id: "held-1", memoryGiB: 4, residentGiB: 4, held: true }, { id: "held-2", memoryGiB: 4, residentGiB: 4, held: true },
+  ] }]);
+  assert.equal(freeHeldRoom(registry, "a" as NodeName).length, 1, "one held builder's 4 GiB bring back the 1 GiB of headroom");
+  assert.deepEqual(freeHeldRoom(fakeRegistry([{ name: "b", total: 31.2, committed: 8, free: 20, pylons: [{ id: "held", memoryGiB: 4, residentGiB: 4, held: true }] }]), "b" as NodeName), [],
+    "a node with room keeps its held builders up");
 });

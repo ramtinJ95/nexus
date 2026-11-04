@@ -26,12 +26,13 @@ import type { NodeObservation, ProbeEvent, PylonObservation } from "../protocol/
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { pylonLive } from "./live.ts";
+import { freeHeldRoom } from "./placement.ts";
 import { claudeLaunch } from "./claude-launch.ts";
 import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "markOffline" | "node" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "releasePreview" | "releasePreviews" | "cleanupRequestedAt" | "dropCleanup" | "finishCleanup" | "reportSession" | "requestCleanup" | "savePylon" | "sealedBoot" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
+type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseHold" | "releasePreview" | "releasePreviews" | "reserved" | "cleanupRequestedAt" | "dropCleanup" | "finishCleanup" | "reportSession" | "requestCleanup" | "savePylon" | "sealedBoot" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -171,6 +172,7 @@ export function startLoop(options: LoopOptions): Loop {
         log(`${template.id}: template build tick failed: ${(err as Error).message}`);
       }
     }
+    for (const thread of freeHeldRoom(registry, node)) log(`${thread}: its review no longer holds its pylon up, since ${node} needs the room`);
     const seen = observation(node);
     const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes.map((r) => r.pylonId) ?? []];
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on

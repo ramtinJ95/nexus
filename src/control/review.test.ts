@@ -23,6 +23,7 @@ import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transc
 import { tempDir, watch } from "../test-kit.ts";
 import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "../agent-protocol.ts";
+import { desiredPhase, idlePolicy } from "../reconcile.ts";
 import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./start-request.ts";
 import { HttpError } from "./http-error.ts";
@@ -285,6 +286,76 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => [(e.payload.phase as { kind: string }).kind, e.payload.round]),
     [["reviewing", 1], ["fixing", 1], ["reviewing", 2], ["checking", 2], ["approved", 2]]);
   assert.equal(f.registry.thread(f.builder)!.lastHumanActivityAt, 1, "nothing in the loop is human activity");
+});
+
+test("a builder's pylon stays up while its reviewer reads a round, so its findings need no wake, and never while the review waits on the person", async (t) => {
+  // The registry reads the real clock, so the fixture's starts there, with the builder's turn just ended.
+  const setUp = (idle = false) => {
+    const f = fixture(t);
+    f.tick(Date.now() - f.now);
+    if (!idle) f.registry.recordActivity(f.builder, { agent: f.now - 60_000 });
+    return { f, loop: f.loop(), builder: () => desiredPhase(f.registry.thread(f.builder)!, f.now) };
+  };
+  const { f, loop, builder } = setUp();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.tick(idlePolicy.agentIdleMs + 3 * 60_000);
+  assert.equal(builder(), "running", "a reviewer that reads for 8 minutes finds the builder up");
+  f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  const read = f.holdPolls(0);
+  const pass = loop.poll();
+  await read.entered;
+  assert.equal(f.review().outbox?.to, "builder");
+  assert.equal(builder(), "running", "findings that wait on GitHub before they go still find the builder up");
+  read.release();
+  await pass;
+  assert.equal(f.sent.at(-1)!.to, f.builder);
+  assert.equal(f.registry.thread(f.builder)!.awaitedUntil, undefined, "the findings went, so the review awaits the builder no more");
+
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  f.registry.recordActivity(f.builder, { agent: f.now });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  f.tick(29 * 60_000);
+  assert.equal(builder(), "running", "each round keeps it up");
+  f.tick(2 * 60_000);
+  assert.equal(builder(), "paused", "a reviewer that reads for over 30 minutes holds the builder's memory no longer");
+  f.reply(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.equal(builder(), "paused", "an approval that waits for the person's Land holds nothing up");
+
+  const failing = setUp();
+  await failing.loop.start(failing.f.builder, { land: null, rounds: 1 });
+  await failing.loop.poll();
+  failing.f.failedTurn(failing.f.review().reviewer, "Request timed out.");
+  await failing.loop.poll();
+  failing.f.tick(idlePolicy.agentIdleMs);
+  assert.equal(failing.f.review().phase.kind, "reviewing");
+  assert.equal(failing.builder(), "paused", "nor while the reviewer's model fails");
+  failing.f.tick(2 * 60_000);
+  await failing.loop.poll();
+  failing.f.reply(failing.f.review().reviewer, verdict(failing.f.review(), { verdict: "changes", findings: [serious] }));
+  await failing.loop.poll();
+  assert.equal(failing.f.review().phase.kind, "needs-person");
+  assert.equal(failing.builder(), "paused", "nor once the review is held for the person");
+
+  const late = setUp(true);
+  await late.loop.start(late.f.builder, { land: null });
+  await late.loop.poll();
+  assert.equal(late.f.review().phase.kind, "reviewing");
+  assert.equal(late.builder(), "paused", "a builder already paused when its review starts is not woken to be held");
+
+  const ended = fixture(t);
+  ended.registry.recordActivity(ended.builder, { agent: ended.now });
+  const endedLoop = ended.loop();
+  await endedLoop.start(ended.builder, { land: null });
+  await endedLoop.poll();
+  assert.equal(ended.review().phase.kind, "reviewing");
+  assert.equal(ended.registry.thread(ended.builder)!.awaitedUntil, undefined, "a hold that ended by the registry's clock is not shown");
 });
 
 test("rounds that run out, and agents that never answer in the block, end with the person's attention", async (t) => {
