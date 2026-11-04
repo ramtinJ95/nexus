@@ -457,10 +457,11 @@ pylon's stamp of a `session.ended` of the `turn_session` whose previous report i
 `session_order` was a turn start or a heartbeat, so its turn had not ended. While it is
 no older than `turn_at`, the turn died, which `Thread.turnDied` says, as it does for a
 turn whose newest entry that is not bookkeeping is an error notice without
-`usageLimit` and no newer than the turn's start. `resume` holds the JSON record of
+`usageLimit` and no older than the turn's start. A turn or `Interrupted` entry no older
+than the turn's start says the turn ended, so the session ending after it is no death. `resume` holds the JSON record of
 Nexus resuming the worker (`src/control/resume.ts`): `{ "state": "waiting", "turn",
-"count", "due" }` for a resume that goes at `due`, `sending` for one saved before it is
-sent, `resumed` with `at` for one that went, `{ "state": "person", "turn", "count",
+"count", "due" }` for a resume that goes at `due`, `sending` with `since` for one saved before it
+was first sent, `resumed` with `at` for one that went, `{ "state": "person", "turn", "count",
 "why" }` once Nexus stopped, which makes the attention `decision`, and `{ "state":
 "left-alone" }`, kept for good, once the person wrote to the thread after its first
 reply. `turn` is the `turnDied.at` of the death it answers and `count` the resumes in a

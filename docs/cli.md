@@ -1006,7 +1006,9 @@ nexus events --kind thread.resumed       # each resume Nexus typed
 
 A Claude worker's turn dies when its Claude session ends during the turn, which the
 session's `session.ended` event says when no `session.turn-ended` came after its
-`session.turn-started`, or when the turn ends on a model error that is not its usage
+`session.turn-started` and the transcript shows no turn's end or interrupt since, as a
+turn that ends with a background task still running reports a heartbeat for its end,
+or when the turn ends on a model error that is not its usage
 limit, an error notice that is the newest entry that is not bookkeeping, as for
 [usage-limit stops](#usage-limit-stops-0210). Until a turn of a session starts after
 it, the thread has `turnDied` and `show` prints `turn died: <reason>, at <time>`, with
@@ -1015,8 +1017,11 @@ that ends records no reply.
 
 The control plane resumes such a turn of a builder on its own: a Claude worker thread
 the person started, active or idle, that is not a reviewer, a check or a planning
-thread. A builder its review waits on in `fixing` gets no resume for a model error,
-which the review loop sends its request again for. Each turn that died gets one
+thread, and whose review, if it has one, is not `needs-person`, which is the person's.
+A builder whose review has not finished gets no resume for a model error: the review
+loop sends its request again, or its next message, which resumes it too. Only a death
+in the last hour is resumed, so a control plane that starts leaves older ones as they
+were. Each turn that died gets one
 message, `[Nexus resume — automated, not a message from the person] Your turn stopped
 before it finished: its Claude session ended, or its model's API failed. Continue
 where you stopped.`, typed into the session as the person's message would be, which
@@ -1024,10 +1029,12 @@ starts Claude again in a session that ended and wakes a paused pylon. It goes 1,
 and 30 minutes after each death in a row, under the request ID
 `resume:<thread>:<turnDied.at>`, and appends a `thread.resumed` event with `turn`,
 `count`, `reason` and `requestId`. A turn that ends without dying ends the count. The
-fourth death in a row, or a resume that starts no turn within 10 minutes, stops it:
+fourth death in a row, a resume that starts no turn within 10 minutes, or one the
+session takes for 10 minutes, as while it waits at a dialog, stops it:
 `resume.state` becomes `person`, `resume.why` says why in a line, `show` prints
 `resume: stopped. <why> Write to it to resume it`, and the attention is `decision`
-until a turn of it starts. The person writing to the thread after its first reply makes
+until a turn of it starts. An archive clears the record, so an unarchived thread whose
+last turn died starts its count over and is resumed a minute later. The person writing to the thread after its first reply makes
 it theirs, and Nexus never resumes it again, as with [the nudge](design.md#nudging-a-builder-that-stopped-short).
 
 ## Token usage (0.32.0)
