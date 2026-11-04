@@ -3346,6 +3346,100 @@ test("a review approved before Nexus recorded its holds reads them at most once 
   assert.notEqual(f.review().rounds[0]!.heldAt, undefined);
 });
 
+test("a pull request retargeted after its approval does not land on it: the landing reviews the head against the new base, or holds for the person with no round left", async (t) => {
+  for (const rounds of [5, 1]) {
+    const f = fixture(t);
+    const loop = f.loop();
+    await loop.start(f.builder, { land: null, rounds });
+    await loop.poll();
+    f.reply(f.review().reviewer, verdict(f.review(), {}));
+    await loop.poll();
+    assert.deepEqual(f.review().phase, { kind: "approved" });
+    f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+    loop.land(f.builder, "nLAPTOP", head1);
+    await loop.poll();
+    assert.deepEqual(f.merges, [], "the approval was of the change against main");
+    const r = f.review();
+    if (rounds === 1) {
+      assert.deepEqual(shown(r.phase), { kind: "needs-person", label: { state: "added" }, unreviewed: head1, reasons: [`The pull request's base changed from main to release after round 1, the last this review allows, so ${head1} is unreviewed.`] });
+      assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), /base changed from main to release/);
+      continue;
+    }
+    assert.equal(r.phase.kind, "reviewing");
+    assert.deepEqual(r.rounds.map((round) => [round.head, round.base]), [[head1, "main"], [head1, "release"]]);
+    assert.equal(roundNote(r), `a new round reviews ${head1.slice(0, 12)} against release, since the pull request's base changed from main after its approval`);
+    const asked = f.sent.at(-1)!.message.text;
+    assert.match(asked, /The pull request's base changed from main to release after you approved 1{40}\./);
+    assert.match(asked, /git diff origin\/release\.\.\.1{40}/);
+    f.reply(r.reviewer, verdict(r, {}));
+    await loop.poll();
+    assert.deepEqual(f.merges, [head1], "the approval against release lands");
+    assert.equal(roundsSpent(f.review()), 2, "the round against release reviewed another change, so it counts");
+  }
+});
+
+test("a landing the person waived, retargeted at the same head, needs the person's waiver again after its new round", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+  loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().waiver, null, "the person waived the change against main");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
+});
+
+test("a waived landing retargeted with a push, then reset to the waived head, needs the person's waiver again", async (t) => {
+  const f = fixture(t);
+  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const loop = await approved(f, "nLAPTOP");
+  loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+  pushed(f, head2);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.equal(f.review().waiver, null, "the person waived the change against main");
+  pushed(f, head1);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
+});
+
+test("a pull request retargeted and merged outside the review during its checks is not deployed", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "checking");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, base: "release", mergeCommit: merged } };
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, [], "someone else merged it");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`Pull request #7 was merged outside this review into release, not main, the base its approval was of, so it is not deployed.`] });
+  assert.equal(f.registry.desiredRelease(), null);
+});
+
+test("a pull request retargeted and merged after the review authorized its merge into the old base is not deployed", async (t) => {
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: head1 } });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, base: "release", mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`Pull request #7 was merged outside this review into release, not main, the base its approval was of, so it is not deployed.`] });
+  assert.equal(f.registry.desiredRelease(), null);
+});
+
 test("a pull request retargeted at its approved head has its path holds read again at the landing", async (t) => {
   const f = fixture(t);
   const loop = await approved(f, null);
@@ -3353,6 +3447,9 @@ test("a pull request retargeted at its approved head has its path holds read aga
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
   f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type Hosts = 1;\n+type Hosts = 2;" }];
   loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "a new base takes a round first");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [egress.text] });
@@ -3367,6 +3464,9 @@ test("a retargeted landing held for the person shows the holds read at the new b
   f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null } });
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
   f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "a new base takes a round first");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.equal(f.review().phase.kind, "needs-person");

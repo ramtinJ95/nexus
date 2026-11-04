@@ -316,12 +316,12 @@ export const heldForGate = (r: Review) => {
     && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks) && gateFailure(round) !== null;
 };
 /**
- * The rounds that count against the limit. One that approves again the head its previous round approved reviewed
- * nothing new, and an approval carried to the same change reviewed nothing at all.
+ * The rounds that count against the limit. One that approves again the head its previous round approved on the same
+ * base reviewed nothing new, and an approval carried to the same change reviewed nothing at all.
  */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
-  return round.carried === undefined && !(previous?.head === round.head && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
+  return round.carried === undefined && !(previous?.head === round.head && previous.base === round.base && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
 }).length;
 /**
  * The head `pr` was read at, when it is open there at another head than the latest round's and than the one its hold
@@ -337,6 +337,7 @@ export function roundNote(r: Review): string | null {
   const [previous, round] = r.rounds.slice(-2);
   if (round?.carried !== undefined) return `${reviewerApproved(round) ? "approval" : "review"} carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
   if (round === undefined || previous!.answers !== null || previous!.verdict?.verdict !== "approve") return null;
+  if (round.head === previous!.head && round.base !== previous!.base) return `a new round reviews ${round.head.slice(0, 12)} against ${round.base}, since the pull request's base changed from ${previous!.base} after its approval`;
   return `a new round reviews ${round.head.slice(0, 12)}, since the pull request's head moved from ${previous!.head.slice(0, 12)} after its approval`;
 }
 const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, labelled "${humanLabel}"`, failed: `, label "${humanLabel}" not added` } as const;
