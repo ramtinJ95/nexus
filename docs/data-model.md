@@ -9,10 +9,10 @@ The control plane writes every record. Probes send facts in observations, and th
 | Record | Fields | Comes from |
 |---|---|---|
 | Node | `name`, `tailnetHost`, `tailnetNodeId`, `cpuVendor`, `memoryGiB`, `state` | You add a node. Capacity and `state` come from its probe's observations |
-| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity`, `autoReview` and `pipeline` | You |
+| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity`, `autoReview`, `pipeline` and `standingRules` | You |
 | Image | `id`, `pins`, `builtOn`, `builtAt`, `sha256`, `release` | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
 | Template | `id`, `key`, `state`, `node`, `builtAt`, `commit` | Thread starts, which record a build, and the results of its `build-template` job |
-| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup` | You, and the harness |
+| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup`, `standingRulesRevision` | You, and the harness |
 | Queued thread | `id`, `title`, `project`, `startedBy`, `createdAt`, `after`, `request`, `message`, `status`, `startNow`, `lastError`, `startedAt`, `firstMessage` | `nexus start --after`, until the thread starts. [Queued thread records](#queued-thread-records) describes it |
 | Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
 | Pylon | `id`, `thread`, `node`, `template` | Thread start |
@@ -268,6 +268,8 @@ On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, tar
 `Project.autoReview` is optional `{ land: boolean, enabledBy: string }`, absent when off. `enabledBy` is the caller who turned it on, which only a project edit sets, and a landing it asks for merges and deploys for that caller.
 
 `Project.pipeline` is optional `{ autoStart: boolean }`, absent or null when off. Turning it off stores null, so the migration that turned it on for project `nexus` skips it when a registry rewound past that migration applies it again.
+
+`Project.standingRules` is optional `{ text: string | null, revision: number }`, absent until a person first sets them. `text` is null once cleared, and `revision` counts each change, a clear among them, and never goes back. A thread's row keeps the rules its first message carried in its `standing_rules` column, JSON of `{ revision, text }`, or NULL when it carried none, so a resend of that message after the rules change carries the same text. `Thread.standingRulesRevision` is that revision, and the text stays out of thread rows, which lists read in bulk.
 
 `Project.gitIdentity` is optional `{ name: string, email: string }` (null also means inherit). The optional control.json `gitIdentity` has the same shape without null. Project values override the control default. Only name and email are carried: no credentials. Before a fresh or checkpoint boot, reconciliation resolves the identity into `BootInputs.gitIdentity`. The boot hook applies it globally for `user` after common dotfiles. The saved value renders PYLON.md while the pylon runs. With neither configured, no git config is changed; an earlier identity on disk remains.
 
