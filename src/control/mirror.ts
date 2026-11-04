@@ -33,7 +33,12 @@ export function projectMirror(options: { githubToken: string | null }): ProjectM
       };
       try {
         await ok(["init", "--quiet", "--bare"]);
-        await ok(["fetch", "--quiet", "--depth=1", "--filter=blob:none", project.repoUrl, "branch" in ref ? `refs/heads/${ref.branch}` : ref.commit]);
+        const fetch = ["fetch", "--quiet", "--depth=1", "--filter=blob:none", project.repoUrl, "branch" in ref ? `refs/heads/${ref.branch}` : ref.commit];
+        const fetched = await git(fetch);
+        if (fetched.code !== 0) {
+          if ("branch" in ref && /couldn't find remote ref/.test(fetched.stderr)) return null;
+          throw failed(fetch, fetched);
+        }
         const commit = await ok(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
         // A `<rev>:<path>` name takes no peel suffix, and the ID comes from the tree, so the blob is never fetched.
         const setup = ["rev-parse", "-q", "--verify", "FETCH_HEAD:.nexus/setup"];
