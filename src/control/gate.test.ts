@@ -13,7 +13,7 @@ import { checkoutDir } from "../session-harness.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { StartRequest } from "./start-request.ts";
-import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 
@@ -105,12 +105,11 @@ test("a check pylon keeps the CPUs of a project sized over 4", async (t) => {
 test("a check's end is heard as it exits, without waiting for the next poll, and a void run's end too", async (t) => {
   const f = await fixture(t, "echo ok");
   const ended: ThreadId[] = [];
-  const heard = Promise.withResolvers<void>();
-  const runs = f.runs(undefined, (id) => { ended.push(id); heard.resolve(); });
+  const runs = f.runs(undefined, (id) => { ended.push(id); });
   const id = await runs.start(f.builder, "feature", f.head);
   f.running(f.registry.thread(id)!);
   assert.deepEqual(runs.poll(id, f.head), { kind: "running" });
-  await heard.promise;
+  await until("the check's end is heard", () => ended.length > 0);
   assert.deepEqual(ended, [id]);
   assert.deepEqual(runs.poll(id, f.head), { kind: "done", passed: true, output: "ok" });
 
@@ -118,7 +117,7 @@ test("a check's end is heard as it exits, without waiting for the next poll, and
   const lost = await runs.start(f.builder, "feature", f.head);
   f.running(f.registry.thread(lost)!);
   runs.poll(lost, f.head);
-  for (const deadline = Date.now() + 60_000; !ended.includes(lost) && Date.now() < deadline;) await sleep(10);
+  await until("the void run's end is heard", () => ended.includes(lost));
   assert.deepEqual(ended, [id, lost]);
 });
 
