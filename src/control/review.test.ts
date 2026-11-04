@@ -1080,6 +1080,9 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(holds("src/control/releases.ts", "-  return options !== undefined && options.deployers.has(caller) && isPerson(registry, options, caller);"), ["reserved-path:auth"]);
   assert.deepEqual(holds("src/probe/server.ts", `-    return routeAuth[route] === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);`), ["reserved-path:auth"]);
   assert.deepEqual(holds("src/control/api/kit.ts", "+export const x = 1;"), ["reserved-path:auth"]);
+  assert.deepEqual(holds("src/control/api.ts", "-    if (req.method !== \"GET\") requireJson(req);"), ["reserved-path:auth"], "the API's admission of every request");
+  assert.deepEqual(holds("src/pylon-vm/runtime.ts", "+\t\t\thttpHooks: {},"), ["reserved-path:egress"], "a hook that replaces the allowlist's");
+  assert.deepEqual(holds("src/probe/redact.ts", "-const minValueLength = 8;", "+const minValueLength = 32;"), ["reserved-path:secrets"], "what keeps granted secrets out of the probe's logs");
   assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/pylon-vm/client.ts", previous: null, patch: "" }, { path: "src/control/api/sse.ts", previous: null, patch: "" }] }).map((h) => h.code),
     ["reserved-path:egress", "reserved-path:auth"], "a file GitHub shows no patch for may change anything");
 });
