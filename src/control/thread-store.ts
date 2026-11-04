@@ -380,7 +380,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         stops.set(id, { usageLimit: { stoppedAt: current.at, resetsAt: current.usageLimit.resetsAt } });
         continue;
       }
-      const ended = typeof w.died_at === "number" && turnAt !== null && w.died_at >= turnAt ? w.died_at : null;
+      // A turn that ends with a background task running reports a heartbeat for its end, so its session may end after a
+      // turn whose end only the transcript shows, as a turn's duration or an interrupt.
+      const finished = turnAt !== null && (entries.get(id) ?? []).some((e) => e.at !== null && e.at >= turnAt && (e.kind === "turn" || (e.kind === "notice" && e.text === "Interrupted")));
+      const ended = typeof w.died_at === "number" && turnAt !== null && w.died_at >= turnAt && !finished ? w.died_at : null;
       if (ended !== null && (current === null || ended >= current.at)) stops.set(id, { turnDied: { at: ended, cause: "session-ended", reason: "its Claude session ended during the turn" } });
       else if (current !== null) stops.set(id, { turnDied: { at: current.at, cause: "model-error", reason: current.text } });
     }
