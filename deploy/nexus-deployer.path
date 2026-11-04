@@ -1,0 +1,12 @@
+# The probe writes this file when the control plane says the desired release changed, or that the control role is
+# healthy at it, so the deployer starts at once rather than at its timer's next tick. The timer stays the fallback, as
+# a start while the deployer runs is merged into that run.
+[Unit]
+Description=Start the Nexus deployer when the probe asks
+
+[Path]
+PathChanged=/var/lib/nexus/deployer-wake
+Unit=nexus-deployer.service
+
+[Install]
+WantedBy=paths.target

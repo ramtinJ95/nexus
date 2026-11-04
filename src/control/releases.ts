@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { NexusEvent } from "../events.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { Registry } from "./registry.ts";
 import { busyDrainReason, fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../deploy/model.ts";
@@ -66,6 +67,16 @@ export function releaseView(registry: ReleasesRegistry, self: string | undefined
     });
   }) };
 }
+/**
+ * Whether a release.changed event gives a node's deployer something to do: a new desired release, or the control role
+ * healthy at it, which every probe role waits for.
+ */
+export function wakesDeployers(registry: Pick<ReleasesRegistry, "desiredRelease">, event: Pick<NexusEvent, "kind" | "payload">): boolean {
+  if (event.kind !== "release.changed") return false;
+  const { desired, role, state, commit } = event.payload;
+  return desired !== undefined || (role === "control" && state === "healthy" && commit === registry.desiredRelease()?.commit);
+}
+
 export async function resolveMain(): Promise<string> {
   const result = await command("git", ["ls-remote", repository, "refs/heads/main"], "/tmp", 10_000);
   return commitSchema.parse(result.split(/\s/)[0]);

@@ -16,7 +16,7 @@ import { parseCommandResult, type CommandResult, type PylonCommand } from "./com
 import { clientByteStream, streamPath, streamProtocol, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { artifactUsageSchema, dropReplySchema, type ArtifactUsage, type DropReply, type DropRequest } from "./cleanup.ts";
-import { probePort } from "./routes.ts";
+import { gitReadReplySchema, probePort } from "./routes.ts";
 import { isProbeError, probeError, ProbeHttpError, text } from "./http.ts";
 
 /**
@@ -45,6 +45,13 @@ export interface ProbeClient {
   artifactUsage?(): Promise<ArtifactUsage>;
   /** POST /v1/cleanup: deletes each artifact in order, unless the node finds it in use, and answers what each delete did. */
   dropArtifacts?(ids: readonly PortableArtifactId[]): Promise<DropReply>;
+  /** POST /v1/deployer/wake: starts the node's deployer now rather than at its timer's next tick. */
+  wakeDeployer?(): Promise<void>;
+  /**
+   * POST /v1/pylons/{id}/git: has a snapshot read the pylon's git again, past the probe's reuse of its last read, and
+   * answers once that snapshot is published, with when it was observed. It fails when none was published.
+   */
+  readGit?(pylonId: PylonId): Promise<string>;
 }
 
 /**
@@ -185,6 +192,16 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       const res = await call("POST", "/v1/cleanup", JSON.stringify({ drop: ids } satisfies DropRequest), dropTimeoutMs);
       expectStatus("POST", "/v1/cleanup", res, 200);
       return parseJson(dropReplySchema, res.body, "cleanup");
+    },
+    async readGit(pylonId) {
+      const path = `/v1/pylons/${encodeURIComponent(pylonId)}/git`;
+      const res = await call("POST", path);
+      expectStatus("POST", path, res, 200, "not-running");
+      return parseJson(gitReadReplySchema, res.body, "git read").observedAt;
+    },
+    async wakeDeployer() {
+      const res = await call("POST", "/v1/deployer/wake");
+      expectStatus("POST", "/v1/deployer/wake", res, 204);
     },
     async putPeers(peers) {
       const res = await call("PUT", "/v1/peers", JSON.stringify(peers));

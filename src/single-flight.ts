@@ -34,6 +34,36 @@ export function singleFlight(run: () => Promise<void>, stopped: () => boolean = 
 
 export type SingleFlight = ReturnType<typeof singleFlight>;
 
+/**
+ * Runs `run` one at a time, over everything (null) or over the keys asked for since the run before began. A poll
+ * joins a run over everything in flight, and otherwise asks for one. A wake asks for its key in the next run, which
+ * every wake before that run starts shares.
+ */
+export function scopedFlight<K>(run: (only: ReadonlySet<K> | null) => Promise<void>, stopped: () => boolean = () => false) {
+  let all = false;
+  let keys = new Set<K>();
+  let whole = false;
+  const flight = singleFlight(async () => {
+    const only = all ? null : keys;
+    all = false;
+    keys = new Set();
+    whole = only === null;
+    try { await run(only); } finally { whole = false; }
+  }, stopped);
+  return {
+    poll(): Promise<void> {
+      if (whole) return flight.join();
+      all = true;
+      return flight.rerun();
+    },
+    wake(key: K): Promise<void> {
+      keys.add(key);
+      return flight.rerun();
+    },
+    settled: flight.settled,
+  };
+}
+
 /** Runs each `work` after the one before it settles. A failure goes to its own caller and does not stop the next. */
 export function serialQueue() {
   let last: Promise<unknown> = Promise.resolve();

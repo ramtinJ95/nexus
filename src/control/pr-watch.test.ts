@@ -1028,3 +1028,47 @@ test("a GitHub answer of not modified that comes after its resource was evicted 
   await client.find("acme/repo", "other-0");
   assert.equal(asked.at(-1)!.etag, null, "the late answer evicted the least recently used resource");
 });
+
+test("a turn end reads the thread's pushed branches again and links its pull request at once, reading no other thread", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const builder = f.add("th-2", false, null);
+  const linked: [ThreadId, number][] = [];
+  const freshened: ThreadId[] = [];
+  const watcher = prWatcher({
+    ...f.options,
+    linked: async (thread, pr) => { linked.push([thread.id, pr.number]); },
+    // The probe's read after the turn sees the branch the turn pushed.
+    fresh: async (thread) => {
+      freshened.push(thread.id);
+      f.registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "origin/pushed" });
+    },
+  });
+  await watcher.turnEnded(builder);
+  assert.deepEqual(freshened, [builder]);
+  assert.deepEqual(f.calls, ["find:acme/repo:pushed", "poll"], "only the thread whose turn ended is read");
+  assert.deepEqual(linked, [[builder, 1]]);
+  assert.equal(f.registry.prWatch(f.id), null);
+  assert.deepEqual(watcher.passes(), { started: 0, finished: 0 }, "a turn end's pass is not a pass over every thread");
+});
+
+test("a turn end whose fresh read fails still reads the branches the registry holds", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const watcher = prWatcher({ ...f.options, fresh: async () => { throw new Error("pylon is stopped, not running"); } });
+  await watcher.turnEnded(f.id);
+  assert.deepEqual(f.calls, ["find:acme/repo:feature", "poll"]);
+  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+});
+
+test("close waits for a turn end's fresh read, and no pass reads GitHub after it", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const read = Promise.withResolvers<void>();
+  const asked = Promise.withResolvers<void>();
+  const watcher = prWatcher({ ...f.options, fresh: async () => { asked.resolve(); await read.promise; } });
+  const ended = watcher.turnEnded(f.id);
+  await asked.promise;
+  const closed = watcher.close();
+  read.resolve();
+  await closed;
+  await ended;
+  assert.deepEqual(f.calls, []);
+});

@@ -61,6 +61,8 @@ const configSchema = z.strictObject({
   secretsFile: absolutePath,
   /** In the probe's state directory, so the next boot's probe reads what the node's shutdown paused. */
   shutdownFile: absolutePath.default("/var/lib/nexus/shutdown.json"),
+  /** In the probe's state directory, which deploy/nexus-deployer.path watches to start the node's deployer. */
+  deployerWakeFile: absolutePath.default("/var/lib/nexus/deployer-wake"),
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
   previews: z.strictObject({
     /** The gateway's loopback port. Keep it fixed: the serve entries that proxy to it are how the probe knows its own. */

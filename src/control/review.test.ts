@@ -791,6 +791,40 @@ async function secondBuilder(f: ReturnType<typeof fixture>, loop: ReturnType<Ret
   return builder;
 }
 
+test("a wake steps only the reviews its thread takes part in, at once", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  const second = await secondBuilder(f, loop);
+  // The first poll joins the pass the first start began, before the second review was saved.
+  await loop.poll();
+  await loop.poll();
+  const first = f.review();
+  const other = f.registry.review(second)!;
+  f.reply(first.reviewer, verdict(first, { verdict: "changes", findings: [serious] }));
+  f.reply(other.reviewer, verdict(other, { verdict: "changes", findings: [serious] }));
+  const polls = f.polls;
+  await loop.wake(first.reviewer);
+  assert.equal(f.review().phase.kind, "fixing", "the woken reviewer's verdict moves its review on");
+  assert.equal(f.registry.review(second)!.phase.kind, "reviewing", "the other review waits for its poll");
+  assert.equal(f.polls, polls + 1, "only the woken review's PR is read");
+  await loop.wake("th-none" as ThreadId);
+  assert.equal(f.polls, polls + 1, "a thread no review holds steps nothing");
+  await loop.poll();
+  assert.equal(f.registry.review(second)!.phase.kind, "fixing");
+});
+
+test("a wake after close steps nothing, as from a check whose stream ends while the control plane stops", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  await loop.close();
+  const polls = f.polls;
+  await loop.wake(f.builder);
+  assert.equal(f.polls, polls);
+});
+
 test("landings deploy one at a time: the second merges once the first is healthy, and rolls back to the first's commit", async (t) => {
   const f = fixture(t);
   released(f, previous);

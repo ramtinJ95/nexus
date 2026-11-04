@@ -109,6 +109,8 @@ export function checkRuns(options: {
   startThread(request: StartRequest, caller: string): Promise<Thread>;
   wake(t: Thread): void;
   gate?: Gate;
+  /** Hears of each run that ended with a verdict, or with none, so the review that waits on it steps at once. */
+  ended?: (thread: ThreadId) => void;
 }): CheckRuns {
   const { registry, probes, startThread, wake, gate = checkGate } = options;
   const runs = new Map<ThreadId, Run>();
@@ -118,7 +120,11 @@ export function checkRuns(options: {
   function open(t: Thread, head: string, probe: Pick<ProbeClient, "stream">) {
     const run: Run = { kind: "running", output: Buffer.alloc(0) };
     runs.set(t.id, run);
-    const settle = (next: Run) => { if (runs.get(t.id) === run) runs.set(t.id, next); };
+    const settle = (next: Run) => {
+      if (runs.get(t.id) !== run) return;
+      runs.set(t.id, next);
+      if (next.kind !== "waiting") options.ended?.(t.id);
+    };
     void (async () => {
       let stream: ByteStream;
       try {
@@ -155,6 +161,7 @@ export function checkRuns(options: {
     if (runs.get(id) !== run) return;
     runs.set(id, { kind: "void" });
     remove(id);
+    options.ended?.(id);
   }
 
   function remove(id: ThreadId) {

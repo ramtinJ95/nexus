@@ -52,6 +52,7 @@ const probe = await startProbe({
   backend: config.backend.kind === "pylon-vm" ? pylonVm(config.backend) : docker(config.backend),
   secrets,
   shutdownFile: config.shutdownFile,
+  deployerWakeFile: config.deployerWakeFile,
   ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
   // /var/lib/nexus, the probe user's home, holds the Docker and Gondolin caches of image builds.
   watched: [...config.backend.artifacts === undefined ? [] : [config.backend.artifacts], "/var/lib/nexus", "/var/lib/nexus-control", "/opt/nexus/releases"],

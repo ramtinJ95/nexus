@@ -13,7 +13,7 @@ import { checkoutDir } from "../session-harness.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { StartRequest } from "./start-request.ts";
-import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 
@@ -64,8 +64,8 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
   const started: StartRequest[] = [];
   const local = (argv: readonly string[]) => argv.map((a) => a.replaceAll(checkoutDir, repo).replace(imageEnv, `cat ${image}`));
   let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, local(argv).slice(1), () => {});
-  const runs = (gate?: typeof verifyGate): CheckRuns => checkRuns({
-    registry, wake: () => {}, ...gate === undefined ? {} : { gate },
+  const runs = (gate?: typeof verifyGate, ended?: (thread: ThreadId) => void): CheckRuns => checkRuns({
+    registry, wake: () => {}, ...gate === undefined ? {} : { gate }, ...ended === undefined ? {} : { ended },
     probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
     async startThread(request, caller) { started.push(request); return add(caller); },
   });
@@ -100,6 +100,25 @@ test("a check pylon keeps the CPUs of a project sized over 4", async (t) => {
   f.registry.editProject(f.builder.project, (p) => ({ ...p, resources: { ...p.resources, cpus: 8 } }));
   await f.runs().start(f.builder, "feature", f.head);
   assert.deepEqual(f.started.map((r) => r.resources), [{ cpus: 8 }]);
+});
+
+test("a check's end is heard as it exits, without waiting for the next poll, and a void run's end too", async (t) => {
+  const f = await fixture(t, "echo ok");
+  const ended: ThreadId[] = [];
+  const runs = f.runs(undefined, (id) => { ended.push(id); });
+  const id = await runs.start(f.builder, "feature", f.head);
+  f.running(f.registry.thread(id)!);
+  assert.deepEqual(runs.poll(id, f.head), { kind: "running" });
+  await until("the check's end is heard", () => ended.length > 0);
+  assert.deepEqual(ended, [id]);
+  assert.deepEqual(runs.poll(id, f.head), { kind: "done", passed: true, output: "ok" });
+
+  f.stream = async () => { throw new Error("the pipe could not open"); };
+  const lost = await runs.start(f.builder, "feature", f.head);
+  f.running(f.registry.thread(lost)!);
+  runs.poll(lost, f.head);
+  await until("the void run's end is heard", () => ended.includes(lost));
+  assert.deepEqual(ended, [id, lost]);
 });
 
 test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 GiB that asks for nested virtualization, which is archived afterwards", async (t) => {

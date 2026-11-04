@@ -140,9 +140,11 @@ nexus release --json
 
 ### The deployer's identity
 
-`deploy/install.sh` installs the root `nexus-deployer.service` and its 15-second timer on every machine, records the machine's roles, and puts the SHA-256 digest of the deployer's token in the control plane's `deployKeys`. On the control plane's machine it does this itself. A node's digest arrives with its join, or with `--add-node`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. To read a node's digest again, run as root `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
+`deploy/install.sh` installs the root `nexus-deployer.service`, its 15-second timer and `nexus-deployer.path` on every machine, records the machine's roles, and puts the SHA-256 digest of the deployer's token in the control plane's `deployKeys`. On the control plane's machine it does this itself. A node's digest arrives with its join, or with `--add-node`. The plaintext token remains only in that node's root-owned, mode-0600 `deployer.json`; never put it in a project's secrets or a pylon. To read a node's digest again, run as root `node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";console.log(createHash("sha256").update(JSON.parse(readFileSync("/etc/nexus/deployer.json")).token).digest("hex"))'`.
 
 Only the `deployers` in control.json, which `--admit` sets, may change the release. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed, and the installer refuses to admit one. The `url` in `control-plane.json` names the control plane's tailnet IP on its own machine and its MagicDNS name on port 7470 elsewhere; that name must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Check `nexus release` for fresh reports from every role.
+
+The deployer also starts as soon as the node's probe writes `/var/lib/nexus/deployer-wake`, which `nexus-deployer.path` watches. The control plane asks every probe to write it when the desired release changes and when the control role reports healthy at it, which each probe role waits for, so a deploy does not wait for the next tick of each timer. The probe passes on nothing but the wake: the deployer reads and checks the desired release itself, as on a tick. A start while the deployer runs joins that run, and the timer stays the fallback. A node whose deployer was installed before the path unit has only the timer until `deploy/install.sh` runs on it again.
 
 Node polling goes directly to the control plane, not through a probe. This keeps root credentials out of the probe and reuses the existing mutual tailnet identity check. Node routes additionally require the root-only token, so pylon egress through its host cannot forge health reports or drain control. Node credentials cannot set a release. The in-pylon CLI bridge accepts only its closed operation schema; it cannot forward an arbitrary API route. Tests cover the bridge, a pylon presenting its host's allowed/deployer identity, spoofed forwarding headers, missing node tokens, and the wrong control endpoint. Do not run an unauthenticated proxy on an allowed deployer: tailnet identity authorizes that machine, not individual programs on it.
 
@@ -171,14 +173,14 @@ The failed release may answer, or it may crash-loop or never bind, which is like
 The person picks one of two ways on. Deploying a fixed commit, which needs a control plane that answers, since `nexus deploy` goes through it, keeps everything the control plane recorded since the migration, and its own rollback goes to the migrated release, which can start. With a control plane that does not answer, install the fixed commit by hand with `deploy/install.sh` from its checkout, or restore. Restoring the backup goes back to the previous release and discards everything recorded after the backup: threads, messages, reviews, and the conversations in the harness's storage. The drain held from the backup until the failed health check, at most `healthTimeoutMs`, so only what control did in that window, and whatever it took in after the deployer released the drain, is lost. To restore, on the control node, with the backup and the previous release the report names:
 
 ```sh
-sudo systemctl stop nexus-deployer.timer nexus-deployer.service nexus-backup.timer nexus-backup.service nexus-control.service
+sudo systemctl stop nexus-deployer.timer nexus-deployer.path nexus-deployer.service nexus-backup.timer nexus-backup.service nexus-control.service
 sudo node /opt/nexus/control-current/src/control/backup.ts restore <backup>
 sudo ln -sfn releases/<previous commit> /opt/nexus/control-current
 sudo install -o root -g root -m 0644 /opt/nexus/releases/<previous commit>/deploy/nexus-control.service /etc/systemd/system/nexus-control.service
 sudo systemctl daemon-reload
 # A refused rollback's report would hold the previous commit back as failed.
 sudo rm -f /opt/nexus/control-deploy-report.json
-sudo systemctl start nexus-control.service nexus-deployer.timer nexus-backup.timer
+sudo systemctl start nexus-control.service nexus-deployer.timer nexus-deployer.path nexus-backup.timer
 nexus deploy <previous commit> --wait
 ```
 
@@ -193,7 +195,7 @@ Run these on the **control node**, as the person, not from a pylon. Clearing a h
 1. Stop automatic deployment, including an already-running worker, then inspect the persisted hold. This read works even when the control API is down and does not load or migrate the registry through release code:
 
    ```sh
-   sudo systemctl stop nexus-deployer.timer nexus-deployer.service
+   sudo systemctl stop nexus-deployer.timer nexus-deployer.path nexus-deployer.service
    sudo -u nexus-control env PATH=/usr/local/bin:/usr/bin node --input-type=module <<'JS'
    import { readFileSync } from 'node:fs';
    import { DatabaseSync } from 'node:sqlite';
@@ -219,7 +221,7 @@ Run these on the **control node**, as the person, not from a pylon. Clearing a h
    ```sh
    sudo flock -x /opt/nexus/deployer/lock bash -s <<'SH'
    set -euo pipefail
-   for unit in nexus-deployer.timer nexus-deployer.service nexus-control.service; do
+   for unit in nexus-deployer.timer nexus-deployer.path nexus-deployer.service nexus-control.service; do
      case "$(systemctl show --property=ActiveState --value "$unit")" in
        inactive|failed) ;;
        *) echo "Refusing: $unit is not stopped" >&2; exit 1 ;;
@@ -254,7 +256,7 @@ Run these on the **control node**, as the person, not from a pylon. Clearing a h
    sudo systemctl is-active nexus-control.service
    ```
 
-   From an allowed client, check `nexus release` and normal API access. Leave the deployer timer stopped until the worker is repaired and the desired release is the one you intend to run; then use `sudo systemctl start nexus-deployer.timer`. Clearing a hold does **not** cancel the desired release or remove a failed-commit quarantine. Restarting the timer without addressing the original problem may acquire another hold.
+   From an allowed client, check `nexus release` and normal API access. Leave the deployer timer and path stopped until the worker is repaired and the desired release is the one you intend to run; then use `sudo systemctl start nexus-deployer.timer nexus-deployer.path`. Clearing a hold does **not** cancel the desired release or remove a failed-commit quarantine. Restarting the timer without addressing the original problem may acquire another hold.
 
 ### Old releases go once the person agrees
 
@@ -266,7 +268,7 @@ Each release stays under `/opt/nexus/releases` after the links move on, because 
 
 This does not make arbitrary merged root code safe: merged release code and npm lifecycle scripts are trusted. The fixed supervisor protects against broken workers, not a release deliberately deleting its recovery copy.
 
-`deploy/install.sh` remains the bootstrapping and recovery path. Before repairing a deployment manually, stop both `nexus-deployer.timer` and `nexus-deployer.service` (stopping a timer alone does not stop its running service), rerun the installer from a known-good checkout, then start the timer again. It preserves configs and secrets, and the manual path retains content-hash release directories. The pylon test environment cannot run node systemd, tailscaled or real VM hosts: rollback, polling and supervisor recovery are tested with temporary files, local HTTP/git servers and fake service commands. The actual one-time node installation and service restart must be verified by the person after merge.
+`deploy/install.sh` remains the bootstrapping and recovery path. Before repairing a deployment manually, stop `nexus-deployer.timer`, `nexus-deployer.path` and `nexus-deployer.service` (stopping a timer alone does not stop its running service), rerun the installer from a known-good checkout, then start the timer and the path again. It preserves configs and secrets, and the manual path retains content-hash release directories. The pylon test environment cannot run node systemd, tailscaled or real VM hosts: rollback, polling and supervisor recovery are tested with temporary files, local HTTP/git servers and fake service commands. The actual one-time node installation and service restart must be verified by the person after merge.
 
 ## The probe
 
@@ -283,6 +285,7 @@ The probe runs as the system user `nexus`. These are its paths:
 | `/var/lib/nexus/artifacts` | Images and templates, one directory per ID, which `backend.artifacts` in `probe.json` names. A `probe.json` from before the store, with a `backend.images` map of `<store>/<image ID>` directories, is read as that store. |
 | `/var/lib/nexus/preview-routes.json` | Which pylon each published preview port belongs to. Mode 0600. |
 | `/var/lib/nexus/shutdown.json` | The pylons the node's last shutdown found running, which the next boot wakes, and why a pause did not finish. Mode 0600. `shutdownFile` in `probe.json` moves it. |
+| `/var/lib/nexus/deployer-wake` | The time of the control plane's last ask to start the node's deployer, which `nexus-deployer.path` watches. `deployerWakeFile` in `probe.json` moves it, and the path unit must then name the same file. |
 | `/opt/nexus/current` | The release the probe runs. |
 
 Images and templates the node no longer needs stay in `/var/lib/nexus/artifacts` until the person agrees to delete them on the node's cleanup card. The control plane then sends the probe `POST /v1/cleanup`, and the probe deletes each unless a pylon, a template or a create in progress still needs it. `GET /v1/cleanup` gives the bytes each one takes.
@@ -495,11 +498,11 @@ To run a backup now, `sudo systemctl start nexus-backup`.
 A restore puts every file of a chosen backup back where the manifest says it came from, with its recorded mode and owner, and replaces each database whole, removing its stale `-wal` and `-shm` first. It writes every file beside its target before it replaces any, so a restore that fails there changes nothing. Files that are not in the backup stay as they are. It refuses a backup that does not verify, and refuses to run while the control plane, the deployer or the backup runs, in their services or their timers, because the deployer can restart the control plane and a backup can prune the one being restored:
 
 ```sh
-sudo systemctl stop nexus-deployer.timer nexus-deployer.service nexus-backup.timer nexus-backup.service nexus-control.service
+sudo systemctl stop nexus-deployer.timer nexus-deployer.path nexus-deployer.service nexus-backup.timer nexus-backup.service nexus-control.service
 sudo ls /var/backups/nexus
 sudo node /opt/nexus/control-current/src/control/backup.ts restore 2026-10-31T00-23-41Z
 sudo systemctl start nexus-control.service
-sudo systemctl start nexus-deployer.timer nexus-backup.timer
+sudo systemctl start nexus-deployer.timer nexus-deployer.path nexus-backup.timer
 ```
 
 The registry and the conversations come back as they were at the backup, so what the control plane recorded after it is lost. A restored `/etc/nexus/probe.json` or `secrets.env` takes effect once the probe restarts. Owners are numeric, so a restore suits the machine the backup was taken on.
