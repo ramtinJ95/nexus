@@ -116,11 +116,14 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
   const peers = new Map<string, readonly string[]>();
   /** Nodes whose probe is from before peers were learned. */
   const unaware = new Set(options.unaware);
+  /** Each node whose deployer the control plane woke, with when. */
+  const wakes: [string, number][] = [];
   const probe = (node: { name: NodeName; tailnetHost: string; tailnetNodeId: TailnetNodeId }): ProbeClient => {
     followed.push([node.name, node.tailnetHost, node.tailnetNodeId]);
     const unused = () => Promise.reject(new Error("unused"));
     return {
       node: node.name, submit: unused, job: unused, command: unused, stream: unused, manifest: unused, putSecret: unused, health: options.health ?? unused,
+      async wakeDeployer() { wakes.push([node.name, Date.now()]); },
       async putPeers(list) {
         if (unaware.has(node.name)) throw new ProbeHttpError(`${node.name}: PUT /v1/peers: HTTP 404: no route /v1/peers`, 404);
         peers.set(node.name, list);
@@ -141,7 +144,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
     caller = as;
     return callJson({ host: "127.0.0.1", port: plane.port, method, path, body, headers });
   }
-  return { db, followed, peers, hosts, call, port: plane.port, as(id: string) { caller = id; } };
+  return { db, followed, peers, hosts, wakes, call, port: plane.port, as(id: string) { caller = id; } };
 }
 
 /** The person's control.json as install.sh wrote it before join tokens: two nodes, the Mac as caller and deployer, and both deploy keys. */
@@ -181,6 +184,24 @@ test("a registry and control.json from before join tokens come up with the same 
   assert.equal((await plane.call("nPeerProbeCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer firebat-token" })).status, 403);
   const registry = testRegistry(t, plane.db);
   assert.deepEqual(registry.joinedNodes(), []);
+});
+
+test("a new desired release wakes every node's deployer within seconds, and so does the control role healthy at it", async (t) => {
+  const plane = await controlPlaneOf(t, today);
+  const commit = "c".repeat(40);
+  const asked = Date.now();
+  assert.equal((await plane.call("nLaptopCNTRL", "PUT", "/v1/release", { commit })).status, 200);
+  await until("both deployers are woken", () => plane.wakes.length === 2, 10_000);
+  assert.deepEqual(plane.wakes.map(([node]) => node).sort(), ["infra-testbench", "rj-firebat"]);
+  assert.ok(Math.max(...plane.wakes.map(([, at]) => at)) - asked < 5_000, "well before a 15-second timer tick, let alone two");
+
+  const report = (role: string, state: string, token: string, node = "nPeerProbeCNTRL") => plane.call(node, "POST", "/v1/deployer/report", { role, commit, target: commit, state, reason: null }, { authorization: `Bearer ${token}` });
+  assert.equal((await report("probe", "waiting-for-control", "bench-token")).status, 200);
+  assert.equal((await report("control", "installing", "firebat-token", "nControlPlaneCNTRL")).status, 200);
+  assert.equal((await report("control", "healthy", "firebat-token", "nControlPlaneCNTRL")).status, 200);
+  await until("both deployers are woken again", () => plane.wakes.length === 4, 10_000);
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  assert.equal(plane.wakes.length, 4, "a report that unblocks no deployer wakes none");
 });
 
 test("each read of a node's health is recorded, and its history read back", async (t) => {

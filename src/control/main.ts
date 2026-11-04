@@ -9,7 +9,7 @@ import { z } from "zod";
 import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { connectProbe, type ProbeClient } from "../protocol/client.ts";
-import { canDeploy } from "./releases.ts";
+import { canDeploy, wakesDeployers } from "./releases.ts";
 import { gitIdentitySchema } from "../spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "../reconcile.ts";
@@ -51,6 +51,7 @@ import { backedUpAt, backupStatusFile, readBackupStatus } from "./backup-status.
 import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";
+import { followEvents } from "./follow-events.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
@@ -225,16 +226,25 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     agentState: agents.state,
-    checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread }),
-    live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate }),
+    checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, ended: (id) => void reviews?.wake(id) }),
+    live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate, ended: (id) => void reviews?.wake(id) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => canDeploy(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,
     log,
   });
-  const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto });
+  const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto, fresh: (t) => loop.readGit(registry.pylon(t.pylonId)!.node, t.pylonId) });
   every(prWatchMs, () => watch.poll());
   every(15_000, () => reviews?.poll());
+  // The events only run a step sooner: each poll above stays its fallback.
+  const stopFollowing = followEvents(registry, ["session.turn-ended", "thread.turn-ended", "release.changed"], 1_000, (events) => {
+    for (const id of new Set(events.flatMap((e) => e.kind === "release.changed" ? [] : e.thread ?? []))) {
+      void watch.turnEnded(id as ThreadId);
+      void reviews?.wake(id as ThreadId);
+    }
+    if (!events.some((e) => wakesDeployers(registry, e))) return;
+    for (const probe of probeMap.values()) probe.wakeDeployer?.().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
+  }, (err) => log(`following events for wake-ups failed, going on from the newest: ${err.message}`));
   for (const poll of threads.polls) every(15_000, poll);
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });
   every(15_000, () => nudges?.poll());
@@ -297,6 +307,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     port: api.port,
     async close() {
       for (const timer of timers) clearInterval(timer);
+      stopFollowing();
       for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, cleanup, health, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
