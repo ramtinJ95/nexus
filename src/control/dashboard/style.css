@@ -728,6 +728,7 @@ h4.md-h { font-size: 1.07em; }
 .graph-unit { font-weight: 400; color: var(--text-3); }
 .graph-plot { position: relative; min-width: 0; transition: opacity 0.15s; }
 .graphs-loading .graph-plot { opacity: 0.45; }
+.node-detail[aria-busy="true"] .node-live { opacity: 0.45; }
 .graph-empty { position: absolute; inset: 0 0 26px 46px; z-index: 1; display: grid; place-items: center; padding: 0 24px; text-align: center; pointer-events: none; }
 .graph-legend { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 12px; padding-left: 52px; overflow-y: auto; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text-2); }
 .graph-at { margin-left: auto; font: 400 11.5px/1.3 var(--sans); font-variant-numeric: tabular-nums; color: var(--text-3); white-space: nowrap; }

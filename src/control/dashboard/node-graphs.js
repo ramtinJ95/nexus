@@ -261,6 +261,8 @@ for (const b of buttons) {
 }
 pick();
 void load();
+// The Cluster page's switch to another node names it here, and the graphs draw it in the same range and lines.
+new MutationObserver(() => void load()).observe(section, { attributeFilter: ["data-node"] });
 
 afterSwap(() => {
   const sample = document.querySelector("#node-health [data-sample]")?.dataset.sample;

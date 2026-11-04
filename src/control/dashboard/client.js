@@ -38,6 +38,7 @@ if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')
 // The Cluster page's cards and its node's graphs, which bring uPlot, are chunks no other page needs.
 if (document.getElementById("cluster-nodes") !== null) {
   void import("./node-cards.js");
+  void import("./node-switch.js");
   void import("./node-graphs.js");
 }
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
