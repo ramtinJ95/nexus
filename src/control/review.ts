@@ -136,15 +136,19 @@ You may take them up in a later pull request. Do not push to this pull request's
 function nextRound(r: Review, previous: Round, token: string, base: string): string {
   const n = roundsSpent(r);
   const head = r.rounds.at(-1)!.head;
-  const answered = previous.answers === null ? `New commits were pushed to the branch after you approved ${previous.head}.`
-    : `The builder answered your findings:\n${previous.answers.map((a) => `${a.id}: ${a.action}. ${a.reason}`).join("\n")}`;
-  // A rebase rewrites the commits, so a diff from the old head would show the base's own changes as the builder's.
-  const rewritten = previous.conflict !== undefined || previous.answers === null;
-  const review = head === previous.head ? `It pushed nothing, so the head is still ${head}.`
+  const retargeted = previous.base !== undefined && previous.base !== base;
+  const answered = previous.answers !== null ? `The builder answered your findings:\n${previous.answers.map((a) => `${a.id}: ${a.action}. ${a.reason}`).join("\n")}`
+    : retargeted && head === previous.head ? `The pull request's base changed from ${previous.base} to ${base} after you approved ${previous.head}.`
+    : `New commits were pushed to the branch after you approved ${previous.head}.`;
+  const alsoRetargeted = retargeted && !(previous.answers === null && head === previous.head) ? ` The pull request's base also changed from ${previous.base} to ${base}.` : "";
+  // A rebase rewrites the commits, so a diff from the old head would show the base's own changes as the builder's, and
+  // after a retarget it would leave out what the new base adds to the merge.
+  const rewritten = retargeted || previous.conflict !== undefined || previous.answers === null;
+  const review = head === previous.head ? retargeted ? `Review the head against the new base:\n  git fetch origin && git checkout --detach ${head}\n  git diff origin/${base}...${head}` : `It pushed nothing, so the head is still ${head}.`
     : rewritten ? `Review the new head against the base, and compare its commits with the ones you reviewed:\n  git fetch origin && git checkout --detach ${head}\n  git diff origin/${base}...${head}\n  git range-diff origin/${base} ${previous.head} ${head}`
     : `Review the new commits:\n  git fetch origin && git checkout --detach ${head}\n  git diff ${previous.head}..${head}`;
   return `${reviewPrefix}
-Round ${n} of at most ${r.maxRounds}. ${answered}
+Round ${n} of at most ${r.maxRounds}. ${answered}${alsoRetargeted}
 
 ${review}
 Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "${token}".`;
@@ -273,16 +277,24 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The PR's change at commit `head`, as GitHub shows it against `base`. */
   const changeAt = async (r: Review, base: string, head: string) => changeOf(base, await github.change(r.pr.repo, base, head));
   /**
-   * The reviewer's approval of the latest round carried to `head`, pushed after it, when the change at both is the
-   * same, so the checks run at `head` with no reviewer round. Null when the reviewer did not approve it, or the change
-   * differs or cannot be compared, and `head` needs a round of its own.
+   * `r` with the latest round's verdict carried to `head`, pushed after it, when the change at both is the same on the
+   * same base, or null when the change differs or cannot be compared, and `head` needs a round of its own.
    */
-  const carryApproval = async (r: Review, head: string, base: string): Promise<Review | null> => {
+  const carryRound = async (r: Review, head: string, base: string, held?: true): Promise<Review | null> => {
     const round = r.rounds.at(-1)!;
-    if (!reviewerApproved(round) || round.base !== base) return null;
+    if (round.base !== base) return null;
     const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
     if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
-    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head } }], phase: checking(), outbox: null, nudges: 0 };
+    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head, ...held && { held } } }] };
+  };
+  /**
+   * The reviewer's approval of the latest round carried to `head`, so the checks run at `head` with no reviewer round.
+   * Null when the reviewer did not approve it, or the change differs.
+   */
+  const carryApproval = async (r: Review, head: string, base: string): Promise<Review | null> => {
+    if (!reviewerApproved(r.rounds.at(-1)!)) return null;
+    const carried = await carryRound(r, head, base);
+    return carried === null ? null : { ...carried, phase: checking(), outbox: null, nudges: 0 };
   };
   /**
    * The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. The
@@ -293,9 +305,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (carried !== null) return carried;
     const n = roundsSpent(r);
     if (n >= r.maxRounds) return end(r, { ...personPhase("rounds", `${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`), label: { state: "adding" }, unreviewed: head });
-    const next: Review = { ...r, rounds: [...r.rounds, { head, base, verdict: null, check: null, answers: null }] };
+    const next = reviewRound(r, head, base);
     return send(next, "reviewer", (token) => nextRound(next, r.rounds.at(-1)!, token, base), { kind: "reviewing" });
   };
+  /** `r` with a round for the reviewer at `head`. The person's waiver was of the change against the latest round's base. */
+  const reviewRound = (r: Review, head: string, base: string): Review =>
+    ({ ...r, rounds: [...r.rounds, { head, base, verdict: null, check: null, answers: null }], waiver: r.rounds.at(-1)!.base === base ? r.waiver : null });
   /**
    * The builder rebases a branch that conflicts with its base, even after the last round: a rebase that keeps the
    * approved change needs no round, and one that changes it runs out of rounds when the builder pushes it.
@@ -388,7 +403,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (carried !== null) return carried;
       }
       if (n >= r.maxRounds) return ranOut(withAnswers, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
-      const next: Review = { ...withAnswers, rounds: [...withAnswers.rounds, { head: snapshot.detail.head, base: snapshot.detail.base, verdict: null, check: null, answers: null }] };
+      const next = reviewRound(withAnswers, snapshot.detail.head, snapshot.detail.base);
       return send(next, "reviewer", (token) => nextRound(next, withAnswers.rounds.at(-1)!, token, snapshot.detail.base), { kind: "reviewing" });
     },
     async quoting(r, phase, __, reviewer) {
@@ -482,8 +497,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       };
       let commit: string;
       let landing = r;
+      // A retargeted PR merges another change at the same head than the one the reviewer read against its round's base.
+      const { base } = r.rounds.at(-1)!;
+      const retargeted = base !== undefined && snapshot.detail.base !== base;
       if (snapshot.detail.mergeCommit !== null) {
         if (snapshot.detail.head !== head) return toPerson(r, "outside", { code: "not-approved-head", text: `Pull request #${r.pr.number} merged at ${snapshot.detail.head}, not the approved ${head}, so it is not deployed.` });
+        // A merge authorized into the old base does not authorize one into the new.
+        if (retargeted) return toPerson(r, "outside", `Pull request #${r.pr.number} was merged outside this review into ${snapshot.detail.base}, not ${base}, the base its approval was of, so it is not deployed.`);
         // A merge this review did not authorize is someone else's, so it deploys only if the policy would have let this review merge it.
         if (phase.authorized !== head) {
           const { all, left, review, why } = await holds();
@@ -494,6 +514,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       } else {
         // A head pushed after the approval, such as a rebase on the PR watch's news of a conflict, gets its own round.
         if (snapshot.detail.head !== head) return await newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
+        if (retargeted) return await newHead(r, head, snapshot.detail.base, `The pull request's base changed from ${base} to ${snapshot.detail.base}`);
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
         const { all, left, review, why } = await holds();
@@ -573,13 +594,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * A head pushed after the review approved its last round or held it for the person. A review that would land gets a
    * new round, as a landing does, and so does one held only for a failed check, live check or conflict after an
    * approval, which the push may answer. One the loop gave up on otherwise stays the person's, and its reasons name the
-   * new head.
+   * new head, unless its rounds ran out and the push keeps the change they judged, which keeps the hold at that head.
    */
   async function pushedAfter(r: Review, snapshot: PrSnapshot): Promise<Review | null> {
     const head = pushedHead(r, { ...snapshot.pr, head: snapshot.detail.head });
     if (head === null) return null;
     const phase = r.phase;
     if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return await newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
+    // Its reviewer is archived, so the carried round goes to no one, and its reasons stay true of the same change.
+    const carried = phase.cause === "rounds" && phase.unreviewed === undefined ? await carryRound(r, head, snapshot.detail.base, true) : null;
+    if (carried !== null) return carried;
     const stale: Hold = { code: "stale-head", text: `The pull request's head moved to ${head} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.` };
     return { ...r, phase: { ...phase, ...personPhase(phase.cause, ...phase.holds.filter((h) => h.code !== "stale-head"), stale), unreviewed: head } };
   }

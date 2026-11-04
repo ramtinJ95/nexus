@@ -53,7 +53,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
         }
         const pr = { review: review.id, repo: review.pr.repo, pr: review.pr.number };
         const round = review.rounds.at(-1)!;
-        if (before?.id === review.id && before.rounds.length < review.rounds.length && round.carried !== undefined) {
+        if (before?.id === review.id && before.rounds.length < review.rounds.length && round.carried !== undefined && round.carried.held === undefined) {
           appendEvent("review.approval-carried", review.builder, { ...pr, from: round.carried.from, to: round.head });
         }
         // Reading the change a waiver is for, or carrying it to a later head, is not the person waiving again.
