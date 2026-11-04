@@ -307,4 +307,8 @@ export const migrations: readonly string[] = [
   // first message that carried them, so a resend of that message carries the same text after the rules change. A
   // thread started before has none.
   `ALTER TABLE threads ADD COLUMN standing_rules TEXT;`,
+  // When a Claude worker's session ended during its latest turn, by the pylon's clock, and the record of Nexus resuming
+  // a worker whose turn died. A worker from before has neither, so no turn of it died that Nexus saw.
+  `ALTER TABLE claude_workers ADD COLUMN died_at INTEGER;
+   ALTER TABLE claude_workers ADD COLUMN resume TEXT;`,
 ];

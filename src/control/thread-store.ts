@@ -29,7 +29,7 @@ import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "../tick.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
-import { maxEntries, transcriptStart, usageLimitStop, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
+import { errorStop, maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
 import type { NodeStore } from "./node-store.ts";
 
 /**
@@ -72,10 +72,30 @@ export interface Thread extends StoredThread, ActivityFacts {
   workingSince?: number;
   /** The Claude worker's session stopped on its usage limit and no turn of a session runs since. `resetsAt` is null when Claude Code did not say when the limit resets. */
   usageLimit?: { stoppedAt: number; resetsAt: number | null };
+  /**
+   * The Claude worker's latest turn died, as its session ended during it or it ended on a model error that was not its
+   * usage limit, and no turn of a session runs since. `at` is when, by the pylon's clock, and `reason` says which, with
+   * the error's text for a model error.
+   */
+  turnDied?: { at: number; cause: "session-ended" | "model-error"; reason: string };
 }
 
 /** An archived thread's pylon held to be read whole: woken to be read, or read or given up on and waiting for its pause, since `since`. */
 export interface UsageHold { thread: ThreadId; phase: "reading" | "pausing"; since: number }
+
+/**
+ * Nexus resuming a Claude worker whose turn died (resume.ts). `turn` is the `turnDied.at` of the turn it answers, and
+ * `count` the resumes in a row that turn makes. A resume `waiting` goes at `due`, one `sending` is saved before it is
+ * sent, and one `resumed` went at `at`. After the last resume in a row a turn that died too waits on the person, which
+ * makes the attention a decision, and `why` says why in a line. So does a resume that started no turn. The person
+ * writing to the thread makes it theirs, which is kept, as the transcript may drop the message.
+ */
+export type ClaudeResume =
+  | { state: "waiting"; turn: number; count: number; due: number }
+  | { state: "sending"; turn: number; count: number }
+  | { state: "resumed"; turn: number; count: number; at: number }
+  | { state: "person"; turn: number; count: number; why: string }
+  | { state: "left-alone" };
 
 /** A Claude worker thread's worker. `session` is the Claude Code session its launch opened, null until the launch names one. */
 export interface ClaudeWorker { prompt: string; state: string; model: string | null; session: string | null; message?: string }
@@ -291,7 +311,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const reading = new Set([readingUsage(), settling?.phase === "reading" ? settling.thread : undefined]);
     const archived = new Map(sql("SELECT * FROM thread_archives WHERE thread IN (SELECT value FROM json_each(?))").all(ids).map((r) => [r.thread as ThreadId, r]));
     const backedUp = backedUpAt();
-    const limits = usageLimits(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)));
+    const stops = claudeStops(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)));
     const holds = participants.flatMap((p) => [...p.awaited?.(rows.map((r) => r.id as ThreadId)) ?? []]);
     const now = clock();
     return rows.map((row): Thread => {
@@ -299,13 +319,12 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const working = (live.get(thread.id)?.at ?? null) as number | null;
       const wait = waiting.get(thread.id);
       const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.get(thread.id)?.since].filter((at): at is number => typeof at === "number");
-      const usageLimit = limits.get(thread.id);
       const archive = archived.get(thread.id);
       return withHold({
         ...thread, working: thread.agentTurnRunning || working !== null,
         ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(wait === undefined ? {} : { sessionWaiting: true }),
         ...(typeof wait?.message === "string" ? { sessionWaitingMessage: wait.message } : {}),
-        ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...(usageLimit === undefined ? {} : { usageLimit }),
+        ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...stops.get(thread.id),
         ...(reading.has(thread.id) ? { readingUsage: true } : {}), ...(archive === undefined ? {} : archiveFacts(archive, backedUp, settleWaits.get(thread.id))),
       }, holds.flatMap(([id, hold]) => id === thread.id ? [hold] : []), now);
     });
@@ -335,28 +354,37 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   }
 
   /**
-   * The usage limit each of the Claude worker threads among `ids` stopped on. Derived from the newest entries rather
-   * than stored, so it holds whichever of the turn's end and the transcript's read comes first.
+   * What stopped the latest turn of each of the Claude worker threads among `ids`: its usage limit, or its death. Derived
+   * from the newest entries rather than stored, so it holds whichever of the turn's end and the transcript's read comes
+   * first.
    */
-  function usageLimits(ids: readonly ThreadId[]): Map<ThreadId, NonNullable<Thread["usageLimit"]>> {
-    const limits = new Map<ThreadId, NonNullable<Thread["usageLimit"]>>();
-    if (ids.length === 0) return limits;
-    const turns = new Map(sql(`SELECT w.thread, w.turn_at FROM claude_workers w JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
-      WHERE w.thread IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids)).map((r) => [r.thread as ThreadId, r.turn_at as number | null]));
-    if (turns.size === 0) return limits;
+  function claudeStops(ids: readonly ThreadId[]): Map<ThreadId, Pick<Thread, "usageLimit" | "turnDied">> {
+    const stops = new Map<ThreadId, Pick<Thread, "usageLimit" | "turnDied">>();
+    if (ids.length === 0) return stops;
+    const workers = sql(`SELECT w.thread, w.turn_at, w.died_at, t.thread IS NOT NULL AS read FROM claude_workers w LEFT JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
+      WHERE w.thread IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids));
     const entries = new Map<ThreadId, ClaudeEntry[]>();
     // Each thread's newest 16 through the index, as a window over the threads' entries would rank every one it keeps.
     for (const r of sql(`SELECT j.value AS thread, e.entry FROM json_each(?) j JOIN claude_entries e ON e.thread = j.value
-      AND e.seq > coalesce((SELECT seq FROM claude_entries WHERE thread = j.value ORDER BY seq DESC LIMIT 1 OFFSET 16), -1) ORDER BY j.value, e.seq`).all(JSON.stringify([...turns.keys()]))) {
+      AND e.seq > coalesce((SELECT seq FROM claude_entries WHERE thread = j.value ORDER BY seq DESC LIMIT 1 OFFSET 16), -1) ORDER BY j.value, e.seq`).all(JSON.stringify(workers.filter((w) => w.read === 1).map((w) => w.thread)))) {
       const of = r.thread as ThreadId;
       entries.set(of, [...entries.get(of) ?? [], json<ClaudeEntry>(r.entry)]);
     }
-    for (const [id, turnAt] of turns) {
-      const stop = usageLimitStop(entries.get(id) ?? []);
+    for (const w of workers) {
+      const id = w.thread as ThreadId;
+      const turnAt = w.turn_at as number | null;
+      const stop = errorStop(entries.get(id) ?? []);
       // A turn that started after the stop, by the pylon's clock as the record's time is, ended it, though its prompt may not be read yet.
-      if (stop !== null && (turnAt === null || turnAt <= stop.stoppedAt)) limits.set(id, stop);
+      const current = stop !== null && (turnAt === null || turnAt <= stop.at) ? stop : null;
+      if (current?.usageLimit !== undefined) {
+        stops.set(id, { usageLimit: { stoppedAt: current.at, resetsAt: current.usageLimit.resetsAt } });
+        continue;
+      }
+      const ended = typeof w.died_at === "number" && turnAt !== null && w.died_at >= turnAt ? w.died_at : null;
+      if (ended !== null && (current === null || ended >= current.at)) stops.set(id, { turnDied: { at: ended, cause: "session-ended", reason: "its Claude session ended during the turn" } });
+      else if (current !== null) stops.set(id, { turnDied: { at: current.at, cause: "model-error", reason: current.text } });
     }
-    return limits;
+    return stops;
   }
 
   const threadStatus = (id: ThreadId) => sql("SELECT status FROM threads WHERE id = ?").get(id)?.status as ThreadStatus | undefined;
@@ -366,7 +394,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = pylon(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
-    const decision = participants.some((p) => p.needsPerson?.(id));
+    const decision = participants.some((p) => p.needsPerson?.(id)) || claudeResume(id)?.state === "person";
     // An archived thread's pylon stays paused, so its failure waits for no one until an unarchive.
     const failed = t.status !== "archived" && (p?.failed != null || workerFailed);
     const attention = attentionOf(failed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
@@ -444,6 +472,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     };
   }
 
+  function claudeResume(thread: ThreadId): ClaudeResume | null {
+    return jsonOrNull<ClaudeResume>(sql("SELECT resume FROM claude_workers WHERE thread = ?").get(thread)?.resume ?? null);
+  }
+
   function claudeTranscript(thread: ThreadId): ClaudeTranscript | undefined {
     const row = sql("SELECT * FROM claude_transcripts WHERE thread = ?").get(thread);
     return row === undefined ? undefined : {
@@ -478,6 +510,16 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       });
     },
     claudeWorker,
+    claudeResume,
+    /** Replaces the worker's resume record, or with null deletes it. */
+    saveClaudeResume(thread: ThreadId, resume: ClaudeResume | null) {
+      transaction(() => {
+        sql("UPDATE claude_workers SET resume = ? WHERE thread = ?").run(resume === null ? null : JSON.stringify(resume), thread);
+        updateAttention(thread);
+      });
+    },
+    /** The threads with a resume record that a later pass may still change or clear, which is every one but left-alone. */
+    resumedThreads: (): ThreadId[] => sql("SELECT thread FROM claude_workers WHERE resume IS NOT NULL AND json_extract(resume, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
     agent(t: Pick<Thread, "id" | "conversationId">): ThreadAgent {
       const worker = claudeWorker(t.id);
       return worker !== undefined ? { kind: "claude", worker } : t.conversationId !== null ? { kind: "harness", conversationId: t.conversationId } : { kind: "none" };
@@ -514,7 +556,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
             dropped = excluded.dropped, read_at = excluded.read_at`)
           .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
         // An image without the StopFailure hook reports no end to the turn a usage limit stopped, so the transcript ends it.
-        const stop = usageLimits([thread]).get(thread);
+        const stop = claudeStops([thread]).get(thread)?.usageLimit;
         if (stop !== undefined) {
           sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
             .run(thread, read.session, thread, read.session, stop.stoppedAt);
@@ -664,6 +706,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         const evicted = sql("DELETE FROM session_order WHERE thread = ? AND session NOT IN (SELECT session FROM session_order WHERE thread = ? ORDER BY at DESC, rowid DESC LIMIT ?) RETURNING at")
           .all(thread, thread, maxActiveSessions * 2);
         if (evicted.length > 0) sql("INSERT INTO session_order_floor VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET at = max(at, excluded.at)").run(thread, Math.max(...evicted.map((r) => Number(r.at))));
+        // The session's order outlives its activity, which a long command without a heartbeat outlasts.
+        if (event.kind === "session.ended" && (previous?.kind === "session.turn-started" || previous?.kind === "session.heartbeat")) {
+          sql("UPDATE claude_workers SET died_at = ? WHERE thread = ? AND turn_session = ? AND turn_at <= ?").run(at, thread, session, at);
+        }
         if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
           sql("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
         } else {
