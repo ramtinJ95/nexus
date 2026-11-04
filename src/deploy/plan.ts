@@ -45,3 +45,19 @@ export function planDeploy(input: DeployInput): DeployStep {
   }
   return { kind: "install", commit: desired.commit };
 }
+
+/**
+ * The registry's user_version, and how many migrations a release's code applies. Either is null before the control
+ * plane has made a registry, or for a release from before src/control/schema.ts.
+ */
+export interface SchemaVersions { registry: number | null; release: number | null }
+
+/**
+ * What a release's control plane does to the registry as db.ts opens it: migrates one behind it, refuses one ahead. A
+ * release from before schema.ts kept the same refusal in registry.ts, so one whose count is unknown counts as refusing.
+ */
+export function schemaStep({ registry, release }: SchemaVersions): "starts" | "migrates" | "refuses" {
+  if (registry === null) return "starts";
+  if (release === null || registry > release) return "refuses";
+  return registry < release ? "migrates" : "starts";
+}

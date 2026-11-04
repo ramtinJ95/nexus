@@ -134,6 +134,89 @@ test("polling reconciles a desired control release, reports rollback and leaves 
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
 });
 
+test("a failed deploy that migrated the registry stays on its release with a backup taken first, and a rollback past the migration is refused before it switches", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRole } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-migration-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const old = "b".repeat(40);
+  for (const path of ["etc", "units", "deployer", `releases/${old}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${old}/release-commit`), old);
+  await symlink(`releases/${old}`, join(dir, "control-current"));
+  await writeFile(join(dir, "units/nexus-control.service"), "old unit");
+  // Neither release ever answers health with its own commit, so every install fails its health check.
+  const server = createServer((_req, res) => res.end(JSON.stringify({ commit: "c".repeat(40) }))).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await writeFile(join(dir, "etc/control.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
+  let desired = commit;
+  let schema = 3;
+  const reports: any[] = [];
+  const calls: string[] = [];
+  const api = async (path: string, body?: any) => {
+    if (path === "release") return { desired: { commit: desired, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "drain") { if (body.hold) calls.push("drain hold"); return { idle: true }; }
+    if (path === "report") { reports.push(body); return { ok: true }; }
+    assert.fail(path);
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = {
+    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
+    async checkout() {},
+    async run(program: string, args: readonly string[]) {
+      const release = args.find((a) => a.startsWith("NEXUS_COMMIT="))?.slice("NEXUS_COMMIT=".length);
+      if (program === "env" && !args.includes("NEXUS_PREPARE=1")) {
+        await mkdir(join(dir, `releases/${release}`), { recursive: true });
+        await writeFile(join(dir, `releases/${release}/release-commit`), release!);
+      }
+      if (program === "env" && args.includes("NEXUS_PREPARE=1")) calls.push(`activate ${release}`);
+      if (program === "systemctl" && (args[0] === "stop" || args[0] === "start")) calls.push(args[0]);
+      if (program === "systemctl" && args[0] === "restart") {
+        calls.push(`restart ${await readlink(join(dir, "control-current"))}`);
+        if (await readlink(join(dir, "control-current")) === `releases/${commit}`) schema = 4;
+      }
+      return "";
+    },
+    registry: {
+      version: async () => schema,
+      known: async (release: string): Promise<number> => release === `releases/${commit}` ? 4 : 3,
+      backUp: async () => { calls.push(`backup at ${schema}`); return "2026-11-04T00-00-00Z"; },
+    },
+  };
+
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(calls, ["drain hold", "backup at 3", `activate ${commit}`, `restart releases/${commit}`, "stop", "start"],
+    "the backup comes after the drain seals and before the link moves, and the registry is read with the target stopped");
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "failed"]);
+  assert.match(reports.at(-1).reason, /not rolled back: the registry is at schema version 4, and the previous release, releases\/b{40}, applies 3 registry migrations/);
+  assert.match(reports.at(-1).reason, /restore backup 2026-11-04T00-00-00Z, taken just before it,/);
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
+  assert.equal(JSON.parse(await readFile(join(dir, "control-deploy.json"), "utf8")).backup, "2026-11-04T00-00-00Z");
+
+  calls.length = 0;
+  desired = old;
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(calls, ["drain hold"], "a release older than the registry never backs up, switches or restarts");
+  assert.equal(reports.at(-1).state, "failed");
+  assert.equal(reports.at(-1).target, old);
+  assert.match(reports.at(-1).reason, new RegExp(`release ${old} applies 3 registry migrations, but the registry is at schema version 4`));
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
+  const third = "d".repeat(40);
+  await rm(join(dir, "control-deploy-report.json"));
+  await rm(join(dir, "control-deploy.json"));
+  calls.length = 0;
+  desired = third;
+  boundary.registry.known = async (release) => release === `releases/${third}` ? 5 : release === `releases/${commit}` ? 4 : 3;
+  const version = boundary.registry.version;
+  boundary.registry.version = async () => { if (calls.includes("stop")) throw new Error("registry unreadable"); return version(); };
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(calls.slice(-2), ["stop", "start"], "a control plane stopped for a check that failed is started again");
+  assert.equal(reports.at(-1).state, "failed");
+  assert.match(reports.at(-1).reason, /not rolled back: whether the previous release can start could not be read: Error: registry unreadable/);
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${third}`);
+});
+
 test("a rolled-back install stays quarantined by its journal after its report is cleared, without draining control", async (t) => {
   const { reconcileRole } = await import("./worker.ts");
   const dir = await mkdtemp(join(tmpdir(), "nexus-journal-quarantine-"));
@@ -428,4 +511,58 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
   calls.length = 0;
   await reconcileRole("control", config, api, boundary);
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
+});
+
+test("the node's registry reads give the registry's version and a release's migrations, and null only for what does not exist yet", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { nodeRegistry } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-registry-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const path of ["home", "releases/new/src/control", "releases/old/src/deploy", "releases/broken/src/control"]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, "control.json"), JSON.stringify({ db: "registry.db" }));
+  const registry = nodeRegistry({ config: join(dir, "control.json"), home: join(dir, "home"), prefix: dir, status: join(dir, "status.json") });
+  assert.equal(await registry.version(), null, "the control plane has not made a registry yet");
+  const db = new DatabaseSync(join(dir, "home/registry.db"));
+  db.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (x); PRAGMA user_version = 7");
+  assert.equal(await registry.version(), 7, "read while another connection holds the registry open");
+  db.close();
+  await writeFile(join(dir, "releases/new/src/control/schema.ts"), "export const migrations: readonly string[] = [`CREATE TABLE a (x)`, `CREATE TABLE b (x)`];\n");
+  assert.equal(await registry.known("releases/new"), 2);
+  assert.equal(await registry.known(join(dir, "releases/new")), 2, "an absolute link target");
+  assert.equal(await registry.known("releases/old"), null, "a release from before schema.ts");
+  await writeFile(join(dir, "releases/broken/src/control/schema.ts"), "export const migrations = [;\n");
+  await assert.rejects(registry.known("releases/broken"), SyntaxError);
+});
+
+test("a backup before a migration counts only a successful run that began after it was asked for, and gives up within its budget", async (t) => {
+  const { nodeRegistry } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-backup-run-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const status = join(dir, "status.json");
+  const paths = { config: join(dir, "control.json"), home: dir, prefix: dir, status };
+  const write = (ranAt: Date, succeeded = true) => writeFile(status, JSON.stringify({ ranAt: ranAt.toISOString(), succeeded, newest: { name: `backup-${ranAt.getTime()}`, verified: succeeded, createdAt: ranAt.toISOString() } }));
+  const stale = new Date(Date.now() - 60_000);
+  let starts: number[] = [];
+  const run = (runs: ((n: number) => Promise<void>)[]) => async (program: string, args: readonly string[], _cwd: string, timeoutMs?: number) => {
+    assert.deepEqual([program, ...args], ["systemctl", "start", "nexus-backup.service"]);
+    starts.push(timeoutMs!);
+    await runs[starts.length - 1]!(starts.length);
+    return "";
+  };
+
+  const fresh = new Date(Date.now() + 1000);
+  assert.equal(await nodeRegistry(paths, run([() => write(stale), () => write(fresh)])).backUp(), `backup-${fresh.getTime()}`, "a start that joined an earlier run starts once more");
+  assert.equal(starts.length, 2);
+
+  starts = [];
+  await assert.rejects(nodeRegistry(paths, run([() => write(stale), () => write(stale)])).backUp(), /no backup that began after the drain sealed succeeded/, "a status left by an earlier run, as when the status write failed");
+  assert.equal(starts.length, 2);
+
+  starts = [];
+  await assert.rejects(nodeRegistry(paths, run([() => write(new Date(Date.now() + 1000), false), () => write(new Date(Date.now() + 1000), false)])).backUp(), /did not succeed|no backup/);
+
+  starts = [];
+  await assert.rejects(nodeRegistry(paths, run([async () => { await new Promise((r) => setTimeout(r, 60)); await write(stale); }]), 50).backUp(), /no backup/);
+  assert.equal(starts.length, 1, "no second start once the budget is spent");
+  assert.ok(starts[0]! <= 50, "each start is bounded by what is left of the budget");
 });
