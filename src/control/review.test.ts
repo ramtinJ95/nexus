@@ -82,6 +82,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const checkHeads: string[] = [];
   /** Check threads whose runs a restart lost, which the gate then reports as giving no verdict. */
   const forgotten = new Set<ThreadId>();
+  let checkStartFails = false;
   const discarded: ThreadId[] = [];
   let verifies = false;
   let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
@@ -124,7 +125,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       replies: replies.get(target.id) ?? [], failure: failures.get(target.id) ?? null,
     })),
     checks: {
-      async start(_, __, head) { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return id; },
+      async start(_, __, head) {
+        if (checkStartFails) throw new Error("no node took the check pylon");
+        const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return id;
+      },
       poll: (id) => forgotten.has(id) ? { kind: "void" } : check,
       discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
     },
@@ -179,6 +183,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     checkThreads, checkHeads, discarded,
     /** A restart: the gate holds no run for any check thread started so far. */
     forgetChecks() { for (const id of checkThreads) forgotten.add(id); },
+    set checkStartFails(fails: boolean) { checkStartFails = fails; },
     /** Whether the PR's head has a .nexus/verify, the live check's state, and why no node takes a verify pylon. */
     set verifies(v: boolean) { verifies = v; },
     set live(c: CheckState) { live = c; },
@@ -1679,6 +1684,61 @@ test("a builder that pushes nothing for the reviewer's changes gets a round at t
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" });
   assert.deepEqual(f.checkHeads, [head1], "head1 was checked beside the first round");
+});
+
+test("a check that cannot start beside the reviewer leaves the reviewer's reminders running, and starts once the reviewer approves", async (t) => {
+  const f = fixture(t);
+  f.checkStartFails = true;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, "I looked and it seems fine.");
+  await loop.poll();
+  assert.match(f.sent.at(-1)!.message.text, /no nexus-review block/);
+  assert.equal(f.review().nudges, 1);
+  f.checkStartFails = false;
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.checkHeads, [head1]);
+});
+
+test("a check that finished as the reviewer asked for changes keeps its result for a round at the same head", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.check = { kind: "done", passed: true, output: "ok" };
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.deepEqual(f.review().rounds[0]!.check, { passed: true, output: "ok" });
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "rejected", reason: "The cache is rebuilt on every deploy." }]));
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.checkHeads, [head1]);
+});
+
+test("a head the branch returns to keeps the check an earlier round ran there", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  for (const head of [head2, head1]) {
+    f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+    await loop.poll();
+    f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head } };
+    f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+    await loop.poll();
+  }
+  assert.deepEqual(f.review().rounds.map((r) => r.head), [head1, head2, head1]);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.checkHeads, [head1, head2], "head1 was checked in the first round");
 });
 
 test("a head that moves while the reviewer and the check run gets its own round and its own check", async (t) => {

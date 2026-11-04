@@ -270,6 +270,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (again.length) return toPerson(next, "gate", ...again, ...output);
     return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
   };
+  /** The check's result at `head` from any round of `r`, which every round there keeps, since the check clones that commit alone. */
+  const checkedAt = (r: Review, head: string) => r.rounds.findLast((round) => round.head === head && round.check !== null)?.check ?? null;
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
     const expect = nudges === 0 ? mint(r.id) : r.expect;
@@ -289,7 +291,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (round.base !== base) return null;
     const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
     if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
-    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head, ...held && { held } } }] };
+    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: checkedAt(r, head), answers: null, carried: { from: round.head, ...held && { held } } }] };
   };
   /**
    * The reviewer's approval of the latest round carried to `head`, so the checks run at `head` with no reviewer round.
@@ -312,14 +314,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const next = reviewRound(r, head, base);
     return send(next, "reviewer", (token) => nextRound(next, r.rounds.at(-1)!, token, base), { kind: "reviewing" });
   };
-  /**
-   * `r` with a round for the reviewer at `head`. The person's waiver was of the change against the latest round's base.
-   * The check clones the head commit alone, so a result at the same head is kept.
-   */
-  const reviewRound = (r: Review, head: string, base: string): Review => {
-    const previous = r.rounds.at(-1)!;
-    return { ...r, rounds: [...r.rounds, { head, base, verdict: null, check: previous.head === head ? previous.check : null, answers: null }], waiver: previous.base === base ? r.waiver : null };
-  };
+  /** `r` with a round for the reviewer at `head`. The person's waiver was of the change against the latest round's base. */
+  const reviewRound = (r: Review, head: string, base: string): Review =>
+    ({ ...r, rounds: [...r.rounds, { head, base, verdict: null, check: checkedAt(r, head), answers: null }], waiver: r.rounds.at(-1)!.base === base ? r.waiver : null });
   /**
    * The round's check beside its reviewer, started at the round's head unless the round has its result, which is
    * recorded once the run gives one. A run that cannot give one starts again in a fresh thread, and one the pylon
@@ -392,7 +389,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const state = await agentState(reviewer, r.since);
       const verdict = answeredSince(state) ? latest(state.replies, "nexus-review", verdictSchema, r.expect) : null;
       if (verdict === null) {
-        const checked = await checkWhileReading(r, phase, builder);
+        // A check that cannot start yet must not keep the reviewer's reminders, retries and deadline from running.
+        const checked = await checkWhileReading(r, phase, builder).catch((err: unknown) => {
+          log(`review ${r.id} of ${r.builder}: the check beside the reviewer did not start and will be tried again (${(err as Error).name})`);
+          return r;
+        });
         return checked === r ? waitOn(r, phase, state) : checked;
       }
       const next = withRound(r, { verdict });
@@ -403,10 +404,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         return verdict.findings.length ? send(next, "builder", () => builderNotes(next), after) : { ...next, phase: after, nudges: 0 };
       }
       if (n >= r.maxRounds) return ranOut(next, `The reviewer still requests changes after ${n} rounds, the most this review allows.`);
-      // A fix round almost always moves the head, so the check stops rather than hold a pylon through it.
+      // A fix round almost always moves the head, so the check stops rather than hold a pylon through it. A result it
+      // gave meanwhile is kept for a round at the same head.
       const check = checkThread(phase);
+      const run = check === null ? null : checks.poll(check, round.head);
       if (check !== null) checks.discard(check);
-      return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
+      const stopped = run?.kind === "done" ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next;
+      return send(stopped, "builder", (token) => builderFindings(stopped, token), { kind: "fixing" });
     },
     async fixing(r, phase, builder) {
       const n = roundsSpent(r);
