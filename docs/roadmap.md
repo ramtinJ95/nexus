@@ -23,7 +23,6 @@ Started on 2026-11-04, beside the orchestration wave. A measurement of the contr
 
 - **Faster checks.** Being built. A `.nexus/check` run took 6.8 minutes at the median, and 13.8 minutes since 2026-11-03. A check pylon takes its project's size, which went from 4 CPUs to 2 on 2026-11-02, and the nexus check runs `npm ci` although the template already installed that lockfile, then the typecheck and the tests one after the other. Give checks a size of their own, skip `npm ci` when the lockfile matches what is installed, and run the typecheck and the tests side by side.
 - **Check while the reviewer reads.** A review starts its check only after the reviewer's verdict, so each round waits for both in turn, 1.2 to 2.7 minutes more than it needs. Start the check at the round's start and drop it when the reviewer asks for changes.
-- **Wake-ups from the event stream.** The passes in `src/control/main.ts` poll every 15 seconds, the PR watch every 2 minutes on git reads up to a minute old, and each node's deployer every 15 seconds. A builder's turn end reaches a review start 94 seconds later at the median, and the polls between a run's later steps add about a minute more. The stream and the background follower exist, but nothing inside Nexus consumes them. Read the pushed branch when a builder's turn ends, run the review pass when a reviewed thread's turn or job ends, and wake the deployer when the desired release changes. [The exploration](explorations/orchestration.md#wake-ups-from-the-event-stream) says this adds no capability, which still holds: it only cuts waits. This is the control plane's side of the event consumers under Later.
 - **Ask about holds when the review starts.** The holds that need the person are read only once a review is merging, after its check. The path holds are known from the diff at the start, so asking then would let the person answer while the review and the check run. 89 of the 128 runs waited on the person.
 
 ## The dashboard wave
@@ -39,7 +38,7 @@ Planned for later, as one wave of interface work. The person scopes it and start
 
 ## Later
 
-- **Event consumers in Claude Code and pi-nexus.** The shared stream and background CLI follower now exist; client wake-ups and automatic reactions do not.
+- **Event consumers in Claude Code and pi-nexus.** The shared stream and background CLI follower now exist, and the control plane wakes its own passes on the events that matter. Wake-ups in the clients do not.
 - **Placement by a scheduler.** A person or the control plane's pipeline submits work without naming a node, and Nexus boots the pylon on the node where it fits with the least load. Nodes now report what their pylons hold, `auto` picks the node with the most room left, as [the design's placement](design.md#placement) describes, and new projects default to it. What remains:
   - No model tool starts a thread, and none is planned, because a thread never starts another thread. The pipeline's starts already follow a project's default node when an item names none, and that default may be `auto`.
   - There is no move job, so a pylon stays on the node it booted on. [The lifecycle](design.md#lifecycle-follows-amp) describes how a move could work, and spike S7 showed that copying checkpoints needs verifying.
