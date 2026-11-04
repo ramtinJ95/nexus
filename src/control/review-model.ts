@@ -83,9 +83,11 @@ export interface ModelFailure { count: number; last: string; retryAt: number }
 export type Phase =
   /**
    * The reviewer has the round's request and owes its verdict. `check` is the repository's checks at the round's head,
-   * run beside it in `thread` unless the round has their result already, as `checking`'s are.
+   * run beside it in `thread` unless the round has their result already, as `checking`'s are. `unrunnable` is the output
+   * of a check the pylon could not run, which goes to the person once the reviewer approves. `refused` is why no node had
+   * room for the check, which then runs in `checking` once the reviewer approves.
    */
-  | { kind: "reviewing"; failing?: ModelFailure; check?: { startedAt: number; thread: ThreadId | null } }
+  | { kind: "reviewing"; failing?: ModelFailure; check?: { startedAt: number; thread: ThreadId | null; unrunnable?: string; refused?: string } }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
   /** The repository's checks run at the approved head, in `thread`, a check thread thrown away afterwards. */
@@ -370,6 +372,8 @@ export function checkBeside(r: Review): string {
   const { head, check } = r.rounds.at(-1)!;
   if (check !== null) return `, .nexus/check ${check.passed ? "passed" : "failed"} at ${head.slice(0, 12)}`;
   if (r.phase.check === undefined) return "";
+  if (r.phase.check.unrunnable !== undefined) return `, .nexus/check could not run at ${head.slice(0, 12)}`;
+  if (r.phase.check.refused !== undefined) return `, .nexus/check runs once the reviewer approves, since no node had room for it: ${r.phase.check.refused}`;
   return r.phase.check.thread === null ? `, .nexus/check starting at ${head.slice(0, 12)}` : `, .nexus/check running at ${head.slice(0, 12)} in check thread ${r.phase.check.thread}`;
 }
 /** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
@@ -382,7 +386,8 @@ export function liveNote(r: Review): string | null {
   }
   if (round.live?.kind === "absent") return `no live check: ${head} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live`;
   if (round.live?.kind === "ran") return `live check ${round.live.passed ? "passed" : "failed"} at ${head}`;
-  return round.check?.passed === true ? `no live check ran at ${head}` : null;
+  if (round.check?.passed !== true) return null;
+  return (r.phase.kind === "reviewing" || r.phase.kind === "fixing") && !reviewerApproved(round) ? `no live check yet: it runs at ${head} once the reviewer approves it` : `no live check ran at ${head}`;
 }
 export const checkOutput = (output: string) => `The check's output:\n${output}`;
 export const liveOutput = (output: string) => `The live check's output:\n${output}`;

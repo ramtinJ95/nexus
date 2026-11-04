@@ -14,7 +14,7 @@ import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, reservedNames, type Hold, type HoldCode } from "./holds.ts";
 import { carryWaiver, headHolds, heldBy, landingHolds, landPress } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
-import { cannotLand, changeOf, checkBeside, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
+import { cannotLand, changeOf, checkBeside, ended, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
 import { reviewLoop, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
@@ -83,6 +83,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   /** Check threads whose runs a restart lost, which the gate then reports as giving no verdict. */
   const forgotten = new Set<ThreadId>();
   let checkStartFails = false;
+  /** Whether a node has room for a check that asks for it, and whether each check start and poll asked for room or opened a run. */
+  let checkRoom = true;
+  const checkIfRoom: boolean[] = [];
+  const pollOpens: boolean[] = [];
   const discarded: ThreadId[] = [];
   let verifies = false;
   let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
@@ -125,11 +129,13 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       replies: replies.get(target.id) ?? [], failure: failures.get(target.id) ?? null,
     })),
     checks: {
-      async start(_, __, head) {
+      async start(_, __, head, ifRoom) {
         if (checkStartFails) throw new Error("no node took the check pylon");
+        if (ifRoom && !checkRoom) throw new HttpError(409, "no node has room for this pylon: node is overcommitted");
+        checkIfRoom.push(ifRoom === true);
         const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return id;
       },
-      poll: (id) => forgotten.has(id) ? { kind: "void" } : check,
+      poll: (id, _, opens) => { pollOpens.push(opens !== false); return forgotten.has(id) ? { kind: "void" } : check; },
       discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
     },
     live: {
@@ -184,6 +190,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     /** A restart: the gate holds no run for any check thread started so far. */
     forgetChecks() { for (const id of checkThreads) forgotten.add(id); },
     set checkStartFails(fails: boolean) { checkStartFails = fails; },
+    set checkRoom(room: boolean) { checkRoom = room; },
+    checkIfRoom, pollOpens,
     /** Whether the PR's head has a .nexus/verify, the live check's state, and why no node takes a verify pylon. */
     set verifies(v: boolean) { verifies = v; },
     set live(c: CheckState) { live = c; },
@@ -1741,6 +1749,121 @@ test("a head the branch returns to keeps the check an earlier round ran there", 
   assert.deepEqual(f.checkHeads, [head1, head2], "head1 was checked in the first round");
 });
 
+test("a check beside the reviewer starts only where a node has room, and otherwise runs once the reviewer approves", async (t) => {
+  const f = fixture(t);
+  f.checkRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.deepEqual(f.checkThreads, [], "no check pylon the node cannot hold");
+  assert.equal(checkBeside(f.review()), ", .nexus/check runs once the reviewer approves, since no node had room for it: no node has room for this pylon: node is overcommitted");
+  f.checkRoom = true;
+  await loop.poll();
+  assert.deepEqual(f.checkThreads, [], "the refused check waits for the verdict");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.checkIfRoom, [false], "the check after the verdict starts as it always did");
+  assert.deepEqual(f.checkHeads, [head1]);
+
+  const g = fixture(t);
+  await approved(g, null);
+  assert.deepEqual(g.checkIfRoom, [true], "the check beside the reviewer asks for room");
+});
+
+test("a check the pylon cannot run beside the reviewer says so, is not run again after a restart, and goes to the person on the approval", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "unrunnable", output: "The repository has no executable .nexus/check at 1." };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(checkBeside(f.review()), `, .nexus/check could not run at ${head1.slice(0, 12)}`);
+  assert.deepEqual(f.discarded, f.checkThreads);
+  f.forgetChecks();
+  const restarted = f.loop();
+  await restarted.poll();
+  assert.equal(f.checkThreads.length, 1, "a fresh pylon would fail the same way");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await restarted.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`.nexus/check could not run at ${head1}.`, "The check's output:\nThe repository has no executable .nexus/check at 1."] });
+  assert.equal(f.sent.length, 1, "neither agent hears of it");
+});
+
+test("a check that passed while the reviewer reads says the live check waits for the approval", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(liveNote(f.review()), `no live check yet: it runs at ${head1.slice(0, 12)} once the reviewer approves it`);
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.equal(liveNote(f.review()), `no live check yet: it runs at ${head1.slice(0, 12)} once the reviewer approves it`);
+  const g = fixture(t);
+  await approved(g, null);
+  assert.equal(liveNote(g.review()), `no live check: ${head1.slice(0, 12)} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live`);
+});
+
+test("a check beside the reviewer is not started for a pull request GitHub says merged, ahead of the PR watch", async (t) => {
+  const f = fixture(t);
+  f.checkStartFails = true;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.checkStartFails = false;
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merged" });
+  assert.deepEqual(f.checkThreads, []);
+});
+
+test("a check that failed beside a request for changes reaches the builder with the findings", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "src/cache.ts(1,1): error TS2322" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  const text = f.sent.at(-1)!.message.text;
+  assert.match(text, /F1 \(P1\)/);
+  assert.match(text, /\.nexus\/check also failed at 1{40} while the reviewer read it\. It needs no answer, but fix it in the same push\. Its output:\nsrc\/cache\.ts\(1,1\): error TS2322/);
+  assert.doesNotMatch(text, /CHECK \(P0\)/, "the reviewer's changes are what the builder answers");
+});
+
+test("a request for changes stops a check whose pylon has not run it, without starting it", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "waiting" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.equal(f.pollOpens.at(-1), false, "the last poll of the stopped check opened no run");
+  assert.deepEqual(f.discarded, f.checkThreads);
+});
+
+test("a review that ends while the reviewer reads throws its check thread away", async (t) => {
+  const endings: [string, (f: ReturnType<typeof fixture>) => Promise<void>][] = [
+    ["out of rounds", async (f) => f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }))],
+    ["reviewer silent", async (f) => { for (let i = 0; i < 3; i++) { f.reply(f.review().reviewer, "I looked and it seems fine."); await f.loop().poll(); } }],
+    ["pull request closed", async (f) => f.watched("closed")],
+  ];
+  for (const [kind, ending] of endings) {
+    const f = fixture(t);
+    f.check = { kind: "running" };
+    const loop = f.loop();
+    await loop.start(f.builder, { land: null, rounds: 1 });
+    await loop.poll();
+    assert.equal(f.checkThreads.length, 1, kind);
+    await ending(f);
+    await loop.poll();
+    assert.ok(ended.has(f.review().phase.kind), `${kind}: ${f.review().phase.kind}`);
+    assert.deepEqual(f.discarded, f.checkThreads, `${kind}: the check thread goes with the review`);
+  }
+});
+
 test("a head that moves while the reviewer and the check run gets its own round and its own check", async (t) => {
   const f = fixture(t);
   f.check = { kind: "running" };
@@ -2093,14 +2216,16 @@ test("a PR merged or closed outside a review that does not land ends it quietly,
   assert.equal(f.sent.length, 1);
 
   const g = fixture(t);
+  g.checkStartFails = true;
   const loop = g.loop();
   await loop.start(g.builder, { land: null });
   await loop.poll();
+  g.checkStartFails = false;
   g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "merged" }, detail: { ...g.snapshot.detail, mergeCommit: merged } };
   g.reply(g.review().reviewer, verdict(g.review(), {}));
   await loop.poll();
-  assert.deepEqual(g.review().phase, { kind: "merged" }, "GitHub is read before the next phase, ahead of the PR watch");
-  assert.equal(g.checkThreads.length, 1, "the check beside the reviewer, and no other");
+  assert.deepEqual(g.review().phase, { kind: "merged" }, "GitHub is read before a check starts, ahead of the PR watch");
+  assert.deepEqual(g.checkThreads, []);
 
   const h = fixture(t);
   const silent = h.loop();
@@ -3066,10 +3191,11 @@ const silent = async (f: ReturnType<typeof fixture>, id: ThreadId) => {
 };
 const holds: { kind: string; hold(f: ReturnType<typeof fixture>): Promise<void>; cause: HoldCause; reasons: string[]; landable: boolean; round: boolean }[] = [
   { kind: "rounds", cause: "rounds", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], landable: false, round: false, async hold(f) {
-    await f.loop().start(f.builder, { land: null, rounds: 1 });
-    await f.loop().poll();
+    const loop = f.loop();
+    await loop.start(f.builder, { land: null, rounds: 1 });
+    await loop.poll();
     f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
-    await f.loop().poll();
+    await loop.poll();
   } },
   { kind: "gate", cause: "gate", reasons: [`.nexus/check failed at ${head1}, and the builder pushed nothing for it: The test is flaky.`, "The check's output:\n1 test failed"], landable: false, round: true, async hold(f) {
     f.check = { kind: "done", passed: false, output: "1 test failed" };

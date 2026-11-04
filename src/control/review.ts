@@ -112,11 +112,14 @@ function builderFindings(r: Review, token: string): string {
   // The builder got the notes already with the approval that the gate then stopped.
   const notes = gate !== null ? [] : findings.filter((f) => !blocks(f));
   const verdict = gate?.verdict ?? "changes requested";
+  // A check that failed while the reviewer read is no finding yet, but it fails again once the reviewer approves.
+  const beside = gate === null && round.check?.passed === false
+    ? `\n.nexus/check also failed at ${round.head} while the reviewer read it. It needs no answer, but fix it in the same push. Its output:\n${round.check.output}\n` : "";
   return `${reviewPrefix}
 Round ${n} of at most ${r.maxRounds} on pull request #${r.pr.number} (${r.pr.url}), reviewed at ${round.head} by a reviewer on ${r.models.reviewer}: ${verdict}.
 
 ${findings.filter(blocks).map(findingLine).join("\n\n")}
-${notes.length ? `\nThese P3 notes do not block and need no answer. Take them up here or in a later pull request:\n\n${notes.map(findingLine).join("\n\n")}\n` : ""}
+${notes.length ? `\nThese P3 notes do not block and need no answer. Take them up here or in a later pull request:\n\n${notes.map(findingLine).join("\n\n")}\n` : ""}${beside}
 Fix each P0 to P2 finding or reject it with a reason. Push what you fix to the pull request's branch; the reviewer reviews the new commits. Then end your reply with exactly one block like this, with JSON in it:
 \`\`\`nexus-review-answers
 {"token": "${token}", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}
@@ -272,6 +275,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
   /** The check's result at `head` from any round of `r`, which every round there keeps, since the check clones that commit alone. */
   const checkedAt = (r: Review, head: string) => r.rounds.findLast((round) => round.head === head && round.check !== null)?.check ?? null;
+  /** The check could not run at the round's head, which a fresh pylon would not change, so the person gets its output. */
+  const unrunnable = (r: Review, output: string): Review =>
+    toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check could not run at ${r.rounds.at(-1)!.head}.` }, checkOutput(output));
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
     const expect = nudges === 0 ? mint(r.id) : r.expect;
@@ -324,10 +330,24 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   const checkWhileReading = async (r: Review, phase: Extract<Phase, { kind: "reviewing" }>, builder: Thread): Promise<Review> => {
     const round = r.rounds.at(-1)!;
-    if (round.check !== null) return r;
     const check = phase.check ?? { startedAt: now(), thread: null };
-    if (check.thread === null) return { ...r, phase: { ...phase, check: { ...check, thread: await checks.start(builder, r.pr.branch, round.head) } } };
+    if (round.check !== null || check.unrunnable !== undefined || check.refused !== undefined) return r;
+    if (check.thread === null) {
+      const gone = await endedOnGitHub(r);
+      if (gone !== null) return gone;
+      try {
+        return { ...r, phase: { ...phase, check: { ...check, thread: await checks.start(builder, r.pr.branch, round.head, true) } } };
+      } catch (err) {
+        // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
+        if (!(err instanceof HttpError)) throw err;
+        return { ...r, phase: { ...phase, check: { ...check, refused: err.message } } };
+      }
+    }
     const state = checks.poll(check.thread, round.head);
+    if (state.kind === "unrunnable") {
+      checks.discard(check.thread);
+      return { ...r, phase: { ...phase, check: { ...check, thread: null, unrunnable: state.output } } };
+    }
     if (state.kind !== "done") {
       if (state.kind !== "void") return r;
       checks.discard(check.thread);
@@ -400,14 +420,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const round = next.rounds.at(-1)!;
       const n = roundsSpent(next);
       if (reviewerApproved(round)) {
-        const after: Phase = { kind: "checking", ...phase.check ?? { startedAt: now(), thread: null } };
+        if (phase.check?.unrunnable !== undefined) return unrunnable(next, phase.check.unrunnable);
+        const after: Phase = phase.check === undefined || phase.check.refused !== undefined ? checking() : { kind: "checking", startedAt: phase.check.startedAt, thread: phase.check.thread };
         return verdict.findings.length ? send(next, "builder", () => builderNotes(next), after) : { ...next, phase: after, nudges: 0 };
       }
       if (n >= r.maxRounds) return ranOut(next, `The reviewer still requests changes after ${n} rounds, the most this review allows.`);
       // A fix round almost always moves the head, so the check stops rather than hold a pylon through it. A result it
       // gave meanwhile is kept for a round at the same head.
       const check = checkThread(phase);
-      const run = check === null ? null : checks.poll(check, round.head);
+      const run = check === null ? null : checks.poll(check, round.head, false);
       if (check !== null) checks.discard(check);
       const stopped = run?.kind === "done" ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next;
       return send(stopped, "builder", (token) => builderFindings(stopped, token), { kind: "fixing" });
@@ -473,7 +494,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         checks.discard(phase.thread);
         return { ...r, phase: { ...phase, thread: null } };
       }
-      if (state.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check could not run at ${round.head}.` }, checkOutput(state.output));
+      if (state.kind === "unrunnable") return unrunnable(r, state.output);
       if (state.kind !== "done") return r;
       // Read while the check thread is held, so a read that fails is retried with the check's result. A landing tried
       // again keeps the round's live check, which ran at the same head.
