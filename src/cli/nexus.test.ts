@@ -48,6 +48,8 @@ import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-tra
 import { testCertificate } from "../test-certificate.ts";
 import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";
+import type { Api } from "./kit.ts";
+import { pressOf } from "./commands/release.ts";
 import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
 
@@ -1689,6 +1691,56 @@ test("review --cancel ends the thread's running review through its route, and pr
   assert.deepEqual(asked, [[thread.id, laptop], [thread.id, laptop]]);
   for (const extra of [["--land"], ["--pr", "7"], ["--rounds", "2"]]) assert.equal((await s.nexus(["review", "--cancel", thread.id, ...extra])).code, 64, `--cancel with ${extra[0]}`);
   assert.equal(asked.length, 2, "a refused flag sends nothing");
+});
+
+test("land --waive without a terminal refuses before it reads or sends anything, and land alone sends no waiver", async (t) => {
+  const asked: unknown[][] = [];
+  const reviews = { land(builder: ThreadId, by: string, head?: string, waive?: readonly string[]) { asked.push([builder, by, head, waive]); return s.registry.review(builder)!; } } as never as ReviewLoop;
+  const s = await setup(t, { reviews });
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
+  const egress = { code: "reserved-path:egress" as const, text: "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts." };
+  s.registry.saveReview(testReview({ builder: thread.id, phase: { kind: "approved" }, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [egress] } }] }));
+  const refused = await s.nexus(["land", thread.id, "--waive"]);
+  assert.equal(refused.code, 64);
+  assert.match(refused.stderr, /stdin or stderr is not a terminal/);
+  assert.equal((await s.nexus(["land", thread.id])).code, 0);
+  assert.deepEqual(asked, [[thread.id, laptop, undefined, undefined]], "the refused waiver sent nothing");
+});
+
+const approvedRound = { head: "1".repeat(40), verdict: { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "ok" }, live: { kind: "ran" as const, thread: "th-0123456789ab" as ThreadId, passed: true, output: "ok" }, answers: null };
+
+/** A terminal whose person types `answer`, or closes it without a line when null, and what it showed them. */
+function confirmingTerminal(answer: string | null, isTTY = true) {
+  const shown: string[] = [];
+  const input = Object.assign(new PassThrough(), { isTTY });
+  const output = Object.assign(new PassThrough(), { isTTY });
+  output.on("data", (chunk: Buffer) => {
+    shown.push(chunk.toString());
+    if (answer === null) input.end();
+    else input.write(`${answer}\n`);
+  });
+  return { terminal: { input, output }, shown: () => shown.join("") };
+}
+
+test("land --waive shows the head and every hold it waives, and sends them only once the person types yes", async () => {
+  const egress = "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts.";
+  const check = "The pull request changes .nexus/check, the check this policy relies on.";
+  const review = testReview({ phase: { kind: "approved" }, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [{ code: "reserved-path:egress", text: egress }, { code: "check-changed", text: check }] } }] });
+  const api = (async (method: string, path: string) => {
+    assert.deepEqual([method, path], ["GET", "/v1/threads/th-builder"]);
+    return { review };
+  }) as Api;
+  const yes = confirmingTerminal("yes");
+  assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { head: approvedRound.head, waive: [egress, check] });
+  assert.equal(yes.shown(), `Land pull request #7 at ${approvedRound.head}, waiving the holds the merge policy reserves for you:\n  ${egress}\n  ${check}\nType yes to waive them and land: `);
+  for (const answer of ["y", "", null]) {
+    await assert.rejects(pressOf(api, "th-builder", confirmingTerminal(answer).terminal), (err: CliError) => err.kind === "failed" && /did not confirm/.test(err.message), `answered ${JSON.stringify(answer)}`);
+  }
+  await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("yes", false).terminal), (err: CliError) => err.kind === "invalid");
+  const nothing = confirmingTerminal("yes");
+  const unheld = (async () => ({ review: { ...review, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [] } }] } })) as Api;
+  assert.deepEqual(await pressOf(unheld, "th-builder", nothing.terminal), { head: approvedRound.head }, "nothing to waive asks nothing");
+  assert.equal(nothing.shown(), "");
 });
 
 test("project edit replaces supplied grants and preserves omitted settings", async (t) => {
