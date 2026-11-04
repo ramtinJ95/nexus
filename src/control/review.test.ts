@@ -3070,15 +3070,15 @@ test("an approval never carries to a head on another base, nor from a round save
 
 test("a review whose rounds ran out, rebased with the same change, stays held at the new head with its reasons, and one with a changed line gains the stale head", async (t) => {
   const ranOut = [
-    { kind: "changes requested", carries: "review", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], async hold(f: ReturnType<typeof fixture>) {
+    { kind: "changes requested", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], async hold(f: ReturnType<typeof fixture>) {
       f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
     } },
-    { kind: "check failed", carries: "approval", reasons: [`.nexus/check failed at ${head1} after the last round this review allows.`, "The check's output:\n1 test failed"], async hold(f: ReturnType<typeof fixture>) {
+    { kind: "check failed", reasons: [`.nexus/check failed at ${head1} after the last round this review allows.`, "The check's output:\n1 test failed"], async hold(f: ReturnType<typeof fixture>) {
       f.check = { kind: "done", passed: false, output: "1 test failed" };
       f.reply(f.review().reviewer, verdict(f.review(), {}));
     } },
   ];
-  for (const { kind, carries, reasons, hold } of ranOut) {
+  for (const { kind, reasons, hold } of ranOut) {
     for (const [change, carried] of [[migration(250), true], [migration(250, "y"), false]] as const) {
       const f = fixture(t);
       f.files = migration(240);
@@ -3099,10 +3099,10 @@ test("a review whose rounds ran out, rebased with the same change, stays held at
       if (carried) {
         assert.deepEqual(shown(r.phase), { kind: "needs-person", reasons, label: { state: "added" } }, `${kind}: the same change keeps the reasons, with no stale head`);
         assert.equal(r.rounds.at(-1)!.head, head2, `${kind}: the review is at the PR's head`);
-        assert.deepEqual(r.rounds.at(-1)!.carried, { from: head1 }, kind);
+        assert.deepEqual(r.rounds.at(-1)!.carried, { from: head1, held: true }, kind);
         assert.equal(r.rounds.at(-1)!.check, null, `${kind}: a check result belongs to the head it ran at`);
-        assert.equal(roundNote(r), `${carries} carried from ${head1.slice(0, 12)} to ${head2.slice(0, 12)}: same change after a rebase`, kind);
-        assert.deepEqual(carriedEvents(f), carries === "approval" ? [["review.approval-carried", head1, head2]] : [], `${kind}: only an approval's carry is an approval-carried event`);
+        assert.equal(roundNote(r), `hold carried from ${head1.slice(0, 12)} to ${head2.slice(0, 12)}: same change after a rebase`, kind);
+        assert.deepEqual(carriedEvents(f), [], `${kind}: no approval carried to a review that stays held`);
         assert.doesNotMatch(cannotLand(r, f.registry.thread(f.builder)!, { state: "open" })!, /moved to/, `${kind}: Land refuses for the reasons, not a stale head`);
       } else {
         assert.equal(r.rounds.at(-1)!.head, head1, kind);
@@ -3430,6 +3430,27 @@ test("a waived landing retargeted with a push, then reset to the waived head, ne
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
+});
+
+test("a round saved before rounds recorded their base never detects a retarget, and its new round drops the person's waiver", async (t) => {
+  const legacy = (f: ReturnType<typeof fixture>) => f.registry.saveReview({ ...f.review(), rounds: f.review().rounds.map(({ base: _, ...round }) => round) });
+  const f = fixture(t);
+  const loop = await approved(f, null);
+  legacy(f);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "with no base recorded, the landing has nothing to compare the new base with");
+
+  const g = fixture(t);
+  g.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  const held = await approved(g, "nLAPTOP");
+  legacy(g);
+  held.land(g.builder, "nLAPTOP", head1, reservedHolds);
+  pushed(g, head2);
+  await held.poll();
+  assert.equal(g.review().phase.kind, "reviewing");
+  assert.equal(g.review().waiver, null, "a base it cannot compare is not taken for the same base");
 });
 
 test("a pull request retargeted and merged outside the review during its checks is not deployed", async (t) => {

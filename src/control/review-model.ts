@@ -52,7 +52,7 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string; heldAt?: HeldAt }
+export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; heldAt?: HeldAt }
 /** The holds a round's head alone decides, read from the PR's files against `base`. */
 export interface HeldAt { base: string; holds: Hold[] }
 /**
@@ -335,7 +335,7 @@ export const pushedHead = (r: Review, pr: Pick<PullRequest, "state" | "head"> | 
  */
 export function roundNote(r: Review): string | null {
   const [previous, round] = r.rounds.slice(-2);
-  if (round?.carried !== undefined) return `${reviewerApproved(round) ? "approval" : "review"} carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
+  if (round?.carried !== undefined) return `${round.carried.held ? "hold" : "approval"} carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
   if (round === undefined || previous!.answers !== null || previous!.verdict?.verdict !== "approve") return null;
   if (round.head === previous!.head && round.base !== previous!.base) return `a new round reviews ${round.head.slice(0, 12)} against ${round.base}, since the pull request's base changed from ${previous!.base} after its approval`;
   return `a new round reviews ${round.head.slice(0, 12)}, since the pull request's head moved from ${previous!.head.slice(0, 12)} after its approval`;

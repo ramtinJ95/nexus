@@ -280,12 +280,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * `r` with the latest round's verdict carried to `head`, pushed after it, when the change at both is the same on the
    * same base, or null when the change differs or cannot be compared, and `head` needs a round of its own.
    */
-  const carryRound = async (r: Review, head: string, base: string): Promise<Review | null> => {
+  const carryRound = async (r: Review, head: string, base: string, held?: true): Promise<Review | null> => {
     const round = r.rounds.at(-1)!;
     if (round.base !== base) return null;
     const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
     if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
-    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head } }] };
+    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head, ...held && { held } } }] };
   };
   /**
    * The reviewer's approval of the latest round carried to `head`, so the checks run at `head` with no reviewer round.
@@ -602,7 +602,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const phase = r.phase;
     if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return await newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
     // Its reviewer is archived, so the carried round goes to no one, and its reasons stay true of the same change.
-    const carried = phase.cause === "rounds" && phase.unreviewed === undefined ? await carryRound(r, head, snapshot.detail.base) : null;
+    const carried = phase.cause === "rounds" && phase.unreviewed === undefined ? await carryRound(r, head, snapshot.detail.base, true) : null;
     if (carried !== null) return carried;
     const stale: Hold = { code: "stale-head", text: `The pull request's head moved to ${head} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.` };
     return { ...r, phase: { ...phase, ...personPhase(phase.cause, ...phase.holds.filter((h) => h.code !== "stale-head"), stale), unreviewed: head } };
