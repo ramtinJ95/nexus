@@ -81,6 +81,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     `${t.id}  ${t.title}`,
     `project: ${t.project}`,
     ...planning ? ["planning: its proposed items become questions you accept or reject"] : [],
+    ...t.standingRulesRevision === undefined ? [] : [`standing rules: revision ${t.standingRulesRevision} of the project's, sent with its first message`],
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
