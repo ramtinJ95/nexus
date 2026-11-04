@@ -60,11 +60,20 @@ export interface Transaction {
   target: string;
   state: "installing" | "healthy" | "rolled-back" | "failed";
   reason: string | null;
+  /** The backup taken before the switch, which a restore needs once the target has changed stored data. */
+  backup?: string;
 }
 export interface InstallBoundary {
   /** Builds and performs upgrade steps without switching links or restarting services. */
   prepare(commit: string): Promise<string>;
   beforeSwitch?(): Promise<void>;
+  /**
+   * Readies stored data for the target's code once nothing else can enter: resolves the backup it took first, or null.
+   * Throws when the target cannot start on that data.
+   */
+  readyData?(target: string): Promise<string | null>;
+  /** Why the previous release cannot start on what the target left, or null when it can. */
+  rollbackRefused?(transaction: Transaction): Promise<string | null>;
   activate?(): Promise<void>;
   restart(): Promise<void>;
   /** Must bound both the active-service check and API request, including its response body. */
@@ -99,7 +108,8 @@ export class ReleaseInstaller {
     const previous = await readlink(this.link);
     const target = await this.boundary.prepare(commit);
     await this.boundary.beforeSwitch?.();
-    const transaction = await this.record({ commit, previous, target, state: "installing", reason: null });
+    const backup = await this.boundary.readyData?.(target) ?? null;
+    const transaction = await this.record({ commit, previous, target, state: "installing", reason: null, ...backup === null ? {} : { backup } });
     try {
       await pointLink(this.link, target);
       await this.boundary.activate?.();
@@ -121,6 +131,11 @@ export class ReleaseInstaller {
   private async rollback(transaction: Transaction, reason: string): Promise<Transaction> {
     try { reason += `\n${(await this.boundary.journal()).slice(-16_384)}`; }
     catch { reason += "\njournal unavailable"; }
+    let refused: string | null;
+    try { refused = await this.boundary.rollbackRefused?.(transaction) ?? null; }
+    catch (error) { refused = `whether the previous release can start could not be read: ${String(error)}`; }
+    // Moving the link back would only crash-loop the previous release, so the target keeps running for the person.
+    if (refused !== null) return this.record({ ...transaction, state: "failed", reason: `${reason}\nnot rolled back: ${refused}` });
     try {
       await pointLink(this.link, transaction.previous);
       await this.boundary.restart();

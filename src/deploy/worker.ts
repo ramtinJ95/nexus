@@ -1,8 +1,9 @@
 import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
-import { planDeploy, quarantined, type Attempt, type ReleaseHealth } from "./plan.ts";
+import { planDeploy, quarantined, schemaStep, type Attempt, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "./model.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
@@ -63,7 +64,44 @@ export async function cleanReleases(prefix: string, api: Api, proc = "/proc"): P
 }
 
 type Api = (path: string, body?: unknown) => Promise<any>;
-const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged };
+
+/** What a control install reads of the registry, and the backup that undoes a migration. */
+export interface RegistrySchema {
+  /** The registry's user_version, or null before the control plane has made one. */
+  version(): Promise<number | null>;
+  /** How many migrations the release at `dir`, relative to the prefix, applies, or null for one from before schema.ts. */
+  known(dir: string): Promise<number | null>;
+  /** Runs the daily backup's unit now and resolves the backup's name. */
+  backUp(): Promise<string>;
+}
+
+const nodeRegistry: RegistrySchema = {
+  async version() {
+    const config = await readJson("/etc/nexus/control.json", null) as { db: string };
+    // As nexus-control.service resolves a relative path, from its WorkingDirectory.
+    const path = resolve("/var/lib/nexus-control", config.db);
+    try { await stat(path); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+    const db = new DatabaseSync(path, { readOnly: true });
+    try { return (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version; } finally { db.close(); }
+  },
+  async known(dir) {
+    // schema.ts imports nothing, so a release's own list loads without its node_modules.
+    try { return ((await import(join(resolve(prefix, dir), "src/control/schema.ts"))) as { migrations: readonly string[] }).migrations.length; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") return null; throw error; }
+  },
+  async backUp() {
+    await command("systemctl", ["start", "nexus-backup.service"], prefix, 300_000);
+    const status = await readJson("/var/lib/nexus-backup/status.json", null) as { succeeded: boolean; newest: { name: string } | null } | null;
+    if (status?.succeeded !== true || status.newest === null) throw new Error("the backup before the migration did not succeed; see journalctl -u nexus-backup");
+    return status.newest.name;
+  },
+};
+
+const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged, registry: nodeRegistry };
+type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema };
+
+const restoreSteps = `deploy/README.md's "A failed deploy past a registry migration"`;
 
 /** What a probe plans from: control's report in the view. */
 function controlHealth(view: ReleaseView): ReleaseHealth {
@@ -72,7 +110,7 @@ function controlHealth(view: ReleaseView): ReleaseHealth {
 }
 
 /** One poll. Its roles share one read of the release view, read again once control's report would change what it shows. */
-export async function reconcileRoles(roles: readonly Role[], config: WorkerConfig, api: Api, boundary = nodeBoundary): Promise<void> {
+export async function reconcileRoles(roles: readonly Role[], config: WorkerConfig, api: Api, boundary: NodeBoundary = nodeBoundary): Promise<void> {
   let view: Promise<ReleaseView> | undefined;
   const reporting: Api = async (path, body) => {
     const answer = await api(path, body);
@@ -86,9 +124,12 @@ export async function reconcileRoles(roles: readonly Role[], config: WorkerConfi
   for (const role of roles) await reconcileRole(role, config, reporting, boundary, () => view ??= api("release"));
 }
 
-export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary = nodeBoundary,
+export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary: NodeBoundary = nodeBoundary,
   readView: () => Promise<ReleaseView> = () => api("release")): Promise<void> {
   const { prefix, etc, units, run, checkout } = boundary;
+  // Only control's code opens the registry.
+  const registry = role === "control" ? boundary.registry : undefined;
+  const schemaAt = async (dir: string): Promise<SchemaVersions> => ({ registry: await registry!.version(), release: await registry!.known(dir) });
   const link = releaseLink(prefix, role);
   const service = `nexus-${role}.service`;
   const unit = join(units, service);
@@ -152,6 +193,22 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
         if (drainLost || !(await drain()).idle) throw new Error("drain barrier lost before restart");
       }
       await run("env", [`NEXUS_COMMIT=${desired}`, "NEXUS_PREPARE=1", "bash", join(repo, "deploy", `install-${role}.sh`)], repo);
+    },
+    async readyData(target) {
+      if (registry === undefined) return null;
+      const versions = await schemaAt(target);
+      const step = schemaStep(versions);
+      if (step === "refuses") {
+        throw new Error(`release ${desired} applies ${versions.release} registry migrations, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
+      }
+      return step === "migrates" ? registry.backUp() : null;
+    },
+    async rollbackRefused(transaction) {
+      if (registry === undefined) return null;
+      const versions = await schemaAt(transaction.previous);
+      if (schemaStep(versions) !== "refuses") return null;
+      const backup = transaction.backup === undefined ? "a backup from before it" : `backup ${transaction.backup}, taken just before it,`;
+      return `the registry is at schema version ${versions.registry}, and the previous release, ${transaction.previous}, applies only ${versions.release} migrations, so its control plane would refuse to start. Control stays on ${transaction.target}. Deploy a fixed commit to keep what control recorded since the migration, or restore ${backup} and point control back at ${transaction.previous}, which discards that, as ${restoreSteps} says`;
     },
     async restart() {
       const transaction = await installer.observed();
