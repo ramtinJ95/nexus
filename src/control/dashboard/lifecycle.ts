@@ -73,6 +73,7 @@ export function needLabel(n: ThreadNeed): string {
   switch (n.kind) {
     case "review": return n.d.review?.phase.kind === "needs-person" ? "Review needs you" : "Approved, yours to land";
     case "nudge": return "Stopped short of a pull request";
+    case "resume": return "Stopped resuming its turns";
     case "disk": return "Disk kept for its usage";
     case "question": return n.question.ask !== undefined ? "Claude asks" : n.question.proposal !== undefined ? "Proposed item" : (n.d.judgments ?? []).some((j) => j.question === n.question.id) ? "Judgment" : "Needs your decision";
     case "thread": return { waiting: "Dialog in its terminal", limited: "Usage limit", parked: "Stuck on the restart limit", failed: "Failed" }[n.attention];
@@ -88,6 +89,7 @@ export function needWhy(n: ThreadNeed, now: number): string {
   switch (n.kind) {
     case "review": return "";
     case "nudge": return "Its turn ended without a pull request after two nudges";
+    case "resume": return n.why;
     case "disk": return firstLine(keptPastDay(t, now) ?? "Its disk is kept for its token usage");
     case "question": return firstLine(n.question.ask?.questions[0]?.question ?? n.question.proposal?.title ?? n.question.text);
     case "thread": switch (n.attention) {

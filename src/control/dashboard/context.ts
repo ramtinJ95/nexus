@@ -28,7 +28,7 @@ export interface Context {
 
 /**
  * One thing that waits on the person, for a card in the inbox: a review held for them or one they can land, a question
- * of the thread's, a builder its nudges did not move, or the thread itself, stopped where only they move it. The first
+ * of the thread's, a builder its nudges did not move, a Claude worker whose turns kept dying, or the thread itself, stopped where only they move it. The first
  * three are each a source of the `decision` attention, and the card is the thread page's own. A node's cleanup
  * question waits on them too, with its Cluster card, and so does work its pipeline phase holds for them that no card
  * acts on, such as an item to approve or a blocked queued thread. `since` is when it began to wait, so far as the
@@ -38,6 +38,7 @@ export type ThreadNeed =
   | { kind: "review"; d: ThreadDetail; since: number }
   | { kind: "question"; d: ThreadDetail; question: Question; since: number }
   | { kind: "nudge"; d: ThreadDetail; since: number }
+  | { kind: "resume"; d: ThreadDetail; why: string; since: number }
   | { kind: "disk"; d: ThreadDetail; since: number }
   | { kind: "thread"; d: ThreadDetail; attention: Exclude<Attention, "reply" | "working" | "decision" | null>; since: number };
 export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread; d: ThreadDetail };

@@ -34,14 +34,14 @@ export type ToolItem = Extract<Item, { kind: "tool" }>;
 export type AskItem = Extract<Item, { kind: "ask" }>;
 export type UserItem = Extract<Item, { kind: "user" }>;
 
-/** Who a message came from. Nexus's PR watch, review loop, usage-limit watch and nudge write into a conversation as a user. */
+/** Who a message came from. Nexus's PR watch, review loop, usage-limit watch, nudge and resumer write into a conversation as a user. */
 type PromptFrom = PromptSource | Sender;
 /** How a bubble names who a message came from. A person's is said only to a screen reader, as the bubble's side shows it. */
 export const promptLabel: Record<PromptFrom, string> = {
-  person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge", command: "Slash command", other: "Claude Code",
+  person: "You", "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge", resume: "Nexus resume", command: "Slash command", other: "Claude Code",
 };
 /** A harness entry's kind for each sender's messages. */
-const nexusKinds: Readonly<Record<string, Sender>> = { "nexus.pr-watch": "pr-watch", "nexus.review": "review", "nexus.usage-limit": "usage-limit", "nexus.nudge": "nudge" } satisfies Record<`nexus.${Sender}`, Sender>;
+const nexusKinds: Readonly<Record<string, Sender>> = { "nexus.pr-watch": "pr-watch", "nexus.review": "review", "nexus.usage-limit": "usage-limit", "nexus.nudge": "nudge", "nexus.resume": "resume" } satisfies Record<`nexus.${Sender}`, Sender>;
 
 /** A message's text, with what each image part becomes in it. A committed message's images show as images. */
 const messageText = (content: UserMessage["content"], image: (part: ImageContent) => string) => typeof content === "string" ? content

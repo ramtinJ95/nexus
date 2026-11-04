@@ -11,7 +11,7 @@ import { cannotLand, roundsSpent, settledKinds, type Review } from "../review-mo
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
-import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard } from "./cards.ts";
+import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
 import { lifeOfThread, needWhy, itemsOf, roleLine, threadRole, type Life } from "./lifecycle.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
@@ -113,6 +113,7 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
       ...d.review?.phase.kind === "needs-person" || (d.review?.phase.kind === "approved" && cannotLand(d.review, d.thread, prOf(d)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
       ...(d.questions ?? []).filter(isOpen).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
       ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
+      ...d.resume?.state === "person" ? [{ kind: "resume" as const, d, why: d.resume.why, since: d.resume.turn }] : [],
     ];
     const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
     if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
@@ -230,6 +231,7 @@ function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
 ${card}`];
     }
     case "nudge": return ["Stopped short", nudgeCard(c, t, (name) => `${name}-${t.id}`)!];
+    case "resume": return ["Turns died", resumeCard(c, t, (name) => `${name}-${t.id}`)!];
     case "disk": return ["Disk kept", fix(`Its disk is kept past its 24 hours, as ${keptPastDay(t, c.now)}. Nexus tries the read again on its own, or delete the thread, which deletes the disk with the token usage on it unread.`,
       html`<button type="button" class="btn btn-xs danger" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its disk goes with the token usage on it unread.">Delete</button>`)];
     case "question": {

@@ -73,7 +73,16 @@ function judgmentText(j: ThreadDetail["judgments"][number]): string {
   ].join("\n");
 }
 
-export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, attention, review, questions, judgments, planning }: ThreadDetail): string {
+/** Why a Claude worker's latest turn died and what Nexus does about it, or why Nexus stopped resuming it. */
+function deathLines(t: ThreadDetail["thread"], resume: ThreadDetail["resume"]): string[] {
+  if (resume?.state === "person") return [`resume: stopped. ${resume.why} Write to it to resume it`];
+  if (t.turnDied === undefined) return [];
+  const then = resume == null ? "" : resume.state === "left-alone" ? "; Nexus leaves it to you, as you wrote to it"
+    : resume.state === "waiting" ? `; Nexus resumes it at ${new Date(resume.due).toISOString()}, ${resume.count} in a row` : `; Nexus resumed it, ${resume.count} in a row`;
+  return [`turn died: ${t.turnDied.reason}, at ${new Date(t.turnDied.at).toISOString()}${then}`];
+}
+
+export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, resume, attention, review, questions, judgments, planning }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   // A pylon its node does not list has no disk left to keep.
   const kept = p.actualState === "absent" ? null : keptPastDay(t, Date.now());
@@ -84,6 +93,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...t.standingRulesRevision === undefined ? [] : [`standing rules: revision ${t.standingRulesRevision} of the project's, sent with its first message`],
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
+    ...deathLines(t, resume),
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,

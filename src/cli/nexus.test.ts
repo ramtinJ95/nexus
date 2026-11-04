@@ -2039,6 +2039,24 @@ test("threads, show and conversation say a Claude worker stopped on its usage li
   assert.ok((await s.nexus(["conversation", thread.id])).stdout.endsWith(`(Claude stopped on its usage limit until ${until}. Send it "continue" after the reset to resume)\n`));
 });
 
+test("show says a Claude worker's turn died, when Nexus resumes it, and why Nexus stopped resuming it", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  const report = (sequence: number, kind: "session.turn-started" | "session.ended", at: number) =>
+    s.registry.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1", at } });
+  report(1, "session.turn-started", 1_000);
+  report(2, "session.ended", 4_000);
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^turn died: its Claude session ended during the turn, at 1970-01-01T00:00:04\.000Z$/m);
+  s.registry.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, due: 64_000 });
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^turn died: its Claude session ended during the turn, at 1970-01-01T00:00:04\.000Z; Nexus resumes it at 1970-01-01T00:01:04\.000Z, 1 in a row$/m);
+  const why = "Its turn died 4 times in a row (last: its Claude session ended during the turn), so Nexus stopped resuming it.";
+  s.registry.saveClaudeResume(thread.id, { state: "person", turn: 4_000, count: 3, why });
+  const shown = (await s.nexus(["show", thread.id])).stdout;
+  assert.ok(shown.includes("attention: decision"), shown);
+  assert.ok(shown.includes(`resume: stopped. ${why} Write to it to resume it`), shown);
+});
+
 test("conversation prints a Claude worker's transcript, and send types into its session, waiting for a paused pylon under one request ID", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
