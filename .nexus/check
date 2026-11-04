@@ -1,7 +1,30 @@
 #!/bin/sh
 # The typecheck and the full test suite, which the review loop runs at an approved head before a landing.
-set -e
+# The install is setup's, which installs nothing when node_modules records an install of this package-lock.json, as in a pylon booted from a template.
 # Exit 75 tells the review loop the failure was transient, such as a registry timeout, so it runs the check again.
-npm ci --no-audit --no-fund || exit 75
-npm run typecheck
-npm test
+"$(dirname "$0")/setup" || exit 75
+logs=$(mktemp -d) || exit 1
+trap 'rm -rf "$logs"' EXIT
+npm run typecheck > "$logs/typecheck" 2>&1 &
+typecheck=$!
+npm test > "$logs/test" 2>&1 &
+tests=$!
+wait "$typecheck"
+typecheck=$?
+wait "$tests"
+tests=$?
+
+show() {
+  echo "==> $1 exited $3"
+  cat "$logs/$2"
+}
+# The review loop keeps only the output's last 6,000 bytes, so a failed step prints after a passed one.
+if [ "$typecheck" -ne 0 ] && [ "$tests" -eq 0 ]; then
+  show "npm test" test 0
+  show "npm run typecheck" typecheck "$typecheck"
+  exit "$typecheck"
+fi
+show "npm run typecheck" typecheck "$typecheck"
+show "npm test" test "$tests"
+[ "$tests" -eq 0 ] || exit "$tests"
+exit "$typecheck"

@@ -266,3 +266,78 @@ test("verify gives the live check the imported base whenever the pylon holds it,
   assert.equal((await v.run({ docker: 0, base: true })).code, 0);
   assert.deepEqual(await v.calls(), ["npm run build", "live-check nexus-verify-base:pylon"]);
 });
+
+/**
+ * A checkout with this repository's .nexus/check, setup and resume, and an `npm` stub first on PATH that logs each call.
+ * `npm ci` acts as the checkout's does, and exits 1 under $NPM_FAIL. `npm run typecheck` and `npm test` each mark that
+ * they started, wait up to 10 s for the other to start, print a line, and exit $TYPECHECK_EXIT or $TEST_EXIT, or 3 when
+ * the other never started, so a check that runs them one after the other fails.
+ */
+async function checkCheckout(t: { after(fn: () => Promise<void>): void }) {
+  const dir = await tempDir("nexus-check-", t);
+  const root = join(dir, "repo");
+  const bin = join(dir, "bin");
+  await mkdir(join(root, ".nexus"), { recursive: true });
+  await mkdir(bin);
+  for (const name of ["check", "setup", "resume"]) await copyFile(join(repo, ".nexus", name), join(root, ".nexus", name));
+  await writeFile(join(root, "package.json"), '{"name":"x"}\n');
+  await writeFile(join(root, "package-lock.json"), '{"lockfileVersion":3}\n');
+  const calls = join(dir, "npm-calls");
+  const step = (name: string, other: string, code: string) =>
+    `touch ${join(dir, name)}; i=0; while [ ! -e ${join(dir, other)} ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i + 1)); done\n    [ -e ${join(dir, other)} ] || { echo "${name} ran alone"; exit 3; }\n    echo "${name} printed"; exit "\${${code}:-0}"`;
+  await writeFile(join(bin, "npm"), `#!/bin/sh
+echo "$*" >> ${calls}
+case "$1" in
+  ci) rm -rf node_modules; [ -z "\${NPM_FAIL:-}" ] || exit 1; mkdir node_modules && touch node_modules/installed ;;
+  run) ${step("typecheck", "test", "TYPECHECK_EXIT")} ;;
+  test) ${step("test", "typecheck", "TEST_EXIT")} ;;
+esac
+`, { mode: 0o755 });
+  const run = async (env: { npmFails?: boolean; typecheck?: number; test?: number } = {}) => {
+    try {
+      const { stdout } = await promisify(execFile)(join(root, ".nexus", "check"), [], {
+        cwd: root,
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TYPECHECK_EXIT: String(env.typecheck ?? 0), TEST_EXIT: String(env.test ?? 0), ...env.npmFails ? { NPM_FAIL: "1" } : {} },
+      });
+      return { code: 0, stdout };
+    } catch (error) {
+      const { code, stdout } = error as { code: number; stdout: string };
+      return { code, stdout };
+    }
+  };
+  return { root, run, calls: async () => (await readFile(calls, "utf8").catch(() => "")).split("\n").filter(Boolean) };
+}
+
+test("check installs nothing while node_modules records an install of this package-lock.json, and installs once it changes", async (t) => {
+  const c = await checkCheckout(t);
+  assert.equal((await c.run()).code, 0);
+  const first = await c.calls();
+  assert.deepEqual([first[0], ...first.slice(1).sort()], ["ci --no-audit --no-fund", "run typecheck", "test"], "a first check installs");
+  assert.equal((await c.run()).code, 0);
+  assert.deepEqual((await c.calls()).slice(3).sort(), ["run typecheck", "test"], "the install it recorded is not repeated");
+  await writeFile(join(c.root, "package-lock.json"), changedLock);
+  assert.equal((await c.run()).code, 0);
+  assert.equal((await c.calls())[5], "ci --no-audit --no-fund", "a changed lockfile installs again");
+});
+
+test("check exits 75, a transient failure, when the install fails, and runs neither the typecheck nor the tests", async (t) => {
+  const c = await checkCheckout(t);
+  assert.equal((await c.run({ npmFails: true })).code, 75);
+  assert.ok((await c.calls()).every((call) => call.startsWith("ci ")), "only installs ran");
+});
+
+test("check runs the typecheck and the tests at once, and prints a failed one last, with its exit code", async (t) => {
+  const c = await checkCheckout(t);
+  const passed = await c.run();
+  assert.equal(passed.code, 0, passed.stdout);
+  assert.match(passed.stdout, /^==> npm run typecheck exited 0\ntypecheck printed\n==> npm test exited 0\ntest printed\n$/);
+  const typecheck = await c.run({ typecheck: 2 });
+  assert.equal(typecheck.code, 2);
+  assert.match(typecheck.stdout, /==> npm test exited 0\ntest printed\n==> npm run typecheck exited 2\ntypecheck printed\n$/);
+  const tests = await c.run({ test: 1 });
+  assert.equal(tests.code, 1);
+  assert.match(tests.stdout, /==> npm run typecheck exited 0\ntypecheck printed\n==> npm test exited 1\ntest printed\n$/);
+  const both = await c.run({ typecheck: 2, test: 1 });
+  assert.equal(both.code, 1, "the tests' code, whose output is last");
+  assert.match(both.stdout, /==> npm run typecheck exited 2\ntypecheck printed\n==> npm test exited 1\ntest printed\n$/);
+});
