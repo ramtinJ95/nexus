@@ -91,10 +91,14 @@ const nodeRegistry: RegistrySchema = {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") return null; throw error; }
   },
   async backUp() {
-    await command("systemctl", ["start", "nexus-backup.service"], prefix, 300_000);
-    const status = await readJson("/var/lib/nexus-backup/status.json", null) as { succeeded: boolean; newest: { name: string } | null } | null;
-    if (status?.succeeded !== true || status.newest === null) throw new Error("the backup before the migration did not succeed; see journalctl -u nexus-backup");
-    return status.newest.name;
+    const started = Date.now();
+    // A start that joins a daily run already going returns when that run ends, so the second start runs one of its own.
+    for (let tries = 0; tries < 2; tries++) {
+      await command("systemctl", ["start", "nexus-backup.service"], prefix, 300_000);
+      const status = await readJson("/var/lib/nexus-backup/status.json", null) as { ranAt: string; succeeded: boolean; newest: { name: string } | null } | null;
+      if (status?.succeeded === true && status.newest !== null && Date.parse(status.ranAt) >= started) return status.newest.name;
+    }
+    throw new Error("no backup that began after the drain sealed succeeded; see journalctl -u nexus-backup");
   },
 };
 
@@ -102,6 +106,7 @@ const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", 
 type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema };
 
 const restoreSteps = `deploy/README.md's "A failed deploy past a registry migration"`;
+const applies = ({ release }: SchemaVersions) => release === null ? "has no src/control/schema.ts to say which migrations it applies" : `applies ${release} registry migrations`;
 
 /** What a probe plans from: control's report in the view. */
 function controlHealth(view: ReleaseView): ReleaseHealth {
@@ -199,16 +204,20 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       const versions = await schemaAt(target);
       const step = schemaStep(versions);
       if (step === "refuses") {
-        throw new Error(`release ${desired} applies ${versions.release} registry migrations, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
+        throw new Error(`release ${desired} ${applies(versions)}, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
       }
       return step === "migrates" ? registry.backUp() : null;
     },
     async rollbackRefused(transaction) {
       if (registry === undefined) return null;
+      if (schemaStep({ registry: await registry.known(transaction.target), release: await registry.known(transaction.previous) }) === "starts") return null;
+      // A target still migrating, or restarted by systemd, could raise the version after it was read.
+      await run("systemctl", ["stop", service], prefix, 60_000);
       const versions = await schemaAt(transaction.previous);
       if (schemaStep(versions) !== "refuses") return null;
+      await run("systemctl", ["start", service], prefix, 60_000);
       const backup = transaction.backup === undefined ? "a backup from before it" : `backup ${transaction.backup}, taken just before it,`;
-      return `the registry is at schema version ${versions.registry}, and the previous release, ${transaction.previous}, applies only ${versions.release} migrations, so its control plane would refuse to start. Control stays on ${transaction.target}. Deploy a fixed commit to keep what control recorded since the migration, or restore ${backup} and point control back at ${transaction.previous}, which discards that, as ${restoreSteps} says`;
+      return `the registry is at schema version ${versions.registry}, and the previous release, ${transaction.previous}, ${applies(versions)}, so its control plane would refuse to start. Control stays on ${transaction.target}. Deploy a fixed commit to keep what control recorded since the migration, or restore ${backup} and point control back at ${transaction.previous}, which discards that, as ${restoreSteps} says`;
     },
     async restart() {
       const transaction = await installer.observed();

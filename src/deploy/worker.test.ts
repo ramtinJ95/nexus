@@ -171,6 +171,7 @@ test("a failed deploy that migrated the registry stays on its release with a bac
         await writeFile(join(dir, `releases/${release}/release-commit`), release!);
       }
       if (program === "env" && args.includes("NEXUS_PREPARE=1")) calls.push(`activate ${release}`);
+      if (program === "systemctl" && (args[0] === "stop" || args[0] === "start")) calls.push(args[0]);
       if (program === "systemctl" && args[0] === "restart") {
         calls.push(`restart ${await readlink(join(dir, "control-current"))}`);
         if (await readlink(join(dir, "control-current")) === `releases/${commit}`) schema = 4;
@@ -185,9 +186,10 @@ test("a failed deploy that migrated the registry stays on its release with a bac
   };
 
   await reconcileRole("control", config, api, boundary);
-  assert.deepEqual(calls, ["drain hold", "backup at 3", `activate ${commit}`, `restart releases/${commit}`], "the backup comes after the drain seals and before the link moves");
+  assert.deepEqual(calls, ["drain hold", "backup at 3", `activate ${commit}`, `restart releases/${commit}`, "stop", "start"],
+    "the backup comes after the drain seals and before the link moves, and the registry is read with the target stopped");
   assert.deepEqual(reports.map((r) => r.state), ["installing", "failed"]);
-  assert.match(reports.at(-1).reason, /not rolled back: the registry is at schema version 4, and the previous release, releases\/b{40}, applies only 3 migrations/);
+  assert.match(reports.at(-1).reason, /not rolled back: the registry is at schema version 4, and the previous release, releases\/b{40}, applies 3 registry migrations/);
   assert.match(reports.at(-1).reason, /restore backup 2026-11-04T00-00-00Z, taken just before it,/);
   assert.equal(await readlink(join(dir, "control-current")), `releases/${commit}`);
   assert.equal(JSON.parse(await readFile(join(dir, "control-deploy.json"), "utf8")).backup, "2026-11-04T00-00-00Z");

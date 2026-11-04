@@ -56,10 +56,10 @@ test("legacy busy-turn quarantine permits the same commit and newer main, but ne
   }
 });
 
-test("a release migrates a registry behind its code, refuses one ahead of it, and starts on one it matches or that is unknown", () => {
+test("a release migrates a registry behind its code, refuses one ahead of it or that it cannot name, and starts on one it matches or none", () => {
   assert.equal(schemaStep({ registry: 3, release: 4 }), "migrates");
   assert.equal(schemaStep({ registry: 4, release: 3 }), "refuses");
   assert.equal(schemaStep({ registry: 4, release: 4 }), "starts");
   assert.equal(schemaStep({ registry: null, release: 4 }), "starts", "the control plane has not made a registry yet");
-  assert.equal(schemaStep({ registry: 4, release: null }), "starts", "a release from before schema.ts");
+  assert.equal(schemaStep({ registry: 4, release: null }), "refuses", "a release from before schema.ts");
 });

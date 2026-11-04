@@ -52,8 +52,12 @@ export function planDeploy(input: DeployInput): DeployStep {
  */
 export interface SchemaVersions { registry: number | null; release: number | null }
 
-/** What a release's control plane does to the registry as db.ts opens it: migrates one behind it, refuses one ahead. */
+/**
+ * What a release's control plane does to the registry as db.ts opens it: migrates one behind it, refuses one ahead. A
+ * release from before schema.ts kept the same refusal in registry.ts, so one whose count is unknown counts as refusing.
+ */
 export function schemaStep({ registry, release }: SchemaVersions): "starts" | "migrates" | "refuses" {
-  if (registry === null || release === null || registry === release) return "starts";
-  return registry < release ? "migrates" : "refuses";
+  if (registry === null) return "starts";
+  if (release === null || registry > release) return "refuses";
+  return registry < release ? "migrates" : "starts";
 }
