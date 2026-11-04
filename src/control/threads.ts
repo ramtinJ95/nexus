@@ -137,7 +137,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const need = { image, resources, network, repo: freshRepo, dotfiles };
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }
       : request.node === "auto" || (request.near === undefined && project.defaultNode === "auto") ? placeAuto(registry, need)
-      : request.near !== undefined ? placeNear(registry, need, request.near)
+      : request.near !== undefined ? placeNear(registry, need, request.near, request.ifRoom === true)
       : { how: "default", node: project.defaultNode as NodeName };
     const { node } = placement;
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.

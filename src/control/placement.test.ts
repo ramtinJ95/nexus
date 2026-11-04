@@ -144,6 +144,8 @@ test("a review's start beside its builder goes elsewhere once the builder's host
   assert.deepEqual(placeNear(registry, need(), "builder" as NodeName).node, "other");
   assert.deepEqual(placeNear(fakeRegistry([{ name: "builder", total: 32, committed: 4, free: 3 }]), need(), "builder" as NodeName), { how: "named", node: "builder" },
     "with no node to take it, it goes beside the builder all the same");
+  assert.throws(() => placeNear(fakeRegistry([{ name: "builder", total: 32, committed: 4, free: 3 }]), need(), "builder" as NodeName, true), /no node has room for this pylon: builder has 3 GiB of memory free/,
+    "a start that asks for room never overcommits the builder's host");
 });
 
 test("a move weighs the other nodes by their free memory too", () => {

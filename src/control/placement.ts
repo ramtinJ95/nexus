@@ -22,10 +22,12 @@ export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
 
 /**
  * On `near` while it can run the pylon, as the review loop starts a builder's reviewer and checks beside it. Otherwise on
- * the node with the most room left, and on `near` all the same when no node has room, so a review never waits for one.
+ * the node with the most room left, and on `near` all the same when no node has room, so a review never waits for one,
+ * unless `ifRoom`, as for a check that can wait for the reviewer's verdict instead.
  */
-export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName): Placement {
+export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName, ifRoom = false): Placement {
   const { best, weighed } = weighNodes(registry, need);
+  if (best === null && ifRoom) throw new HttpError(409, `no node has room for this pylon: ${refusals(weighed)}`);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
