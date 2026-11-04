@@ -23,10 +23,17 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { StartRequest } from "./start-request.ts";
 
-type GateRegistry = Pick<Registry, "node" | "pylon" | "recordActivity" | "sealedBoot" | "setThreadStatus" | "thread">;
+type GateRegistry = Pick<Registry, "node" | "project" | "pylon" | "recordActivity" | "sealedBoot" | "setThreadStatus" | "thread">;
 
-/** The one pylon sized over the default: Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and has passed only at 4 CPUs and 8 GiB (nexus#388). */
+/** Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and has passed only at 4 CPUs and 8 GiB (nexus#388). */
 const verifySize = { cpus: 4, memoryGiB: 8 };
+/**
+ * node --test runs one file fewer at once than the pylon has CPUs, so at the default 2 CPUs the suite ran file by file
+ * in 574 s. At 2 CPUs, 3 files at once took 257 s and 4 took 246 to 254 s, bound by src/cli/nexus.test.ts, which takes
+ * 187 s on one core by itself. At 4 CPUs the runner runs 3, and more CPUs cannot shorten that one file. A project
+ * sized over that keeps its own CPUs.
+ */
+const checkCpus = 4;
 const tailBytes = 6_000;
 /** The pipe's exit status when the pylon was not fit to run the check, which says nothing of the change. */
 const unfit = 125;
@@ -59,10 +66,12 @@ exec ./${file} </dev/null 2>&1`;
  * What a run is: the script, who starts its pylon and how, and what becomes of the pylon afterwards. A check thread is
  * deleted. A verify pylon is archived, so the person can unarchive one within 24 hours to see what its live check left.
  */
-interface Gate { caller: string; pylon: string; script: string; request(builder: Thread, branch: string, head: string): StartRequest; after: "deleted" | "archived" }
+interface Gate { caller: string; pylon: string; script: string; request(builder: Thread, branch: string, head: string, projectCpus: number): StartRequest; after: "deleted" | "archived" }
 export const checkGate: Gate = {
   caller: checkCaller, pylon: "check", script: scriptOf(".nexus/check", "check"), after: "deleted",
-  request: (builder, branch, head) => ({ project: builder.project, title: `Check of ${branch} at ${head.slice(0, 12)}`, branch, commit: head, bare: true }),
+  request: (builder, branch, head, projectCpus) => ({
+    project: builder.project, title: `Check of ${branch} at ${head.slice(0, 12)}`, branch, commit: head, bare: true, resources: { cpus: Math.max(checkCpus, projectCpus) },
+  }),
 };
 export const verifyGate: Gate = {
   caller: verifyCaller, pylon: "verify", script: scriptOf(".nexus/verify", "verify"), after: "archived",
@@ -157,7 +166,8 @@ export function checkRuns(options: {
 
   return {
     async start(builder, branch, head) {
-      const t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head) }, gate.caller);
+      const projectCpus = registry.project(builder.project)?.resources.cpus ?? 0;
+      const t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus) }, gate.caller);
       runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
       return t.id;
     },

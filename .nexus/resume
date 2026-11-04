@@ -1,5 +1,6 @@
 #!/bin/sh
-# Installs the npm packages on boot when node_modules records no install of this package-lock.json.
+# Installs the npm packages on boot when node_modules records no install of this package.json and package-lock.json.
+# With --installed it installs nothing and exits 0 only when node_modules records one, as .nexus/check asks.
 cd "$(dirname "$0")/.." || exit 1
 staging=.nexus-install
 stamp=node_modules/.nexus-lockfile-sha256
@@ -32,9 +33,14 @@ attempt() {
   return 1
 }
 
+# npm ci installs from both manifests, and refuses a package.json the lockfile is out of step with.
+sum=$(cat package.json package-lock.json | sha256sum | cut -d " " -f 1)
+if [ "${1:-}" = --installed ]; then
+  [ "$(cat "$stamp" 2>/dev/null)" = "$sum" ]
+  exit
+fi
 restore
 rm -rf "$staging"
-sum=$(sha256sum package-lock.json | cut -d " " -f 1)
 [ "$(cat "$stamp" 2>/dev/null)" = "$sum" ] && exit 0
 i=0
 while [ "$i" -lt "$attempts" ]; do
