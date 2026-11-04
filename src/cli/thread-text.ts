@@ -10,7 +10,7 @@ import type { Question } from "../control/questions.ts";
 import { reservedNames } from "../control/holds.ts";
 import { usageLimitText } from "../claude-transcript.ts";
 import { keptPastDay } from "../reconcile.ts";
-import { liveNote, phaseNote, roundNote, roundsSpent } from "../control/review-model.ts";
+import { checkBeside, liveNote, phaseNote, roundNote, roundsSpent } from "../control/review-model.ts";
 import type { Changes, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../control/templates.ts";
 import { ago, table, clip, gib } from "./kit.ts";
@@ -40,7 +40,7 @@ export function reviewText(r: Review): string {
   const round = roundNote(r);
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
   return [
-    `review ${r.id} of PR #${r.pr.number}${r.auto ? ", started on its own" : ""}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}`,
+    `review ${r.id} of PR #${r.pr.number}${r.auto ? ", started on its own" : ""}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}${checkBeside(r)}`,
     ...round === null ? [] : [round],
     ...note === null ? [] : [note],
     ...live?.kind === "ran" && !live.passed ? live.output.split("\n").slice(-20).map((line) => `  ${line}`) : [],

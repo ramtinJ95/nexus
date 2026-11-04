@@ -1,9 +1,9 @@
 /**
  * The review loop: once a builder thread's pull request is open, a reviewer thread on another model reviews it, the
  * builder fixes or rejects each finding and pushes, and the reviewer reviews the new commits, until it approves or the
- * rounds run out. Then the control plane runs the repository's checks at the approved head, and its live check when it
- * has a `.nexus/verify`, and, when the person asked for it, lands the PR under the merge policy (policy.ts): merge,
- * deploy, and roll back if the fleet is not healthy.
+ * rounds run out. The control plane runs the repository's checks at each round's head while the reviewer reads it, and
+ * once both the approval and the checks are in, its live check when the head has a `.nexus/verify`, and, when the person
+ * asked for it, lands the PR under the merge policy (policy.ts): merge, deploy, and roll back if the fleet is not healthy.
  *
  * The loop runs on the control plane, one pass every few seconds, from the record the registry keeps per builder. Each
  * phase's step reads what the world says now (the agents' replies, the PR, the release) and moves on only from that,
@@ -37,7 +37,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 import {
-  answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, descriptionDigest, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
+  answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
   landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, quoteSchema, reviewerApproved, roundsSpent, settledKinds, verdictSchema,
   type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Waiver,
 } from "./review-model.ts";
@@ -112,11 +112,14 @@ function builderFindings(r: Review, token: string): string {
   // The builder got the notes already with the approval that the gate then stopped.
   const notes = gate !== null ? [] : findings.filter((f) => !blocks(f));
   const verdict = gate?.verdict ?? "changes requested";
+  // A check that failed while the reviewer read is no finding yet, but it fails again once the reviewer approves.
+  const beside = gate === null && round.check?.passed === false
+    ? `\n.nexus/check also failed at ${round.head} while the reviewer read it. It needs no answer, but fix it in the same push. Its output:\n${round.check.output}\n` : "";
   return `${reviewPrefix}
 Round ${n} of at most ${r.maxRounds} on pull request #${r.pr.number} (${r.pr.url}), reviewed at ${round.head} by a reviewer on ${r.models.reviewer}: ${verdict}.
 
 ${findings.filter(blocks).map(findingLine).join("\n\n")}
-${notes.length ? `\nThese P3 notes do not block and need no answer. Take them up here or in a later pull request:\n\n${notes.map(findingLine).join("\n\n")}\n` : ""}
+${notes.length ? `\nThese P3 notes do not block and need no answer. Take them up here or in a later pull request:\n\n${notes.map(findingLine).join("\n\n")}\n` : ""}${beside}
 Fix each P0 to P2 finding or reject it with a reason. Push what you fix to the pull request's branch; the reviewer reviews the new commits. Then end your reply with exactly one block like this, with JSON in it:
 \`\`\`nexus-review-answers
 {"token": "${token}", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}
@@ -128,7 +131,7 @@ function builderNotes(r: Review): string {
   return `${reviewPrefix}
 The reviewer on ${r.models.reviewer} approved pull request #${r.pr.number} (${r.pr.url}) at ${round.head} in round ${roundsSpent(r)}. It left these P3 notes, which do not block and need no answer or push:
 
-${findingsOf(round).map(findingLine).join("\n\n")}
+${round.verdict!.findings.map(findingLine).join("\n\n")}
 
 You may take them up in a later pull request. Do not push to this pull request's branch: the approved head is what gets checked and landed.`;
 }
@@ -204,8 +207,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** When the loop last read the holds of each approved review's head that had none recorded, at most once per PR watch interval. */
   const holdReads = new Map<string, number>();
   /** The check thread or verify pylon `phase` holds, and the runs it is one of. */
-  const gateThread = (phase: Phase): { thread: ThreadId; runs: CheckRuns } | null =>
-    (phase.kind === "checking" || phase.kind === "verifying") && phase.thread !== null ? { thread: phase.thread, runs: phase.kind === "checking" ? checks : live } : null;
+  const gateThread = (phase: Phase): { thread: ThreadId; runs: CheckRuns } | null => {
+    const check = checkThread(phase);
+    if (check !== null) return { thread: check, runs: checks };
+    return phase.kind === "verifying" && phase.thread !== null ? { thread: phase.thread, runs: live } : null;
+  };
   const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
     const gate = gateThread(r.phase);
     if (gate !== null) gate.runs.discard(gate.thread);
@@ -267,6 +273,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (again.length) return toPerson(next, "gate", ...again, ...output);
     return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
   };
+  /** The check's result at `head` from any round of `r`, which every round there keeps, since the check clones that commit alone. */
+  const checkedAt = (r: Review, head: string) => r.rounds.findLast((round) => round.head === head && round.check !== null)?.check ?? null;
+  /** The check could not run at the round's head, which a fresh pylon would not change, so the person gets its output. */
+  const unrunnable = (r: Review, output: string): Review =>
+    toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check could not run at ${r.rounds.at(-1)!.head}.` }, checkOutput(output));
   /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
   const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
     const expect = nudges === 0 ? mint(r.id) : r.expect;
@@ -286,7 +297,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (round.base !== base) return null;
     const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
     if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
-    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head, ...held && { held } } }] };
+    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: checkedAt(r, head), answers: null, carried: { from: round.head, ...held && { held } } }] };
   };
   /**
    * The reviewer's approval of the latest round carried to `head`, so the checks run at `head` with no reviewer round.
@@ -311,7 +322,41 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
   /** `r` with a round for the reviewer at `head`. The person's waiver was of the change against the latest round's base. */
   const reviewRound = (r: Review, head: string, base: string): Review =>
-    ({ ...r, rounds: [...r.rounds, { head, base, verdict: null, check: null, answers: null }], waiver: r.rounds.at(-1)!.base === base ? r.waiver : null });
+    ({ ...r, rounds: [...r.rounds, { head, base, verdict: null, check: checkedAt(r, head), answers: null }], waiver: r.rounds.at(-1)!.base === base ? r.waiver : null });
+  /**
+   * The round's check beside its reviewer, started at the round's head unless the round has its result, which is
+   * recorded once the run gives one. A run that cannot give one starts again in a fresh thread, and one the pylon
+   * cannot run is left for `checking` to report once the reviewer approves.
+   */
+  const checkWhileReading = async (r: Review, phase: Extract<Phase, { kind: "reviewing" }>, builder: Thread): Promise<Review> => {
+    const round = r.rounds.at(-1)!;
+    const check = phase.check ?? { startedAt: now(), thread: null };
+    if (round.check !== null || check.unrunnable !== undefined || check.refused !== undefined) return r;
+    if (check.thread === null) {
+      const gone = await endedOnGitHub(r);
+      if (gone !== null) return gone;
+      try {
+        return { ...r, phase: { ...phase, check: { ...check, thread: await checks.start(builder, r.pr.branch, round.head, true) } } };
+      } catch (err) {
+        // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
+        if (!(err instanceof HttpError)) throw err;
+        return { ...r, phase: { ...phase, check: { ...check, refused: err.message } } };
+      }
+    }
+    const state = checks.poll(check.thread, round.head);
+    if (state.kind === "unrunnable") {
+      checks.discard(check.thread);
+      return { ...r, phase: { ...phase, check: { ...check, thread: null, unrunnable: state.output } } };
+    }
+    if (state.kind !== "done") {
+      if (state.kind !== "void") return r;
+      checks.discard(check.thread);
+      return { ...r, phase: { ...phase, check: { ...check, thread: null } } };
+    }
+    checks.discard(check.thread);
+    const { check: _, ...reading } = phase;
+    return withRound({ ...r, phase: reading }, { check: { passed: state.passed, output: state.output } });
+  };
   /**
    * The builder rebases a branch that conflicts with its base, even after the last round: a rebase that keeps the
    * approved change needs no round, and one that changes it runs out of rounds when the builder pushes it.
@@ -339,7 +384,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   async function waitOn(r: Review, phase: Extract<Phase, { kind: "reviewing" | "fixing" | "quoting" }>, state: AgentState, missing: string | null = null): Promise<Review> {
     const who = phase.kind === "fixing" ? "builder" : "reviewer";
-    const again = (failing?: ModelFailure): Phase => ({ ...phase.kind === "quoting" ? { kind: phase.kind, asked: phase.asked } : { kind: phase.kind }, ...failing && { failing } });
+    const again = (failing?: ModelFailure): Phase => {
+      const { failing: _, ...kept } = phase;
+      return { ...kept, ...failing && { failing } };
+    };
     if (now() - r.since > answerMs) return toPerson(r, "agent", `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
     // Until the request goes again, `since` is before `retryAt`, and the turn that ended is the failure already counted,
     // whose end a Claude worker's transcript and its hook may each report at another time.
@@ -357,16 +405,33 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
 
   const steps: { [K in Exclude<PhaseKind, typeof endedKinds[number]>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
-    async reviewing(r, phase, __, reviewer) {
+    async reviewing(r, phase, builder, reviewer) {
       const state = await agentState(reviewer, r.since);
       const verdict = answeredSince(state) ? latest(state.replies, "nexus-review", verdictSchema, r.expect) : null;
-      if (verdict === null) return waitOn(r, phase, state);
+      if (verdict === null) {
+        // A check that cannot start yet must not keep the reviewer's reminders, retries and deadline from running.
+        const checked = await checkWhileReading(r, phase, builder).catch((err: unknown) => {
+          log(`review ${r.id} of ${r.builder}: the check beside the reviewer did not start and will be tried again (${(err as Error).name})`);
+          return r;
+        });
+        return checked === r ? waitOn(r, phase, state) : checked;
+      }
       const next = withRound(r, { verdict });
       const round = next.rounds.at(-1)!;
       const n = roundsSpent(next);
-      if (approves(round)) return findingsOf(round).length ? send(next, "builder", () => builderNotes(next), checking()) : { ...next, phase: checking(), nudges: 0 };
+      if (reviewerApproved(round)) {
+        if (phase.check?.unrunnable !== undefined) return unrunnable(next, phase.check.unrunnable);
+        const after: Phase = phase.check === undefined || phase.check.refused !== undefined ? checking() : { kind: "checking", startedAt: phase.check.startedAt, thread: phase.check.thread };
+        return verdict.findings.length ? send(next, "builder", () => builderNotes(next), after) : { ...next, phase: after, nudges: 0 };
+      }
       if (n >= r.maxRounds) return ranOut(next, `The reviewer still requests changes after ${n} rounds, the most this review allows.`);
-      return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
+      // A fix round almost always moves the head, so the check stops rather than hold a pylon through it. A result it
+      // gave meanwhile is kept for a round at the same head.
+      const check = checkThread(phase);
+      const run = check === null ? null : checks.poll(check, round.head, false);
+      if (check !== null) checks.discard(check);
+      const stopped = run?.kind === "done" ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next;
+      return send(stopped, "builder", (token) => builderFindings(stopped, token), { kind: "fixing" });
     },
     async fixing(r, phase, builder) {
       const n = roundsSpent(r);
@@ -420,8 +485,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
     async checking(r, phase, builder) {
       const round = r.rounds.at(-1)!;
-      // The check clones the head commit alone, so one that passed there is kept, as the live check is.
-      if (phase.thread === null && round.check?.passed === true) return await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify"));
+      // The check clones the head commit alone, so a result there, such as one from beside the reviewer, is kept, as the live check is.
+      if (phase.thread === null && round.check !== null) return round.check.passed ? await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify")) : gateFailed(r, r);
       if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
       if (phase.thread === null) return await endedOnGitHub(r) ?? { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
       const state = checks.poll(phase.thread, round.head);
@@ -429,7 +494,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         checks.discard(phase.thread);
         return { ...r, phase: { ...phase, thread: null } };
       }
-      if (state.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check could not run at ${round.head}.` }, checkOutput(state.output));
+      if (state.kind === "unrunnable") return unrunnable(r, state.output);
       if (state.kind !== "done") return r;
       // Read while the check thread is held, so a read that fails is retried with the check's result. A landing tried
       // again keeps the round's live check, which ran at the same head.
