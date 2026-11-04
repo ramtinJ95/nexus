@@ -78,7 +78,7 @@ export function afterSwap(settle) { settlers.push(settle); }
  * Regions hold buttons, links, the prompt box and tool output, so focus, the draft, what the reader opened or
  * closed, and their place in the conversation survive the swap.
  */
-function swap(regions) {
+export function swap(regions) {
   const changed = regions.map(([el, html]) => [el, html, comparable(html)]).filter(([el, , key]) => el !== null && served.get(el.id) !== key);
   if (changed.length === 0) return;
   const focused = changed.some(([el]) => el.contains(document.activeElement)) ? focusKey(document.activeElement) : null;
@@ -137,17 +137,29 @@ export function follow(url) {
   });
 }
 
+/** The page at `url`, as the poll reads it. */
+export async function readPage(url) {
+  // A link that stalls mid-body would otherwise hold the refresh lock forever.
+  const res = await fetch(url, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+  if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
+  return new DOMParser().parseFromString(await res.text(), "text/html");
+}
+
+/** The page the address names. A jump within it, as to a hash, is the same page. */
+const addressed = () => location.pathname + location.search;
+
 let refreshing = null;
 async function refresh() {
   const state = document.getElementById("refresh-state");
+  const at = addressed();
   try {
     const seen = frames;
     const url = new URL(location.href);
     if (streaming()) url.searchParams.set("streaming", "1");
-    // A link that stalls mid-body would otherwise hold the refresh lock forever.
-    const res = await fetch(url, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
-    if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
-    const next = new DOMParser().parseFromString(await res.text(), "text/html");
+    const next = await readPage(url);
+    // The reader went to another page in place while this one was read, as the Cluster page goes to another node, so
+    // its regions are not the page's any more.
+    if (addressed() !== at) return;
     // A queued thread that started has a thread page, whose regions the queued page has none of.
     if ((next.getElementById("queued") === null) !== (document.getElementById("queued") === null)) return void location.reload();
     const freshConvo = next.getElementById("convo");
@@ -167,7 +179,7 @@ async function refresh() {
     else main.dataset.activity = activity;
     if (state !== null) state.textContent = "";
   } catch (err) {
-    if (state !== null) state.textContent = `Not updated: ${err.message}. Retrying.`;
+    if (state !== null && addressed() === at) state.textContent = `Not updated: ${err.message}. Retrying.`;
   }
 }
 export const refreshNow = () => (refreshing ??= refresh().finally(() => { refreshing = null; }));

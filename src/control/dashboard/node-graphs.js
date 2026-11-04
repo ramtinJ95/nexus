@@ -22,7 +22,7 @@ const store = (key, value) => { try { localStorage.setItem(key, value); } catch 
 
 let range = rangeOf(stored(rangeKey));
 const hidden = new Set((() => { try { return JSON.parse(stored(hiddenKey) ?? "[]"); } catch { return []; } })());
-const slots = slotter();
+let slots = slotter();
 /** The range's history, null until a fetch answers and after one fails, so the next poll fetches again. */
 let history = null;
 const plotHeight = 188;
@@ -207,6 +207,13 @@ function view(chart, figure) {
   return {
     draw,
     reset() { v.y = null; },
+    clear() {
+      v.lines = [];
+      v.shape = "";
+      build();
+      note.hidden = true;
+      at.textContent = "";
+    },
     resize() { v.u.setSize({ width: Math.max(plot.clientWidth, 100), height: plotHeight }); },
     repaint() {
       v.shape = "";
@@ -219,24 +226,38 @@ function view(chart, figure) {
 const views = [...grid.querySelectorAll("figure[data-chart]")].map((figure) => view(charts.find((c) => c.id === figure.dataset.chart), figure));
 const drawAll = () => { for (const v of views) v.draw(); };
 
+/** The node whose pylons hold the colour slots, and whose lines the charts draw. */
+let drawn = section.dataset.node;
+/** Starts the slots afresh for a node other than the one drawn, so its pylons get the colours a load of its page gives. */
+function renode(node) {
+  if (node === drawn) return false;
+  drawn = node;
+  slots = slotter();
+  return true;
+}
+
 let asked = 0;
 let loading = false;
 let loadedAt = 0;
 async function load() {
   const ask = ++asked;
+  const node = section.dataset.node;
   loading = true;
   loadedAt = Date.now();
   section.classList.add("graphs-loading");
   const to = Date.now();
   try {
-    const metrics = await api("GET", `/v1/nodes/${encodeURIComponent(section.dataset.node)}/metrics?from=${to - rangeMs(range)}&to=${to}`);
+    const metrics = await api("GET", `/v1/nodes/${encodeURIComponent(node)}/metrics?from=${to - rangeMs(range)}&to=${to}`);
     if (ask !== asked) return;
+    renode(node);
     history = historyOf(metrics, rangeMs(range));
     for (const v of views) v.reset();
     drawAll();
     errorNote.hidden = true;
   } catch (err) {
     if (ask !== asked) return;
+    // Another node's lines would read as this one's.
+    if (renode(node)) for (const v of views) v.clear();
     history = null;
     errorNote.textContent = `The graphs could not load: ${err.message}`;
     errorNote.hidden = false;
@@ -261,6 +282,8 @@ for (const b of buttons) {
 }
 pick();
 void load();
+// The Cluster page's switch to another node names it here, and the graphs draw it in the same range and lines.
+new MutationObserver(() => void load()).observe(section, { attributeFilter: ["data-node"] });
 
 afterSwap(() => {
   const sample = document.querySelector("#node-health [data-sample]")?.dataset.sample;
