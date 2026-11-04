@@ -93,6 +93,14 @@ test("resume skips npm while the lockfile is the one it installed, and installs 
   assert.equal((await c.calls()).length, 2, "and records the new lockfile");
 });
 
+test("resume installs again when only package.json changes, since npm ci installs from both manifests", async (t) => {
+  const c = await checkout(t);
+  await c.run("resume");
+  await writeFile(join(c.root, "package.json"), '{"name":"x","dependencies":{"y":"1"}}\n');
+  await c.run("resume");
+  assert.equal((await c.calls()).length, 2);
+});
+
 test("a failed install on a wake exits 0, says to run npm ci, records nothing, and the next run tries again", async (t) => {
   const c = await checkout(t);
   assert.match(await c.run("resume", { fail: true }), notInstalled);
@@ -268,7 +276,7 @@ test("verify gives the live check the imported base whenever the pylon holds it,
 });
 
 /**
- * A checkout with this repository's .nexus/check, setup and resume, and an `npm` stub first on PATH that logs each call.
+ * A checkout with this repository's .nexus/check and resume, and an `npm` stub first on PATH that logs each call.
  * `npm ci` acts as the checkout's does, and exits 1 under $NPM_FAIL. `npm run typecheck` and `npm test` each mark that
  * they started, wait up to 10 s for the other to start, print a line, and exit $TYPECHECK_EXIT or $TEST_EXIT, or 3 when
  * the other never started, so a check that runs them one after the other fails.
@@ -279,7 +287,7 @@ async function checkCheckout(t: { after(fn: () => Promise<void>): void }) {
   const bin = join(dir, "bin");
   await mkdir(join(root, ".nexus"), { recursive: true });
   await mkdir(bin);
-  for (const name of ["check", "setup", "resume"]) await copyFile(join(repo, ".nexus", name), join(root, ".nexus", name));
+  for (const name of ["check", "resume"]) await copyFile(join(repo, ".nexus", name), join(root, ".nexus", name));
   await writeFile(join(root, "package.json"), '{"name":"x"}\n');
   await writeFile(join(root, "package-lock.json"), '{"lockfileVersion":3}\n');
   const calls = join(dir, "npm-calls");
@@ -305,19 +313,23 @@ esac
       return { code, stdout };
     }
   };
-  return { root, run, calls: async () => (await readFile(calls, "utf8").catch(() => "")).split("\n").filter(Boolean) };
+  const resume = () => promisify(execFile)(join(root, ".nexus", "resume"), [], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  return { root, run, resume, calls: async () => (await readFile(calls, "utf8").catch(() => "")).split("\n").filter(Boolean) };
 }
 
-test("check installs nothing while node_modules records an install of this package-lock.json, and installs once it changes", async (t) => {
+test("check installs nothing while node_modules records an install of this package.json and package-lock.json, and runs npm ci otherwise", async (t) => {
   const c = await checkCheckout(t);
+  const installs = async () => (await c.calls()).filter((call) => call.startsWith("ci ")).length;
+  await c.resume();
   assert.equal((await c.run()).code, 0);
-  const first = await c.calls();
-  assert.deepEqual([first[0], ...first.slice(1).sort()], ["ci --no-audit --no-fund", "run typecheck", "test"], "a first check installs");
-  assert.equal((await c.run()).code, 0);
-  assert.deepEqual((await c.calls()).slice(3).sort(), ["run typecheck", "test"], "the install it recorded is not repeated");
+  assert.equal(await installs(), 1, "the install the boot's resume recorded is not repeated");
   await writeFile(join(c.root, "package-lock.json"), changedLock);
   assert.equal((await c.run()).code, 0);
-  assert.equal((await c.calls())[5], "ci --no-audit --no-fund", "a changed lockfile installs again");
+  assert.equal(await installs(), 2, "a changed lockfile installs");
+  await c.resume();
+  await writeFile(join(c.root, "package.json"), '{"name":"x","dependencies":{"y":"1"}}\n');
+  assert.equal((await c.run()).code, 0);
+  assert.equal(await installs(), 4, "so does a changed package.json, which npm ci refuses when the lockfile is out of step");
 });
 
 test("check exits 75, a transient failure, when the install fails, and runs neither the typecheck nor the tests", async (t) => {

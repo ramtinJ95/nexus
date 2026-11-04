@@ -1,8 +1,8 @@
 #!/bin/sh
 # The typecheck and the full test suite, which the review loop runs at an approved head before a landing.
-# The install is setup's, which installs nothing when node_modules records an install of this package-lock.json, as in a pylon booted from a template.
+# A pylon booted from a template has the packages its .nexus/resume installed after the checkout, so the check installs only when they are not recorded.
 # Exit 75 tells the review loop the failure was transient, such as a registry timeout, so it runs the check again.
-"$(dirname "$0")/setup" || exit 75
+"$(dirname "$0")/resume" --installed || npm ci --no-audit --no-fund || exit 75
 logs=$(mktemp -d) || exit 1
 trap 'rm -rf "$logs"' EXIT
 npm run typecheck > "$logs/typecheck" 2>&1 &
