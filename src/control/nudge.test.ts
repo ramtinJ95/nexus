@@ -479,6 +479,18 @@ test("a Claude worker stopped on its usage limit is not nudged", async (t) => {
   assert.equal(f.registry.attention(id), "limited");
 });
 
+test("a Claude worker whose turn ended on a model error is not nudged, as the resumer resumes it", async (t) => {
+  const f = fixture(t);
+  const id = await f.add("th-claude", { claude: true });
+  f.transcript(id, [{ kind: "notice", at: f.now, tone: "error", text: "API Error: Request timed out." }]);
+  f.registry.recordReply(id, f.now);
+  assert.equal(f.registry.thread(id)!.turnDied?.cause, "model-error");
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.deepEqual(f.typed, []);
+  assert.equal(f.registry.nudge(id), null);
+});
+
 test("a nudge the session could not take yet is kept and sent again under the same request ID", async (t) => {
   const f = fixture(t);
   const id = await f.add("th-claude", { claude: true });

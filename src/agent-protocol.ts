@@ -15,16 +15,17 @@ export const checkCaller = "nexus-check";
 export const verifyCaller = "nexus-verify";
 
 /** Who sent an automated input entry, which the entry's kind, `nexus.<sender>`, and its data name. */
-export type Sender = "pr-watch" | "review" | "usage-limit" | "nudge";
-export const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge" };
+export type Sender = "pr-watch" | "review" | "usage-limit" | "nudge" | "resume";
+export const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge", resume: "Nexus resume" };
 
 export const reviewPrefix = "[Nexus review — automated, not a message from the person]";
 export const nudgePrefix = "[Nexus nudge — automated, not a message from the person]";
 export const prWatchPrefix = "[Nexus PR watch — automated, not a message from the person]";
 export const usageLimitPrefix = "[Nexus usage limit — automated, not a message from the person]";
+export const resumePrefix = "[Nexus resume — automated, not a message from the person]";
 export const planningPrefix = "[Nexus planning: automated, not a message from the person]";
 export const judgmentPrefix = "[Nexus judgment — automated, not a message from the person]";
-export const senderPrefixes: Readonly<Record<Sender, string>> = { "pr-watch": prWatchPrefix, review: reviewPrefix, nudge: nudgePrefix, "usage-limit": usageLimitPrefix };
+export const senderPrefixes: Readonly<Record<Sender, string>> = { "pr-watch": prWatchPrefix, review: reviewPrefix, nudge: nudgePrefix, "usage-limit": usageLimitPrefix, resume: resumePrefix };
 
 export type ThreadRole = "builder" | "reviewer" | "check" | "verify" | "other";
 

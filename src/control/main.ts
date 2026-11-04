@@ -39,6 +39,7 @@ import { judgmentPass } from "./judgment.ts";
 import { cleanupEveryMs, cleanupPass } from "./cleanup.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
+import { deadTurnResumer } from "./resume.ts";
 import { usageCounter } from "./usage-counter.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { startImageRollout } from "./image-rollout.ts";
@@ -248,6 +249,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   for (const poll of threads.polls) every(15_000, poll);
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });
   every(15_000, () => nudges?.poll());
+  const resumes = deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote });
+  every(15_000, () => resumes.poll());
   // Judgments need no GitHub, so they run without a token too.
   const judgments = judgmentPass({ registry, harness, probes: probeMap, wake });
   every(15_000, () => judgments.poll());
@@ -308,7 +311,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     async close() {
       for (const timer of timers) clearInterval(timer);
       stopFollowing();
-      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, judgments, cleanup, health, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
+      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, resumes, judgments, cleanup, health, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
       registry.close();
     },
   };
