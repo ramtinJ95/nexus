@@ -162,8 +162,8 @@ The control plane refuses to open a registry whose schema version, its `user_ver
 
 The control role's deployer now compares the registry's version, read through a read-only connection, with the migrations in each release's `src/control/schema.ts`:
 
-- A release that migrates the registry gets a backup first. Once the drain is sealed, so no turn starts or receives a message, the deployer runs `nexus-backup.service`, the [daily backup](#daily-backup)'s unit, and waits for it. It names the backup in the journal, `/opt/nexus/control-deploy.json`, as `backup`. A backup that fails stops the install before the link moves.
-- When that release then fails its health check, the deployer does not move the link back. Control stays on the migrated release, the only one that can open the registry, and the deployer reports `failed` with the journal tail, then `not rolled back:`, the versions, and the backup's name. It releases the drain, so a control plane that answers takes work again. The release is quarantined like any failed one.
+- A release that migrates the registry gets a backup first. Once the drain is sealed, so no turn starts or receives a message, the deployer runs `nexus-backup.service`, the [daily backup](#daily-backup)'s unit, and waits for a run that began after the seal. It names the backup in the journal, `/opt/nexus/control-deploy.json`, as `backup`. A backup that fails stops the install before the link moves.
+- When that release then fails its health check, the deployer stops it, so no migration still running or restart by systemd can change the registry, and reads the registry's version. If the previous release cannot open it, the deployer starts the failed release again and does not move the link back. Control stays on the migrated release, the only one that can open the registry, and the deployer reports `failed` with the journal tail, then `not rolled back:`, the versions, and the backup's name. It releases the drain, so a control plane that answers takes work again. The release is quarantined like any failed one.
 - A release older than the registry, such as the previous release a landing rolls back to, is refused after its build and before the link moves or anything restarts, and reports `failed` with the versions. A landing then says the rollback failed too, with that reason, and hands the fleet to the person.
 
 The person picks one of two ways on. Deploying a fixed commit keeps everything the control plane recorded since the migration, and its own rollback goes to the migrated release, which can start. Restoring the backup goes back to the previous release and discards everything recorded after the backup: threads, messages, reviews, and the conversations in the harness's storage. The drain held from the backup until the failed health check, at most `healthTimeoutMs`, so only what control did in that window, and whatever it took in after the deployer released the drain, is lost. To restore, on the control node, with the backup and the previous release the report names:
@@ -172,7 +172,7 @@ The person picks one of two ways on. Deploying a fixed commit keeps everything t
 sudo systemctl stop nexus-deployer.timer nexus-deployer.service nexus-backup.timer nexus-backup.service nexus-control.service
 sudo node /opt/nexus/control-current/src/control/backup.ts restore <backup>
 sudo ln -sfn releases/<previous commit> /opt/nexus/control-current
-sudo cp /opt/nexus/control-deploy.unit /etc/systemd/system/nexus-control.service
+sudo install -o root -g root -m 0644 /opt/nexus/releases/<previous commit>/deploy/nexus-control.service /etc/systemd/system/nexus-control.service
 sudo systemctl daemon-reload
 # A refused rollback's report would hold the previous commit back as failed.
 sudo rm -f /opt/nexus/control-deploy-report.json
@@ -180,7 +180,7 @@ sudo systemctl start nexus-control.service nexus-deployer.timer nexus-backup.tim
 nexus deploy <previous commit> --wait
 ```
 
-The backup counts among the 7 the daily backup keeps, so it is gone after a week of daily runs. A release from before `src/control/schema.ts`, or a registry the control plane has not made yet, takes no backup and is never refused.
+The backup counts among the 7 the daily backup keeps, so it is gone after a week of daily runs. A registry the control plane has not made yet takes no backup and refuses no release. A release from before `src/control/schema.ts`, which came on 2026-10-30, cannot say which migrations it applies, so on an existing registry the deployer refuses to install it and refuses to roll back to it; install such a commit by hand.
 
 GitHub reports this repository as **public**. HTTPS fetches need no credentials. Child commands receive a minimal environment with no inherited `GH_TOKEN`, root deployer token, npm config or git user config. If the repository becomes private, do not put credentials in its URL or run builds with GH_TOKEN: fetch-only credential support must be added before automatic upgrades will work.
 
