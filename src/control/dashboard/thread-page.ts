@@ -11,7 +11,7 @@ import type { Preview, Thread, ThreadAgent } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { promptSenders } from "../inbox.ts";
 import type { AgentView } from "../conversation-view.ts";
-import { liveNote, phaseNote, roundNote, roundsSpent } from "../review-model.ts";
+import { checkBeside, liveNote, phaseNote, roundNote, roundsSpent } from "../review-model.ts";
 import type { QueuedThread, Wait } from "../queue.ts";
 import { tokenCount, type UsageTotals } from "../usage.ts";
 import { attentions } from "../attention.ts";
@@ -278,7 +278,7 @@ ${pylon.notAnswering !== undefined && html`<p class="error">The guest has not an
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + (d.pullRequests?.length ?? 0))}</h2>
 ${!d.prWatch?.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
 ${(d.pullRequests ?? []).map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
-${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}</p>${roundNote(d.review) !== null && html`<p class="dim">${roundNote(d.review)}</p>`}${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}${cancelReview(t.id, d.review, "btn-xs btn-ghost danger")}`}
+${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}${checkBeside(d.review)}</p>${roundNote(d.review) !== null && html`<p class="dim">${roundNote(d.review)}</p>`}${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}${cancelReview(t.id, d.review, "btn-xs btn-ghost danger")}`}
 ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}

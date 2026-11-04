@@ -45,7 +45,7 @@ export type Verdict = z.output<typeof verdictSchema>;
 export type Answer = z.infer<typeof answersSchema>["answers"][number];
 
 /**
- * A round is one review of `head`. `check` is the repository's checks at `head`, run once the reviewer approves it.
+ * A round is one review of `head`. `check` is the repository's checks at `head`, run while the reviewer reads it.
  * `live` is the live check at `head`, recorded once the checks pass, and unset until a live check gave a verdict or
  * found no `.nexus/verify`. `conflict` is the base that `head` conflicted with when the landing tried to merge it, which
  * the builder rebases onto.
@@ -81,8 +81,11 @@ export type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; pa
 export interface ModelFailure { count: number; last: string; retryAt: number }
 
 export type Phase =
-  /** The reviewer has the round's request and owes its verdict. */
-  | { kind: "reviewing"; failing?: ModelFailure }
+  /**
+   * The reviewer has the round's request and owes its verdict. `check` is the repository's checks at the round's head,
+   * run beside it in `thread` unless the round has their result already, as `checking`'s are.
+   */
+  | { kind: "reviewing"; failing?: ModelFailure; check?: { startedAt: number; thread: ThreadId | null } }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
   /** The repository's checks run at the approved head, in `thread`, a check thread thrown away afterwards. */
@@ -285,10 +288,11 @@ const gates = {
   }),
 };
 /**
- * The gate that failed at `round`, or null. A round fails at most one: the check runs only after an approval, the
- * live check only after the check passes, and a conflict is recorded only when a merge after both is refused.
+ * The gate that failed at `round`, or null. A round fails at most one: a failed check counts only once the reviewer
+ * approves, the live check runs only after the check passes, and a conflict is recorded only when a merge after both
+ * is refused.
  */
-export const gateFailure = (round: Round): GateFailure | null => round.check?.passed === false ? gates.check(round.head, round.check.output)
+export const gateFailure = (round: Round): GateFailure | null => round.check?.passed === false && reviewerApproved(round) ? gates.check(round.head, round.check.output)
   : round.live?.kind === "ran" && !round.live.passed ? gates.live(round.head, round.live.output)
   : round.conflict !== undefined ? gates.conflict(round.head, round.conflict.base) : null;
 /** What the builder must answer for a round: the reviewer's findings, and the finding of a gate that failed. */
@@ -358,6 +362,16 @@ export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.w
   : r.phase.kind === "merging" && r.phase.waiting !== undefined ? `, waiting while ${r.phase.waiting}`
   : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state]
   : (r.phase.kind === "reviewing" || r.phase.kind === "fixing" || r.phase.kind === "quoting") && r.phase.failing ? `, the ${r.phase.kind === "fixing" ? "builder" : "reviewer"}'s model is failing (${r.phase.failing.count} in a row, last: ${r.phase.failing.last}), retrying at ${new Date(r.phase.failing.retryAt).toISOString().slice(11, 16)} UTC` : "";
+/** The check thread `phase` holds: a checking round's, or a reviewing round's, which runs beside the reviewer. */
+export const checkThread = (phase: Phase): ThreadId | null => phase.kind === "checking" ? phase.thread : phase.kind === "reviewing" ? phase.check?.thread ?? null : null;
+/** What a reviewing round's check does beside the reviewer, which a review's line adds to its phase note, so it says whether the round waits on one or both. */
+export function checkBeside(r: Review): string {
+  if (r.phase.kind !== "reviewing") return "";
+  const { head, check } = r.rounds.at(-1)!;
+  if (check !== null) return `, .nexus/check ${check.passed ? "passed" : "failed"} at ${head.slice(0, 12)}`;
+  if (r.phase.check === undefined) return "";
+  return r.phase.check.thread === null ? `, .nexus/check starting at ${head.slice(0, 12)}` : `, .nexus/check running at ${head.slice(0, 12)} in check thread ${r.phase.check.thread}`;
+}
 /** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
 export function liveNote(r: Review): string | null {
   const round = r.rounds.at(-1)!;
@@ -368,7 +382,7 @@ export function liveNote(r: Review): string | null {
   }
   if (round.live?.kind === "absent") return `no live check: ${head} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live`;
   if (round.live?.kind === "ran") return `live check ${round.live.passed ? "passed" : "failed"} at ${head}`;
-  return round.check?.passed === true ? `no live check ran at ${head}` : null;
+  return round.check?.passed === true && reviewerApproved(round) ? `no live check ran at ${head}` : null;
 }
 export const checkOutput = (output: string) => `The check's output:\n${output}`;
 export const liveOutput = (output: string) => `The live check's output:\n${output}`;

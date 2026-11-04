@@ -14,7 +14,7 @@ import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, reservedNames, type Hold, type HoldCode } from "./holds.ts";
 import { carryWaiver, headHolds, heldBy, landingHolds, landPress } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
-import { cannotLand, changeOf, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
+import { cannotLand, changeOf, checkBeside, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
 import { reviewLoop, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
@@ -79,6 +79,9 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let labelAnswer: (name: string) => LabelResult = (name) => { labels.add(name); return { kind: "labelled" }; };
   let check: CheckState = { kind: "done", passed: true, output: "ok" };
   const checkThreads: ThreadId[] = [];
+  const checkHeads: string[] = [];
+  /** Check threads whose runs a restart lost, which the gate then reports as giving no verdict. */
+  const forgotten = new Set<ThreadId>();
   const discarded: ThreadId[] = [];
   let verifies = false;
   let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
@@ -121,8 +124,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       replies: replies.get(target.id) ?? [], failure: failures.get(target.id) ?? null,
     })),
     checks: {
-      async start() { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); return id; },
-      poll: () => check,
+      async start(_, __, head) { const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return id; },
+      poll: (id) => forgotten.has(id) ? { kind: "void" } : check,
       discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
     },
     live: {
@@ -173,7 +176,9 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
     labels, labelCalls, set labelAnswer(a: (name: string) => LabelResult) { labelAnswer = a; },
     set check(c: CheckState) { check = c; },
-    checkThreads, discarded,
+    checkThreads, checkHeads, discarded,
+    /** A restart: the gate holds no run for any check thread started so far. */
+    forgetChecks() { for (const id of checkThreads) forgotten.add(id); },
     /** Whether the PR's head has a .nexus/verify, the live check's state, and why no node takes a verify pylon. */
     set verifies(v: boolean) { verifies = v; },
     set live(c: CheckState) { live = c; },
@@ -1322,6 +1327,7 @@ test("a check that fails again at a head where it failed before goes to the pers
 
 test("in a review stored before priorities, a reviewer's repeat approval of an unchanged head costs no round", async (t) => {
   const f = fixture(t);
+  f.check = { kind: "running" };
   const loop = f.loop();
   await loop.start(f.builder, { land: null, rounds: 2 });
   await loop.poll();
@@ -1339,10 +1345,10 @@ test("in a review stored before priorities, a reviewer's repeat approval of an u
   assert.equal(f.review().phase.kind, "fixing", "the failed check reaches the builder: the approval at the same head spent no round");
   assert.match(f.sent.at(-1)!.message.text, /^Round 1 of at most 2/m);
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.check = { kind: "done", passed: true, output: "ok" };
   f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Fixed the test." }]));
   await loop.poll();
   assert.match(f.sent.at(-1)!.message.text, /^Round 2 of at most 2/m);
-  f.check = { kind: "done", passed: true, output: "ok" };
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" });
@@ -1585,6 +1591,145 @@ test("a check run that cannot give a verdict starts again in a fresh check threa
   assert.deepEqual(f.review().phase, { kind: "approved" });
   assert.ok(f.checkThreads.length >= 2, "the void run's thread was replaced");
   assert.deepEqual(f.discarded, f.checkThreads);
+});
+
+test("the check runs beside the reviewer, and the round goes on once both are in, whichever comes first", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds[0]!.check, { passed: true, output: "ok" }, "the check gave its result before the reviewer");
+  assert.deepEqual(f.discarded, f.checkThreads);
+  assert.equal(checkBeside(f.review()), `, .nexus/check passed at ${head1.slice(0, 12)}`);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.checkHeads, [head1], "the approval runs no check of its own");
+
+  const g = fixture(t);
+  g.check = { kind: "running" };
+  const slow = g.loop();
+  await slow.start(g.builder, { land: null });
+  await slow.poll();
+  assert.equal(checkBeside(g.review()), `, .nexus/check running at ${head1.slice(0, 12)} in check thread ${g.checkThreads[0]}`);
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await slow.poll();
+  const phase = g.review().phase;
+  assert.ok(phase.kind === "checking" && phase.thread === g.checkThreads[0], "the verdict waits on the check already running");
+  assert.equal(checkBeside(g.review()), "");
+  g.check = { kind: "done", passed: true, output: "ok" };
+  await slow.poll();
+  assert.deepEqual(g.review().phase, { kind: "approved" });
+  assert.deepEqual(g.checkHeads, [head1]);
+  assert.deepEqual(g.discarded, g.checkThreads);
+});
+
+test("a check that fails beside the reviewer reaches the builder only once the reviewer approves", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "the reviewer's verdict is still owed");
+  assert.deepEqual(f.review().rounds[0]!.check, { passed: false, output: "1 test failed" });
+  assert.equal(f.sent.length, 1);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.match(f.sent.at(-1)!.message.text, /CHECK \(P0\) \.nexus\/check: \.nexus\/check failed at 1{40}\n {4}1 test failed/);
+  assert.deepEqual(f.checkHeads, [head1]);
+});
+
+test("a reviewer that asks for changes while the check runs stops the check, and the fixed head gets its own", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const first = f.checkThreads[0]!;
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.deepEqual(f.discarded, [first], "the check of a head the builder will move is stopped");
+  assert.equal(f.registry.thread(first)!.status, "deleted");
+  assert.doesNotMatch(f.sent.at(-1)!.message.text, /CHECK/);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds[0]!.check, null, "the stopped check reports nothing");
+  assert.deepEqual(f.checkHeads, [head1, head2]);
+  assert.deepEqual(f.review().rounds[1]!.check, { passed: false, output: "1 test failed" });
+  assert.equal(f.review().phase.kind, "reviewing");
+});
+
+test("a builder that pushes nothing for the reviewer's changes gets a round at the same head with no second check", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.deepEqual(f.review().rounds[0]!.check, { passed: true, output: "ok" }, "the check finished before the reviewer asked for changes");
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "rejected", reason: "The cache is rebuilt on every deploy." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds[1]!.head, head1);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.checkHeads, [head1], "head1 was checked beside the first round");
+});
+
+test("a head that moves while the reviewer and the check run gets its own round and its own check", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "checking");
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.equal(f.review().rounds.length, 2);
+  assert.deepEqual(f.review().rounds.map((r) => [r.head, r.check]), [[head1, { passed: true, output: "ok" }], [head2, { passed: true, output: "ok" }]]);
+  assert.deepEqual(f.checkHeads, [head1, head2], "each head's check ran at that head");
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.merges, []);
+});
+
+test("a restart while the reviewer reads keeps a check that gave its result, and starts again only one that had not", async (t) => {
+  const f = fixture(t);
+  const crashed = f.loop();
+  await crashed.start(f.builder, { land: null });
+  await crashed.poll();
+  assert.deepEqual(f.review().rounds[0]!.check, { passed: true, output: "ok" });
+  f.forgetChecks();
+  const restarted = f.loop();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await restarted.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.deepEqual(f.checkHeads, [head1], "the head checked before the restart is not checked again");
+
+  const g = fixture(t);
+  g.check = { kind: "running" };
+  const lost = g.loop();
+  await lost.start(g.builder, { land: null });
+  await lost.poll();
+  g.forgetChecks();
+  const again = g.loop();
+  await again.poll();
+  assert.deepEqual(g.discarded, [g.checkThreads[0]], "the run the restart lost gives no verdict, so its thread goes");
+  const phase = g.review().phase;
+  assert.ok(phase.kind === "reviewing" && phase.check?.thread === g.checkThreads[1]);
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  g.check = { kind: "done", passed: true, output: "ok" };
+  await again.poll();
+  assert.deepEqual(g.review().phase, { kind: "approved" });
+  assert.deepEqual(g.checkHeads, [head1, head1], "one run at the head gave a verdict");
+  assert.deepEqual(g.discarded, g.checkThreads);
 });
 
 test("a Claude reviewer's approval does not land, and goes to the person", async (t) => {
@@ -1894,8 +2039,8 @@ test("a PR merged or closed outside a review that does not land ends it quietly,
   g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "merged" }, detail: { ...g.snapshot.detail, mergeCommit: merged } };
   g.reply(g.review().reviewer, verdict(g.review(), {}));
   await loop.poll();
-  assert.deepEqual(g.review().phase, { kind: "merged" }, "GitHub is read before a check starts, ahead of the PR watch");
-  assert.deepEqual(g.checkThreads, []);
+  assert.deepEqual(g.review().phase, { kind: "merged" }, "GitHub is read before the next phase, ahead of the PR watch");
+  assert.equal(g.checkThreads.length, 1, "the check beside the reviewer, and no other");
 
   const h = fixture(t);
   const silent = h.loop();
@@ -2092,17 +2237,15 @@ test("a check thread or verify pylon a pass starts as the person cancels the rev
   for (const verifies of [false, true]) {
     const f = fixture(t);
     f.verifies = verifies;
+    f.check = { kind: "running" };
     const loop = f.loop();
     await loop.start(f.builder, { land: "nLAPTOP" });
     await loop.poll();
-    // A check's first step reads GitHub before it starts its thread, and so does a live check's. A pass reads a PR from
-    // GitHub once, so the live check starts in a later pass than the check.
-    if (verifies) f.check = { kind: "running" };
     f.reply(f.review().reviewer, verdict(f.review(), {}));
-    if (verifies) {
-      await loop.poll();
-      f.check = { kind: "done", passed: true, output: "ok" };
-    }
+    await loop.poll();
+    // The check runs beside the reviewer, so the pass held here starts the live check once the check passed, or the
+    // check again after a run that gave no verdict, and each reads GitHub before it starts its thread.
+    f.check = verifies ? { kind: "done", passed: true, output: "ok" } : { kind: "void" };
     const held = f.holdPolls(0);
     const pass = loop.poll();
     await held.entered;
@@ -2110,9 +2253,9 @@ test("a check thread or verify pylon a pass starts as the person cancels the rev
     loop.cancel(f.builder, "nPHONE");
     held.release();
     await pass;
-    const started = verifies ? f.liveThreads : f.checkThreads;
+    const started = verifies ? f.liveThreads : f.checkThreads.slice(1);
     assert.equal(started.length, 1, `the pass started its ${verifies ? "verify pylon" : "check thread"}`);
-    assert.deepEqual(verifies ? f.archived : f.discarded, started, "and threw it away before the pass ended");
+    assert.deepEqual(verifies ? f.archived : f.discarded.slice(1), started, "and threw it away before the pass ended");
     assert.equal(f.review().phase.kind, "cancelled");
   }
 });
@@ -2886,8 +3029,9 @@ const holds: { kind: string; hold(f: ReturnType<typeof fixture>): Promise<void>;
     await f.loop().poll();
   } },
   { kind: "agent while reviewing", cause: "agent", reasons: ["The reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."], landable: false, round: false, async hold(f) {
-    await f.loop().start(f.builder, { land: null });
-    await f.loop().poll();
+    const loop = f.loop();
+    await loop.start(f.builder, { land: null });
+    await loop.poll();
     await silent(f, f.review().reviewer);
   } },
   { kind: "agent while fixing a gate finding", cause: "agent", reasons: ["The builder ended 3 turns in a row without an answer Nexus could read, in round 1."], landable: false, round: true, async hold(f) {
@@ -3151,7 +3295,7 @@ test("an approved review rebased with the same change runs its checks again with
     pushed(f, head2);
     await loop.poll();
     assert.equal(f.review().phase.kind, carried ? "approved" : "reviewing");
-    assert.equal(f.checkThreads.length, carried ? 2 : 1, "the check runs again at once at the same change");
+    assert.equal(f.checkThreads.length, 2, "the check runs again at head2, at once at the same change and beside the reviewer at a changed one");
     assert.equal(roundsSpent(f.review()), carried ? 1 : 2);
     assert.deepEqual(f.review().rounds[1]!.carried, carried ? { from: head1 } : undefined);
   }
@@ -3174,21 +3318,21 @@ test("an approval never carries to a head on another base, nor from a round save
 });
 
 test("a review whose rounds ran out, rebased with the same change, stays held at the new head with its reasons, and one with a changed line gains the stale head", async (t) => {
-  const ranOut = [
-    { kind: "changes requested", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], async hold(f: ReturnType<typeof fixture>) {
+  const ranOut: { kind: string; reasons: string[]; check?: CheckState; hold(f: ReturnType<typeof fixture>): Promise<void> }[] = [
+    { kind: "changes requested", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], async hold(f) {
       f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
     } },
-    { kind: "check failed", reasons: [`.nexus/check failed at ${head1} after the last round this review allows.`, "The check's output:\n1 test failed"], async hold(f: ReturnType<typeof fixture>) {
-      f.check = { kind: "done", passed: false, output: "1 test failed" };
+    { kind: "check failed", reasons: [`.nexus/check failed at ${head1} after the last round this review allows.`, "The check's output:\n1 test failed"], check: { kind: "done", passed: false, output: "1 test failed" }, async hold(f) {
       f.reply(f.review().reviewer, verdict(f.review(), {}));
     } },
   ];
-  for (const { kind, reasons, hold } of ranOut) {
+  for (const { kind, reasons, check, hold } of ranOut) {
     for (const [change, carried] of [[migration(250), true], [migration(250, "y"), false]] as const) {
       const f = fixture(t);
       f.files = migration(240);
       f.changes.set(head1, migration(240));
       f.changes.set(head2, [...change]);
+      if (check !== undefined) f.check = check;
       const loop = f.loop();
       await loop.start(f.builder, { land: null, rounds: 1 });
       await loop.poll();
@@ -3620,10 +3764,12 @@ test("a retargeted landing held for the person shows the holds read at the new b
 
 test("a check that passed keeps its thread until the holds of its head are read", async (t) => {
   const f = fixture(t);
+  f.check = { kind: "running" };
   const loop = f.loop();
   await loop.start(f.builder, { land: null });
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
+  f.check = { kind: "done", passed: true, output: "ok" };
   f.onFiles = () => { throw new Error("GitHub is down"); };
   await loop.poll();
   assert.equal(f.review().phase.kind, "checking");

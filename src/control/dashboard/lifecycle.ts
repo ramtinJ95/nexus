@@ -7,7 +7,7 @@ import type { ThreadId } from "../../ids.ts";
 import { roleOf } from "../../agent-protocol.ts";
 import { keptPastDay } from "../../reconcile.ts";
 import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pipeline.ts";
-import { liveNote, roundsSpent, type PhaseKind, type Review } from "../review-model.ts";
+import { checkBeside, checkThread, liveNote, roundsSpent, type PhaseKind, type Review } from "../review-model.ts";
 import { html, limitText, type Html, type Tone } from "./view.ts";
 import { landingAt } from "./cards.ts";
 import type { Context, ThreadNeed } from "./context.ts";
@@ -53,7 +53,7 @@ function reviewStep(r: Review): Step {
 function reviewNext(r: Review): string | null {
   const round = r.rounds.length;
   switch (r.phase.kind) {
-    case "reviewing": return `The reviewer reads round ${round}`;
+    case "reviewing": return `The reviewer reads round ${round}${checkBeside(r)}`;
     case "fixing": return `The builder answers round ${round}'s findings`;
     case "quoting": return "The reviewer quotes what could not be checked live";
     case "checking": return "Runs .nexus/check at the approved head";
@@ -116,7 +116,7 @@ export function threadRole(c: Pick<Context, "registry" | "reviews">, id: ThreadI
   if (role === "check" || role === "verify") return { kind: role, review: c.reviews().find((r) => ranIn(r, id)) ?? null };
   return c.registry.planning(id) === null ? { kind: "builder" } : { kind: "planning" };
 }
-const ranIn = (r: Review, id: ThreadId) => ((r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread === id)
+const ranIn = (r: Review, id: ThreadId) => checkThread(r.phase) === id || (r.phase.kind === "verifying" && r.phase.thread === id)
   || r.rounds.some((round) => round.live?.kind === "ran" && round.live.thread === id);
 
 /** Where a review is, in a word or two after the thread it serves. */
@@ -129,7 +129,7 @@ const reviewAt: Record<PhaseKind, (r: Review) => string> = {
 
 /** What a check or verify thread did, from its own run when the review records it. */
 function runAt(r: Review, id: ThreadId): string {
-  if ((r.phase.kind === "checking" || r.phase.kind === "verifying") && r.phase.thread === id) return "running";
+  if (checkThread(r.phase) === id || (r.phase.kind === "verifying" && r.phase.thread === id)) return "running";
   const live = r.rounds.find((round) => round.live?.kind === "ran" && round.live.thread === id)?.live;
   return live?.kind === "ran" ? live.passed ? "passed" : "failed" : reviewAt[r.phase.kind](r);
 }

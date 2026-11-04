@@ -7,7 +7,7 @@ import type { ThreadDetail } from "../wire.ts";
 import { isOpen } from "../questions.ts";
 import type { ThreadId } from "../../ids.ts";
 import { keptPastDay } from "../../reconcile.ts";
-import { blocks, findingsOf, phaseNote, roundsSpent, type Review, type Round } from "../review-model.ts";
+import { blocks, checkBeside, findingsOf, phaseNote, roundsSpent, type Review, type Round } from "../review-model.ts";
 import { Html, html, ago, short, dot, icon, limitText, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
@@ -129,7 +129,7 @@ ${outputs.length > 0 && html`<p class="tl-meta">${outputs.map((o, i) => html`${i
 <p class="tl-go"><button type="button" class="btn btn-xs" data-tab-go="convo">${icon("chat")}Open the conversation</button></p>
 ${heldAt("building")}`,
     review: html`${d.pullRequests.length === 0 && r === null ? html`<p class="empty">No pull request yet.</p>` : html`<ul class="tl-prs">${d.pullRequests.map((pr) => html`<li><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title} ↗</a> <span class="tag">${pr.state}</span> <span class="dim">checks ${pr.checks}${pr.review !== "" && ` · ${pr.review}`}</span></li>`)}</ul>`}
-${r !== null && html`<p class="tl-meta">Reviewed by <a class="link" href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind}) · round ${roundsSpent(r)} of ${r.maxRounds}${r.land !== null && " · lands once approved"} · ${r.phase.kind.replace("-", " ")}${phaseNote(r)}</p>
+${r !== null && html`<p class="tl-meta">Reviewed by <a class="link" href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind}) · round ${roundsSpent(r)} of ${r.maxRounds}${r.land !== null && " · lands once approved"} · ${r.phase.kind.replace("-", " ")}${phaseNote(r)}${checkBeside(r)}</p>
 ${r.rounds.length > 0 && html`<ol class="tl-rounds">${r.rounds.map((round, i) => roundView(r, round, i, i === r.rounds.length - 1))}</ol>`}`}
 ${heldAt("review")}`,
     landing: html`${r === null ? html`<p class="empty">It lands once its review approves it.</p>` : landingView(c, r) || html`<p class="empty">${r.land === null ? "It lands once you press Land." : "It lands once its review approves it."}</p>`}

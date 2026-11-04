@@ -1,5 +1,5 @@
 /**
- * Runs the repository's `.nexus/check`, its typecheck and full test suite, at an approved commit, for the merge
+ * Runs the repository's `.nexus/check`, its typecheck and full test suite, at a review round's head, for the merge
  * policy's "the typecheck and the full test suite pass". The live check runs the repository's `.nexus/verify` the same
  * way, in a verify pylon: one that asks for nested virtualization, so its script can boot the change as a small fleet.
  *
