@@ -112,9 +112,52 @@ test("a Nexus agent thread's first message carries the rules it recorded, and a 
   assert.equal((next.body as Thread).standingRulesRevision, 2);
   assert.equal(s.fake.transcript((next.body as Thread).id).messages[0]!.content, `Fix the cart.${section("- Rebase first.")}`);
 
-  const bare = await s.call("POST", "/v1/threads", { project: "acme", title: "No brief" });
-  assert.equal((bare.body as Thread).standingRulesRevision, undefined, "a Nexus agent thread with no first message has no brief to carry them");
-  assert.equal(await revisionOf(s, (bare.body as Thread).id), undefined);
+});
+
+test("a Nexus agent thread started without a first message gets the rules it started with on the first message the person sends", async (t) => {
+  const s = await withImage(t);
+  await setRules(s, rules);
+  const started = (await s.call("POST", "/v1/threads", { project: "acme", title: "No brief" })).body as Thread;
+  assert.equal(started.standingRulesRevision, undefined, "nothing carried them yet");
+  await setRules(s, "- Rebase first.");
+  assert.equal((await s.call("POST", `/v1/threads/${started.id}/messages`, { text: "Fix the cart.", requestId: "msg:1" })).status, 202);
+  assert.equal(await revisionOf(s, started.id), 1, "the rules it started with");
+  assert.equal((await s.call("POST", `/v1/threads/${started.id}/messages`, { text: "Fix the cart.", requestId: "msg:1" })).status, 202);
+  assert.equal((await s.call("POST", `/v1/threads/${started.id}/messages`, { text: "And the tests.", requestId: "msg:2" })).status, 202);
+  assert.deepEqual(s.calls.filter((c) => c[0] === "send" && c[1] === started.id).map((c) => c[2]),
+    [`Fix the cart.${section(rules)}`, `Fix the cart.${section(rules)}`, "And the tests."], "a resend of that message carries them again, and the next carries none");
+});
+
+test("a first message the harness never took leaves the rules for the person's next message", async (t) => {
+  const s = await withImage(t);
+  await setRules(s, rules);
+  const send = s.fake.harness.send;
+  t.after(() => { s.fake.harness.send = send; });
+  s.fake.harness.send = async () => { throw new Error("the harness is unreachable"); };
+  const failed = await s.call("POST", "/v1/threads", { project: "acme", title: "Brief", message: "Fix the checkout bug." });
+  assert.match(failed.body.error, /its first message was not sent: the harness is unreachable\. Send it with POST \/v1\/threads\/(th-[0-9a-f]+)\/messages/);
+  const id = /\/v1\/threads\/(th-[0-9a-f]+)\/messages/.exec(failed.body.error)![1]!;
+  assert.equal(await revisionOf(s, id), undefined, "no message carried them");
+  s.fake.harness.send = send;
+  assert.equal((await s.call("POST", `/v1/threads/${id}/messages`, { text: "Fix the checkout bug.", requestId: "msg:1" })).status, 202);
+  assert.equal(s.fake.transcript(id).messages[0]!.content, `Fix the checkout bug.${section(rules)}`);
+  assert.equal(await revisionOf(s, id), 1);
+});
+
+test("a queued Claude worker that rules lengthened past the prompt limit is held for the person, not retried on every pass", async (t) => {
+  const s = await withQueue(t);
+  await setRules(s, "- Short.");
+  const queued = (await s.call("POST", "/v1/threads", { project: "acme", title: "Long", after: [s.first.id], claude: "b".repeat(15_000) })).body as QueuedThread;
+  assert.equal(queued.blocked, false);
+  await setRules(s, "r".repeat(8_192));
+  const refused = await s.call("POST", `/v1/threads/${queued.id}/start`);
+  assert.equal(refused.status, 400);
+  const view = (await s.call("GET", `/v1/queued/${queued.id}`)).body as QueuedThread;
+  assert.equal(view.blocked, true, "held for the person");
+  assert.match(view.lastError!, /project acme's standing rules exceeds 16384 characters/);
+  assert.ok(s.registry.queuedThread(queued.id as ThreadId)!.refused !== undefined, "the queue reads it again only after a wait or a start-queued");
+  await setRules(s, "- Short.");
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/start`)).status, 201, "shorter rules let it start");
 });
 
 test("a queued thread gets the rules as they are when it starts, not when it was queued", async (t) => {
@@ -172,4 +215,7 @@ test("the review loop's reviewers and check and live-check threads get no standi
     assert.equal(started.standingRulesRevision, undefined, started.title);
     assert.equal(await revisionOf(s, started.id), undefined, started.title);
   }
+  assert.equal((await s.call("POST", `/v1/threads/${harnessReviewer.id}/messages`, { text: "Look again.", requestId: "msg:r" })).status, 202);
+  assert.equal(s.fake.transcript(harnessReviewer.id).messages.at(-1)!.content, "Look again.", "a message to a reviewer carries none");
+  assert.equal(await revisionOf(s, harnessReviewer.id), undefined);
 });

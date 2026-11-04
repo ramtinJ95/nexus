@@ -31,14 +31,14 @@ const claudePromptOf = (request: StartRequest) =>
  * What a start refuses before it places anything, which a queued start is checked against when it is queued too. A
  * Claude prompt must fit the pylon's open-session prompt, its project's standing rules included.
  */
-export function checkStart(registry: ThreadsRegistry, request: StartRequest): Project {
+export function checkStart(registry: ThreadsRegistry, request: StartRequest, caller: string): Project {
   const claudePrompt = claudePromptOf(request);
   if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
   const project = registry.project(request.project as ProjectId);
   if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
-  const rules = standingRulesFor(project, request);
+  const rules = standingRulesFor(project, request, caller);
   if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > 16_384) {
-    throw new HttpError(400, `Claude prompt including /poteto-mode and project ${project.id}'s standing rules exceeds 16384 characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`);
+    throw new HttpError(400, `Claude prompt including /poteto-mode and project ${project.id}'s standing rules exceeds 16384 characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
   }
   if (request.node !== undefined && request.node !== "auto" && registry.node(request.node as NodeName) === undefined) throw new HttpError(400, `no node ${request.node}`);
   if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
@@ -116,9 +116,9 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
    * thread's, whose queue record the registry marks started with the row. `key` is stored with the row.
    */
   return async function startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread> {
-    const project = checkStart(registry, request);
+    const project = checkStart(registry, request, caller);
     // Decided once from the project as read now, so the thread records the rules its first message carries.
-    const rules = standingRulesFor(project, request);
+    const rules = standingRulesFor(project, request, caller);
     const prompt = claudePromptOf(request);
     const claudePrompt = prompt === undefined ? undefined : withStandingRules(prompt, rules);
     const named = request.node !== undefined && request.node !== "auto";
@@ -161,7 +161,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.
         agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement, setup,
-        ...rules === null ? {} : { standingRulesRevision: rules.revision },
+        ...rules?.carriedBy == null ? {} : { standingRulesRevision: rules.revision },
       };
       // Ports are allocated once the pylon reports the services that want a preview.
       const live = pylonLive({ pylonId, thread: id, node, boot }, project, []);

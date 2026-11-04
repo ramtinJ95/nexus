@@ -11,7 +11,7 @@ import { observedPylon } from "../observed.ts";
 import { queuedView, type QueuedThread, type ThreadQueue } from "../queue.ts";
 import { retryRefusal } from "../../reconcile.ts";
 import { startKey } from "../threads.ts";
-import { withStandingRules } from "../standing-rules.ts";
+import { sendWithStandingRules } from "../standing-rules.ts";
 import { ok, created, noContent, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { projectSchema } from "./project-routes.ts";
 
@@ -136,16 +136,16 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
     if (planning && !options.planning) throw new HttpError(409, "this control plane has no planning pass");
     if (after === undefined) {
       if (message !== undefined && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
-      const t = made === undefined ? await startThread({ ...request, message, planning }, caller, undefined, key) : registry.thread(made)!;
+      const t = made === undefined ? await startThread({ ...request, planning }, caller, undefined, key) : registry.thread(made)!;
       if (planning) options.planning!.begin(t);
       if (message !== undefined && t.status !== "archived" && t.status !== "deleted") {
         const requestId = `brief:${t.id}`;
-        // The rules the thread recorded, not the project's now, so a repeat of the start sends the same text.
-        const brief = withStandingRules(message, registry.standingRulesOf(t.id));
-        await harness.send(t.id, options.planning?.compose(t, requestId, brief) ?? brief, requestId, "followUp").then(() => options.planning?.sent(t, requestId), (err: Error) => {
+        await sendWithStandingRules(registry, t.id, requestId, message, (brief) => harness.send(t.id, options.planning?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => options.planning?.sent(t, requestId), (err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
           throw err instanceof HttpError ? new HttpError(err.status, why) : new Error(why);
         });
+        const revision = registry.thread(t.id)?.standingRulesRevision;
+        return revision === undefined ? t : { ...t, standingRulesRevision: revision };
       }
       return t;
     }

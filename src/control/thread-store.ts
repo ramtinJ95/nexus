@@ -58,7 +58,7 @@ export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnR
   placement?: Placement;
   /** Absent from a thread started before setups were recorded. */
   setup?: ThreadSetup;
-  /** The revision of its project's standing rules its first message carried. Absent when it carried none. */
+  /** The revision of its project's standing rules its first message carried. Absent until a message carries them, or when it gets none. */
   standingRulesRevision?: number;
 }
 
@@ -143,7 +143,7 @@ function threadRow(r: Row): StoredThread {
     lastReplyAt: r.last_reply_at as number | null,
     ...(r.placement === null ? {} : { placement: json<Placement>(r.placement) }),
     ...(r.setup === null ? {} : { setup: json<ThreadSetup>(r.setup) }),
-    ...(r.standing_rules === null ? {} : { standingRulesRevision: json<StandingRulesStamp>(r.standing_rules).revision }),
+    ...(r.standing_rules === null || json<StandingRulesStamp>(r.standing_rules).carriedBy === null ? {} : { standingRulesRevision: json<StandingRulesStamp>(r.standing_rules).revision }),
   };
 }
 
@@ -700,10 +700,14 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         if (key !== undefined) saveStartKey(key, thread.id);
       });
     },
-    /** The standing rules the thread's first message carried, which every send of that message composes with. */
+    /** The standing rules the thread was started with, which its first message composes with. */
     standingRulesOf(id: ThreadId): StandingRulesStamp | null {
       const row = sql("SELECT standing_rules FROM threads WHERE id = ?").get(id);
       return row?.standing_rules == null ? null : json<StandingRulesStamp>(row.standing_rules);
+    },
+    /** The harness took the message sent under `requestId` with the rules. The first such message stays the one. */
+    standingRulesCarried(id: ThreadId, requestId: string) {
+      sql("UPDATE threads SET standing_rules = json_set(standing_rules, '$.carriedBy', ?) WHERE id = ? AND json_extract(standing_rules, '$.carriedBy') IS NULL").run(requestId, id);
     },
     startRequest(requestId: string): { thread: ThreadId; body: string } | undefined {
       const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);

@@ -164,7 +164,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
       if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
       if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's brief is its claude");
       if (message === null && request.claude === undefined) throw new HttpError(400, "an item needs a brief: message for a Nexus agent thread, or claude for a Claude worker");
-      const project = checkStart(registry, request);
+      const project = checkStart(registry, request, caller);
       if (project.pipeline == null) throw new HttpError(409, `the pipeline does not run for project ${project.id}. nexus project edit ${project.id} --pipeline start turns it on`);
       const ids = [...new Set(after)] as ItemId[];
       for (const id of ids) {

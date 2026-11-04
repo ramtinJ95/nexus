@@ -19,7 +19,7 @@ import type { Thread } from "./thread-store.ts";
 import { checkStart, newThreadId, resourcesOf } from "./threads.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
-import { withStandingRules } from "./standing-rules.ts";
+import { sendWithStandingRules } from "./standing-rules.ts";
 
 type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
@@ -117,7 +117,7 @@ const statusName = (status: QueuedRecord["status"]) => status === "archived" ? "
 export const refusedRetryMs = 10 * 60_000;
 
 export function threadQueue(options: {
-  registry: QueueRegistry & Pick<Registry, "standingRulesOf">;
+  registry: QueueRegistry & Pick<Registry, "standingRulesCarried" | "standingRulesOf">;
   startThread: (request: StartRequest, caller: string, id?: ThreadId) => Promise<Thread>;
   /** A human message, the harness's followUp. A repeated request ID answers with the first submission. */
   send: (thread: ThreadId, text: string, requestId: string) => Promise<unknown>;
@@ -141,7 +141,7 @@ export function threadQueue(options: {
     if (record?.status !== "started" || record.firstMessage !== "pending" || record.message === null) return;
     const t = registry.thread(id);
     if (t === undefined || t.status === "archived" || t.status === "deleted") return;
-    await send(id, withStandingRules(record.message, registry.standingRulesOf(id)), `queued:${id}`);
+    await sendWithStandingRules(registry, id, `queued:${id}`, record.message, (text) => send(id, text, `queued:${id}`));
     registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" });
   }
 
@@ -150,14 +150,14 @@ export function threadQueue(options: {
     if (record?.status !== "queued") throw new HttpError(409, `thread ${id} is no longer queued`);
     let t: Thread;
     try {
-      t = await gate.run(() => startThread(record.message === null ? record.request : { ...record.request, message: record.message }, record.startedBy, id));
+      t = await gate.run(() => startThread(record.request, record.startedBy, id));
     } catch (err) {
       const message = (err as Error).message;
       const now = registry.queuedThread(id);
       if (now?.status !== "queued") throw err instanceof HttpError ? err : new HttpError(409, message);
       if (now.lastError !== message) log(`queued thread ${id} did not start: ${message}`);
       const { refused: _, ...rest } = now;
-      registry.saveQueued({ ...rest, lastError: message, ...err instanceof HttpError && err.code === "no-branch" ? { refused: { at: Date.now() } } : {} });
+      registry.saveQueued({ ...rest, lastError: message, ...err instanceof HttpError && (err.code === "no-branch" || err.code === "too-long") ? { refused: { at: Date.now() } } : {} });
       throw err;
     }
     await deliver(id).catch((err: unknown) => log(`queued thread ${id} started, but its first message was not sent yet: ${(err as Error).message}`));
@@ -190,7 +190,7 @@ export function threadQueue(options: {
   return {
     add(request, message, after, caller, key) {
       if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
-      const project = checkStart(registry, request);
+      const project = checkStart(registry, request, caller);
       const ids = [...new Set(after)] as ThreadId[];
       for (const id of ids) {
         const t = registry.thread(id);
