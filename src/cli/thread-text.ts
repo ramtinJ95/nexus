@@ -60,7 +60,8 @@ function questionText(q: Question): string {
     ...q.ask === undefined ? [] : rest.map((line) => `  ${line}`),
     ...q.options.length === 0 ? [] : [`  options: ${q.options.map((o) => JSON.stringify(o)).join(", ")}`],
     ...q.reserved === null ? [] : [`  reserved: ${reservedNames[q.reserved]}`],
-    q.answer !== null ? `  answered ${JSON.stringify(q.answer.option)} by ${q.answer.by} at ${new Date(q.answer.at).toISOString()}` : q.answerer === "deployer" ? "  needs a deployer" : "  needs you",
+    q.withdrawn !== undefined ? `  withdrawn when the thread was archived at ${new Date(q.withdrawn.at).toISOString()}`
+      : q.answer !== null ? `  answered ${JSON.stringify(q.answer.option)} by ${q.answer.by} at ${new Date(q.answer.at).toISOString()}` : q.answerer === "deployer" ? "  needs a deployer" : "  needs you",
   ].join("\n");
 }
 

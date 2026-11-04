@@ -343,7 +343,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const p = pylon(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     const decision = participants.some((p) => p.needsPerson?.(id));
-    const attention = attentionOf(p?.failed != null || workerFailed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
+    // An archived thread's pylon stays paused, so its failure waits for no one until an unarchive.
+    const failed = t.status !== "archived" && (p?.failed != null || workerFailed);
+    const attention = attentionOf(failed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });

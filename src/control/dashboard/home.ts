@@ -4,6 +4,7 @@ import type { ThreadId } from "../../ids.ts";
 import { threadPhase } from "../pipeline.ts";
 import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
+import { isOpen } from "../questions.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import { cannotLand, roundsSpent, settledKinds, type Review } from "../review-model.ts";
@@ -110,7 +111,7 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
     const nudged = c.registry.nudge(t.id);
     const needs: ThreadNeed[] = [
       ...d.review?.phase.kind === "needs-person" || (d.review?.phase.kind === "approved" && cannotLand(d.review, d.thread, prOf(d)) === null) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
-      ...(d.questions ?? []).filter((q) => q.answer === null).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
+      ...(d.questions ?? []).filter(isOpen).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
       ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
     ];
     const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;

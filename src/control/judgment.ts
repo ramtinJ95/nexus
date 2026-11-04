@@ -344,7 +344,7 @@ export function judgmentPass(options: {
     ].join("\n\n");
     return {
       next: { ...j, phase: { kind: "asked", verdict } },
-      act: () => { registry.askQuestion({ id: judgmentId(j.failure), thread: j.thread, text, options: choices, reserved: null, answerer: "person", askedAt: now() }); },
+      act: () => { registry.askQuestion({ id: judgmentId(j.failure), thread: j.thread, failure: j.failure, text, options: choices, reserved: null, answerer: "person", askedAt: now() }); },
       nodes: [],
     };
   }
@@ -384,8 +384,10 @@ export function judgmentPass(options: {
   }
 
   function asked(j: Judgment, verdict: Verdict) {
-    const answer = registry.question(judgmentId(j.failure))?.answer ?? null;
-    const why = settled(j);
+    const question = registry.question(judgmentId(j.failure));
+    const answer = question?.answer ?? null;
+    // An unarchive before this pass leaves the failure on the pylon, and the question withdrawn.
+    const why = settled(j) ?? (question?.withdrawn !== undefined ? "the thread was archived, which withdrew the question" : null);
     if (why === null && answer === null) return;
     const pylon = registry.pylon(registry.thread(j.thread)!.pylonId)!;
     const plan = (() => {

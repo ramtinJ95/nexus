@@ -296,4 +296,11 @@ export const migrations: readonly string[] = [
      CHECK ((settle_failures = 0) = (settle_failure IS NULL) AND (settle_failure IS NULL) = (settle_failed_at IS NULL) AND (usage_settled_at IS NULL OR settle_failures = 0));
    ALTER TABLE thread_archives ADD COLUMN usage_unread TEXT CHECK (usage_unread IS NULL OR (usage_settled_at IS NULL AND settle_failures = 0));
    ALTER TABLE pylons ADD COLUMN sealed_boot TEXT;`,
+  // A failure judgment's question names its failure, and archiving its thread withdraws it while it is open. One asked
+  // before names none, so it takes the failure in its ID, and an open one of a thread archived already is withdrawn as of
+  // the archive, which settles that thread's attention as an archive now does. Applied again, it changes nothing.
+  `UPDATE questions SET record = json_set(record, '$.failure', CAST(substr(id, 10) AS INTEGER)) WHERE id LIKE 'judgment:%' AND json_extract(record, '$.failure') IS NULL;
+   UPDATE questions SET record = json_set(record, '$.withdrawn', json_object('by', 'archive', 'at', (SELECT archived_at FROM thread_archives a WHERE a.thread = questions.thread)))
+     WHERE thread IN (SELECT thread FROM thread_archives) AND json_extract(record, '$.failure') IS NOT NULL
+     AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL;`,
 ];
