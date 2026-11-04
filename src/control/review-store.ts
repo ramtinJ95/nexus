@@ -8,7 +8,7 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "../agent-protocol.ts";
-import { builderAwaitedUntil, storedReview, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import { builderAwaited, storedReview, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
 
 export type ReviewStore = ReturnType<typeof reviewStore>;
 
@@ -23,9 +23,9 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
   return {
     participant: {
       needsPerson: (thread: ThreadId) => waitsOnPerson(recordOf<Review>("reviews", "builder", thread)),
-      awaitedUntil: (threads: readonly ThreadId[]) => new Map(sql(`SELECT record FROM reviews WHERE builder IN (SELECT value FROM json_each(?))
+      awaited: (threads: readonly ThreadId[]) => new Map(sql(`SELECT record FROM reviews WHERE builder IN (SELECT value FROM json_each(?))
         AND json_extract(record, '$.phase.kind') IN ('reviewing', 'fixing')`).all(JSON.stringify(threads)).map((r) => storedReview(json<Review>(r.record)))
-        .flatMap((r) => { const until = builderAwaitedUntil(r); return until === null ? [] : [[r.builder, until] as const]; })),
+        .flatMap((r) => { const hold = builderAwaited(r); return hold === null ? [] : [[r.builder, hold] as const]; })),
     },
     review: storedReviewOf,
     /** Whether `review` is the builder's review as stored, so no other save came since it was read. */

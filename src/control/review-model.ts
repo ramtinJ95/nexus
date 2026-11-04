@@ -223,8 +223,8 @@ export const builderAwaitedMs = 30 * 60_000;
  * builder, and until those findings are delivered, which counts as the builder's activity from then. Never while its
  * reviewer's model fails, it waits on the person or it ended.
  */
-export const builderAwaitedUntil = (r: Review): number | null =>
-  (r.phase.kind === "reviewing" && r.phase.failing === undefined) || (r.phase.kind === "fixing" && r.outbox?.to === "builder") ? r.since + builderAwaitedMs : null;
+export const builderAwaited = (r: Review): { from: number; until: number } | null =>
+  (r.phase.kind === "reviewing" && r.phase.failing === undefined) || (r.phase.kind === "fixing" && r.outbox?.to === "builder") ? { from: r.since, until: r.since + builderAwaitedMs } : null;
 /** Whether the review waits on the person: held for them, or stopped at an approval that only their Land merges. */
 export const waitsOnPerson = (r: Review | null) => needsPerson(r) || r?.phase.kind === "approved";
 /** What a landing that authorized its merge, or is deploying or rolling back, does now, or null for any other review. */
