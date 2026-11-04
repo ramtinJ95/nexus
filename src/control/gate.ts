@@ -94,9 +94,13 @@ export type CheckState =
   | { kind: "unrunnable"; output: string };
 
 export interface CheckRuns {
-  /** Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node, or a verify pylon on a node that nests KVM. */
-  start(builder: Thread, branch: string, head: string): Promise<ThreadId>;
-  poll(thread: ThreadId, head: string): CheckState;
+  /**
+   * Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node, or a verify pylon on a
+   * node that nests KVM. With `ifRoom` it is refused, as an HttpError, when no node has room for it.
+   */
+  start(builder: Thread, branch: string, head: string, ifRoom?: true): Promise<ThreadId>;
+  /** The run's state. A run whose pylon just came up opens its pipe, unless `opens` is false. */
+  poll(thread: ThreadId, head: string, opens?: boolean): CheckState;
   /** Deletes the check thread and its pylon, or archives the verify pylon. Safe to repeat. */
   discard(thread: ThreadId): void;
 }
@@ -172,13 +176,13 @@ export function checkRuns(options: {
   }
 
   return {
-    async start(builder, branch, head) {
+    async start(builder, branch, head, ifRoom) {
       const projectCpus = registry.project(builder.project)?.resources.cpus ?? 0;
-      const t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus) }, gate.caller);
+      const t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, gate.caller);
       runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
       return t.id;
     },
-    poll(id, head) {
+    poll(id, head, opens = true) {
       const run = runs.get(id);
       const t = registry.thread(id);
       if (run === undefined || t === undefined || t.status !== "active") return { kind: "void" };
@@ -189,6 +193,7 @@ export function checkRuns(options: {
       registry.recordActivity(id, { agent: Date.now() });
       wake(t);
       if (run.kind === "running") return { kind: "running" };
+      if (!opens) return { kind: "waiting" };
       const probe = runningProbe(registry, probes, t);
       if (probe !== null) open(t, head, probe);
       return { kind: runs.get(id)!.kind === "running" ? "running" : "waiting" };

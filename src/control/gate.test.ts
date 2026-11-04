@@ -121,6 +121,18 @@ test("a check's end is heard as it exits, without waiting for the next poll, and
   assert.deepEqual(ended, [id, lost]);
 });
 
+test("a check that starts only where a node has room says so in its start, and a poll that opens nothing leaves its pylon unrun", async (t) => {
+  const f = await fixture(t, "echo tests ok");
+  const runs = f.runs();
+  let streams = 0;
+  f.stream = async () => { streams++; throw new Error("no pipe expected"); };
+  const id = await runs.start(f.builder, "feature", f.head, true);
+  assert.equal(f.started[0]!.ifRoom, true);
+  f.running(f.registry.thread(id)!);
+  assert.deepEqual(runs.poll(id, f.head, false), { kind: "waiting" });
+  assert.equal(streams, 0, "the script never started");
+});
+
 test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 GiB that asks for nested virtualization, which is archived afterwards", async (t) => {
   const f = await fixture(t, "echo tests ok", "echo fleet booted; exit 4");
   const runs = f.runs(verifyGate);
