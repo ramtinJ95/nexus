@@ -1774,6 +1774,63 @@ test("project edit turns reviews of its own on and off, and projects shows who t
   assert.equal((await s.json(["project", "edit", "auto", "--auto-review", "off"])).autoReview, undefined);
 });
 
+test("project add and edit set standing rules from a file or stdin, edit clears them, and project show and show print them", async (t) => {
+  const s = await setup(t);
+  const dir = await mkdtemp(join(tmpdir(), "nexus-rules-"));
+  t.after(() => rm(dir, { recursive: true }));
+  const file = join(dir, "rules.md");
+  await writeFile(file, "- Run npm test before you push.\n");
+  const added = await s.nexus(["project", "add", "ruled", "--scratch", "--node", node, "--rules-file", file]);
+  assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added scratch project ruled on ${node}, with standing rules\n`, ""]);
+  const ruled = () => s.registry.project("ruled" as ProjectId)!;
+  assert.deepEqual(ruled().standingRules, { text: "- Run npm test before you push.", revision: 1 });
+
+  const show = await s.nexus(["project", "show", "ruled"]);
+  assert.deepEqual([show.code, show.stdout], [0, [
+    "ruled: scratch",
+    `node ${node}, branch main, 2 CPUs, 4 GiB memory, 10 GiB disk`,
+    "hosts: none. logins: none. secrets: none",
+    "auto review off, pipeline off",
+    "",
+    "Standing rules, revision 1:",
+    "",
+    "- Run npm test before you push.",
+    "",
+  ].join("\n")]);
+  assert.deepEqual(await s.json(["project", "show", "ruled"]), ruled(), "--json prints the project");
+
+  const piped = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+    const child = execFile(process.execPath, [cli, "project", "edit", "ruled", "--rules-file", "-"], { env: s.env() }, (err, stdout, stderr) => {
+      resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout, stderr });
+    });
+    child.stdin!.end("- Keep commits small.\n");
+  });
+  assert.equal(piped.code, 0, piped.stderr);
+  assert.match(piped.stdout, / Builder threads started from now get its standing rules, revision 2\.\n$/);
+  assert.deepEqual(ruled().standingRules, { text: "- Keep commits small.", revision: 2 }, "- reads stdin");
+
+  const thread: Thread = await s.json(["start", "--project", "ruled", "--message", "Fix the build"]);
+  assert.equal(s.fake.transcript(thread.id).messages[0]!.content, "Fix the build\n\n## Standing rules for this project\n\n- Keep commits small.");
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^standing rules: revision 2 of the project's, sent with its first message$/m);
+
+  const fails = async (args: readonly string[], code: number, error: Record<string, unknown>) => {
+    const res = await s.nexus([...args, "--json"]);
+    assert.deepEqual([res.code, res.stdout], [code, ""], `${args.join(" ")}: ${res.stderr}`);
+    const reported = JSON.parse(res.stderr);
+    assert.deepEqual(Object.fromEntries(Object.keys(error).map((k) => [k, reported[k]])), error, args.join(" "));
+  };
+  await fails(["project", "edit", "ruled", "--rules-file", file, "--clear-rules"], 64, { kind: "invalid", status: null, error: "--clear-rules conflicts with --rules-file" });
+  await fails(["project", "edit", "ruled", "--rules-file", join(dir, "missing.md")], 64, { kind: "invalid", status: null });
+  await writeFile(join(dir, "empty.md"), "\n");
+  await fails(["project", "edit", "ruled", "--rules-file", join(dir, "empty.md")], 64, { kind: "invalid", status: 400 });
+  await fails(["project", "show", "nope"], 4, { kind: "not-found", status: null, error: "no project nope" });
+  assert.deepEqual(ruled().standingRules, { text: "- Keep commits small.", revision: 2 }, "no refused edit changed the rules");
+
+  assert.deepEqual((await s.json(["project", "edit", "ruled", "--clear-rules"])).standingRules, { text: null, revision: 3 });
+  assert.match((await s.nexus(["project", "show", "ruled"])).stdout, /\n\nNo standing rules, cleared at revision 3\.\n$/);
+  assert.match((await s.nexus(["project", "show", "acme"])).stdout, /\n\nNo standing rules\.\n$/);
+});
+
 test("concurrent project edits preserve independently changed resources", async (t) => {
   const s = await setup(t);
   assert.equal((await s.nexus(["project", "add", "concurrent", "--scratch", "--node", node, "--cpus", "1", "--memory", "1", "--disk", "10"])).code, 0);

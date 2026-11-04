@@ -33,11 +33,18 @@ export interface Project {
    * person approves each item. Null is off, which a person set, and an absent field is off too.
    */
   pipeline?: PipelineSetting | null | undefined;
+  /** Markdown every builder thread the project starts gets with its first message. Absent until a person first sets it. */
+  standingRules?: StandingRules | null | undefined;
 }
 /** What `nexus project add` and the dashboard's new-project dialog give a project unless told otherwise. */
 export const defaultProjectResources: Readonly<Project["resources"]> = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
 export interface AutoReview { land: boolean; enabledBy: string }
 export interface PipelineSetting { autoStart: boolean }
+/**
+ * `text` is null once cleared. `revision` counts each change, a clear among them, and never goes back, so a thread's
+ * recorded revision names one text for good. Setting the same text again is no change.
+ */
+export interface StandingRules { text: string | null; revision: number }
 /** Templates mirror a remote, so they take a project that has one. */
 export type RemoteProject = Project & { repoUrl: string };
 export const hasRemote = (project: Project): project is RemoteProject => project.repoUrl !== null;

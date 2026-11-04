@@ -7,10 +7,12 @@ import type { BootInputs } from "../spawn.ts";
  * unless `raw`, as for the review loop's reviewers. A `bare` thread has neither agent, as a check thread needs only
  * its pylon. Only the control plane itself asks for `raw` or `bare`. `node` names a node, or is `auto` for the one
  * where the pylon fits best. `near` is a node to place the pylon on while it has room, which only the control plane asks
- * for. `resources` overrides the project's size field by field.
+ * for. `resources` overrides the project's size field by field. `planning` marks a planning thread, which gets no
+ * standing rules.
  */
 export interface StartRequest {
   project: string; title: string; node?: string | undefined; branch?: string | undefined; commit?: string | undefined; claude?: string | undefined; model?: string | undefined; raw?: boolean; bare?: boolean;
+  planning?: true | undefined;
   near?: NodeName | undefined; resources?: { [K in keyof BootInputs["resources"]]?: BootInputs["resources"][K] | undefined } | undefined;
 }
 

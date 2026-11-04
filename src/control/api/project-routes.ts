@@ -8,6 +8,7 @@ import { HttpError } from "../http-error.ts";
 import { chatgptTokenGrant, secretHostPattern, secretNamePattern } from "../../secret-grants.ts";
 import { gitIdentitySchema } from "../../spawn.ts";
 import { gitUrl, type Project } from "../project.ts";
+import { editedRules, standingRulesLimit } from "../standing-rules.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
@@ -26,10 +27,14 @@ export const projectSchema = z.strictObject({
   preSetup: z.string().nullable(),
   gitIdentity: gitIdentitySchema.nullable().optional(),
 });
+const rulesText = z.string().trim().min(1).max(standingRulesLimit).refine((text) => !text.includes("\0"), "standing rules cannot hold a NUL character, which no Claude prompt can");
+/** A caller gives standing rules as their text, and Nexus counts their revisions. */
+const projectAddSchema = projectSchema.extend({ standingRules: rulesText.optional() });
 /** Only an edit sets `autoReview`, and the API records its caller in it, so a project's add cannot name someone else. */
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true })
   .extend({
     resources: projectSchema.shape.resources.partial(), autoReview: z.strictObject({ land: z.boolean() }).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
+    standingRules: rulesText.nullable(),
   }).partial();
 
 export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null | undefined }): readonly RouteEntry[] {
@@ -40,7 +45,9 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
   }
 
   function createProject(body: unknown): Project {
-    const project: Project = parse(projectSchema, body);
+    const { standingRules, ...fields } = parse(projectAddSchema, body);
+    const rules = standingRules === undefined ? undefined : editedRules(undefined, standingRules);
+    const project: Project = { ...fields, ...rules === undefined ? {} : { standingRules: rules } };
     refuseUnknownNode(project);
     if (registry.project(project.id) !== undefined) throw new HttpError(409, `project ${project.id} exists`);
     registry.createProject(project);
@@ -49,15 +56,16 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
 
   return [
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, { person: "edit a project" }, async ([, id], r) => {
-      const { autoReview, pipeline, ...patch } = parse(projectEditSchema, await r.body());
+      const { autoReview, pipeline, standingRules, ...patch } = parse(projectEditSchema, await r.body());
       if (autoReview?.land) mayLand(r.caller);
-      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, ...previous }) => {
+      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
         const review = autoReview === undefined ? kept : autoReview === null ? null : { land: autoReview.land, enabledBy: r.caller };
         // An off pipeline stays null, so the migration that turns it on for project nexus never turns it back on.
         const items = pipeline === undefined ? running : pipeline;
-        return { ...updated, ...review == null ? {} : { autoReview: review }, ...items === undefined ? {} : { pipeline: items } };
+        const rules = standingRules === undefined ? standing : editedRules(standing, standingRules);
+        return { ...updated, ...review == null ? {} : { autoReview: review }, ...items === undefined ? {} : { pipeline: items }, ...rules == null ? {} : { standingRules: rules } };
       });
       if (pipeline !== undefined) void options.pipeline?.poll();
       if (project === undefined) throw new HttpError(404, `no project ${id}`);

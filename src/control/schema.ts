@@ -303,4 +303,8 @@ export const migrations: readonly string[] = [
    UPDATE questions SET record = json_set(record, '$.withdrawn', json_object('by', 'archive', 'at', (SELECT archived_at FROM thread_archives a WHERE a.thread = questions.thread)))
      WHERE thread IN (SELECT thread FROM thread_archives) AND json_extract(record, '$.failure') IS NOT NULL
      AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL;`,
+  // The project's standing rules a thread was started with, as JSON of their revision, text and the request ID of the
+  // first message that carried them, so a resend of that message carries the same text after the rules change. A
+  // thread started before has none.
+  `ALTER TABLE threads ADD COLUMN standing_rules TEXT;`,
 ];

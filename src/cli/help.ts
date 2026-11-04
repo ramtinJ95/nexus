@@ -41,13 +41,15 @@ export const usage = `nexus ${version}, the Nexus control plane from this Mac
   nexus abort|retry|retry-pylon|wake <thread>
   nexus archive|unarchive|delete <thread>
   nexus projects
+  nexus project show <id>                      a project's settings, and the standing rules each builder thread gets with its first message
+    project add and project edit set the rules with --rules-file PATH, or - for stdin, and project edit --clear-rules clears them
   nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
     [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer
     [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own
   nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
-                    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
+                    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH|-]
   nexus review <thread> [--pr N] [--rounds N] [--land]
     a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy
   nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying
