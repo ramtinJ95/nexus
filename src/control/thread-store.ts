@@ -86,13 +86,14 @@ export interface UsageHold { thread: ThreadId; phase: "reading" | "pausing"; sin
 /**
  * Nexus resuming a Claude worker whose turn died (resume.ts). `turn` is the `turnDied.at` of the turn it answers, and
  * `count` the resumes in a row that turn makes. A resume `waiting` goes at `due`, one `sending` is saved before it is
- * sent, and one `resumed` went at `at`. After the last resume in a row a turn that died too waits on the person, which
- * makes the attention a decision, and `why` says why in a line. So does a resume that started no turn. The person
- * writing to the thread makes it theirs, which is kept, as the transcript may drop the message.
+ * first sent at `since`, and one `resumed` went at `at`. After the last resume in a row a turn that died too waits on
+ * the person, which makes the attention a decision, and `why` says why in a line. So does a resume that started no
+ * turn, or one the session took no message for. The person writing to the thread makes it theirs, which is kept, as
+ * the transcript may drop the message.
  */
 export type ClaudeResume =
   | { state: "waiting"; turn: number; count: number; due: number }
-  | { state: "sending"; turn: number; count: number }
+  | { state: "sending"; turn: number; count: number; since: number }
   | { state: "resumed"; turn: number; count: number; at: number }
   | { state: "person"; turn: number; count: number; why: string }
   | { state: "left-alone" };

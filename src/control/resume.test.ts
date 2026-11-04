@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testPylon, testRegistry, testThread } from "./test-kit.ts";
+import { testPylon, testRegistry, testReview, testThread } from "./test-kit.ts";
+import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { deadTurnResumer, resumeWaitsMs } from "./resume.ts";
@@ -218,7 +219,7 @@ test("a resume delivered just before a crash, whose record says sending, is not 
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
   const turn = f.registry.thread(id)!.turnDied!.at;
-  f.registry.saveClaudeResume(id, { state: "sending", turn, count: 1 });
+  f.registry.saveClaudeResume(id, { state: "sending", turn, count: 1, since: f.now });
   await f.resumer.poll();
   assert.equal(f.typed.length, 1, "the inbox answers the request ID it already typed");
   assert.equal(f.registry.claudeResume(id)?.state, "resumed");
@@ -284,7 +285,7 @@ test("a resume delivered just before a crash, whose turn then died, counts towar
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
   const first = f.registry.thread(id)!.turnDied!.at;
-  f.registry.saveClaudeResume(id, { state: "sending", turn: first, count: 1 });
+  f.registry.saveClaudeResume(id, { state: "sending", turn: first, count: 1, since: f.now });
   f.tick(1_000);
   f.turn(id, "session-ended");
   await f.resumer.poll();
@@ -314,4 +315,81 @@ test("a person's message seen while the turn it started runs keeps the thread th
     await f.resumer.poll();
   }
   assert.equal(f.typed.length, 0);
+});
+
+test("a builder whose review is not finished gets no resume for a model error, nor for any death once the review is the person's", async (t) => {
+  const f = fixture(t);
+  const phases: [string, Phase, "model-error" | "session-ended", boolean][] = [
+    ["th-fixing-error", { kind: "fixing" }, "model-error", false],
+    ["th-person-error", personPhase("agent", "The builder's model failed 5 times in a row. Run nexus review again once the provider recovers."), "model-error", false],
+    ["th-person-ended", personPhase("agent", "The builder gave no answer Nexus could read within 3 hours in round 1."), "session-ended", false],
+    ["th-checking-error", { kind: "checking", startedAt: 0, thread: null }, "model-error", false],
+    ["th-fixing-ended", { kind: "fixing" }, "session-ended", true],
+    ["th-merged-error", { kind: "merged" }, "model-error", true],
+  ];
+  for (const [i, [name, phase, death]] of phases.entries()) {
+    const id = f.add(name);
+    f.registry.saveReview(testReview({ id: `rv-${i}`, builder: id, reviewer: `th-reviewer-${i}` as ThreadId, phase }));
+    f.turn(id, death);
+  }
+  await f.resumer.poll();
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]).sort(), phases.filter(([, , , resumed]) => resumed).map(([name]) => name).sort());
+});
+
+test("a session that ends after a turn the transcript shows ended, with a background task still running, did not die", async (t) => {
+  const f = fixture(t);
+  const finished = f.add("th-finished");
+  const interrupted = f.add("th-interrupted");
+  for (const [id, entry] of [[finished, { kind: "turn", durationMs: 2_000 }], [interrupted, { kind: "notice", tone: "info", text: "Interrupted" }]] as const) {
+    f.report(id, "session.turn-started");
+    f.tick(2_000);
+    f.transcript(id, [{ ...entry, at: f.now } as ClaudeEntry]);
+    f.report(id, "session.heartbeat");
+    f.tick(60_000);
+    f.report(id, "session.ended");
+    assert.equal(f.registry.thread(id)!.turnDied, undefined, entry.kind);
+  }
+  await f.resumer.poll();
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 0);
+});
+
+test("a death more than an hour old, as one from before this control plane watched, is left alone", async (t) => {
+  const f = fixture(t);
+  const id = f.add("th-1");
+  f.turn(id, "model-error");
+  f.tick(60 * minute + 1);
+  for (const wait of resumeWaitsMs) {
+    await f.resumer.poll();
+    f.tick(wait);
+  }
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 0);
+  assert.equal(f.registry.claudeResume(id), null);
+  assert.notEqual(f.registry.attention(id), "decision");
+});
+
+test("a resume the session never takes goes to the person once it has tried for ten minutes", async (t) => {
+  const f = fixture(t);
+  const id = f.add("th-1");
+  f.turn(id, "session-ended");
+  await f.resumer.poll();
+  f.tick(resumeWaitsMs[0]!);
+  f.outcome = "blocked";
+  await f.resumer.poll();
+  f.tick(10 * minute - 1);
+  await f.resumer.poll();
+  assert.equal(f.registry.claudeResume(id)?.state, "sending");
+  f.tick(1);
+  await f.resumer.poll();
+  const record = f.registry.claudeResume(id);
+  assert.equal(record?.state === "person" ? record.why : null, "Its turn died, and Nexus could not type its resume into the session for 10 minutes.");
+  assert.equal(f.registry.attention(id), "decision");
+  const tries = f.typed.length;
+  f.tick(minute);
+  await f.resumer.poll();
+  assert.equal(f.typed.length, tries, "it stops trying");
 });
