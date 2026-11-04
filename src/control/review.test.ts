@@ -14,7 +14,7 @@ import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, reservedNames, type Hold, type HoldCode } from "./holds.ts";
 import { carryWaiver, headHolds, heldBy, landingHolds, landPress } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
-import { changeOf, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
+import { cannotLand, changeOf, humanLabel, landable, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
 import { reviewLoop, type ReviewDeps } from "./review.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
@@ -3065,6 +3065,51 @@ test("an approval never carries to a head on another base, nor from a round save
     await loop.poll();
     assert.equal(f.review().phase.kind, "reviewing", retarget ? "a new base adds its own commits to the change" : "an old round's base is unknown");
     assert.equal(roundsSpent(f.review()), 2);
+  }
+});
+
+test("a review whose rounds ran out, rebased with the same change, stays held at the new head with its reasons, and one with a changed line gains the stale head", async (t) => {
+  const ranOut = [
+    { kind: "changes requested", carries: "review", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], async hold(f: ReturnType<typeof fixture>) {
+      f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+    } },
+    { kind: "check failed", carries: "approval", reasons: [`.nexus/check failed at ${head1} after the last round this review allows.`, "The check's output:\n1 test failed"], async hold(f: ReturnType<typeof fixture>) {
+      f.check = { kind: "done", passed: false, output: "1 test failed" };
+      f.reply(f.review().reviewer, verdict(f.review(), {}));
+    } },
+  ];
+  for (const { kind, carries, reasons, hold } of ranOut) {
+    for (const [change, carried] of [[migration(250), true], [migration(250, "y"), false]] as const) {
+      const f = fixture(t);
+      f.files = migration(240);
+      f.changes.set(head1, migration(240));
+      f.changes.set(head2, [...change]);
+      const loop = f.loop();
+      await loop.start(f.builder, { land: null, rounds: 1 });
+      await loop.poll();
+      await hold(f);
+      await loop.poll();
+      assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons, label: { state: "added" } }, kind);
+      const [sent, checks] = [f.sent.length, f.checkThreads.length];
+      pushed(f, head2);
+      await loop.poll();
+      const r = f.review();
+      assert.equal(r.phase.kind, "needs-person", `${kind}: a review with no reviewer round left stays the person's`);
+      assert.deepEqual([f.sent.length, f.checkThreads.length, roundsSpent(r)], [sent, checks, 1], `${kind}: nothing restarts`);
+      if (carried) {
+        assert.deepEqual(shown(r.phase), { kind: "needs-person", reasons, label: { state: "added" } }, `${kind}: the same change keeps the reasons, with no stale head`);
+        assert.equal(r.rounds.at(-1)!.head, head2, `${kind}: the review is at the PR's head`);
+        assert.deepEqual(r.rounds.at(-1)!.carried, { from: head1 }, kind);
+        assert.equal(r.rounds.at(-1)!.check, null, `${kind}: a check result belongs to the head it ran at`);
+        assert.equal(roundNote(r), `${carries} carried from ${head1.slice(0, 12)} to ${head2.slice(0, 12)}: same change after a rebase`, kind);
+        assert.deepEqual(carriedEvents(f), carries === "approval" ? [["review.approval-carried", head1, head2]] : [], `${kind}: only an approval's carry is an approval-carried event`);
+        assert.doesNotMatch(cannotLand(r, f.registry.thread(f.builder)!, { state: "open" })!, /moved to/, `${kind}: Land refuses for the reasons, not a stale head`);
+      } else {
+        assert.equal(r.rounds.at(-1)!.head, head1, kind);
+        assert.deepEqual((r.phase as { unreviewed?: string }).unreviewed, head2, `${kind}: a changed line is unreviewed`);
+        assert.match((r.phase as { reasons: string[] }).reasons.at(-1)!, /moved to 2{40} after this review was held/, kind);
+      }
+    }
   }
 });
 

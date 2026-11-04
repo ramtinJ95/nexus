@@ -335,7 +335,7 @@ export const pushedHead = (r: Review, pr: Pick<PullRequest, "state" | "head"> | 
  */
 export function roundNote(r: Review): string | null {
   const [previous, round] = r.rounds.slice(-2);
-  if (round?.carried !== undefined) return `approval carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
+  if (round?.carried !== undefined) return `${reviewerApproved(round) ? "approval" : "review"} carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
   if (round === undefined || previous!.answers !== null || previous!.verdict?.verdict !== "approve") return null;
   return `a new round reviews ${round.head.slice(0, 12)}, since the pull request's head moved from ${previous!.head.slice(0, 12)} after its approval`;
 }

@@ -273,16 +273,24 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** The PR's change at commit `head`, as GitHub shows it against `base`. */
   const changeAt = async (r: Review, base: string, head: string) => changeOf(base, await github.change(r.pr.repo, base, head));
   /**
-   * The reviewer's approval of the latest round carried to `head`, pushed after it, when the change at both is the
-   * same, so the checks run at `head` with no reviewer round. Null when the reviewer did not approve it, or the change
-   * differs or cannot be compared, and `head` needs a round of its own.
+   * `r` with the latest round's verdict carried to `head`, pushed after it, when the change at both is the same on the
+   * same base, or null when the change differs or cannot be compared, and `head` needs a round of its own.
    */
-  const carryApproval = async (r: Review, head: string, base: string): Promise<Review | null> => {
+  const carryRound = async (r: Review, head: string, base: string): Promise<Review | null> => {
     const round = r.rounds.at(-1)!;
-    if (!reviewerApproved(round) || round.base !== base) return null;
+    if (round.base !== base) return null;
     const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
     if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
-    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head } }], phase: checking(), outbox: null, nudges: 0 };
+    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, check: null, answers: null, carried: { from: round.head } }] };
+  };
+  /**
+   * The reviewer's approval of the latest round carried to `head`, so the checks run at `head` with no reviewer round.
+   * Null when the reviewer did not approve it, or the change differs.
+   */
+  const carryApproval = async (r: Review, head: string, base: string): Promise<Review | null> => {
+    if (!reviewerApproved(r.rounds.at(-1)!)) return null;
+    const carried = await carryRound(r, head, base);
+    return carried === null ? null : { ...carried, phase: checking(), outbox: null, nudges: 0 };
   };
   /**
    * The next round reviews `head`, a head the reviewer has not seen, or the person gets it once no round is left. The
@@ -573,13 +581,16 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * A head pushed after the review approved its last round or held it for the person. A review that would land gets a
    * new round, as a landing does, and so does one held only for a failed check, live check or conflict after an
    * approval, which the push may answer. One the loop gave up on otherwise stays the person's, and its reasons name the
-   * new head.
+   * new head, unless its rounds ran out and the push keeps the change they judged, which keeps the hold at that head.
    */
   async function pushedAfter(r: Review, snapshot: PrSnapshot): Promise<Review | null> {
     const head = pushedHead(r, { ...snapshot.pr, head: snapshot.detail.head });
     if (head === null) return null;
     const phase = r.phase;
     if (phase.kind !== "needs-person" || landable(r) || heldForGate(r)) return await newHead(r, head, snapshot.detail.base, `The pull request's head moved to ${head}`);
+    // Its reviewer is archived, so the carried round goes to no one, and its reasons stay true of the same change.
+    const carried = phase.cause === "rounds" && phase.unreviewed === undefined ? await carryRound(r, head, snapshot.detail.base) : null;
+    if (carried !== null) return carried;
     const stale: Hold = { code: "stale-head", text: `The pull request's head moved to ${head} after this review was held, so none of its rounds reviewed that commit. Run nexus review ${r.builder} to review it.` };
     return { ...r, phase: { ...phase, ...personPhase(phase.cause, ...phase.holds.filter((h) => h.code !== "stale-head"), stale), unreviewed: head } };
   }

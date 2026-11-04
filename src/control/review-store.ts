@@ -8,7 +8,7 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "../agent-protocol.ts";
-import { storedReview, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import { reviewerApproved, storedReview, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
 
 export type ReviewStore = ReturnType<typeof reviewStore>;
 
@@ -53,7 +53,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
         }
         const pr = { review: review.id, repo: review.pr.repo, pr: review.pr.number };
         const round = review.rounds.at(-1)!;
-        if (before?.id === review.id && before.rounds.length < review.rounds.length && round.carried !== undefined) {
+        if (before?.id === review.id && before.rounds.length < review.rounds.length && round.carried !== undefined && reviewerApproved(round)) {
           appendEvent("review.approval-carried", review.builder, { ...pr, from: round.carried.from, to: round.head });
         }
         // Reading the change a waiver is for, or carrying it to a later head, is not the person waiving again.
