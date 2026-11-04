@@ -21,7 +21,7 @@ import { prose } from "./markdown.ts";
 import { itemsOf, modelOf } from "./items.ts";
 import { runOf, stateBar, composer, type Run } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
-import { judgmentCards, questionCards, landing, cancelReview, nudgeCard } from "./cards.ts";
+import { judgmentCards, questionCards, landing, cancelReview, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
 import { lifeOfThread, roleLine, threadRole } from "./lifecycle.ts";
 import { lifeTrack, timeline } from "./timeline.ts";
@@ -89,6 +89,7 @@ ${t.status !== "deleted" && termView(t)}
 <div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
 <div id="nudge" data-live>${nudgeCard(c, t)}</div>
+<div id="resume" data-live>${resumeCard(c, t)}</div>
 <div id="landing" data-live>${landing(c, d)}</div>
 <div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, agent, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>

@@ -8,7 +8,7 @@ import type { BootInputs } from "../spawn.ts";
 import type { GuestNotAnswering } from "../protocol/observations.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { SessionHarness } from "../session-harness.ts";
-import type { ClaudeSent, Output, Preview, Session, Thread } from "./thread-store.ts";
+import type { ClaudeResume, ClaudeSent, Output, Preview, Session, Thread } from "./thread-store.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { PullRequest } from "./github.ts";
 import type { Question } from "./questions.ts";
@@ -23,6 +23,8 @@ export interface OpenedSession { herdrPane: string; harness: SessionHarness; tit
 
 export interface ThreadDetail {
   claudeWorker?: { model: string | null; state: string; message?: string };
+  /** Nexus resuming the Claude worker after its turns died, or null. A control plane older than 0.63.0 sends none. */
+  resume?: ClaudeResume | null;
   attention: Attention;
   seenAt: number | null;
   lastReplyAt: number | null;

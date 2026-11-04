@@ -73,7 +73,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     const { claudeWorker, agent } = agents[registry.agent(t).kind].detail(t);
     return {
       thread: t,
-      ...claudeWorker === undefined ? {} : { claudeWorker },
+      ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.claudeResume(t.id) },
       attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, Date.now()),
       pylon: pylonOf(state, registry.project(t.project)!),

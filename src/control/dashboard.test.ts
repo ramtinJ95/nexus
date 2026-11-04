@@ -807,6 +807,22 @@ test("every source of a thread's decision has a card on its page with the action
   assert.equal(needsCount((await s.call("GET", "/")).text), String(sources.length - 1));
 });
 
+test("a Claude worker Nexus stopped resuming has a card on its page and in Needs you that says why and writes to it", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const th = await s.start("acme", "Kept dying");
+  s.registry.setClaudeWorker(th.id, "fix it", "started", undefined, "s1");
+  const why = "Its turn died 4 times in a row (last: API Error: Request timed out.), so Nexus stopped resuming it.";
+  s.registry.saveClaudeResume(th.id, { state: "person", turn: Date.now(), count: 3, why });
+  const page = (await s.call("GET", `/threads/${th.id}`)).text;
+  assert.equal(chipOf(page), "needs your decision");
+  const dock = dockOf(page);
+  assert.deepEqual(actionsOf(dock), [`/threads/${th.id}#write`]);
+  assert.ok(textOf(dock).startsWith(`Stopped resuming its turns ${why} Write to it to resume it`), textOf(dock));
+  const inbox = (await s.call("GET", "/")).text;
+  const card = needsOf(inbox).cards.filter((c) => c.thread === th.id);
+  assert.equal(card.length, 1);
+  assert.deepEqual(actionsOf(card[0]!.html), actionsOf(dock));
+});
 test("a held review waits from when it was held, not from when its review last messaged an agent, so a question asked before that comes first", async (t) => {
   const s = await seeded(t, landingOptions());
   const held = await s.start("acme", "Cache the list");

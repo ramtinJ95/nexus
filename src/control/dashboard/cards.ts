@@ -267,6 +267,16 @@ export const cancelReview = (thread: ThreadId, r: Review, look: string) => cance
  * Above the landing card, for a builder that ended its turns short of a pull request after two nudges: Nexus stopped
  * nudging it and waits on the person, whose message makes the thread theirs. `id` names its elements, as `landing`'s.
  */
+export function resumeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
+  const resume = c.registry.claudeResume(t.id);
+  if (resume?.state !== "person") return null;
+  return html`<section class="landing nudge" aria-labelledby="${id("resume-h")}">
+<div class="land-top"><h2 id="${id("resume-h")}">Stopped resuming its turns</h2></div>
+<p class="land-note">${resume.why} Write to it to resume it: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
+<div class="land-act need-act"><a class="btn btn-primary" href="/threads/${t.id}#write" data-write>Write to it</a></div>
+</section>`;
+}
+
 export function nudgeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
   if (c.registry.nudge(t.id)?.state !== "person") return null;
   return html`<section class="landing nudge" aria-labelledby="${id("nudge-h")}">
