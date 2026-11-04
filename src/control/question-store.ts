@@ -1,18 +1,19 @@
 /**
  * The question store: each question asked about a thread or a node, in `questions`, and the asks each thread's pylon
  * last reported waiting, in `waiting_asks`. A write recomputes a thread's attention, in its transaction. Its
- * participant tells the thread core of an unanswered question, drops a closed thread's asks, and runs `reconcileAsks`
+ * participant tells the thread core of an open question, drops a closed thread's asks, withdraws an archived thread's
+ * open failure questions, and runs `reconcileAsks`
  * when a Claude worker, its transcript or its thread's status changes.
  */
 import { json, jsonOrNull, type Db } from "./db.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
-import { askQuestionId, askRecord, isNodeQuestion, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
+import { askQuestionId, askRecord, isNodeQuestion, isOpen, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 
 export type QuestionStore = ReturnType<typeof questionStore>;
 
-export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStatus | undefined, updateAttention: (thread: ThreadId) => void) {
+export function questionStore(db: Db, clock: () => number, threadStatus: (id: ThreadId) => ThreadStatus | undefined, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql, recordOf } = db;
   function questionRecord(id: string): Question | null {
     return recordOf<Question>("questions", "id", id);
@@ -41,8 +42,14 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
     return changes > 0;
   }
 
-  const needsPerson = (thread: ThreadId) => sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL").get(thread) !== undefined;
-  const closed = (thread: ThreadId) => { sql("DELETE FROM waiting_asks WHERE thread = ?").run(thread); };
+  const needsPerson = (thread: ThreadId) => sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL").get(thread) !== undefined;
+  /** An archived thread's failure needs nothing more from the person, so its open question is withdrawn and kept. */
+  function closed(thread: ThreadId) {
+    sql("DELETE FROM waiting_asks WHERE thread = ?").run(thread);
+    if (threadStatus(thread) !== "archived") return;
+    sql(`UPDATE questions SET record = json_set(record, '$.withdrawn', json(?)) WHERE thread = ? AND json_extract(record, '$.failure') IS NOT NULL
+      AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL`).run(JSON.stringify({ by: "archive", at: clock() }), thread);
+  }
 
   return {
     participant: { needsPerson, closed, reconcile: reconcileAsks },
@@ -100,14 +107,15 @@ export function questionStore(db: Db, threadStatus: (id: ThreadId) => ThreadStat
       });
     },
     /**
-     * Records the answer to an open question. An answered one keeps its first answer, which this returns. `then` runs
-     * in the same transaction once the answer is recorded, and a throw from it records nothing.
+     * Records the answer to an open question. An answered one keeps its first answer, and a withdrawn one stays
+     * unanswered, as this returns. `then` runs in the same transaction once the answer is recorded, and a throw from it
+     * records nothing.
      */
     answerQuestion(id: string, answer: NonNullable<Question["answer"]>, then?: (answered: Question) => void): Question {
       return transaction(() => {
         const stored = questionRecord(id);
         if (stored === null) throw new Error(`no question ${id}`);
-        if (stored.answer !== null) return stored;
+        if (!isOpen(stored)) return stored;
         const answered = { ...stored, answer };
         sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(answered), id);
         then?.(answered);

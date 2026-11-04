@@ -34,7 +34,7 @@ export function openRegistry(path: string, clock = Date.now) {
   const { updateAttention, threadRecord, saveStartKey, start, ...core } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, participants, () => readingUsage());
   const { appendEvent, setThreadStatus, threadStatus } = core;
   const { participant: reviewing, ...reviews } = reviewStore(kernel, { setThreadStatus, appendEvent, updateAttention });
-  const { participant: asking, ...questions } = questionStore(kernel, threadStatus, updateAttention);
+  const { participant: asking, ...questions } = questionStore(kernel, clock, threadStatus, updateAttention);
   const { participant: nudging, ...nudges } = nudgeStore(kernel, updateAttention);
   const { participant: watching, ...prWatches } = prWatchStore(kernel, appendEvent);
   const { participant: queueing, ...queue } = queueStore(kernel, saveStartKey);

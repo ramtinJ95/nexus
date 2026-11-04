@@ -24,8 +24,11 @@ export interface SetupInputs {
   setupBlob: string | null; // git object ID of .nexus/setup at `commit`
 }
 export interface ProjectMirror {
-  /** Resolves a branch's tip or a full commit ID on the remote, and reads .nexus/setup's object ID there. Throws when the remote cannot be read. */
-  setupInputs(project: RemoteProject, ref: { branch: string } | { commit: string }, signal?: AbortSignal): Promise<SetupInputs>;
+  /**
+   * Resolves a branch's tip or a full commit ID on the remote, and reads .nexus/setup's object ID there. Null when the
+   * remote answers that it has no such branch. Throws when the remote cannot be read.
+   */
+  setupInputs(project: RemoteProject, ref: { branch: string } | { commit: string }, signal?: AbortSignal): Promise<SetupInputs | null>;
 }
 
 /** sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what it can install. */

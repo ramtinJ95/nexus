@@ -66,6 +66,7 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
       const body = parse(answerSchema, await r.body());
       const question = registry.question(id!);
       if (question === null) throw new HttpError(404, `no question ${id}`);
+      if (question.withdrawn !== undefined) throw new HttpError(409, `question ${question.id} was withdrawn when its thread was archived`);
       const refused = refusalOf(r.caller, question);
       if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]}`);
       if (question.ask !== undefined) {

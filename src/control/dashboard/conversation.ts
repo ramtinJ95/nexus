@@ -4,6 +4,7 @@ import type { ThreadDetail } from "../wire.ts";
 import type { Thread, ThreadAgent } from "../thread-store.ts";
 import type { ClaudeConversation } from "../../claude-transcript.ts";
 import type { AgentView } from "../conversation-view.ts";
+import { isOpen } from "../questions.ts";
 import { clock } from "./elapsed.ts";
 import { Html, html, dot, icon, unseen, limitText, ago, grows, type Tone } from "./view.ts";
 import { prose } from "./markdown.ts";
@@ -27,7 +28,7 @@ export function runOf(d: ThreadDetail, view: AgentView | null, items: readonly I
   const busy = claude ? view.view.working : (view?.view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { kind: "parked", tasks: parked, busy };
-  const open = (d.questions ?? []).filter((q) => q.answer === null);
+  const open = (d.questions ?? []).filter(isOpen);
   // Attention ranks a reply above a wait, so the session's own state says whether a dialog waits in the terminal.
   const terminal = d.thread.sessionWaiting === true;
   if (terminal || open.some((q) => q.ask !== undefined) || (!busy && (open.length > 0 || d.thread.usageLimit !== undefined))) {

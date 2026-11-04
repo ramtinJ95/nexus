@@ -59,14 +59,20 @@ type SetupRead = { project: RemoteProject; inputs: SetupInputs } | { fresh: stri
 export function threadStarter(options: { registry: ThreadsRegistry; harness: Pick<HarnessHost, "startThread">; mirror: ProjectMirror; dotfiles: PylonOverlay["dotfiles"]; gitIdentity?: BootInputs["gitIdentity"]; wake(node: NodeName): void }) {
   const { registry, harness, mirror, dotfiles, gitIdentity, wake } = options;
 
-  async function readSetup(project: Project, branch: string, commit: string | undefined): Promise<SetupRead> {
+  /** A branch the start names and the remote does not have refuses the start, since the pylon's checkout of it would fail. */
+  async function readSetup(project: Project, request: StartRequest, branch: string): Promise<SetupRead> {
+    const { commit } = request;
     if (!hasRemote(project)) return { fresh: "the project is scratch, so it has no template" };
     if (commit !== undefined && !fullCommit.test(commit)) return { fresh: `the start named commit ${commit}, and only a full commit ID or a branch tip can use a template` };
+    let inputs: SetupInputs | null;
     try {
-      return { project, inputs: await mirror.setupInputs(project, commit === undefined ? { branch } : { commit }) };
+      inputs = await mirror.setupInputs(project, commit === undefined ? { branch } : { commit });
     } catch (err) {
       return { fresh: `the control plane could not read .nexus/setup at ${commit ?? branch}: ${(err as Error).message}` };
     }
+    if (inputs !== null) return { project, inputs };
+    if (request.branch === undefined) return { fresh: `the remote has no branch ${branch}` };
+    throw new HttpError(400, `branch ${branch} does not exist on the remote of project ${project.id}. Push it first, or start from the project's default branch, ${project.defaultBranch}, by naming no branch, and the agent creates its own`, "no-branch");
   }
 
   /**
@@ -129,9 +135,12 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const release = registry.reserve(pylonId, node, resources);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.
-      const read: SetupRead = resources.diskGiB !== project.resources.diskGiB
-        ? { fresh: `the start asked for a ${resources.diskGiB} GiB disk, and this project's templates have ${project.resources.diskGiB} GiB` }
-        : await readSetup(project, branch, request.commit);
+      const disk: SetupRead | null = resources.diskGiB === project.resources.diskGiB ? null
+        : { fresh: `the start asked for a ${resources.diskGiB} GiB disk, and this project's templates have ${project.resources.diskGiB} GiB` };
+      // Another disk uses no template, but still waits on the read of a branch the start names, since the read is what
+      // refuses one the remote does not have.
+      const fetched = disk === null || request.branch !== undefined ? await readSetup(project, request, branch) : null;
+      const read: SetupRead = disk ?? fetched!;
 
       const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = Date.now();

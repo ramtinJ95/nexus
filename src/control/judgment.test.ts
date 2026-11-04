@@ -1,6 +1,7 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { openHarnessHost, type ConversationId, type HarnessHost } from "../harness/host.ts";
 import { scriptedModel, scriptedModels, type ScriptedRequest } from "../harness/test-fixture.ts";
 import { desiredPhase } from "../reconcile.ts";
@@ -205,6 +206,67 @@ test("a person answer asks with the actions that can run, and each answer does w
   assert.deepEqual(outcomes, [{ kind: "retried", node: nodeA, on: "answer" }, { kind: "moved", from: nodeA, to: nodeB, on: "answer" }, { kind: "left", why: "the person left it failed" }]);
   assert.deepEqual(ids.map((id) => w.registry.pylon(`pylon-${id}` as PylonId)!.failed === null), [true, true, false]);
   assert.ok(w.registry.thread(ids[0]!)!.lastHumanActivityAt >= answered, "the person's retry is their activity");
+});
+
+test("archiving a thread withdraws its failure's open question and drops the failed attention, which unarchiving brings back", async (t) => {
+  const w = await world(t);
+  const id = builder(w.registry, "th-archived");
+  fail(w.registry, id, brokenWith("person"));
+  await w.until(() => phaseOf(w, id) === "asked");
+  const asked = `judgment:${only(w.registry, id).failure}`;
+  assert.equal(w.registry.question(asked)?.failure, only(w.registry, id).failure);
+  assert.equal(w.registry.attention(id), "failed");
+
+  const archivedAt = Date.now();
+  w.registry.setThreadStatus(id, "archived");
+  const withdrawn = w.registry.question(asked)!;
+  assert.equal(withdrawn.answer, null);
+  assert.equal(withdrawn.withdrawn?.by, "archive");
+  assert.ok(withdrawn.withdrawn.at >= archivedAt);
+  assert.equal(w.registry.attention(id), null);
+  assert.deepEqual(w.registry.events("0", { thread: id, kinds: ["attention.changed"] }).map((e) => e.payload.attention), ["failed", null]);
+  assert.deepEqual(w.registry.answerQuestion(asked, { option: "Retry", by: laptop, at: Date.now() }), withdrawn, "a withdrawn question takes no answer");
+  await w.until(() => phaseOf(w, id) === "done");
+  const phase = only(w.registry, id).phase;
+  assert.deepEqual(phase.kind === "done" && phase.outcome, { kind: "left", why: "the thread is archived" });
+
+  w.registry.setThreadStatus(id, "active");
+  assert.equal(w.registry.attention(id), "failed", "the pylon is still failed");
+  assert.deepEqual(w.registry.question(asked), withdrawn);
+});
+
+test("a judgment whose question an archive withdrew ends though the thread is unarchived before the next pass", async (t) => {
+  const w = await world(t);
+  const id = builder(w.registry, "th-back");
+  fail(w.registry, id, brokenWith("person"));
+  await w.until(() => phaseOf(w, id) === "asked");
+  w.registry.setThreadStatus(id, "archived");
+  w.registry.setThreadStatus(id, "active");
+  await w.until(() => phaseOf(w, id) === "done");
+  const phase = only(w.registry, id).phase;
+  assert.deepEqual(phase.kind === "done" && phase.outcome, { kind: "left", why: "the thread was archived, which withdrew the question" });
+  assert.equal(w.registry.attention(id), "failed", "the person retries the pylon themselves");
+});
+
+test("a thread archived before archives withdrew failure questions has its open one withdrawn as of its archive once the registry migrates", async (t) => {
+  const dir = await tempDir("nexus-judgment-", t);
+  const first = await open(t, dir);
+  const id = builder(first.registry, "th-old");
+  fail(first.registry, id, brokenWith("person"));
+  await first.until(() => phaseOf(first, id) === "asked");
+  const asked = `judgment:${only(first.registry, id).failure}`;
+  await first.close();
+  const db = new DatabaseSync(join(dir, "registry.db"));
+  db.exec(`UPDATE questions SET record = json_remove(record, '$.failure');
+    UPDATE threads SET status = 'archived' WHERE id = '${id}';
+    INSERT INTO thread_archives (thread, archived_at) VALUES ('${id}', 1234);`);
+  db.close();
+  rewindTo(join(dir, "registry.db"), versionBefore(/'\$\.withdrawn', json_object\('by', 'archive'/));
+
+  const w = await open(t, dir);
+  const q = w.registry.question(asked)!;
+  assert.deepEqual([q.failure, q.answer, q.withdrawn], [only(w.registry, id).failure, null, { by: "archive", at: 1234 }]);
+  assert.equal(w.registry.attention(id), null);
 });
 
 test("a reply with a malformed block or none goes to the person, by the control plane's rule", async (t) => {

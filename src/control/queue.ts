@@ -37,7 +37,7 @@ export interface QueuedThread {
   after: readonly ThreadId[];
   /** One per predecessor, in `after` order. */
   waits: readonly Wait[];
-  /** Some wait is blocked. */
+  /** Some wait is blocked, or the queue holds a start refused for a branch the remote does not have. */
   blocked: boolean;
   /** A node, or "auto". */
   node: string;
@@ -103,7 +103,7 @@ export function queuedView(registry: QueueRegistry, record: QueuedRecord): Queue
   const claude = request.claude !== undefined;
   return {
     id: record.id, title: record.title, project: record.project, startedBy: record.startedBy, createdAt: record.createdAt, status: record.status,
-    after: record.after, waits, blocked: waits.some((w) => w.state === "blocked"), node: request.node ?? registry.project(record.project)?.defaultNode ?? "auto",
+    after: record.after, waits, blocked: record.refused !== undefined || waits.some((w) => w.state === "blocked"), node: request.node ?? registry.project(record.project)?.defaultNode ?? "auto",
     worker: claude ? "claude" : "harness", model: claude ? request.model ?? defaultClaudeModel : null,
     prompt: record.message ?? request.claude ?? null, branch: request.branch ?? null, commit: request.commit ?? null,
     resources: request.resources, startNow: record.startNow, lastError: record.lastError,
@@ -111,6 +111,9 @@ export function queuedView(registry: QueueRegistry, record: QueuedRecord): Queue
 }
 
 const statusName = (status: QueuedRecord["status"]) => status === "archived" ? "cancelled" : status;
+
+/** How long a pass leaves a refused start before it reads the branch again. */
+export const refusedRetryMs = 10 * 60_000;
 
 export function threadQueue(options: {
   registry: QueueRegistry;
@@ -152,7 +155,8 @@ export function threadQueue(options: {
       const now = registry.queuedThread(id);
       if (now?.status !== "queued") throw err instanceof HttpError ? err : new HttpError(409, message);
       if (now.lastError !== message) log(`queued thread ${id} did not start: ${message}`);
-      registry.saveQueued({ ...now, lastError: message });
+      const { refused: _, ...rest } = now;
+      registry.saveQueued({ ...rest, lastError: message, ...err instanceof HttpError && err.code === "no-branch" ? { refused: { at: Date.now() } } : {} });
       throw err;
     }
     await deliver(id).catch((err: unknown) => log(`queued thread ${id} started, but its first message was not sent yet: ${(err as Error).message}`));
@@ -173,7 +177,8 @@ export function threadQueue(options: {
     for (const record of registry.queuedThreads()) {
       if (record.status === "started") {
         await deliver(record.id).catch((err: unknown) => log(`queued thread ${record.id} started, but its first message was not sent yet: ${(err as Error).message}`));
-      } else if (record.status === "queued" && (record.startNow !== null || record.after.every((id) => waitOf(registry, id).state === "landed"))) {
+      } else if (record.status === "queued" && (record.refused === undefined || Date.now() - record.refused.at >= refusedRetryMs)
+        && (record.startNow !== null || record.after.every((id) => waitOf(registry, id).state === "landed"))) {
         // attempt records and logs why, and the next pass tries again.
         await start(record.id).catch(() => {});
       }

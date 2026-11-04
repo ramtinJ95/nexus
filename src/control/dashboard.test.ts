@@ -7,6 +7,7 @@ import { itemThread, type PipelineItem } from "./pipeline.ts";
 import type { QueuedThread } from "./queue.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail } from "./wire.ts";
+import { detailText } from "../cli/thread-text.ts";
 import { testPr, testReview } from "./test-kit.ts";
 import { personPhase, type Review } from "./review-model.ts";
 import type { ReviewLoop } from "./review.ts";
@@ -385,6 +386,27 @@ test("an open question is a card with a button per option, disabled with the rea
   assert.match(answered, /<section class="landing question answered" data-question="qn-image"/);
   assert.equal(textOf(answered), `Rebuild the pylon image? It changes the base layer . Answered "Not now" from ${laptop}, just now`);
   assert.ok(!answered.includes("<button"));
+});
+
+test("an archived thread's withdrawn failure question and its attention read the same on its page, in the API, in `nexus show` and in the event stream", async (t) => {
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "setup exited 128: fatal: 'origin/feat/gone' is not a commit" });
+  s.registry.askQuestion({ id: "judgment:7", thread: fix.id, failure: 7, text: "The pylon failed on rj-firebat.", options: ["Retry", "Leave it failed"], reserved: null, answerer: "person", askedAt: Date.now() });
+  assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
+
+  const detail = JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail;
+  assert.equal(detail.attention, null);
+  assert.equal(detail.questions[0]?.withdrawn?.by, "archive");
+  const shown = detailText(detail).split("\n");
+  assert.ok(shown.includes("attention: none"));
+  assert.ok(shown.includes(`  withdrawn when the thread was archived at ${new Date(detail.questions[0]!.withdrawn!.at).toISOString()}`));
+  const card = questionsOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.equal(textOf(card), "The pylon failed on rj-firebat. Withdrawn when the thread was archived, just now");
+  assert.ok(!card.includes("<button"));
+  const events = JSON.parse((await s.call("GET", `/v1/events?thread=${fix.id}&kind=attention.changed`)).text) as { payload: { attention: string | null } }[];
+  assert.deepEqual(events.map((e) => e.payload.attention), ["failed", null]);
+  assert.deepEqual(JSON.parse((await s.call("POST", "/v1/questions/judgment:7/answer", { option: "Retry" })).text), { error: "question judgment:7 was withdrawn when its thread was archived" });
 });
 
 const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };

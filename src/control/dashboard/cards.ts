@@ -71,6 +71,10 @@ export function questionCards(c: Context, d: ThreadDetail): Html[] {
 
 export function questionCard(c: Context, q: Question): Html {
   if (q.ask !== undefined) return askCard(c, q, q.ask.questions);
+  if (q.withdrawn !== undefined) {
+    return html`<section class="landing question answered" data-question="${q.id}" aria-label="Withdrawn question"><div class="question-text">${prose(q.text)}</div>
+<p class="land-meta">Withdrawn when the thread was archived, ${ago(q.withdrawn.at, c.now)}</p></section>`;
+  }
   if (q.answer !== null) {
     return html`<section class="landing question answered" data-question="${q.id}" aria-label="Answered question"><div class="question-text">${prose(q.text)}</div>
 <p class="land-meta">Answered "${q.answer.option}" from ${q.answer.by}, ${ago(q.answer.at, c.now)}</p></section>`;

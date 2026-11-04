@@ -35,6 +35,10 @@ export interface ThreadQuestion extends Asked {
   proposal?: Proposal;
   /** The Claude worker's AskUserQuestion call the question is. */
   ask?: ClaudeAsk;
+  /** The thread.failed event of the failure a failure judgment asks about. Archiving the thread withdraws the question while it is open. */
+  failure?: number;
+  /** Set once the question closed unanswered, as an archive closes an open failure question. It takes no answer after. */
+  withdrawn?: { by: "archive"; at: number };
   cleanup?: never;
 }
 
@@ -44,6 +48,8 @@ export interface NodeQuestion extends Asked {
   thread?: never;
   proposal?: never;
   ask?: never;
+  failure?: never;
+  withdrawn?: never;
   cleanup: Cleanup;
 }
 
@@ -51,6 +57,8 @@ export interface NodeQuestion extends Asked {
 export type Question = ThreadQuestion | NodeQuestion;
 export type Unanswered = Omit<ThreadQuestion, "answer"> | Omit<NodeQuestion, "answer">;
 export const isNodeQuestion = (q: Question): q is NodeQuestion => q.node !== undefined;
+/** Whether the question still waits for its answer. */
+export const isOpen = (q: Pick<Question, "answer" | "withdrawn">) => q.answer === null && q.withdrawn === undefined;
 
 /** One item of a planning thread's block. `after` holds keys of earlier items of the block, or pipeline item IDs. */
 export interface Proposal { block: string; index: number; key: string; title: string; brief: string; after: readonly string[] }

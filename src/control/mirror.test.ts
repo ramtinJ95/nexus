@@ -50,11 +50,12 @@ test("a full commit ID resolves to itself, though no branch ends there", async (
 test("reads that run at once each get their own ref's commit", async () => {
   const refs = ["main", "bare-branch", "main", "bare-branch"];
   const read = await Promise.all(refs.map((branch) => mirror.setupInputs(project, { branch })));
-  assert.deepEqual(read.map((r) => r.commit), await Promise.all(refs.map((branch) => git("rev-parse", branch))));
+  assert.deepEqual(read.map((r) => r?.commit), await Promise.all(refs.map((branch) => git("rev-parse", branch))));
 });
 
-test("a branch the remote does not have fails with git's reason", async () => {
-  await assert.rejects(mirror.setupInputs(project, { branch: "gone" }), /^Error: git fetch exited 128: .*couldn't find remote ref refs\/heads\/gone/);
+test("a branch the remote does not have reads as none, and a commit it does not have still fails with git's reason", async () => {
+  assert.equal(await mirror.setupInputs(project, { branch: "gone" }), null);
+  await assert.rejects(mirror.setupInputs(project, { commit: "0".repeat(40) }), /^Error: git fetch exited 128: /);
 });
 
 test("an SSH or other non-HTTPS remote is refused before git runs, whatever keys or agent the control plane's user has", async () => {

@@ -4,6 +4,7 @@
  * requests, each review round with its findings, its landing and deploy, and its archive.
  */
 import type { ThreadDetail } from "../wire.ts";
+import { isOpen } from "../questions.ts";
 import type { ThreadId } from "../../ids.ts";
 import { keptPastDay } from "../../reconcile.ts";
 import { blocks, findingsOf, phaseNote, roundsSpent, type Review, type Round } from "../review-model.ts";
@@ -123,7 +124,7 @@ ${t.working && html`<p class="tl-event tl-work">${dot("work")}<span>Its agent is
 ${t.usageLimit !== undefined && html`<p class="tl-event tl-bad">${dot("bad")}<span>It ${limitText(t, c.now)}, ${ago(t.usageLimit.stoppedAt, c.now)}.</span></p>`}
 ${d.pylon.failed !== null && html`<p class="tl-event tl-bad">${dot("bad")}<span>Its pylon failed: ${d.pylon.failed.split("\n")[0]}</span></p>`}
 ${judgments.map((j) => html`<p class="tl-event">${dot(j.verdict === null ? "work" : "bad")}<span>Judged a failure on ${j.node} ${ago(j.startedAt, c.now)}: ${j.verdict === null ? "no answer yet" : html`<b>${j.verdict.answer}</b>, ${j.verdict.why}`}</span></p>`)}
-${asked.map((q) => html`<p class="tl-event">${dot(q.answer === null ? "bad" : "ok")}<span class="tl-quote">Asked ${ago(q.askedAt, c.now)}: ${firstLine(q.text || (q.ask?.questions[0]?.question ?? ""))}${q.answer !== null && html` Answered <b>${q.answer.option}</b> ${ago(q.answer.at, c.now)}.`}</span></p>`)}
+${asked.map((q) => html`<p class="tl-event">${dot(isOpen(q) ? "bad" : "ok")}<span class="tl-quote">Asked ${ago(q.askedAt, c.now)}: ${firstLine(q.text || (q.ask?.questions[0]?.question ?? ""))}${q.answer !== null && html` Answered <b>${q.answer.option}</b> ${ago(q.answer.at, c.now)}.`}${q.withdrawn !== undefined && html` Withdrawn when the thread was archived ${ago(q.withdrawn.at, c.now)}.`}</span></p>`)}
 ${outputs.length > 0 && html`<p class="tl-meta">${outputs.map((o, i) => html`${i > 0 && " · "}${o.kind} <code>${o.ref}</code>`)}</p>`}
 <p class="tl-go"><button type="button" class="btn btn-xs" data-tab-go="convo">${icon("chat")}Open the conversation</button></p>
 ${heldAt("building")}`,
