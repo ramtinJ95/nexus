@@ -29,19 +29,34 @@ export function standingRulesFor(project: Pick<Project, "standingRules">, reques
   return builder && rules?.text != null ? { revision: rules.revision, text: rules.text, carriedBy: request.claude === undefined ? null : "prompt" } : null;
 }
 
+/** Each thread's send in flight while no message has carried its rules yet. */
+const uncarried = new Map<ThreadId, Promise<unknown>>();
+
 /**
  * Sends a person's message to a Nexus agent thread, with the thread's rules until a message the harness took carried
- * them. A resend of that message's request ID gets them again, so it composes the text the harness already took.
+ * them. A resend of that message's request ID gets them again, so it composes the text the harness already took. Sends
+ * wait for each other until one carried them, so two at once never both carry them, and one that failed leaves them
+ * for the next.
  */
 export async function sendWithStandingRules<T>(
   registry: { standingRulesOf(id: ThreadId): StandingRulesStamp | null; standingRulesCarried(id: ThreadId, requestId: string): void },
   thread: ThreadId, requestId: string, text: string, send: (text: string) => Promise<T>,
 ): Promise<T> {
-  const stamp = registry.standingRulesOf(thread);
-  const carries = stamp !== null && (stamp.carriedBy === null || stamp.carriedBy === requestId);
-  const sent = await send(carries ? withStandingRules(text, stamp) : text);
-  if (carries) registry.standingRulesCarried(thread, requestId);
-  return sent;
+  const compose = async () => {
+    const stamp = registry.standingRulesOf(thread);
+    const carries = stamp !== null && (stamp.carriedBy === null || stamp.carriedBy === requestId);
+    const sent = await send(carries ? withStandingRules(text, stamp) : text);
+    if (carries) registry.standingRulesCarried(thread, requestId);
+    return sent;
+  };
+  if (registry.standingRulesOf(thread)?.carriedBy !== null && !uncarried.has(thread)) return compose();
+  const turn = (uncarried.get(thread) ?? Promise.resolve()).catch(() => {}).then(compose);
+  uncarried.set(thread, turn);
+  try {
+    return await turn;
+  } finally {
+    if (uncarried.get(thread) === turn) uncarried.delete(thread);
+  }
 }
 
 /** The rules once a person sets `text`, or clears them with null. Absent stays absent until something is set. */

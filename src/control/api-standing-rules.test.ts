@@ -128,6 +128,37 @@ test("a Nexus agent thread started without a first message gets the rules it sta
     [`Fix the cart.${section(rules)}`, `Fix the cart.${section(rules)}`, "And the tests."], "a resend of that message carries them again, and the next carries none");
 });
 
+test("two messages sent at once before either carried the rules: the first the harness takes carries them, and retries compose the same text", async (t) => {
+  const s = await withImage(t);
+  await setRules(s, rules);
+  const started = (await s.call("POST", "/v1/threads", { project: "acme", title: "No brief" })).body as Thread;
+  const send = s.fake.harness.send;
+  t.after(() => { s.fake.harness.send = send; });
+  const held = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const reached: string[] = [];
+  s.fake.harness.send = async (...args) => {
+    reached.push(args[2]);
+    if (args[2] === "msg:1") { entered.resolve(); await held.promise; }
+    return send(...args);
+  };
+  const first = s.call("POST", `/v1/threads/${started.id}/messages`, { text: "Fix the cart.", requestId: "msg:1" });
+  await entered.promise;
+  const second = s.call("POST", `/v1/threads/${started.id}/messages`, { text: "And the tests.", requestId: "msg:2" });
+  assert.equal(await Promise.race([second.then(() => "sent"), new Promise((resolve) => setTimeout(resolve, 200, "waiting"))]), "waiting");
+  assert.deepEqual(reached, ["msg:1"], "the second waits for the first");
+  held.resolve();
+  assert.equal((await first).status, 202);
+  assert.equal((await second).status, 202);
+  for (const requestId of ["msg:1", "msg:2"]) {
+    assert.equal((await s.call("POST", `/v1/threads/${started.id}/messages`, { text: requestId === "msg:1" ? "Fix the cart." : "And the tests.", requestId })).status, 202);
+  }
+  assert.deepEqual(s.calls.filter((c) => c[0] === "send" && c[1] === started.id).map((c) => [c[3], c[2]]), [
+    ["msg:1", `Fix the cart.${section(rules)}`], ["msg:2", "And the tests."], ["msg:1", `Fix the cart.${section(rules)}`], ["msg:2", "And the tests."],
+  ]);
+  assert.equal(await revisionOf(s, started.id), 1);
+});
+
 test("a first message the harness never took leaves the rules for the person's next message", async (t) => {
   const s = await withImage(t);
   await setRules(s, rules);
