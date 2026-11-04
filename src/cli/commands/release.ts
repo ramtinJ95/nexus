@@ -1,4 +1,6 @@
 /** Landing and releasing: `release`, `review`, `land`, `deploy` and the image commands. */
+import { createInterface } from "node:readline";
+import type { Readable, Writable } from "node:stream";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../deploy/model.ts";
 import type { ImagesCurrent, ThreadDetail } from "../../control/wire.ts";
 import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
@@ -65,13 +67,43 @@ const imageCommand = (path: string, args: Command["args"], body: (positionals: r
   },
 });
 
-/** What the dashboard's Land press sends for the thread's review as it is now: its head, and the holds the press waives. */
-async function pressOf(api: Api, id: string): Promise<{ head?: string; waive?: string[] }> {
+/** Where the person reads the holds `land --waive` would waive and answers for them. */
+export interface Terminal { input: Readable & { readonly isTTY?: boolean }; output: Writable & { readonly isTTY?: boolean } }
+
+function needsTerminal(terminal: Terminal): void {
+  if (terminal.input.isTTY !== true || terminal.output.isTTY !== true) throw new CliError("invalid", "land --waive shows you the holds it waives and asks you to confirm them, and stdin or stderr is not a terminal. Run it in a terminal, or press Land on the dashboard");
+}
+
+/**
+ * Shows the person the holds a Land press would waive at `head` and whether they typed yes. An agent on the person's
+ * Mac calls as the same tailnet node, so the terminal is what tells the person apart: with no terminal it refuses.
+ */
+export async function confirmWaiver(terminal: Terminal, pr: number, head: string, holds: readonly string[]): Promise<boolean> {
+  needsTerminal(terminal);
+  terminal.output.write(`Land pull request #${pr} at ${head}, waiving the holds the merge policy reserves for you:\n${holds.map((h) => `  ${h}\n`).join("")}Type yes to waive them and land: `);
+  const lines = createInterface({ input: terminal.input, terminal: false });
+  const answer = await new Promise<string | null>((resolve) => {
+    lines.once("line", resolve);
+    lines.once("close", () => resolve(null));
+  });
+  lines.close();
+  return answer?.trim() === "yes";
+}
+
+/**
+ * What the dashboard's Land press sends for the thread's review as it is now: its head, and the holds the press
+ * waives, once the person confirmed them on `terminal`.
+ */
+export async function pressOf(api: Api, id: string, terminal: Terminal): Promise<{ head?: string; waive?: string[] }> {
+  needsTerminal(terminal);
   const { review } = await api("GET", thread(id)) as ThreadDetail;
   if (review === null) return {};
   const press = landPress(review);
   const head = review.rounds.at(-1)!.head;
-  return press.kind === "lands" && press.waives.length > 0 ? { head, waive: press.waives.map((h) => h.text) } : { head };
+  if (press.kind !== "lands" || press.waives.length === 0) return { head };
+  const waive = press.waives.map((h) => h.text);
+  if (!await confirmWaiver(terminal, review.pr.number, head, waive)) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
+  return { head, waive };
 }
 
 export const releaseCommands: Readonly<Record<string, Command>> = {
@@ -100,7 +132,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
   land: {
     args: [1, 1], options: { waive: { type: "boolean" } },
     async run(api, [id], v) {
-      const r = await api("POST", `${thread(id!)}/land`, v.waive === true ? await pressOf(api, id!) : {}) as Review;
+      const r = await api("POST", `${thread(id!)}/land`, v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {}) as Review;
       return { json: r, text: `Landing ${reviewText(r)}` };
     },
   },
