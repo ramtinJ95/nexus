@@ -82,11 +82,11 @@ async function settle(poll: () => CheckState): Promise<CheckState> {
   assert.fail("the check never finished");
 }
 
-test("a check runs in a fresh bare check thread at the commit, and its verdict is the pipe's exit status", async (t) => {
+test("a check runs in a fresh bare check thread of 4 CPUs at the commit, and its verdict is the pipe's exit status", async (t) => {
   const f = await fixture(t, "echo typecheck ok; echo tests ok");
   const runs = f.runs();
   const id = await runs.start(f.builder, "feature", f.head);
-  assert.deepEqual(f.started, [{ project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, bare: true }]);
+  assert.deepEqual(f.started, [{ project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, bare: true, resources: { cpus: 4 } }]);
   assert.equal(f.registry.thread(id)!.startedBy, checkCaller);
   assert.deepEqual(runs.poll(id, f.head), { kind: "waiting" }, "nothing runs until the pylon does");
   f.running(f.registry.thread(id)!);
