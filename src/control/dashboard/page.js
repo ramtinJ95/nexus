@@ -145,18 +145,21 @@ export async function readPage(url) {
   return new DOMParser().parseFromString(await res.text(), "text/html");
 }
 
+/** The page the address names. A jump within it, as to a hash, is the same page. */
+const addressed = () => location.pathname + location.search;
+
 let refreshing = null;
 async function refresh() {
   const state = document.getElementById("refresh-state");
-  const at = location.href;
+  const at = addressed();
   try {
     const seen = frames;
-    const url = new URL(at);
+    const url = new URL(location.href);
     if (streaming()) url.searchParams.set("streaming", "1");
     const next = await readPage(url);
     // The reader went to another page in place while this one was read, as the Cluster page goes to another node, so
     // its regions are not the page's any more.
-    if (location.href !== at) return;
+    if (addressed() !== at) return;
     // A queued thread that started has a thread page, whose regions the queued page has none of.
     if ((next.getElementById("queued") === null) !== (document.getElementById("queued") === null)) return void location.reload();
     const freshConvo = next.getElementById("convo");
@@ -176,7 +179,7 @@ async function refresh() {
     else main.dataset.activity = activity;
     if (state !== null) state.textContent = "";
   } catch (err) {
-    if (state !== null && location.href === at) state.textContent = `Not updated: ${err.message}. Retrying.`;
+    if (state !== null && addressed() === at) state.textContent = `Not updated: ${err.message}. Retrying.`;
   }
 }
 export const refreshNow = () => (refreshing ??= refresh().finally(() => { refreshing = null; }));

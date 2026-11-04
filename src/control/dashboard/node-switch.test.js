@@ -70,7 +70,7 @@ const popped = [];
 const listeners = [];
 Object.assign(globalThis, {
   Element, HTMLAnchorElement: Element, HTMLImageElement: Element, HTMLDetailsElement: Element, EventSource: { OPEN: 1 },
-  location: { href: "http://nexus.test/nodes/rj-firebat", pathname: "/nodes/rj-firebat", replace: (href) => replaced.push(new URL(href).pathname) },
+  location: { href: "http://nexus.test/nodes/rj-firebat", pathname: "/nodes/rj-firebat", search: "", replace: (href) => replaced.push(new URL(href).pathname) },
   history: { pushState: (_, __, url) => { pushed.push(url.pathname); go(url.pathname); } },
   localStorage: { getItem: () => null, setItem: () => {} },
   addEventListener: (type, listener) => { if (type === "popstate") popped.push(listener); },
@@ -191,4 +191,22 @@ test("back to /cluster before the picked node's page comes picks the node /clust
   await answer("/cluster", 200, "infra-testbench");
   await answer("/nodes/spare");
   assert.deepEqual(shows(), { picked: "infra-testbench", current: "/nodes/infra-testbench", heading: "infra-testbench", crumb: "infra-testbench", graphs: "infra-testbench", busy: null });
+});
+
+test("a switch writes the node into the live heading once, so a screen reader says it once", async () => {
+  const heading = document.querySelector(".node-detail-h");
+  const said = [];
+  let text = heading.textContent;
+  Object.defineProperty(heading, "textContent", { get: () => text, set: (value) => { said.push(value); text = value; } });
+  click("spare");
+  await answer("/nodes/spare");
+  assert.deepEqual(said, ["spare"]);
+});
+
+test("a poll in flight when only the address's hash changes swaps its page in, as the page is the same", async () => {
+  const poll = refreshNow();
+  location.href += "#node-cleanup";
+  await answer("/nodes/spare", 200, "spare, read again");
+  await poll;
+  assert.equal(document.getElementById("node-health").innerHTML, "health of spare, read again");
 });

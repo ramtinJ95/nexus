@@ -22,7 +22,9 @@ function pick(node) {
     if (picked) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
-  heading.textContent = crumb.textContent = node;
+  crumb.textContent = node;
+  // A screen reader says the live heading on each write.
+  if (heading.textContent !== node) heading.textContent = node;
   // The graphs load again on any write of their node, even the same one.
   if (graphs.dataset.node !== node) graphs.dataset.node = node;
 }
