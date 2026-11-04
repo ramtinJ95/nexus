@@ -17,7 +17,8 @@ const minute = 60_000;
 
 /** Claude worker threads behind the real inbox and a probe that types, or blocks, and a clock the test moves. */
 function fixture(t: import("node:test").TestContext) {
-  const registry = testRegistry(t);
+  let now = 1_800_000_000_000;
+  const registry = testRegistry(t, ":memory:", () => now);
   const project = { id: "nexus" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
@@ -27,7 +28,6 @@ function fixture(t: import("node:test").TestContext) {
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: true }; } };
   const harness = { async send() { throw new Error("a Claude worker's message never reaches the harness"); } };
   const inbox = agentInbox({ registry, harness, probes: new Map([[node, probe]]), wake() {} });
-  let now = 1_800_000_000_000;
   const resumer = deadTurnResumer({ registry, inbox, personWroteTo: agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }).personWrote, clock: () => now, log() {} });
   let sequence = 0;
   const seq = new Map<ThreadId, number>();
@@ -43,9 +43,10 @@ function fixture(t: import("node:test").TestContext) {
     transcript(thread.id, [{ kind: "prompt", at: now, text: "/poteto-mode fix it", from: "person" }, { kind: "reply", at: now, text: "On it." }]);
     return thread.id;
   }
-  function transcript(id: ThreadId, entries: ClaudeEntry[]) {
+  /** A read of the worker's transcript. `reset` replaces every entry kept so far, as a read of a new session does. */
+  function transcript(id: ThreadId, entries: ClaudeEntry[], reset = false) {
     const from = seq.get(id)!;
-    registry.appendClaudeRead(id, { session, from: { ...transcriptStart, offset: from }, entries, cursor: { ...transcriptStart, offset: from + 1 }, reset: false, readAt: now });
+    registry.appendClaudeRead(id, { session, from: { ...transcriptStart, offset: from }, entries, cursor: { ...transcriptStart, offset: from + 1 }, reset, readAt: now });
     seq.set(id, from + 1);
   }
   /** A hook's report from the worker's session, stamped now by the pylon's clock. */
@@ -252,4 +253,65 @@ test("a reviewer, a check thread, an archived thread and a running turn get no r
     await f.resumer.poll();
   }
   assert.deepEqual(f.typed, []);
+});
+
+test("a turn end the transcript has not been read past yet keeps the deaths in a row", async (t) => {
+  const f = fixture(t);
+  const id = f.add("th-1");
+  f.turn(id, "model-error");
+  await f.resumer.poll();
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 1);
+  f.tick(1_000);
+  f.report(id, "session.turn-started");
+  f.tick(3_000);
+  f.report(id, "session.turn-ended");
+  await f.resumer.poll();
+  assert.equal(f.registry.claudeResume(id)?.state, "resumed", "a read from before the turn's end shows no error yet");
+  f.tick(1_000);
+  f.transcript(id, [{ kind: "notice", at: f.now - 1_000, tone: "error", text: "API Error: Request timed out." }]);
+  await f.resumer.poll();
+  const record = f.registry.claudeResume(id);
+  assert.deepEqual(record, { state: "waiting", turn: f.now - 1_000, count: 2, due: f.now + resumeWaitsMs[1]! });
+});
+
+test("a resume delivered just before a crash, whose turn then died, counts toward the deaths in a row", async (t) => {
+  const f = fixture(t);
+  const id = f.add("th-1");
+  f.turn(id, "session-ended");
+  await f.resumer.poll();
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  const first = f.registry.thread(id)!.turnDied!.at;
+  f.registry.saveClaudeResume(id, { state: "sending", turn: first, count: 1 });
+  f.tick(1_000);
+  f.turn(id, "session-ended");
+  await f.resumer.poll();
+  assert.equal(f.registry.claudeResume(id)?.state, "resumed");
+  await f.resumer.poll();
+  const record = f.registry.claudeResume(id);
+  assert.equal(record?.state === "waiting" ? record.count : null, 2);
+  f.tick(resumeWaitsMs[1]!);
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 2);
+});
+
+test("a person's message seen while the turn it started runs keeps the thread theirs after the transcript drops it", async (t) => {
+  const f = fixture(t);
+  const id = f.add("th-1");
+  f.tick(1_000);
+  f.transcript(id, [{ kind: "prompt", at: f.now, text: "also check the docs", from: "person" }]);
+  f.registry.recordActivity(id, { human: f.now });
+  f.report(id, "session.turn-started");
+  await f.resumer.poll();
+  assert.deepEqual(f.registry.claudeResume(id), { state: "left-alone" });
+  f.transcript(id, [{ kind: "reply", at: f.now, text: "Checked." }], true);
+  f.tick(3_000);
+  f.report(id, "session.ended");
+  for (const wait of resumeWaitsMs) {
+    f.tick(wait);
+    await f.resumer.poll();
+  }
+  assert.equal(f.typed.length, 0);
 });

@@ -18,7 +18,7 @@ import type { Registry } from "./registry.ts";
 import type { ClaudeResume, Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 
-type ResumeRegistry = Pick<Registry, "agent" | "appendEvent" | "claudeResume" | "isReviewer" | "planning" | "resumedThreads" | "review" | "saveClaudeResume" | "storedThreads" | "thread">;
+type ResumeRegistry = Pick<Registry, "agent" | "appendEvent" | "claudeResume" | "claudeTranscript" | "isReviewer" | "planning" | "resumedThreads" | "review" | "saveClaudeResume" | "storedThreads" | "thread">;
 
 const text = `${resumePrefix} Your turn stopped before it finished: its Claude session ended, or its model's API failed. Continue where you stopped.`;
 
@@ -48,23 +48,31 @@ export function deadTurnResumer(options: {
   }
 
   /** Whether `t` still waits on the death `turn` and no turn of it runs. */
-  const stillDead = (t: Thread | undefined, turn: number): t is Thread => t !== undefined && covered(t) && !t.working && t.turnDied?.at === turn;
+  const stillDead = (t: Thread, turn: number) => covered(t) && !t.working && t.turnDied?.at === turn;
 
   async function judge(t: Thread) {
     const record = registry.claudeResume(t.id);
     if (record?.state === "left-alone") return;
     const save = (next: ClaudeResume | null) => registry.saveClaudeResume(t.id, next);
     if (!covered(t)) return record === null ? undefined : save(null);
+    // The turn the person's message starts may outlast the transcript's hold on that message, so look while it runs.
+    if (t.working && t.lastHumanActivityAt > (t.lastReplyAt ?? 0) && await personWroteTo(t)) return save({ state: "left-alone" });
     const died = t.turnDied;
     if (record?.state === "sending") {
       // It may never have gone out, so it goes only to a thread that still waits on that death and is not the person's.
       if (await personWroteTo(t)) return save({ state: "left-alone" });
       const fresh = registry.thread(t.id);
-      return stillDead(fresh, record.turn) ? deliver(fresh, record) : undefined;
+      if (fresh === undefined) return;
+      if (stillDead(fresh, record.turn)) return deliver(fresh, record);
+      // Only a turn that started since ends a death, so the resume went out before a crash lost its answer.
+      if (covered(fresh) && fresh.turnDied?.at !== record.turn) save({ state: "resumed", turn: record.turn, count: record.count, at: clock() });
+      return;
     }
     if (died === undefined) {
-      // A turn started since the one that died, and once it ends without dying the deaths in a row are over.
-      if (record !== null && !t.working) save(null);
+      // A turn started since the one that died. Once it ended and the transcript was read past its end without a death
+      // in it, the deaths in a row are over: a read that lags the end would show no model error yet.
+      const readAt = registry.claudeTranscript(t.id)?.readAt ?? -Infinity;
+      if (record !== null && !t.working && t.lastReplyAt !== null && readAt >= t.lastReplyAt) save(null);
       return;
     }
     if (t.working) return;
@@ -76,7 +84,7 @@ export function deadTurnResumer(options: {
       if (await personWroteTo(t)) return save({ state: "left-alone" });
       // The await above may have let a turn start or an archive in.
       const fresh = registry.thread(t.id);
-      if (!stillDead(fresh, record.turn)) return;
+      if (fresh === undefined || !stillDead(fresh, record.turn)) return;
       const sending: ClaudeResume = { state: "sending", turn: record.turn, count: record.count };
       save(sending);
       return deliver(fresh, sending);
