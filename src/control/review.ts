@@ -186,8 +186,7 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
 export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
   const { registry, github, inbox, agentState, checks, live, release, log } = deps;
   const now = deps.now ?? Date.now;
-  let closed = false;
-  const passes = scopedFlight(pass, () => closed);
+  const passes = scopedFlight(pass);
   const poll = passes.poll;
 
   /** Whether the agent replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
@@ -783,10 +782,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     /** Steps the reviews thread `id` takes part in now rather than at the next poll, as after its turn or its check ended. */
     wake: passes.wake,
     deploys,
-    async close() {
-      closed = true;
-      await passes.settled();
-    },
+    close: passes.settled,
 
     /** Starts a review of the builder's open PR: the reviewer thread, its first request, and the record. */
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {

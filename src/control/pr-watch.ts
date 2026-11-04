@@ -164,20 +164,20 @@ export function prWatcher(options: {
     }
     if (pass !== null) finished = pass;
   }
-  let closed = false;
-  const ticks = scopedFlight(tick, () => closed);
+  const ticks = scopedFlight(tick);
   /**
    * The number of the latest pass over every thread to start, and of the latest to finish. Passes run one at a time, in
    * order.
    */
   const passes = () => ({ started, finished });
+  let closed = false;
   const ending = new Set<Promise<void>>();
   /** Reads thread `id`'s pull requests now rather than at the next poll, as after its turn ended. */
   function turnEnded(id: ThreadId): Promise<void> {
     const t = registry.thread(id);
     if (closed || github === null || !active(t) || registry.isReviewer(id)) return Promise.resolve();
     // The poll still reads branches a failed read missed.
-    const run = (options.fresh?.(t!) ?? Promise.resolve()).catch(() => undefined).then(() => ticks.wake(id));
+    const run = (options.fresh?.(t!) ?? Promise.resolve()).catch(() => undefined).then(() => closed ? undefined : ticks.wake(id));
     ending.add(run);
     const done = () => { ending.delete(run); };
     run.then(done, done);
