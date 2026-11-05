@@ -49,7 +49,7 @@ import { testCertificate } from "../test-certificate.ts";
 import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";
 import type { Api } from "./kit.ts";
-import { pressOf } from "./commands/release.ts";
+import { answeredText, pressOf } from "./commands/release.ts";
 import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
 
@@ -1750,7 +1750,9 @@ test("land --waive answers the review's question about its holds, once the perso
     holds: { review: review.id, head: approvedRound.head, base: "main", holds: [{ code: "reserved-path:egress", text: egress }] } };
   const api = (async () => ({ review, questions: [question] })) as Api;
   const yes = confirmingTerminal("yes");
-  assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { question: question.id });
+  assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { question: question.id, running: true });
+  assert.match(answeredText(review, true), /^Waived the holds at 111111111111\. It lands once the reviewer approves and its checks pass\.\nreview rv-\S+ of PR #7: reviewing,/, "a review still under way is not landing yet");
+  assert.match(answeredText({ ...review, phase: { kind: "checking", startedAt: 1, thread: null } }, false), /^Landing review /);
   assert.equal(yes.shown(), `Land pull request #7 at ${approvedRound.head}, waiving the holds the merge policy reserves for you:\n  ${egress}\nType yes to waive them and land: `);
   await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("no").terminal), (err: CliError) => err.kind === "failed");
   const answered = (async () => ({ review, questions: [{ ...question, answer: { option: "Leave it", by: "nLAPTOP", at: 2 } }] })) as Api;
