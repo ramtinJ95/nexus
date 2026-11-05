@@ -253,7 +253,9 @@ const secondModels = [defaultClaudeModel, "claude-fable-5-1", "claude-sonnet-5-5
  */
 export function secondReviewerFor(taken: readonly string[], secrets: readonly SecretGrant[]): { model: string } | { why: string } {
   if (!grantsClaude(secrets)) return { why: `the harness runs only ${taken.join(" and ")}, and the project grants no Claude token for a Claude worker on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`)` };
-  const model = secondModels.find((m) => !taken.includes(m));
+  // A Claude worker may run an alias, such as `opus`, or a variant, such as `claude-opus-5-5[1m]`, of a model by its family.
+  const family = (m: string) => /opus|fable|sonnet|haiku/i.exec(m)?.[0].toLowerCase() ?? m;
+  const model = secondModels.find((m) => !taken.some((t) => family(t) === family(m)));
   return model === undefined ? { why: `every Claude model Nexus offers a second reviewer, ${secondModels.join(", ")}, is the builder's or the first reviewer's` } : { model };
 }
 

@@ -14,7 +14,7 @@ import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, personOnly, reservedNames, type Hold, type HoldCode } from "./holds.ts";
 import { carryWaiver, headHolds, heldBy, landingHolds, landPress, secondReviewRule } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
-import { cannotLand, changeOf, checkBeside, ended, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
+import { cannotLand, changeOf, checkBeside, ended, findingsOf, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { reviewText } from "../cli/thread-text.ts";
 import { defaultSecondReview } from "./project.ts";
@@ -4488,6 +4488,8 @@ test("the second reviewer's rule names a change by its lines, tests and docs inc
 test("the second reviewer runs another model than the builder's and the first reviewer's, or says why none can", () => {
   assert.deepEqual(secondReviewerFor(["claude-opus-5-5", "gpt-6-astra"], claudeToken), { model: "claude-fable-5-1" });
   assert.deepEqual(secondReviewerFor(["claude-fable-5-1", "gpt-6-astra"], claudeToken), { model: "claude-opus-5-5" });
+  assert.deepEqual(secondReviewerFor(["opus", "gpt-6-astra"], claudeToken), { model: "claude-fable-5-1" }, "an alias is its model's family");
+  assert.deepEqual(secondReviewerFor(["claude-opus-5-5[1m]", "gpt-6-astra"], claudeToken), { model: "claude-fable-5-1" });
   assert.match((secondReviewerFor(["claude-opus-5-5", "gpt-6-astra"], []) as { why: string }).why, /harness runs only claude-opus-5-5 and gpt-6-astra, and the project grants no Claude token/);
   assert.match((secondReviewerFor(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5"], claudeToken) as { why: string }).why, /is the builder's or the first reviewer's/);
 });
@@ -4522,13 +4524,13 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   const fix = f.sent.at(-1)!;
   assert.equal(fix.to, f.builder);
   assert.match(fix.message.text, /by a reviewer on gpt-6-astra and a second reviewer on claude-fable-5-1: changes requested/);
-  assert.match(fix.message.text, /From the second reviewer on claude-fable-5-1:\n\n2-F1 \(P1\) src\/cache.ts:1: The cache never expires/);
+  assert.match(fix.message.text, /From the second reviewer on claude-fable-5-1:\n\n2\.F1 \(P1\) src\/cache.ts:1: The cache never expires/);
   assert.match(reviewText(f.review()), /th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 asks for changes \(P1\)/);
 
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Wrong ID." }]));
   await loop.poll();
-  assert.match(f.sent.at(-1)!.message.text, /leave 2-F1 without a fix/, "the builder answers the second reviewer's finding by its own ID");
-  f.reply(f.builder, answers(f.review(), [{ id: "2-F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
+  assert.match(f.sent.at(-1)!.message.text, /leave 2\.F1 without a fix/, "the builder answers the second reviewer's finding by its own ID");
+  f.reply(f.builder, answers(f.review(), [{ id: "2.F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
   f.tick(10 * 60_000);
   await loop.poll();
@@ -4536,7 +4538,7 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   assert.equal(f.review().rounds[1]!.secondVerdict, null);
   const toFirst = f.sent.filter((s) => s.to === reviewer).at(-1)!.message.text;
   const toSecond = f.sent.filter((s) => s.to === second.thread).at(-1)!.message.text;
-  assert.doesNotMatch(toFirst, /TTL|2-F1/, "the first reviewer never hears the second's findings");
+  assert.doesNotMatch(toFirst, /TTL|2\.F1/, "the first reviewer never hears the second's findings");
   assert.match(toFirst, /The builder pushed new commits after the round you reviewed/);
   assert.match(toSecond, /The builder answered your findings:\nF1: fixed\. Added a 5-minute TTL\./);
   assert.match(toSecond, new RegExp(`git diff ${head1}..${head2}`));
@@ -4645,6 +4647,41 @@ test("a review whose rule asks for a second reviewer that no other model can run
   assert.deepEqual(f.merges, [head1], "the person's waiver lands it");
 });
 
+test("a stored round of a review with a second reviewer that lacks its verdict has none, so the first reviewer's approval alone does not approve it", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const { secondVerdict: _, ...lost } = f.review().rounds[0]!;
+  f.registry.saveReview({ ...f.review(), rounds: [lost] });
+  assert.equal(f.review().rounds[0]!.secondVerdict, null);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+});
+
+test("a second reviewer's finding IDs never meet the first's, and the builder can answer every finding of both", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const long = "F".repeat(40);
+  const many = (prefix: string) => Array.from({ length: 50 }, (_, i) => ({ ...serious, id: i === 0 ? long : `${prefix}${i}` }));
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [{ ...serious, id: "2-F1" }, ...many("A").slice(1)] }));
+  f.reply(secondOf(f.review()).thread, secondVerdict(f.review(), { verdict: "changes", findings: [{ ...serious, id: "F1" }, ...many("B")].slice(0, 50) }));
+  await loop.poll();
+  const ids = findingsOf(f.review().rounds[0]!).map((finding) => finding.id);
+  assert.equal(new Set(ids).size, 100, "no two findings share an ID");
+  assert.ok(ids.includes("2-F1") && ids.includes("2.F1") && ids.includes(`2.${long}`));
+  f.reply(f.builder, answers(f.review(), ids.map((id) => ({ id, action: "rejected", reason: "Not a bug." }))));
+  f.tick(10 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().rounds[0]!.answers?.length, 100, "every answer reads");
+  assert.equal(f.review().rounds.length, 2);
+  assert.match(f.sent.filter((s) => s.to === f.review().reviewer).at(-1)!.message.text, /2-F1: rejected/, "the first reviewer's own 2-F1 answer goes to it");
+  assert.doesNotMatch(f.sent.filter((s) => s.to === secondOf(f.review()).thread).at(-1)!.message.text, /2-F1|A1:/);
+});
+
 test("the policy holds a landing the second reviewer has not approved, and reads its reserved cases", () => {
   const second = { kind: "claude", rule: "the project gives every pull request one", thread: "th-second" as ThreadId, model: "claude-fable-5-1", expect: "rv-1:s", asked: "", since: 1, nudges: 0, outbox: null } as const;
   const approval = { token: "t", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" };
@@ -4696,7 +4733,7 @@ test("each pull request a second model caught on 2026-11-04 gets a second review
     assert.equal(f.review().phase.kind, "fixing", `#${pr} goes back to its builder`);
     assert.deepEqual(f.merges, [], `#${pr} does not land on the first reviewer's approval`);
     assert.equal(landable(f.review()), false);
-    assert.match(f.sent.at(-1)!.message.text, new RegExp(`From the second reviewer on claude-fable-5-1:\\n\\n2-F1 \\(P1\\) ${finding.where}: ${finding.summary}`));
+    assert.match(f.sent.at(-1)!.message.text, new RegExp(`From the second reviewer on claude-fable-5-1:\\n\\n2\\.F1 \\(P1\\) ${finding.where}: ${finding.summary}`));
   }
   assert.match(secondReviewRule(defaultSecondReview, missed[1]!.files, true)!, /^the change has 158 changed lines/);
   assert.equal(secondReviewRule({ always: false, lines: null, reserved: true }, missed[2]!.files, true), null, "#445 touched no reserved path, so only its size names it");

@@ -36,7 +36,7 @@ export const verdictSchema = z.object({
 }).transform((v) => ({ ...v, verdict: v.findings.some(blocks) ? "changes" as const : "approve" as const }));
 export const answersSchema = z.object({
   token: z.string(),
-  answers: z.array(z.object({ id: z.string().max(40), action: z.enum(["fixed", "rejected"]), reason: z.string().max(4_000) })).max(60),
+  answers: z.array(z.object({ id: z.string().max(42), action: z.enum(["fixed", "rejected"]), reason: z.string().max(4_000) })).max(110),
 });
 /** The reviewer's quote, asked for by a Land press at an approved head, of what the description now says could not be checked live. */
 export const quoteSchema = z.object({ token: z.string(), notCheckedLive: z.string().max(4_000).nullable() });
@@ -281,7 +281,9 @@ export function storedReview(record: Review): Review {
       holds: phase.holds ?? phase.reasons.map((text) => ({ code: legacyHoldCode(text), text })),
     } : phase,
     asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
-    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } }),
+    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } })
+      // A round of a review with a second reviewer that lacks its verdict has none, which never approves.
+      .map((round) => record.second?.kind === "claude" && round.secondVerdict === undefined ? { ...round, secondVerdict: null } : round),
   };
 }
 
@@ -315,8 +317,8 @@ const gates = {
 export const gateFailure = (round: Round): GateFailure | null => round.check?.passed === false && reviewerApproved(round) ? gates.check(round.head, round.check.output)
   : round.live?.kind === "ran" && !round.live.passed ? gates.live(round.head, round.live.output)
   : round.conflict !== undefined ? gates.conflict(round.head, round.conflict.base) : null;
-/** A second reviewer's finding as the builder answers it, so its ID never meets one of the first reviewer's. */
-export const secondId = (id: string) => `2-${id}`;
+/** A second reviewer's finding as the builder answers it. No finding's own ID has a dot, so it never meets one of the first reviewer's. */
+export const secondId = (id: string) => `2.${id}`;
 /** The second reviewer's findings at the round, under the IDs the builder answers. */
 export const secondFindings = (round: Round): Finding[] => (round.secondVerdict?.findings ?? []).map((f) => ({ ...f, id: secondId(f.id) }));
 /** What the reviewers found at the round, the first's then the second's. */
