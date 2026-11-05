@@ -4300,3 +4300,45 @@ test("a cancel while the loop reads the head's change leaves no question open", 
   assert.deepEqual(openHolds(f), [], "the step that read the change before the cancel asks nothing");
   assert.notEqual(f.registry.attention(f.builder), "decision");
 });
+
+test("a Land answer to an early question lands a review the live check left with the person before its holds were recorded", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  f.verifies = true;
+  f.live = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying");
+  f.tick(61 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person", "the live check gave no verdict");
+  assert.equal(f.review().rounds.at(-1)!.heldAt, undefined, "its holds were never recorded");
+  const [question] = openHolds(f);
+  assert.deepEqual(question!.holds!.holds.map((h) => h.text), [imageHold], "the early question is still the one to answer");
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.deepEqual(f.review().waiver!.codes, ["reserved-path:image-rebuild"]);
+  f.live = { kind: "done", passed: true, output: "fleet ok" };
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "the landing reads the holds from GitHub's files, and the waiver gets it past them");
+});
+
+test("a live check that failed after an early question leaves nothing to land, so the question goes", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  f.verifies = true;
+  f.live = { kind: "done", passed: false, output: "broken" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  assert.equal(openHolds(f).length, 1);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.equal(landable(f.review()), false);
+  assert.deepEqual(openHolds(f), []);
+});

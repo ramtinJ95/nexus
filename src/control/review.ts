@@ -466,7 +466,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (!waivable(hold.code)) throw new HttpError(409, `"${text}" cannot be waived: only the holds the merge policy reserves for the person`);
       return hold.code;
     };
-    const waiver = waive === undefined ? null : waiverOf(r, requestedBy, waive, waive.map(waived));
+    return pressWith(r, requestedBy, waive === undefined ? null : waiverOf(r, requestedBy, waive, waive.map(waived)));
+  };
+  /** A Land press on `r`, which `landableAt` took, with `waiver`. */
+  const pressWith = (r: Review, requestedBy: string, waiver: Waiver | null): Review => {
     const press = pressOn(r);
     return { ...r, land: { requestedBy }, waiver, phase: press.quotes ? { kind: "quoting", asked: null } : checking(), outbox: null, nudges: 0 };
   };
@@ -1027,15 +1030,17 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const r = registry.review(question.thread);
       const moved = new HttpError(409, `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
       if (r === null || !asksAt(r, holds)) throw moved;
-      const texts = holds.holds.map((h) => h.text);
+      // The loop asked about these holds at this head and base, which may come from the change before the round
+      // recorded them, so the waiver is the question's, and the landing reads the head's holds again before it merges.
+      const waiver = waiverOf(r, by, holds.holds.map((h) => h.text), holds.holds.map((h) => h.code));
       let next: Review;
-      if (landable(r)) next = pressed(landableAt(question.thread, holds.head), by, texts);
+      if (landable(r)) next = pressWith(landableAt(question.thread, holds.head), by, waiver);
       else {
         const builder = registry.thread(r.builder)!;
         if (builder.status !== "active") throw new HttpError(409, `thread ${r.builder} is ${builder.status}`);
         if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new HttpError(409, cannotLand(r, builder, watchedPr(r))!);
         pressOn(r);
-        next = { ...r, land: { requestedBy: by }, waiver: waiverOf(r, by, texts, holds.holds.map((h) => h.code)) };
+        next = { ...r, land: { requestedBy: by }, waiver };
       }
       const answered = registry.answerQuestion(question.id, answer, () => {
         if (!registry.saveReview(next, [], r)) throw moved;
