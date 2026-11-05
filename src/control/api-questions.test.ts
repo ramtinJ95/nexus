@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadDetail } from "./wire.ts";
 import type { Question } from "./questions.ts";
+import type { ReviewLoop } from "./review.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";
 import { node, laptop, phone, project, image, claudeSession, testApi, withThread, deployment, withClaude } from "./api-test-kit.ts";
 
@@ -143,4 +144,20 @@ test("an answer to an AskUserQuestion nobody waits for any more withdraws it, an
   assert.notEqual((await s.detail()).attention, "decision");
   await s.read();
   assert.deepEqual(await open(), [], "the pylon's next report agrees");
+});
+
+test("Land on a question about a review's holds goes to the review loop, which records the answer with the waiver, and only a deployer gives it", async (t) => {
+  const answered: unknown[][] = [];
+  const reviews = { answerHolds(question: Question, option: string, by: string) { answered.push([question.id, option, by]); return { ...question, answer: { option, by, at: 1 } }; } } as never as ReviewLoop;
+  const s = await withThread(t, { deployment, reviews });
+  s.registry.askQuestion({
+    id: "holds-rv-1-a", thread: s.thread.id, text: "Land pull request #7?", options: ["Land", "Leave it"], reserved: "auth", answerer: "deployer", askedAt: 1,
+    holds: { review: "rv-1", head: "a".repeat(40), base: "main", holds: [{ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }] },
+  });
+  s.callAs(phone);
+  assert.equal((await s.call("POST", "/v1/questions/holds-rv-1-a/answer", { option: "Land" })).status, 403);
+  s.callAs(laptop);
+  const land = await s.call("POST", "/v1/questions/holds-rv-1-a/answer", { option: "Land" });
+  assert.equal(land.status, 200);
+  assert.deepEqual(answered, [["holds-rv-1-a", "Land", laptop]]);
 });

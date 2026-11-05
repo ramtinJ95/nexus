@@ -17,25 +17,26 @@
  * A reply that lacks the block gets a reminder, at most twice in a row, before the loop asks the person. A turn that
  * ended because the agent's model failed gets the same request again, after a wait that grows with each failure in a row.
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "../agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../secret-grants.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
-import type { GitHub, PrSnapshot, PullRequest } from "./github.ts";
+import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
 import { isDraining } from "./drain.ts";
-import { reservedCases, reservedNames, waivable, type Hold } from "./holds.ts";
-import { carryWaiver, headHolds, heldBy, landingHolds, landPress, staleQuote, unwaived } from "./policy.ts";
+import { caseOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
+import { askedHolds, carryWaiver, headHolds, heldBy, landingHolds, landPress, staleQuote, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, watchStopped } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import type { ThreadId } from "../ids.ts";
+import type { TailnetNodeId, ThreadId } from "../ids.ts";
+import { holdOptions, isOpen, type HeldQuestion, type Question, type ThreadQuestion } from "./questions.ts";
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
   landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, quoteSchema, reviewerApproved, roundsSpent, settledKinds, verdictSchema,
@@ -43,7 +44,7 @@ import {
 } from "./review-model.ts";
 import type { StartRequest } from "./start-request.ts";
 
-type ReviewRegistry = Pick<Registry, "agent" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "releaseReports" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread">;
+type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
@@ -176,6 +177,26 @@ const fences = { reviewing: "nexus-review", fixing: "nexus-review-answers", quot
 function reminder(phase: keyof typeof fences, missing: string | null, token: string): string {
   return `${reviewPrefix}
 ${missing ?? `Your last reply had no ${fences[phase]} block with the token "${token}", so Nexus could not read it.`} End your reply with that block, with JSON in it, as ${phase === "quoting" ? "the request" : "the round's message"} showed.`;
+}
+
+/** Every question about a review's holds has an ID that starts so, and a builder has at most one open. */
+const holdsPrefix = "holds-";
+const listed = (names: readonly string[]) => names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+/**
+ * The question that asks the person to waive `holds` at the review's latest head, with `why` an earlier waiver did not
+ * carry to it. Its ID is made from the head, the base and the holds, so the same holds ask nothing new, and holds that
+ * change ask again.
+ */
+function holdsQuestion(r: Review, holds: readonly Hold[], why: Hold | null, deploys: boolean, askedAt: number): Omit<ThreadQuestion, "answer"> {
+  const { head, base } = r.rounds.at(-1)!;
+  const at = head.slice(0, 12);
+  const asked: HeldQuestion = { review: r.id, head, base: base ?? null, holds };
+  const id = `${holdsPrefix}${r.id}-${createHash("sha256").update(JSON.stringify([head, base ?? null, holds])).digest("hex").slice(0, 16)}`;
+  const text = `Land pull request #${r.pr.number}, "${r.pr.title}", at ${at}, waiving ${listed([...new Set(holds.map((h) => waivedName(h.code)))])}?
+${holds.map((h) => `- ${h.text}`).join("\n")}
+${why === null ? "" : `${why.text}\n`}Land waives these at ${at}, and at a rebase of it that leaves the change as it is. Nexus still lands it only once the reviewer approves it and its checks pass${deploys ? ", then deploys it" : ""}. Leave it, and nothing is waived.`;
+  return { id, thread: r.builder, text, options: holdOptions, reserved: holds.map((h) => caseOf(h.code)).find((c) => c !== null) ?? null, answerer: "deployer", askedAt, holds: asked };
 }
 
 /** The reviewer's kind and model: another model family than the builder's where one can run. */
@@ -375,6 +396,79 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const by = r.land?.fromProject ? setting!.enabledBy : r.land!.requestedBy;
     return deps.mayLand(by) ? [] : [{ code: "loop", text: `${by}, who ${r.land?.fromProject ? `turned on landing for project ${builder.project}` : "asked for this landing"}, is not among the control plane's deployers, so only the person can land it.` }];
   };
+
+  /** Each review's latest head's change against its base, read once to ask about its holds before the loop records them. */
+  const early = new Map<string, { at: string; files: readonly ChangedFile[] | null }>();
+  /** The holds question each builder was last left with, so a pass that changes nothing writes nothing. */
+  const asked = new Map<ThreadId, string | null>();
+  const ask = (builder: ThreadId, question: Omit<ThreadQuestion, "answer"> | null) => {
+    if (asked.get(builder) === (question?.id ?? null)) return;
+    registry.replaceQuestions(builder, holdsPrefix, question);
+    asked.set(builder, question?.id ?? null);
+  };
+  /**
+   * Asks the person about the holds a Land press at the review's latest head would waive, as soon as they are known:
+   * those the head's change decides from the round's start, and the reviewer's once it answers. A review that cannot
+   * land, or whose holds the person's waiver covers, asks nothing. Answers `r` with the change its waiver is for read,
+   * or with the waiver carried to a rebase of that change, so the person is not asked again for it.
+   */
+  async function askHolds(r: Review): Promise<Review> {
+    const round = r.rounds.at(-1)!;
+    const askable = r.merged === null && (ended.has(r.phase.kind) ? landable(r) : landingVerb(r) === null);
+    if (!askable) {
+      early.delete(r.id);
+      ask(r.builder, null);
+      return r;
+    }
+    let files: readonly ChangedFile[] | null = null;
+    if (round.heldAt === undefined && round.base !== undefined) {
+      const at = `${round.head}:${round.base}`;
+      if (early.get(r.id)?.at !== at) early.set(r.id, { at, files: await github.change(r.pr.repo, round.base, round.head) });
+      files = early.get(r.id)!.files;
+    }
+    const holds = askedHolds(r, files === null ? null : headHolds({ review: r, files, nexus: deploys(r) }));
+    const base = async () => round.base ?? (await read(r)).detail.base;
+    // As the landing does, the change a waiver is for is read once the person gave it, so a rebase can be compared with it.
+    if (r.waiver !== null && r.waiver.change === null && r.waiver.head === round.head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, await base(), round.head) } };
+    if (holds.length === 0 || unwaived(r, holds).length === 0) {
+      ask(r.builder, null);
+      return r;
+    }
+    let question = holdsQuestion(r, holds, null, deploys(r), now());
+    if (registry.question(question.id) === null && r.waiver !== null && r.waiver.head !== round.head) {
+      const { review, why } = carryWaiver(r, await changeAt(r, await base(), round.head), holds);
+      if (review !== r) return review;
+      question = holdsQuestion(r, holds, why, deploys(r), now());
+    }
+    ask(r.builder, question);
+    return r;
+  }
+
+  /** What a Land press on `r` does, refused when no press lands it. */
+  const pressOn = (r: Review) => {
+    const press = landPress(r);
+    if (press.kind === "stuck") throw new HttpError(409, `review ${r.id} of ${r.builder} is held by what meets every landing of ${r.rounds.at(-1)!.head} again, so no Land press lands it: ${press.holds.map((h) => h.text).join(" ")}`);
+    return press;
+  };
+  /** The waiver of the holds the person named by `texts` at the review's latest head. */
+  const waiverOf = (r: Review, by: string, texts: readonly string[], codes: Waiver["codes"]): Waiver => ({ head: r.rounds.at(-1)!.head, holds: [...texts], codes, by, at: now(), change: null });
+  /** A Land press on `r`, which `landableAt` took, past the holds the person `waive`s, each one the review has now and the policy lets them waive. */
+  const pressed = (r: Review, requestedBy: string, waive: readonly string[] | undefined): Review => {
+    if (waive?.length === 0) throw new HttpError(400, "a waiver names at least one hold");
+    // The person names each hold by the text they saw, which must be one of the review's holds now.
+    const waived = (text: string) => {
+      const hold = heldBy(r).find((h) => h.text === text);
+      if (hold === undefined) throw new HttpError(409, `review ${r.id} is not held by "${text}", so there is nothing to waive. Look at it again`);
+      if (!waivable(hold.code)) throw new HttpError(409, `"${text}" cannot be waived: only the holds the merge policy reserves for the person`);
+      return hold.code;
+    };
+    const waiver = waive === undefined ? null : waiverOf(r, requestedBy, waive, waive.map(waived));
+    const press = pressOn(r);
+    return { ...r, land: { requestedBy }, waiver, phase: press.quotes ? { kind: "quoting", asked: null } : checking(), outbox: null, nudges: 0 };
+  };
+  /** The holds question of `r` that is open at its latest head and names exactly the holds `texts` name. */
+  const openQuestion = (r: Review, texts: readonly string[]): ThreadQuestion | undefined => registry.questions(r.builder).find((q) => isOpen(q) && q.holds?.review === r.id
+    && q.holds.head === r.rounds.at(-1)!.head && JSON.stringify(q.holds.holds.map((h) => h.text).sort()) === JSON.stringify([...texts].sort()));
 
   /**
    * Waits on `t`. Once a turn of it ended after the loop's last message without the answer the loop needs, it gets a
@@ -675,6 +769,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   }
 
   async function step(r: Review): Promise<Review> {
+    // The person is asked once the holds are known, whatever the phase waits on, and a failed read only delays it.
+    const ready = await askHolds(r).catch((err: unknown) => {
+      log(`review ${r.id} of ${r.builder}: its holds were not asked about and will be tried again (${(err as Error).name})`);
+      return r;
+    });
+    if (ready !== r) return ready;
     // A review that waits on the person ends as a running one does once the person closes its PR or archives its
     // builder, before its label, which the person no longer needs, and one stopped at approval once its PR merged
     // outside it too. One that merged is held over its deploy, which neither settles.
@@ -899,21 +999,43 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
      */
     land(builderId: ThreadId, requestedBy: string, head?: string, waive?: readonly string[]): Review {
       const r = landableAt(builderId, head);
-      if (waive?.length === 0) throw new HttpError(400, "a waiver names at least one hold");
-      // The person names each hold by the text they saw, which must be one of the review's holds now.
-      const waived = (text: string) => {
-        const hold = heldBy(r).find((h) => h.text === text);
-        if (hold === undefined) throw new HttpError(409, `review ${r.id} is not held by "${text}", so there is nothing to waive. Look at it again`);
-        if (!waivable(hold.code)) throw new HttpError(409, `"${text}" cannot be waived: only the holds the merge policy reserves for the person`);
-        return hold.code;
-      };
-      const waiver: Waiver | null = waive === undefined ? null : { head: r.rounds.at(-1)!.head, holds: [...waive], codes: waive.map(waived), by: requestedBy, at: now(), change: null };
-      const press = landPress(r);
-      if (press.kind === "stuck") throw new HttpError(409, `review ${r.id} of ${builderId} is held by what meets every landing of ${r.rounds.at(-1)!.head} again, so no Land press lands it: ${press.holds.map((h) => h.text).join(" ")}`);
-      const next: Review = { ...r, land: { requestedBy }, waiver, phase: press.quotes ? { kind: "quoting", asked: null } : checking(), outbox: null, nudges: 0 };
-      registry.saveReview(next);
+      const next = pressed(r, requestedBy, waive);
+      // A press that waives the holds the review's question names answers it, as its Land does.
+      const question = waive === undefined ? undefined : openQuestion(r, waive);
+      if (question === undefined) registry.saveReview(next);
+      else registry.answerQuestion(question.id, { option: "Land", by: requestedBy as TailnetNodeId, at: now() }, () => registry.saveReview(next));
       void poll();
       return next;
+    },
+
+    /**
+     * Records the person's answer to a question about a review's holds. Land is a Land press waiving the holds the
+     * question names: on a review the land route takes, the press itself, and on one still under review at the
+     * question's head, the waiver and the landing request alone, so the review lands once the reviewer approves and
+     * its checks pass. Leave it waives nothing.
+     */
+    answerHolds(question: ThreadQuestion & { holds: HeldQuestion }, option: string, by: TailnetNodeId): Question {
+      const answer = { option, by, at: now() };
+      if (!isOpen(question) || option !== "Land") return registry.answerQuestion(question.id, answer);
+      const { holds } = question;
+      const r = registry.review(question.thread);
+      const moved = new HttpError(409, `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
+      if (r === null || r.id !== holds.review || r.rounds.at(-1)!.head !== holds.head) throw moved;
+      const texts = holds.holds.map((h) => h.text);
+      let next: Review;
+      if (landable(r)) next = pressed(landableAt(question.thread, holds.head), by, texts);
+      else {
+        const builder = registry.thread(r.builder)!;
+        if (builder.status !== "active") throw new HttpError(409, `thread ${r.builder} is ${builder.status}`);
+        if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new HttpError(409, cannotLand(r, builder, watchedPr(r))!);
+        pressOn(r);
+        next = { ...r, land: { requestedBy: by }, waiver: waiverOf(r, by, texts, holds.holds.map((h) => h.code)) };
+      }
+      const answered = registry.answerQuestion(question.id, answer, () => {
+        if (!registry.saveReview(next, [], r)) throw moved;
+      });
+      void poll();
+      return answered;
     },
 
     /**
@@ -928,6 +1050,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const next = end(r, { kind: "cancelled", who: "person", by });
       const archive = finished(r.reviewer);
       registry.saveReview(next, archive.map((t) => t.id));
+      ask(r.builder, null);
       for (const t of archive) deps.wake(t);
       return next;
     },

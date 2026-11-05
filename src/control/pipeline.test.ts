@@ -206,3 +206,22 @@ test("an item is checked as a start is, and its pass records why a queue refused
   assert.equal(phase(f.registry, gone), "planned: was not queued: no node nowhere");
   assert.equal(f.registry.item(gone)!.lastError, "no node nowhere");
 });
+
+test("an item whose review asks about its holds holds only itself: it stays in review, and the items beside it start and build", async (t) => {
+  const f = fixture(t);
+  const r = f.registry;
+  const a = f.add("A"), b = f.add("B");
+  await f.passes();
+  const ta = thread(r, a);
+  f.review(ta, { kind: "reviewing" });
+  r.askQuestion({
+    id: "holds-r-a-1", thread: ta, text: "Land pull request #9?", options: ["Land", "Leave it"], reserved: "auth", answerer: "deployer", askedAt: 1,
+    holds: { review: `r-${ta}`, head: "h", base: "main", holds: [{ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }] },
+  });
+  assert.equal(r.attention(ta), "decision");
+  assert.equal(phase(r, a), "reviewing: PR #9, round 1: reviewing");
+  assert.equal(phase(r, b), "building: no pull request yet");
+  const c = f.add("C");
+  await f.passes();
+  assert.equal(phase(r, c), "building: no pull request yet", "a new item starts while the question waits");
+});
