@@ -106,6 +106,17 @@ export function agentReader(registry: AgentConversationRegistry, harness: Pick<H
       const c = await read(t);
       return { ...turn, replies: repliesOf(c), failure: c.failure };
     },
+    /**
+     * The first message the agent got, which is its brief, or null when it has none: a Claude worker's prompt, or the
+     * first message of a harness conversation.
+     */
+    async brief(t: Thread): Promise<string | null> {
+      const agent = registry.agent(t);
+      if (agent.kind !== "harness") return agent.kind === "claude" ? agent.worker.prompt : null;
+      const first = (await harnessView(harness)(t)).entries.flatMap((entry) => entry.model ?? []).find((message) => message.role === "user");
+      if (first === undefined) return null;
+      return typeof first.content === "string" ? first.content : first.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("");
+    },
     /** An agent's replies, oldest first. */
     replies: async (t: Thread): Promise<string[]> => repliesOf(await read(t)),
     personWrote: async (t: Thread): Promise<boolean> => personWrote(await read(t)),

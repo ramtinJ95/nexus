@@ -179,11 +179,16 @@ export interface Outbox { id: string; text: string; attempted: number | null }
 /**
  * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on another model than the
  * builder's and the first reviewer's, in `thread`, with its side of the conversation, as the review's own fields keep
- * the first's. `none` when no such model could run, for `why`, which holds the landing for the person.
+ * the first's. `starting` until its thread starts, tried since `since` and last at `tried`, which failed for `why`.
+ * `none` when no such model could run or its thread did not start in time, for `why`, which holds the landing for the
+ * person.
  */
 export type SecondReviewer =
   | { kind: "claude"; rule: string; thread: ThreadId; model: string; expect: string; asked: string; since: number; nudges: number; failing?: ModelFailure; outbox: Outbox | null }
+  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null }
   | { kind: "none"; rule: string; why: string };
+/** Whether the review has a second reviewer whose verdict each round it reviews needs. */
+export const secondReads = (r: Pick<Review, "second">) => r.second !== undefined && r.second.kind !== "none";
 
 export interface Review {
   /** Part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
@@ -202,6 +207,8 @@ export interface Review {
   reviewerKind: "harness" | "claude";
   /** Absent when the project's rule gave the review no second reviewer. */
   second?: SecondReviewer;
+  /** The builder's brief, its first message, cut as the description is, which each reviewer's first request carries. */
+  brief?: string | null;
   maxRounds: number;
   /**
    * Who asked for the PR to land once approved, or null to stop at approval. `fromProject` when the project's setting
@@ -283,7 +290,7 @@ export function storedReview(record: Review): Review {
     asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
     rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } })
       // A round of a review with a second reviewer that lacks its verdict has none, which never approves.
-      .map((round) => record.second?.kind === "claude" && round.secondVerdict === undefined ? { ...round, secondVerdict: null } : round),
+      .map((round, i) => secondReads(record) && i === record.rounds.length - 1 && round.secondVerdict === undefined ? { ...round, secondVerdict: null } : round),
   };
 }
 
@@ -403,6 +410,7 @@ export function reviewersNote(r: Review): string | null {
   const round = r.rounds.at(-1)!;
   const first = `round ${r.rounds.length}: the reviewer ${r.reviewer} on ${r.models.reviewer} ${verdictWord(round.verdict)}`;
   if (r.second.kind === "none") return `${first}. No second reviewer runs, though ${r.second.rule}: ${r.second.why}`;
+  if (r.second.kind === "starting") return `${first}, and the second reviewer on ${r.second.model} is starting${r.second.why === null ? "" : `, after a start that failed: ${r.second.why}`}. It reviews since ${r.second.rule}`;
   return `${first}, and the second reviewer ${r.second.thread} on ${r.second.model} ${verdictWord(round.secondVerdict)}. It reviews since ${r.second.rule}`;
 }
 /** The check thread `phase` holds: a checking round's, or a reviewing round's, which runs beside the reviewer. */

@@ -14,7 +14,7 @@
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import type { SecondReview } from "./project.ts";
 import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, changedPaths, descriptionDigest, findingsOf, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
+import { answered, blocks, changedPaths, descriptionDigest, findingsOf, secondReads, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;
@@ -188,7 +188,7 @@ const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
     const round = review.rounds.at(-1)!;
     if (round.verdict?.verdict !== "approve") return [hold("not-approved", "The reviewer has not approved the latest commits.")];
     // A second reviewer that never answered, or whose round lost its verdict, has not approved.
-    if (review.second?.kind === "claude" && round.secondVerdict?.verdict !== "approve") return [hold("not-approved", "The second reviewer has not approved the latest commits.")];
+    if (secondReads(review) && round.secondVerdict?.verdict !== "approve") return [hold("not-approved", "The second reviewer has not approved the latest commits.")];
     const open = findingsOf(round).filter(blocks);
     return open.length ? [hold("open-findings", `Findings P0 to P2 are open: ${open.map((f) => f.id).join(", ")}.`)] : [];
   },

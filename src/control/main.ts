@@ -227,6 +227,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const reviews = github === null ? null : reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     agentState: agents.state,
+    brief: agents.brief,
     checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, ended: (id) => void reviews?.wake(id) }),
     live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate, ended: (id) => void reviews?.wake(id) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
