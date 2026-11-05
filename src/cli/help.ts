@@ -54,7 +54,7 @@ export const usage = `nexus ${version}, the Nexus control plane from this Mac
     a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy
   nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying
   nexus land <thread> [--waive]
-    land an approved review under the merge policy, or try a held landing again; --waive waives the holds reserved for you, as the dashboard's Land does
+    land an approved review under the merge policy, or try a held landing again; --waive answers Land to the review's question about the holds reserved for you
   nexus deploy <commit|main> [--wait]
   nexus release
   nexus image build [--wait]                   build the recipe of the control plane's release, and record the image

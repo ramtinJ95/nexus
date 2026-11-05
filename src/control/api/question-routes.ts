@@ -1,10 +1,12 @@
 /**
- * Answering the questions about a thread, a Claude worker's AskUserQuestion included, and those about a node.
+ * Answering the questions about a thread, a Claude worker's AskUserQuestion and a review's holds included, and those
+ * about a node.
  */
 import { z } from "zod";
 import type { Pipeline } from "../pipeline.ts";
 import type { Planning } from "../planning.ts";
 import type { CleanupPass } from "../cleanup.ts";
+import type { ReviewLoop } from "../review.ts";
 import type { TailnetNodeId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
@@ -19,7 +21,7 @@ const answerRefusals: Record<AnswerRefusal, string> = {
   "not a deployer": "its answer may deploy, so only deployers may",
 };
 
-export function questionRoutes(kit: ApiKit, options: { planning?: Planning | null | undefined; pipeline?: Pipeline | null | undefined; cleanup?: CleanupPass | undefined }): readonly RouteEntry[] {
+export function questionRoutes(kit: ApiKit, options: { planning?: Planning | null | undefined; pipeline?: Pipeline | null | undefined; cleanup?: CleanupPass | undefined; reviews?: ReviewLoop | null | undefined }): readonly RouteEntry[] {
   const { refusalOf, execInPylon, registry, claude } = kit;
 
   /**
@@ -76,7 +78,9 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
       if (!("option" in body)) throw new HttpError(400, `question ${question.id} is answered with {"option": "<one of its options>"}`);
       const { option } = body;
       if (!question.options.includes(option)) throw new HttpError(400, `${JSON.stringify(option)} is not an option of question ${question.id}, which are ${question.options.map((o) => JSON.stringify(o)).join(", ")}`);
-      const answered = registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() }, options.planning?.answered);
+      if (question.holds !== undefined && !options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
+      const answered = question.holds !== undefined ? options.reviews!.answerHolds({ ...question, holds: question.holds }, option, r.caller)
+        : registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() }, options.planning?.answered);
       if (answered.answer!.option !== option) throw answeredConflict(answered);
       if (answered.proposal !== undefined) await options.pipeline?.poll();
       // The deletes take as long as the node's disk does, so the answer does not wait for them.

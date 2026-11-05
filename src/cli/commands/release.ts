@@ -5,8 +5,9 @@ import { fullCommit, releaseOutcome, type ReleaseView } from "../../deploy/model
 import type { ImagesCurrent, ThreadDetail } from "../../control/wire.ts";
 import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
 import type { ImageOperation } from "../../control/image-store.ts";
-import type { Review } from "../../control/review-model.ts";
+import { ended, type Review } from "../../control/review-model.ts";
 import { landPress } from "../../control/policy.ts";
+import { isOpen } from "../../control/questions.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, thread, int, table, pollUntil } from "../kit.ts";
 import { reviewText } from "../thread-text.ts";
@@ -92,12 +93,19 @@ export async function confirmWaiver(terminal: Terminal, pr: number, head: string
 
 /**
  * What the dashboard's Land press sends for the thread's review as it is now: its head, and the holds the press
- * waives, once the person confirmed them on `terminal`.
+ * waives, once the person confirmed them on `terminal`. While the review asks about its holds, the `question` to
+ * answer Land instead, once the person confirmed the holds it names, and whether the review is still `running`, so
+ * the answer waives them for its landing later rather than starts it.
  */
-export async function pressOf(api: Api, id: string, terminal: Terminal): Promise<{ head?: string; waive?: string[] }> {
+export async function pressOf(api: Api, id: string, terminal: Terminal): Promise<{ head?: string; waive?: string[]; question?: string; running?: boolean }> {
   needsTerminal(terminal);
-  const { review } = await api("GET", thread(id)) as ThreadDetail;
+  const { review, questions } = await api("GET", thread(id)) as ThreadDetail;
   if (review === null) return {};
+  const asking = (questions ?? []).find((q) => isOpen(q) && q.holds?.review === review.id);
+  if (asking?.holds !== undefined) {
+    if (!await confirmWaiver(terminal, review.pr.number, asking.holds.head, asking.holds.holds.map((h) => h.text))) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
+    return { question: asking.id, running: !ended.has(review.phase.kind) };
+  }
   const press = landPress(review);
   const head = review.rounds.at(-1)!.head;
   if (press.kind !== "lands" || press.waives.length === 0) return { head };
@@ -105,6 +113,11 @@ export async function pressOf(api: Api, id: string, terminal: Terminal): Promise
   if (!await confirmWaiver(terminal, review.pr.number, head, waive)) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
   return { head, waive };
 }
+
+/** What `land --waive` prints once it answered the review's question: a landing, or a waiver for a review still under way. */
+export const answeredText = (r: Review, running: boolean) => running
+  ? `Waived the holds at ${r.rounds.at(-1)!.head.slice(0, 12)}. It lands once the reviewer approves and its checks pass.\n${reviewText(r)}`
+  : `Landing ${reviewText(r)}`;
 
 export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
@@ -132,7 +145,13 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
   land: {
     args: [1, 1], options: { waive: { type: "boolean" } },
     async run(api, [id], v) {
-      const r = await api("POST", `${thread(id!)}/land`, v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {}) as Review;
+      const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
+      if (question !== undefined) {
+        await api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option: "Land" });
+        const { review } = await api("GET", thread(id!)) as ThreadDetail;
+        return { json: review, text: answeredText(review!, running === true) };
+      }
+      const r = await api("POST", `${thread(id!)}/land`, press) as Review;
       return { json: r, text: `Landing ${reviewText(r)}` };
     },
   },

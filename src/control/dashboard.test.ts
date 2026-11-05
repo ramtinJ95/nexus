@@ -2952,3 +2952,26 @@ test("a held review offers Land only where a press can land, and shows a hold no
   assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button)![1]!)), [reserved.text]);
   assert.match(textOf(/data-confirm="([^"]*)"/.exec(button)![1]!), /Nexus first asks the reviewer to quote, from the description as it is now, what could not be checked live/);
 });
+
+test("a review that asks about its holds has one card in Needs you, the question's, and its Land card points to it rather than waive them itself", async (t) => {
+  const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const review = approvedReview(fix.id, personPhase("policy", { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } });
+  s.registry.saveReview(review);
+  s.registry.replaceQuestions(fix.id, "holds-", {
+    id: "holds-rv-1-a", thread: fix.id, text: `Land pull request #7, "Cache", at ${head.slice(0, 12)}, waiving changes to login or auth?\n- ${reserved}`, options: ["Land", "Leave it"],
+    reserved: "auth", answerer: "deployer", askedAt: Date.now(), holds: { review: review.id, head, base: "main", holds: [{ code: "reserved-path:auth", text: reserved }] },
+  });
+  const page = (await s.call("GET", "/")).text;
+  const mine = needsOf(page).cards.filter((c) => c.thread === fix.id);
+  assert.deepEqual(mine.map((c) => c.kind), ["question"], "one card, not the review's and the question's");
+  assert.match(mine[0]!.text, /^Holds to waive acme \/ Fix checkout .* Land pull request #7, "Cache", at 9f9f9f9f9f9f, waiving changes to login or auth\? .* Land Leave it .* Answer the question about its holds to waive them and land it\.$/);
+  const land = /<button [^>]*data-option="Land"[^>]*>/.exec(mine[0]!.html)![0];
+  assert.equal(textOf(/data-confirm="([^"]*)"/.exec(land)![1]!), `Land pull request #7, "Cache", at ${head.slice(0, 12)}, waiving changes to login or auth? The answer cannot be changed.`);
+  assert.ok(!mine[0]!.html.includes("data-holds"), "no second way to waive");
+
+  const card = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(!card.includes("data-action=\"land\""));
+  assert.match(textOf(card), /Answer the question about its holds above to waive them and land it\.$/);
+});

@@ -49,7 +49,7 @@ import { testCertificate } from "../test-certificate.ts";
 import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";
 import type { Api } from "./kit.ts";
-import { pressOf } from "./commands/release.ts";
+import { answeredText, pressOf } from "./commands/release.ts";
 import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
 
@@ -1741,6 +1741,22 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   const unheld = (async () => ({ review: { ...review, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [] } }] } })) as Api;
   assert.deepEqual(await pressOf(unheld, "th-builder", nothing.terminal), { head: approvedRound.head }, "nothing to waive asks nothing");
   assert.equal(nothing.shown(), "");
+});
+
+test("land --waive answers the review's question about its holds, once the person confirmed the holds it names, while the review still runs too", async () => {
+  const egress = "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts.";
+  const review = testReview({ phase: { kind: "reviewing" }, rounds: [{ head: approvedRound.head, verdict: null, check: null, answers: null }] });
+  const question = { id: "holds-rv-1-a", thread: "th-builder", text: "Land?", options: ["Land", "Leave it"], reserved: "egress", answerer: "deployer", askedAt: 1, answer: null,
+    holds: { review: review.id, head: approvedRound.head, base: "main", holds: [{ code: "reserved-path:egress", text: egress }] } };
+  const api = (async () => ({ review, questions: [question] })) as Api;
+  const yes = confirmingTerminal("yes");
+  assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { question: question.id, running: true });
+  assert.match(answeredText(review, true), /^Waived the holds at 111111111111\. It lands once the reviewer approves and its checks pass\.\nreview rv-\S+ of PR #7: reviewing,/, "a review still under way is not landing yet");
+  assert.match(answeredText({ ...review, phase: { kind: "checking", startedAt: 1, thread: null } }, false), /^Landing review /);
+  assert.equal(yes.shown(), `Land pull request #7 at ${approvedRound.head}, waiving the holds the merge policy reserves for you:\n  ${egress}\nType yes to waive them and land: `);
+  await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("no").terminal), (err: CliError) => err.kind === "failed");
+  const answered = (async () => ({ review, questions: [{ ...question, answer: { option: "Leave it", by: "nLAPTOP", at: 2 } }] })) as Api;
+  assert.deepEqual(await pressOf(answered, "th-builder", confirmingTerminal("yes").terminal), { head: approvedRound.head }, "an answered question is not asked again");
 });
 
 test("project edit replaces supplied grants and preserves omitted settings", async (t) => {

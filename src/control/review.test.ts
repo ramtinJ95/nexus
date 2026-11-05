@@ -11,7 +11,7 @@ import type { ProjectId } from "../ids.ts";
 import type { SecretGrant } from "../secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, reservedNames, type Hold, type HoldCode } from "./holds.ts";
+import { holdRule, personOnly, reservedNames, type Hold, type HoldCode } from "./holds.ts";
 import { carryWaiver, headHolds, heldBy, landingHolds, landPress } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
 import { cannotLand, changeOf, checkBeside, ended, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
@@ -4087,4 +4087,362 @@ for (const reason of ["agent turn still running at drain timeout", "Error: agent
     `Rolled back to the previous release, ${previous}, which every service reports healthy.`,
     `${merged} is still on the default branch. The busy turn did not test the commit; retry deployment rather than revert it.`,
   ] });
+});
+
+const imageHold = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
+const dockerfile: ChangedFile[] = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
+/** The builder's questions about its review's holds, oldest first. */
+const holdQuestions = (f: ReturnType<typeof fixture>) => f.registry.questions(f.builder).filter((q) => q.holds !== undefined);
+const openHolds = (f: ReturnType<typeof fixture>) => holdQuestions(f).filter((q) => q.answer === null);
+
+test("a round asks the person about the holds its head's paths decide as it starts, and Land then lands it once the reviewer approves and the check passes", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  const [question, ...more] = holdQuestions(f);
+  assert.deepEqual(more, []);
+  assert.deepEqual({ ...question!, id: "", askedAt: 0 }, {
+    id: "", thread: f.builder, askedAt: 0, answer: null, options: ["Land", "Leave it"], reserved: "image-rebuild", answerer: "deployer",
+    text: `Land pull request #7, "Add the cache", at ${head1.slice(0, 12)}, waiving pylon image rebuilds?\n- ${imageHold}\nLand waives these at ${head1.slice(0, 12)}, and at a rebase of it that leaves the change as it is. Nexus still lands it only once the reviewer approves it and its checks pass, then deploys it. Leave it, and nothing is waived.`,
+    holds: { review: f.review().id, head: head1, base: "main", holds: [{ code: "reserved-path:image-rebuild", text: imageHold }] },
+  }, "one question names the hold by its case, while the reviewer reads and the check runs");
+  assert.equal(f.registry.attention(f.builder), "decision");
+  await loop.poll();
+  assert.equal(holdQuestions(f).length, 1, "a pass that finds the same holds asks nothing new");
+
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.equal(f.review().phase.kind, "reviewing", "an early Land waits for the reviewer and the check");
+  assert.deepEqual({ ...f.review().waiver!, at: 0 }, { head: head1, holds: [imageHold], codes: ["reserved-path:image-rebuild"], by: "nLAPTOP", at: 0, change: null }, "the waiver a Land press at that head gives");
+  assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", head: head1, base: "main" }, "for the head and base the person saw");
+  assert.equal(f.registry.question(question!.id)!.answer?.option, "Land");
+  assert.notEqual(f.registry.attention(f.builder), "decision");
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [], "the reviewer approved, but the check still runs");
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.deepEqual(openHolds(f), []);
+});
+
+test("holds known only later ask again: the reviewer's reserved case replaces the open question, and a Land answer on a held review is the Land press", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  const [first] = openHolds(f);
+  const cli = { code: "reserved:cli-breaking" as const, text: `${personOnly}${reservedNames["cli-breaking"]}, by the reviewer's reading (it renames a flag).` };
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [cli.text, imageHold] });
+  assert.equal(f.registry.question(first!.id), null, "the question the person never answered is gone, so an answer to it finds nothing");
+  const [second, ...more] = openHolds(f);
+  assert.deepEqual(more, []);
+  assert.deepEqual(second!.holds!.holds, [cli, { code: "reserved-path:image-rebuild", text: imageHold }]);
+  assert.match(second!.text, /^Land pull request #7, "Add the cache", at 111111111111, waiving breaking changes to the CLI's contract and pylon image rebuilds\?\n/);
+  assert.equal(second!.reserved, "cli-breaking");
+
+  loop.answerHolds({ ...second!, holds: second!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.equal(f.review().phase.kind, "checking", "as a Land press does");
+  assert.deepEqual(f.review().waiver!.codes, ["reserved:cli-breaking", "reserved-path:image-rebuild"]);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a Land answer given before a hold appears does not cover it: the landing holds and asks the whole set again", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const [first] = openHolds(f);
+  loop.answerHolds({ ...first!, holds: first!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "irreversible", why: "it drops a table" }] }));
+  await loop.poll();
+  assert.deepEqual(f.merges, [], "a waiver of the set the person saw never lands a larger one");
+  assert.equal(f.review().phase.kind, "needs-person");
+  const [again] = openHolds(f);
+  assert.deepEqual(again!.holds!.holds.map((h) => h.code), ["reserved:irreversible", "reserved-path:image-rebuild"]);
+  assert.match(again!.text, /waiving anything irreversible and pylon image rebuilds\?/);
+});
+
+test("Leave it waives nothing, and the review holds for the person without asking the same holds again", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  const [question] = openHolds(f);
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Leave it", "nLAPTOP" as TailnetNodeId);
+  assert.equal(f.review().waiver, null);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [imageHold] });
+  assert.deepEqual(openHolds(f), []);
+  assert.deepEqual(holdQuestions(f).map((q) => q.answer?.option), ["Leave it"]);
+});
+
+test("a review held for the person before it asked about its holds asks on the next pass, and the land route's waiver answers that question", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "needs-person");
+  f.registry.replaceQuestions(f.builder, "holds-", null);
+  assert.deepEqual(holdQuestions(f), [], "as a review held before this change has no question");
+  const restarted = f.loop();
+  await restarted.poll();
+  const [question] = openHolds(f);
+  assert.deepEqual(question!.holds!.holds.map((h) => h.text), [imageHold]);
+  restarted.land(f.builder, "nLAPTOP", head1, [imageHold]);
+  assert.deepEqual({ option: f.registry.question(question!.id)!.answer?.option, by: f.registry.question(question!.id)!.answer?.by }, { option: "Land", by: "nLAPTOP" });
+  await restarted.poll();
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("an answer to a question about holds at a head the review left waives nothing", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const [question] = openHolds(f);
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  pushed(f, head2);
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds.at(-1)!.head, head2);
+  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { status: 409, message: /moved on/ });
+  assert.equal(f.review().waiver, null);
+  assert.deepEqual(openHolds(f).map((q) => q.holds!.head), [head2], "the new head asks for itself");
+});
+
+test("a review that cannot land, or ended, asks nothing, and a cancel drops its open question", async (t) => {
+  const f = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] as SecretGrant[] });
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(f.review().reviewerKind, "claude");
+  assert.deepEqual(openHolds(f), [], "no press lands what a Claude reviewer approves, so there is nothing to ask");
+
+  const g = fixture(t);
+  g.files = dockerfile;
+  const gLoop = g.loop();
+  await gLoop.start(g.builder, { land: null });
+  await gLoop.poll();
+  assert.equal(openHolds(g).length, 1);
+  gLoop.cancel(g.builder, "nLAPTOP");
+  assert.deepEqual(openHolds(g), []);
+  assert.notEqual(g.registry.attention(g.builder), "decision");
+});
+
+test("a waiver given while the reviewer reads carries to a rebase that keeps the change, without asking again", async (t) => {
+  const f = fixture(t);
+  f.files = migration(240);
+  f.changes.set(head1, migration(240));
+  f.changes.set(head2, migration(250));
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  const [question] = openHolds(f);
+  assert.deepEqual(question!.holds!.holds.map((h) => h.text), reservedHolds);
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  await loop.poll();
+  assert.equal(f.review().waiver!.change?.kind, "known", "the change the person waived is read at once, as a landing reads it");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  conflicting(f);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the conflict goes back to the builder");
+  rebased(f);
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head2]);
+  assert.deepEqual(openHolds(f), []);
+  assert.deepEqual(holdQuestions(f).map((q) => q.answer?.option), ["Land"], "the person was asked once");
+});
+
+test("an answer to a question asked against another base waives nothing, as a retarget at the same head is another change", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = await approved(f, null);
+  const [question] = openHolds(f);
+  assert.equal(question!.holds!.base, "main");
+  const round = f.review().rounds.at(-1)!;
+  f.registry.saveReview({ ...f.review(), rounds: [...f.review().rounds, { head: round.head, base: "release", verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, waiver: null });
+  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { status: 409, message: /moved on/ });
+  assert.equal(f.review().waiver, null);
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [imageHold]), { status: 409 });
+});
+
+test("a cancel while the loop reads the head's change leaves no question open", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  let cancelled = false;
+  f.changes.has = (head: string) => {
+    if (!cancelled) { cancelled = true; loop.cancel(f.builder, "nLAPTOP"); }
+    return Map.prototype.has.call(f.changes, head);
+  };
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.ok(cancelled);
+  assert.equal(f.review().phase.kind, "cancelled");
+  assert.deepEqual(openHolds(f), [], "the step that read the change before the cancel asks nothing");
+  assert.notEqual(f.registry.attention(f.builder), "decision");
+});
+
+test("a Land answer to an early question lands a review the live check left with the person before its holds were recorded", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  f.verifies = true;
+  f.live = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying");
+  f.tick(61 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person", "the live check gave no verdict");
+  assert.equal(f.review().rounds.at(-1)!.heldAt, undefined, "its holds were never recorded");
+  const [question] = openHolds(f);
+  assert.deepEqual(question!.holds!.holds.map((h) => h.text), [imageHold], "the early question is still the one to answer");
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.deepEqual(f.review().waiver!.codes, ["reserved-path:image-rebuild"]);
+  f.live = { kind: "done", passed: true, output: "fleet ok" };
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "the landing reads the holds from GitHub's files, and the waiver gets it past them");
+});
+
+test("a live check that failed after an early question leaves nothing to land, so the question goes", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  f.verifies = true;
+  f.live = { kind: "done", passed: false, output: "broken" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null, rounds: 1 });
+  await loop.poll();
+  assert.equal(openHolds(f).length, 1);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.equal(landable(f.review()), false);
+  assert.deepEqual(openHolds(f), []);
+});
+
+test("an early Land asks for the landing of the head it named only: a new head that changes the change stops at approval for the person", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const [question] = openHolds(f);
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", head: head1, base: "main" }, "the request names the head and base the person saw");
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  f.files = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export const ttl = 1;" }];
+  pushed(f, head2);
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  assert.equal(f.review().rounds.at(-1)!.head, head2);
+  assert.equal(f.review().land, null, "the press was for a change the new head no longer is");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "approved" }, "as on main, the person lands what they have not seen");
+});
+
+test("an early Land on a review started with --land keeps its request, and one for a head carries with its waiver to a rebase that keeps the change", async (t) => {
+  const g = fixture(t);
+  g.files = dockerfile;
+  const gLoop = g.loop();
+  await gLoop.start(g.builder, { land: "nLAPTOP" });
+  await gLoop.poll();
+  const [asked] = openHolds(g);
+  gLoop.answerHolds({ ...asked!, holds: asked!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.deepEqual(g.review().land, { requestedBy: "nLAPTOP" });
+
+  const f = fixture(t);
+  f.files = migration(240);
+  f.changes.set(head1, migration(240));
+  f.changes.set(head2, migration(250));
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const [question] = openHolds(f);
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  conflicting(f);
+  await loop.poll();
+  rebased(f);
+  f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head2], "the same change is the one the person saw");
+});
+
+test("the same holds in another order are the same question, so a Leave it is not asked again", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
+  await loop.poll();
+  const [question] = openHolds(f);
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Leave it", "nLAPTOP" as TailnetNodeId);
+  const phase = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
+  f.registry.saveReview({ ...f.review(), phase: { ...phase, ...personPhase("policy", ...[...phase.holds].reverse()) } });
+  await f.loop().poll();
+  assert.deepEqual(openHolds(f), []);
+});
+
+test("a review saved settled while its question was open leaves no question open after the next pass", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(openHolds(f).length, 1);
+  f.registry.saveReview({ ...f.review(), merged, phase: { kind: "landed", commit: merged }, outbox: null });
+  await loop.poll();
+  assert.deepEqual(openHolds(f), []);
+  assert.notEqual(f.registry.attention(f.builder), "decision");
+});
+
+test("an early Land is for the base it was asked against too: a retarget at the same head stops at approval for the person", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const [question] = openHolds(f);
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", head: head1, base: "main" });
+  f.files = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().rounds.map((r) => [r.head, r.base]), [[head1, "main"], [head1, "release"]], "the retarget gets a round of its own");
+  assert.equal(f.review().land, null, "the press was for the change against main");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(f.review().phase, { kind: "approved" });
 });
