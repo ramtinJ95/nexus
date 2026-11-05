@@ -74,6 +74,9 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
         return changes > 0;
       });
     },
+    /** The threads with an open question whose ID starts with `prefix`. */
+    threadsAsking: (prefix: string): ThreadId[] => sql(`SELECT DISTINCT thread FROM questions WHERE thread IS NOT NULL AND substr(id, 1, ?) = ?
+      AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL`).all(prefix.length, prefix).map((r) => r.thread as ThreadId),
     question: (id: string): Question | null => questionRecord(id),
     /**
      * Stores the asks the thread's pylon reports waiting, in place of its last report, and asks or withdraws its Claude

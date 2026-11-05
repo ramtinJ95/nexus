@@ -4411,3 +4411,16 @@ test("the same holds in another order are the same question, so a Leave it is no
   await f.loop().poll();
   assert.deepEqual(openHolds(f), []);
 });
+
+test("a review saved settled while its question was open leaves no question open after the next pass", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(openHolds(f).length, 1);
+  f.registry.saveReview({ ...f.review(), merged, phase: { kind: "landed", commit: merged }, outbox: null });
+  await loop.poll();
+  assert.deepEqual(openHolds(f), []);
+  assert.notEqual(f.registry.attention(f.builder), "decision");
+});

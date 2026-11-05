@@ -44,7 +44,7 @@ import {
 } from "./review-model.ts";
 import type { StartRequest } from "./start-request.ts";
 
-type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread">;
+type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
@@ -898,6 +898,17 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       }
     }
     await stepEach(reviews);
+    // A review no pass steps any more, such as one saved settled outside the loop's steps, asks nothing.
+    const stepped = new Set(reviews.map((r) => r.builder));
+    try {
+      for (const builder of registry.threadsAsking(holdsPrefix)) {
+        if (stepped.has(builder)) continue;
+        registry.replaceQuestions(builder, holdsPrefix, null);
+        asked.set(builder, null);
+      }
+    } catch (err) {
+      log(`the questions of reviews no pass steps were not dropped and will be tried again (${(err as Error).name})`);
+    }
   }
 
   async function stepEach(reviews: readonly Review[]) {
