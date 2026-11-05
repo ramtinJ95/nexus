@@ -4270,3 +4270,33 @@ test("a waiver given while the reviewer reads carries to a rebase that keeps the
   assert.deepEqual(openHolds(f), []);
   assert.deepEqual(holdQuestions(f).map((q) => q.answer?.option), ["Land"], "the person was asked once");
 });
+
+test("an answer to a question asked against another base waives nothing, as a retarget at the same head is another change", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = await approved(f, null);
+  const [question] = openHolds(f);
+  assert.equal(question!.holds!.base, "main");
+  const round = f.review().rounds.at(-1)!;
+  f.registry.saveReview({ ...f.review(), rounds: [...f.review().rounds, { head: round.head, base: "release", verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, waiver: null });
+  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { status: 409, message: /moved on/ });
+  assert.equal(f.review().waiver, null);
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [imageHold]), { status: 409 });
+});
+
+test("a cancel while the loop reads the head's change leaves no question open", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  let cancelled = false;
+  f.changes.has = (head: string) => {
+    if (!cancelled) { cancelled = true; loop.cancel(f.builder, "nLAPTOP"); }
+    return Map.prototype.has.call(f.changes, head);
+  };
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.ok(cancelled);
+  assert.equal(f.review().phase.kind, "cancelled");
+  assert.deepEqual(openHolds(f), [], "the step that read the change before the cancel asks nothing");
+  assert.notEqual(f.registry.attention(f.builder), "decision");
+});

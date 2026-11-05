@@ -414,10 +414,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   async function askHolds(r: Review): Promise<Review> {
     const round = r.rounds.at(-1)!;
+    // A save since `r` was read, such as the person's cancel while GitHub answered, decides the question instead.
+    const askFor = (question: Omit<ThreadQuestion, "answer"> | null) => {
+      if (registry.isCurrentReview(r)) ask(r.builder, question);
+    };
     const askable = r.merged === null && (ended.has(r.phase.kind) ? landable(r) : landingVerb(r) === null);
     if (!askable) {
       early.delete(r.id);
-      ask(r.builder, null);
+      askFor(null);
       return r;
     }
     let files: readonly ChangedFile[] | null = null;
@@ -431,7 +435,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     // As the landing does, the change a waiver is for is read once the person gave it, so a rebase can be compared with it.
     if (r.waiver !== null && r.waiver.change === null && r.waiver.head === round.head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, await base(), round.head) } };
     if (holds.length === 0 || unwaived(r, holds).length === 0) {
-      ask(r.builder, null);
+      askFor(null);
       return r;
     }
     let question = holdsQuestion(r, holds, null, deploys(r), now());
@@ -440,7 +444,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (review !== r) return review;
       question = holdsQuestion(r, holds, why, deploys(r), now());
     }
-    ask(r.builder, question);
+    askFor(question);
     return r;
   }
 
@@ -467,8 +471,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return { ...r, land: { requestedBy }, waiver, phase: press.quotes ? { kind: "quoting", asked: null } : checking(), outbox: null, nudges: 0 };
   };
   /** The holds question of `r` that is open at its latest head and names exactly the holds `texts` name. */
-  const openQuestion = (r: Review, texts: readonly string[]): ThreadQuestion | undefined => registry.questions(r.builder).find((q) => isOpen(q) && q.holds?.review === r.id
-    && q.holds.head === r.rounds.at(-1)!.head && JSON.stringify(q.holds.holds.map((h) => h.text).sort()) === JSON.stringify([...texts].sort()));
+  const openQuestion = (r: Review, texts: readonly string[]): ThreadQuestion | undefined => registry.questions(r.builder).find((q) => isOpen(q) && q.holds !== undefined && asksAt(r, q.holds)
+    && JSON.stringify(q.holds.holds.map((h) => h.text).sort()) === JSON.stringify([...texts].sort()));
+  /** Whether a question about holds was asked of `r` at its latest round's head and base, since a change against another base is another change. */
+  const asksAt = (r: Review, holds: HeldQuestion) => holds.review === r.id && holds.head === r.rounds.at(-1)!.head && holds.base === (r.rounds.at(-1)!.base ?? null);
 
   /**
    * Waits on `t`. Once a turn of it ended after the loop's last message without the answer the loop needs, it gets a
@@ -1020,7 +1026,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const { holds } = question;
       const r = registry.review(question.thread);
       const moved = new HttpError(409, `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
-      if (r === null || r.id !== holds.review || r.rounds.at(-1)!.head !== holds.head) throw moved;
+      if (r === null || !asksAt(r, holds)) throw moved;
       const texts = holds.holds.map((h) => h.text);
       let next: Review;
       if (landable(r)) next = pressed(landableAt(question.thread, holds.head), by, texts);
