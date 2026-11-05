@@ -53,6 +53,13 @@ const holdRules: Record<HoldCode, HoldRule> = {
 };
 export const holdRule = (code: HoldCode): HoldRule => holdRules[code];
 export const waivable = (code: HoldCode) => holdRule(code).waivable;
+/** The reserved case a hold is, or null for one the policy does not name as a case. */
+export const caseOf = (code: HoldCode): ReservedCase | null => /^reserved(-path)?:/.test(code) ? code.slice(code.indexOf(":") + 1) as ReservedCase : null;
+/** What a hold the person may waive is about, in a few words. */
+export const waivedName = (code: HoldCode): string => {
+  const c = caseOf(code);
+  return c !== null ? reservedNames[c] : code === "check-changed" ? "a change to .nexus/check" : code === "verify-changed" ? "a change to .nexus/verify" : code;
+};
 
 /**
  * The code a hold's text had under the text rules, which reads records saved before holds carried codes: a

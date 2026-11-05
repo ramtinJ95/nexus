@@ -8,8 +8,8 @@
  * patch's words, that might touch a reserved case holds the landing for the person, who can merge it themselves. They
  * are a list, so a reserved change in a file they do not name still rests on the reviewer alone.
  *
- * The holds that always need the person are theirs to waive, by pressing Land on the dashboard. Every other condition
- * is one no person can waive: it clears only when what failed changes.
+ * The holds that always need the person are theirs to waive, by answering Land to the question the review asks about
+ * them. Every other condition is one no person can waive: it clears only when what failed changes.
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
@@ -139,6 +139,18 @@ export function landPress(review: Review): LandPress {
   const round = review.rounds.at(-1)!;
   const quotes = round.live?.kind === "absent" && (quoteOf(round) === null || holds.some((h) => h.code === "not-checked-live"));
   return { kind: "lands", waives: holds.filter((h) => waivable(h.code)), quotes };
+}
+
+/**
+ * The holds a Land press at the review's latest head would waive, which the person is asked about, or none when no
+ * press there lands. `early` is what the head alone decides, read from its change before the loop recorded it, so the
+ * person can answer while the reviewer and the check run.
+ */
+export function askedHolds(review: Review, early: readonly Hold[] | null): Hold[] {
+  const round = review.rounds.at(-1)!;
+  const read = round.heldAt !== undefined || early === null ? review : { ...review, rounds: [...review.rounds.slice(0, -1), { ...round, heldAt: { base: round.base ?? "", holds: [...early] } }] };
+  const press = landPress(read);
+  return press.kind === "lands" ? press.waives : [];
 }
 
 const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [

@@ -2,13 +2,14 @@
  * A question the control plane asks the person about a thread or a node, answered on its card on the dashboard. A
  * thread's attention is `decision` while one of its questions is open. The planning pass asks one per item a planning
  * thread proposes (planning.ts), a Claude worker's AskUserQuestion call is one while its pylon's hook reports that its
- * dialog waits (the registry's asks), and the cleanup pass asks one per node about what it could delete (cleanup.ts).
+ * dialog waits (the registry's asks), the review loop asks one about the holds at a review's head that the person may
+ * waive (review.ts), and the cleanup pass asks one per node about what it could delete (cleanup.ts).
  */
 import { z } from "zod";
 import type { AskAnswer } from "../../images/pylon/nexus-contract.ts";
 import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
 import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
-import type { ReservedCase } from "./holds.ts";
+import type { Hold, ReservedCase } from "./holds.ts";
 import type { Cleanup } from "./cleanup-model.ts";
 
 /** What every question has, whatever its subject. */
@@ -35,6 +36,8 @@ export interface ThreadQuestion extends Asked {
   proposal?: Proposal;
   /** The Claude worker's AskUserQuestion call the question is. */
   ask?: ClaudeAsk;
+  /** The holds at the head of the thread's review that answering Land waives, as a Land press there does. */
+  holds?: HeldQuestion;
   /** The thread.failed event of the failure a failure judgment asks about. Archiving the thread withdraws the question while it is open. */
   failure?: number;
   /** Set once the question closed unanswered, as an archive closes an open failure question. It takes no answer after. */
@@ -48,6 +51,7 @@ export interface NodeQuestion extends Asked {
   thread?: never;
   proposal?: never;
   ask?: never;
+  holds?: never;
   failure?: never;
   withdrawn?: never;
   cleanup: Cleanup;
@@ -59,6 +63,10 @@ export type Unanswered = Omit<ThreadQuestion, "answer"> | Omit<NodeQuestion, "an
 export const isNodeQuestion = (q: Question): q is NodeQuestion => q.node !== undefined;
 /** Whether the question still waits for its answer. */
 export const isOpen = (q: Pick<Question, "answer" | "withdrawn">) => q.answer === null && q.withdrawn === undefined;
+
+/** The review a holds question is about, the head and base it was asked at, and the holds it names, each of which the person may waive. */
+export interface HeldQuestion { review: string; head: string; base: string | null; holds: readonly Hold[] }
+export const holdOptions = ["Land", "Leave it"] as const;
 
 /** One item of a planning thread's block. `after` holds keys of earlier items of the block, or pipeline item IDs. */
 export interface Proposal { block: string; index: number; key: string; title: string; brief: string; after: readonly string[] }

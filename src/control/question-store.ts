@@ -61,6 +61,19 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
         return questionRecord(question.id)! as never;
       });
     },
+    /**
+     * Asks `question` in place of each of the thread's unanswered questions whose ID starts with `prefix`, or with null
+     * drops them all, so an answer to one the asker replaced finds no question. Answers whether anything changed.
+     */
+    replaceQuestions(thread: ThreadId, prefix: string, question: Omit<ThreadQuestion, "answer"> | null): boolean {
+      return transaction(() => {
+        let changes = Number(sql(`DELETE FROM questions WHERE thread = ? AND substr(id, 1, ?) = ? AND id IS NOT ? AND json_extract(record, '$.answer') IS NULL`)
+          .run(thread, prefix.length, prefix, question?.id ?? null).changes);
+        if (question !== null) changes += Number(sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, thread, JSON.stringify({ ...question, answer: null })).changes);
+        if (changes > 0) updateAttention(thread);
+        return changes > 0;
+      });
+    },
     question: (id: string): Question | null => questionRecord(id),
     /**
      * Stores the asks the thread's pylon reports waiting, in place of its last report, and asks or withdraws its Claude
