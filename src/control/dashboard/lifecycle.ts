@@ -75,7 +75,7 @@ export function needLabel(n: ThreadNeed): string {
     case "nudge": return "Stopped short of a pull request";
     case "resume": return "Stopped resuming its turns";
     case "disk": return "Disk kept for its usage";
-    case "question": return n.question.ask !== undefined ? "Claude asks" : n.question.proposal !== undefined ? "Proposed item" : (n.d.judgments ?? []).some((j) => j.question === n.question.id) ? "Judgment" : "Needs your decision";
+    case "question": return n.question.holds !== undefined ? "Holds to waive" : n.question.ask !== undefined ? "Claude asks" : n.question.proposal !== undefined ? "Proposed item" : (n.d.judgments ?? []).some((j) => j.question === n.question.id) ? "Judgment" : "Needs your decision";
     case "thread": return { waiting: "Dialog in its terminal", limited: "Usage limit", parked: "Stuck on the restart limit", failed: "Failed" }[n.attention];
   }
 }

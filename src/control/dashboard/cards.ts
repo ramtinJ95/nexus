@@ -8,7 +8,7 @@ import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, roundNote, roundsSpent, type Review } from "../review-model.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { heldBy, landPress } from "../policy.ts";
-import type { AnswerRefusal, AskedQuestion, NodeQuestion, Question } from "../questions.ts";
+import { isOpen, type AnswerRefusal, type AskedQuestion, type NodeQuestion, type Question } from "../questions.ts";
 import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
 import { Html, html, ago, short } from "./view.ts";
 import type { LandRefusal, Context } from "./context.ts";
@@ -80,8 +80,10 @@ export function questionCard(c: Context, q: Question): Html {
 <p class="land-meta">Answered "${q.answer.option}" from ${q.answer.by}, ${ago(q.answer.at, c.now)}</p></section>`;
   }
   const refusal = c.answerRefusal(q);
+  // Land on a question about holds is a Land press, so its confirmation says what it waives and merges.
+  const confirm = (option: string) => q.holds !== undefined && option === "Land" ? `${q.text.split("\n")[0]} The answer cannot be changed.` : `Answer "${option}"? The answer cannot be changed.`;
   const buttons = q.options.map((option) => refusal === null
-    ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="Answer &quot;${option}&quot;? The answer cannot be changed.">${option}</button>`
+    ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="${confirm(option)}">${option}</button>`
     : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${option}</button>`);
   return html`<section class="landing question" data-question="${q.id}" aria-label="Needs your decision">
 <div class="land-top"><h2>Needs your decision</h2>${q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
@@ -197,6 +199,8 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));
   const press = landPress(r);
   const waived = press.kind === "lands" ? press.waives.map((h) => h.text) : [];
+  // The review's question about these holds is how the person waives them, so the card does not offer a second way.
+  const asking = (d.questions ?? []).find((q) => isOpen(q) && q.holds?.review === r.id && q.holds.head === round.head);
   // A hold that meets every landing again, and that the person cannot waive, leaves only merging on GitHub.
   const stuck = press.kind === "stuck";
   const checks = press.kind === "lands" && press.quotes ? "Nexus first asks the reviewer to quote, from the description as it is now, what could not be checked live, then checks" : "Nexus checks";
@@ -227,6 +231,7 @@ ${found}
 </details>`}
 ${moved !== null ? html`<p class="land-note">The PR watch last read the pull request at ${short(moved)}, not ${short(round.head)}, so ${short(round.head)} is not offered for landing. Nexus confirms the head with GitHub, and a new head gets a new round, or holds for you when no round is left.</p>`
   : stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
+  : asking !== undefined ? html`<p class="land-note">Answer the question about its holds${!card && " above"} to waive them and land it.</p>`
   : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="${id("land")}" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} and any rebase of it that leaves the change as it is. Landing checks everything else again.</p>`}</div>`
   : html`<div class="land-act"><button type="button" class="btn" id="${id("land")}" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
 </section>`;
