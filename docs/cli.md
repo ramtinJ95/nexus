@@ -1117,7 +1117,7 @@ A question can be about a node instead of a thread: the control plane's [cleanup
 | 404 | No question has that ID | `no question <id>` |
 | 409 | The question was answered with another option. An answer never changes | `question <id> was answered "<option>" by <node>` |
 | 409 | Since 0.62.0, archiving its thread withdrew the question | `question <id> was withdrawn when its thread was archived` |
-| 409 | Since 0.65.0, `Land` on a question about holds whose review moved to another head or was replaced since | `the review of <thread> moved on since question <id> asked about its holds at <head>, so nothing was waived. Look at it again` |
+| 409 | Since 0.65.0, `Land` on a question about holds whose review moved to another head or base, or was replaced, since | `the review of <thread> moved on since question <id> asked about its holds at <head>, so nothing was waived. Look at it again` |
 | 409 | Since 0.65.0, `Land` on a question about holds whose review the land route would refuse, or that no press lands, with the land route's error | as for [`land`](#reviews-and-landing-0180) |
 
 Since 0.65.0 a review asks a question about the holds a Land press at its latest head would waive, as soon as Nexus knows them, as [the merge policy](merge-policy.md#asking-the-person) describes, often while the reviewer still reads. `Land` does what that press does: on a review the land route takes, it is the press, and on one still under way, the review records the waiver and the landing request and lands once the reviewer approves and its checks pass. `Leave it` waives nothing. When the holds change before an answer, the question is replaced by one with another ID, so an answer to the old one gets 404.
