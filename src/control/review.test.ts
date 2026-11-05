@@ -4395,3 +4395,19 @@ test("an early Land on a review started with --land keeps its request, and one f
   await loop.poll();
   assert.deepEqual(f.merges, [head2], "the same change is the one the person saw");
 });
+
+test("the same holds in another order are the same question, so a Leave it is not asked again", async (t) => {
+  const f = fixture(t);
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
+  await loop.poll();
+  const [question] = openHolds(f);
+  loop.answerHolds({ ...question!, holds: question!.holds! }, "Leave it", "nLAPTOP" as TailnetNodeId);
+  const phase = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
+  f.registry.saveReview({ ...f.review(), phase: { ...phase, ...personPhase("policy", ...[...phase.holds].reverse()) } });
+  await f.loop().poll();
+  assert.deepEqual(openHolds(f), []);
+});

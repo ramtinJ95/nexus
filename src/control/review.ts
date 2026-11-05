@@ -185,14 +185,15 @@ const listed = (names: readonly string[]) => names.length === 1 ? names[0]! : `$
 
 /**
  * The question that asks the person to waive `holds` at the review's latest head, with `why` an earlier waiver did not
- * carry to it. Its ID is made from the head, the base and the holds, so the same holds ask nothing new, and holds that
- * change ask again.
+ * carry to it. Its ID is made from the head, the base and the holds in any order, so the same holds ask nothing new,
+ * and holds that change ask again.
  */
 function holdsQuestion(r: Review, holds: readonly Hold[], why: Hold | null, deploys: boolean, askedAt: number): Omit<ThreadQuestion, "answer"> {
   const { head, base } = r.rounds.at(-1)!;
   const at = head.slice(0, 12);
   const asked: HeldQuestion = { review: r.id, head, base: base ?? null, holds };
-  const id = `${holdsPrefix}${r.id}-${createHash("sha256").update(JSON.stringify([head, base ?? null, holds])).digest("hex").slice(0, 16)}`;
+  const sorted = [...holds].sort((a, b) => a.code < b.code ? -1 : a.code > b.code ? 1 : a.text < b.text ? -1 : a.text > b.text ? 1 : 0);
+  const id = `${holdsPrefix}${r.id}-${createHash("sha256").update(JSON.stringify([head, base ?? null, sorted])).digest("hex").slice(0, 16)}`;
   const text = `Land pull request #${r.pr.number}, "${r.pr.title}", at ${at}, waiving ${listed([...new Set(holds.map((h) => waivedName(h.code)))])}?
 ${holds.map((h) => `- ${h.text}`).join("\n")}
 ${why === null ? "" : `${why.text}\n`}Land waives these at ${at}, and at a rebase of it that leaves the change as it is. Nexus still lands it only once the reviewer approves it and its checks pass${deploys ? ", then deploys it" : ""}. Leave it, and nothing is waived.`;
