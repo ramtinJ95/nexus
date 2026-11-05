@@ -48,6 +48,7 @@ export const usage = `nexus ${version}, the Nexus control plane from this Mac
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
     [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer
     [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own
+    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names
   nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH|-]
   nexus review <thread> [--pr N] [--rounds N] [--land]

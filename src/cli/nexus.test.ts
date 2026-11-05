@@ -253,7 +253,8 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
     + "    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer\n"
-    + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n");
+    + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n"
+    + "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
   assert.equal((await s.nexus(["session", "open", "--help"])).stdout, "  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]\n");
   const show = await s.nexus(["show", "--help"]);
@@ -1788,6 +1789,20 @@ test("project edit turns reviews of its own on and off, and projects shows who t
   assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review and land, for ${laptop} +pipeline off +scratch$`, "m"));
   assert.deepEqual((await s.json(["project", "edit", "auto", "--auto-review", "review"])).autoReview, { land: false, enabledBy: laptop });
   assert.equal((await s.json(["project", "edit", "auto", "--auto-review", "off"])).autoReview, undefined);
+});
+
+test("project edit sets which pull requests get a second reviewer on another model, and project show says it", async (t) => {
+  const s = await setup(t);
+  await s.nexus(["project", "add", "second", "--scratch", "--node", node]);
+  for (const bad of ["yes", "lines=0", "reserved,reserved", "lines=1,lines=2", "lines"]) assert.equal((await s.nexus(["project", "edit", "second", "--second-reviewer", bad])).code, 64, bad);
+  const on = await s.nexus(["project", "edit", "second", "--second-reviewer", "on"]);
+  assert.equal(on.stdout, "Updated project second, auto review off, pipeline off, a second reviewer on another model for a pull request with a reserved path hold or at least 150 changed lines. Existing threads keep their boot settings and grants; start a new thread to apply them.\n");
+  assert.deepEqual((await s.json(["project", "edit", "second", "--second-reviewer", "lines=400"])).secondReview, { always: false, lines: 400, reserved: false });
+  assert.deepEqual((await s.json(["project", "edit", "second", "--second-reviewer", "always"])).secondReview, { always: true });
+  assert.match((await s.nexus(["project", "show", "second"])).stdout, /^a second reviewer on another model for every pull request$/m);
+  assert.deepEqual((await s.json(["project", "edit", "second", "--node", node])).secondReview, { always: true }, "an edit that does not name it keeps it");
+  assert.equal((await s.json(["project", "edit", "second", "--second-reviewer", "off"])).secondReview, undefined);
+  assert.doesNotMatch((await s.nexus(["project", "show", "second"])).stdout, /second reviewer/);
 });
 
 test("project add and edit set standing rules from a file or stdin, edit clears them, and project show and show print them", async (t) => {
