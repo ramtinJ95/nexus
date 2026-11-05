@@ -28,6 +28,8 @@ export interface Project {
    * person sets it, and `enabledBy` is the caller who did, on whose behalf a landing merges and deploys.
    */
   autoReview?: AutoReview | null | undefined;
+  /** Which pull requests a review gives a second reviewer on another model. Absent or null is none, as for a project that never set it. */
+  secondReview?: SecondReview | null | undefined;
   /**
    * Whether the pipeline turns this project's items into queued threads, and whether it does so on its own or once the
    * person approves each item. Null is off, which a person set, and an absent field is off too.
@@ -39,6 +41,13 @@ export interface Project {
 /** What `nexus project add` and the dashboard's new-project dialog give a project unless told otherwise. */
 export const defaultProjectResources: Readonly<Project["resources"]> = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
 export interface AutoReview { land: boolean; enabledBy: string }
+/** Every pull request, or one that changes at least `lines` lines, tests and docs included, or has a reserved path hold. */
+export type SecondReview = { always: true } | { always: false; lines: number | null; reserved: boolean };
+/**
+ * What `--second-reviewer on` sets. On 2026-11-04 a second model found a serious bug in three pull requests Nexus's
+ * reviewer had passed or was reading, of 158, 220 and 249 changed lines, and only one of them had a reserved path hold.
+ */
+export const defaultSecondReview: SecondReview = { always: false, lines: 150, reserved: true };
 export interface PipelineSetting { autoStart: boolean }
 /**
  * `text` is null once cleared. `revision` counts each change, a clear among them, and never goes back, so a thread's

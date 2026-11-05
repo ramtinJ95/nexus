@@ -22,7 +22,7 @@ export const personOnly = "Always needs the person: ";
 export type HoldCode =
   | "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
   | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed"
-  | "verify-changed" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "waiver-not-carried" | "loop";
+  | "verify-changed" | "no-second-reviewer" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "waiver-not-carried" | "loop";
 export interface Hold { code: HoldCode; text: string }
 const cases = Object.keys(reservedNames) as ReservedCase[];
 
@@ -35,6 +35,7 @@ const holdRules: Record<HoldCode, HoldRule> = {
   ...Object.fromEntries(cases.flatMap((c) => [[`reserved:${c}`, reserved], [`reserved-path:${c}`, reserved]])) as Record<`reserved:${ReservedCase}` | `reserved-path:${ReservedCase}`, HoldRule>,
   "check-changed": { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/check is yours, and pressing Land here is you accepting it." },
   "verify-changed": { holdsAgain: true, waivable: true, why: "Accepting a new .nexus/verify is yours, and pressing Land here is you accepting it." },
+  "no-second-reviewer": { holdsAgain: true, waivable: true, why: "Landing on one reviewer's approval where the project asks for two is yours to accept, and pressing Land here is you accepting it." },
   "claude-approved": { holdsAgain: true, waivable: false, why: "Nothing here stands in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon." },
   "not-approved": notWaivable("Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves."),
   "open-findings": notWaivable("Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves."),
@@ -58,7 +59,7 @@ export const caseOf = (code: HoldCode): ReservedCase | null => /^reserved(-path)
 /** What a hold the person may waive is about, in a few words. */
 export const waivedName = (code: HoldCode): string => {
   const c = caseOf(code);
-  return c !== null ? reservedNames[c] : code === "check-changed" ? "a change to .nexus/check" : code === "verify-changed" ? "a change to .nexus/verify" : code;
+  return c !== null ? reservedNames[c] : code === "check-changed" ? "a change to .nexus/check" : code === "verify-changed" ? "a change to .nexus/verify" : code === "no-second-reviewer" ? "a review without its second reviewer" : code;
 };
 
 /**
