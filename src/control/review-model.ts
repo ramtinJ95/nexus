@@ -189,10 +189,11 @@ export interface Review {
   maxRounds: number;
   /**
    * Who asked for the PR to land once approved, or null to stop at approval. `fromProject` when the project's setting
-   * asked, so each landing reads that setting again and lands for whoever it names. `head` when the person's Land
-   * answer to a question about holds asked for it while the review ran, which is for the change at that head alone.
+   * asked, so each landing reads that setting again and lands for whoever it names. `head` and `base` when the
+   * person's Land answer to a question about holds asked for it while the review ran, which is for the change at that
+   * head against that base alone.
    */
-  land: { requestedBy: string; fromProject?: true; head?: string } | null;
+  land: { requestedBy: string; fromProject?: true; head?: string; base?: string | null } | null;
   /** Started on its own when the PR watch first linked the PR, as the project asks. */
   auto: boolean;
   rounds: Round[];

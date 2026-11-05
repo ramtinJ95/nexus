@@ -529,7 +529,7 @@ interface Review {
   models: { builder: string; reviewer: string };
   reviewerKind: "harness" | "claude";   // only a harness reviewer's approval lands
   maxRounds: number;                  // 1 to 5
-  land: { requestedBy: string; fromProject?: true; head?: string } | null;  // fromProject: the project's autoReview asked, and is read again at each landing; head, since 0.65.0: a Land answer gave it while the review ran, for that head and a rebase that keeps its change only
+  land: { requestedBy: string; fromProject?: true; head?: string; base?: string | null } | null;  // fromProject: the project's autoReview asked, and is read again at each landing; head and base, since 0.65.0: a Land answer gave it while the review ran, for that head against that base and a rebase that keeps its change only
   auto: boolean;                      // started on its own when the PR watch first linked the PR
   merged: string | null;              // the merge commit once merged
   waiver: { head: string; holds: string[]; codes?: HoldCode[]; by: string; at: number; change?: Change | null; from?: string } | null;  // since 0.28.0, codes, change and from additive

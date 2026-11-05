@@ -415,10 +415,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   async function askHolds(r: Review): Promise<Review> {
     const round = r.rounds.at(-1)!;
-    // A Land given early lands the change the person saw: a round carried from its head keeps it, and any other drops it.
-    if (r.land?.head !== undefined && r.land.head !== round.head) {
-      const { head: _, ...land } = r.land;
-      return { ...r, land: round.carried?.from === r.land.head ? { ...land, head: round.head } : null };
+    // A Land given early lands the change the person saw: a round carried from its head on its base keeps it, and any
+    // other round at another head or base drops it.
+    if (r.land?.head !== undefined && (r.land.head !== round.head || (r.land.base ?? null) !== (round.base ?? null))) {
+      const same = round.carried?.from === r.land.head && (r.land.base ?? null) === (round.base ?? null);
+      return { ...r, land: same ? { ...r.land, head: round.head } : null };
     }
     // A save since `r` was read, such as the person's cancel while GitHub answered, decides the question instead.
     const askFor = (question: Omit<ThreadQuestion, "answer"> | null) => {
@@ -1057,7 +1058,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (builder.status !== "active") throw new HttpError(409, `thread ${r.builder} is ${builder.status}`);
         if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new HttpError(409, cannotLand(r, builder, watchedPr(r))!);
         pressOn(r);
-        next = { ...r, land: r.land ?? { requestedBy: by, head: holds.head }, waiver };
+        next = { ...r, land: r.land ?? { requestedBy: by, head: holds.head, base: holds.base }, waiver };
       }
       const answered = registry.answerQuestion(question.id, answer, () => {
         if (!registry.saveReview(next, [], r)) throw moved;
