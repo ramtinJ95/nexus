@@ -6,16 +6,18 @@ import { join } from "node:path";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
-import type { AutoReview } from "./project.ts";
+import type { AutoReview, SecondReview } from "./project.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SecretGrant } from "../secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, personOnly, reservedNames, type Hold, type HoldCode } from "./holds.ts";
-import { carryWaiver, headHolds, heldBy, landingHolds, landPress } from "./policy.ts";
+import { carryWaiver, headHolds, heldBy, landingHolds, landPress, secondReviewRule } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
-import { cannotLand, changeOf, checkBeside, ended, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Waiver } from "./review-model.ts";
-import { reviewLoop, type ReviewDeps } from "./review.ts";
+import { cannotLand, changeOf, checkBeside, ended, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
+import { reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
+import { reviewText } from "../cli/thread-text.ts";
+import { defaultSecondReview } from "./project.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "./fake-harness.ts";
@@ -39,11 +41,11 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; agentState?: (registry: Registry) => ReviewDeps["agentState"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
-  const project = { id: "nexus" as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: options.secrets ?? [], logins: [], preSetup: null, autoReview: options.autoReview ?? null };
+  const project = { id: "nexus" as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: options.secrets ?? [], logins: [], preSetup: null, autoReview: options.autoReview ?? null, ...options.secondReview && { secondReview: options.secondReview } };
   if (registry.project(project.id) === undefined) {
     registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: self });
     registry.createProject(project);
@@ -4445,4 +4447,257 @@ test("an early Land is for the base it was asked against too: a retarget at the 
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+const claudeToken: SecretGrant[] = [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }];
+const secondOn: SecondReview = { always: false, lines: 150, reserved: true };
+/** A change of `lines` added lines to each of `paths`. */
+const sized = (lines: number, ...paths: string[]): ChangedFile[] => paths.map((path) => ({ path, previous: null, patch: `@@ -0,0 +1,${lines} @@\n${Array.from({ length: lines }, (_, i) => `+const line${i} = ${i};`).join("\n")}` }));
+const secondOf = (r: Review) => {
+  assert.equal(r.second?.kind, "claude");
+  return r.second as Extract<NonNullable<Review["second"]>, { kind: "claude" }>;
+};
+const secondVerdict = (r: Review, fields: Record<string, unknown>) => verdict({ ...r, expect: secondOf(r).expect }, fields);
+
+test("a project without a second reviewer's setting, or a change its rule does not name, gets one reviewer as before", async (t) => {
+  const f = fixture(t);
+  f.files = sized(400, "src/cache.ts");
+  const review = await f.loop().start(f.builder, { land: null });
+  assert.equal(review.second, undefined);
+  assert.equal(f.started.length, 1);
+  assert.equal(review.rounds[0]!.secondVerdict, undefined);
+  const g = fixture(t, { secondReview: secondOn, secrets: claudeToken });
+  g.files = sized(20, "src/cache.ts");
+  assert.equal((await g.loop().start(g.builder, { land: null })).second, undefined, "20 lines and no reserved path");
+});
+
+test("the second reviewer's rule names a change by its lines, tests and docs included, by a hold on its paths, or every change", () => {
+  const rule = { always: false, lines: 150, reserved: false } as const;
+  assert.equal(secondReviewRule(rule, sized(149, "src/a.ts"), true), null);
+  assert.equal(secondReviewRule(rule, [...sized(100, "src/a.ts"), ...sized(50, "docs/a.md")], true), "the change has 150 changed lines, at least the 150 the project sets");
+  assert.equal(secondReviewRule(rule, [{ path: "src/a.ts", previous: null, patch: "@@ -1,3 +1,3 @@\n-a\n+b\n c" }], true), null, "context lines do not count");
+  assert.match(secondReviewRule(rule, [{ path: "logo.png", previous: null, patch: "" }], true)!, /GitHub shows no patch for logo.png/);
+  const reserved = { always: false, lines: null, reserved: true } as const;
+  assert.equal(secondReviewRule(reserved, sized(1, "src/control/policy.ts"), true), "the change has holds for the person on its paths: reserved-path:auth");
+  assert.equal(secondReviewRule(reserved, sized(1, "src/control/policy.ts"), false), null, "another repository's paths are not Nexus's");
+  assert.match(secondReviewRule(reserved, sized(1, ".nexus/check"), false)!, /check-changed/);
+  assert.equal(secondReviewRule(reserved, sized(400, "src/a.ts"), true), null);
+  assert.equal(secondReviewRule({ always: true }, sized(1, "src/a.ts"), true), "the project gives every pull request one");
+});
+
+test("the second reviewer runs another model than the builder's and the first reviewer's, or says why none can", () => {
+  assert.deepEqual(secondReviewerFor(["claude-opus-5-5", "gpt-6-astra"], claudeToken), { model: "claude-fable-5-1" });
+  assert.deepEqual(secondReviewerFor(["claude-fable-5-1", "gpt-6-astra"], claudeToken), { model: "claude-opus-5-5" });
+  assert.match((secondReviewerFor(["claude-opus-5-5", "gpt-6-astra"], []) as { why: string }).why, /harness runs only claude-opus-5-5 and gpt-6-astra, and the project grants no Claude token/);
+  assert.match((secondReviewerFor(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5"], claudeToken) as { why: string }).why, /is the builder's or the first reviewer's/);
+});
+
+test("a second reviewer reads the same change beside the first, unaware of it, and the round approves only once both approve", async (t) => {
+  const f = fixture(t, { secondReview: secondOn, secrets: claudeToken });
+  f.files = sized(160, "src/cache.ts");
+  const loop = f.loop();
+  const started = await loop.start(f.builder, { land: null });
+  assert.deepEqual(started.models, { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" });
+  const second = secondOf(started);
+  assert.equal(second.model, "claude-fable-5-1");
+  assert.equal(second.rule, "the change has 160 changed lines, at least the 150 the project sets");
+  assert.deepEqual([f.started[1]!.claude !== undefined, f.started[1]!.model, f.started[1]!.raw], [true, "claude-fable-5-1", true]);
+  assert.equal(f.registry.isReviewer(second.thread), true);
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  const first = f.sent.find((s) => s.to === reviewer)!.message.text;
+  assert.equal(f.started[1]!.claude, first.replace("you run on gpt-6-astra", "you run on claude-fable-5-1").replace(f.review().expect, second.expect), "the second gets the first's request, on its own model and token");
+
+  f.reply(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "one approval is not the round's");
+  assert.equal(f.review().rounds[0]!.verdict?.verdict, "approve");
+  assert.equal(f.review().rounds[0]!.secondVerdict, null);
+  assert.match(reviewText(f.review()), /the reviewer th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 has not answered/);
+  assert.equal(f.sent.filter((s) => s.to === f.builder).length, 0);
+
+  f.reply(second.thread, secondVerdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  const fix = f.sent.at(-1)!;
+  assert.equal(fix.to, f.builder);
+  assert.match(fix.message.text, /by a reviewer on gpt-6-astra and a second reviewer on claude-fable-5-1: changes requested/);
+  assert.match(fix.message.text, /From the second reviewer on claude-fable-5-1:\n\n2-F1 \(P1\) src\/cache.ts:1: The cache never expires/);
+  assert.match(reviewText(f.review()), /th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 asks for changes \(P1\)/);
+
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Wrong ID." }]));
+  await loop.poll();
+  assert.match(f.sent.at(-1)!.message.text, /leave 2-F1 without a fix/, "the builder answers the second reviewer's finding by its own ID");
+  f.reply(f.builder, answers(f.review(), [{ id: "2-F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  f.tick(10 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().rounds.length, 2);
+  assert.equal(f.review().rounds[1]!.secondVerdict, null);
+  const toFirst = f.sent.filter((s) => s.to === reviewer).at(-1)!.message.text;
+  const toSecond = f.sent.filter((s) => s.to === second.thread).at(-1)!.message.text;
+  assert.doesNotMatch(toFirst, /TTL|2-F1/, "the first reviewer never hears the second's findings");
+  assert.match(toFirst, /The builder pushed new commits after the round you reviewed/);
+  assert.match(toSecond, /The builder answered your findings:\nF1: fixed\. Added a 5-minute TTL\./);
+  assert.match(toSecond, new RegExp(`git diff ${head1}..${head2}`));
+
+  f.reply(secondOf(f.review()).thread, secondVerdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  f.reply(reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  assert.equal(roundsSpent(f.review()), 2, "one round runs both reviewers");
+  assert.match(reviewText(f.review()), /round 2: the reviewer th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 approves/);
+  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => e.payload.second), Array(5).fill(second.thread), "the review's events name the second reviewer");
+});
+
+test("a second reviewer that never answers, answers without the block or whose model keeps failing holds the review for the person, never approving it", async (t) => {
+  const silent = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  let loop = silent.loop();
+  await loop.start(silent.builder, { land: null });
+  await loop.poll();
+  silent.reply(silent.review().reviewer, verdict(silent.review(), {}));
+  await loop.poll();
+  silent.tick(4 * 3_600_000);
+  await loop.poll();
+  assert.deepEqual(shown(silent.review().phase), { kind: "needs-person", reasons: ["The second reviewer gave no answer Nexus could read within 3 hours in round 1."] });
+  assert.equal(landable(silent.review()), false);
+
+  const garbled = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  loop = garbled.loop();
+  await loop.start(garbled.builder, { land: null });
+  await loop.poll();
+  garbled.reply(garbled.review().reviewer, verdict(garbled.review(), {}));
+  for (let i = 0; i < 3; i++) {
+    garbled.reply(secondOf(garbled.review()).thread, "```nexus-review\n{\"verdict\": \"approve\"}\n```");
+    await loop.poll();
+  }
+  assert.equal(garbled.sent.filter((s) => s.to === secondOf(garbled.review()).thread).length, 2, "two reminders, under its own token");
+  assert.ok(garbled.sent.filter((s) => s.to === secondOf(garbled.review()).thread).every((s) => s.message.text.includes(secondOf(garbled.review()).expect)));
+  assert.deepEqual(shown(garbled.review().phase), { kind: "needs-person", reasons: ["The second reviewer ended 3 turns in a row without an answer Nexus could read, in round 1."] });
+
+  const failing = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  loop = failing.loop();
+  await loop.start(failing.builder, { land: null });
+  await loop.poll();
+  failing.failedTurn(secondOf(failing.review()).thread, "overloaded_error");
+  await loop.poll();
+  assert.match(phaseNote(failing.review()), /the second reviewer's model is failing \(1 in a row, last: overloaded_error\)/);
+  for (const wait of [2, 5, 10, 20]) {
+    failing.tick(wait * 60_000);
+    await loop.poll();
+    assert.equal(failing.sent.at(-1)!.to, secondOf(failing.review()).thread, "the same request goes again");
+    failing.failedTurn(secondOf(failing.review()).thread, "overloaded_error");
+    await loop.poll();
+  }
+  assert.equal(failing.review().phase.kind, "needs-person");
+  assert.match((failing.review().phase as { reasons: string[] }).reasons[0]!, /The second reviewer's model failed 5 times in a row/);
+});
+
+test("a second reviewer whose thread the person archives stops the review for them, and both reviewers go once it lands or is cancelled", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.registry.setThreadStatus(secondOf(f.review()).thread, "archived");
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`The second reviewer thread ${secondOf(f.review()).thread} is archived, so the review stopped.`] });
+
+  const g = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  const cancelling = g.loop();
+  await cancelling.start(g.builder, { land: null });
+  await cancelling.poll();
+  cancelling.cancel(g.builder, "nLAPTOP");
+  assert.deepEqual([g.review().reviewer, secondOf(g.review()).thread].map((id) => g.registry.thread(id)!.status), ["archived", "archived"]);
+  assert.equal(secondOf(g.review()).outbox, null);
+
+  const h = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  const landing = h.loop();
+  await landing.start(h.builder, { land: "nLAPTOP" });
+  await landing.poll();
+  h.reply(h.review().reviewer, verdict(h.review(), {}));
+  h.reply(secondOf(h.review()).thread, secondVerdict(h.review(), {}));
+  await landing.poll();
+  assert.deepEqual(h.merges, [head1]);
+  released(h, merged);
+  await landing.poll();
+  assert.deepEqual(h.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual([h.builder, h.review().reviewer, secondOf(h.review()).thread].map((id) => h.registry.thread(id)!.status), ["archived", "archived", "archived"]);
+});
+
+test("a review whose rule asks for a second reviewer that no other model can run says so, and holds its landing for the person to waive", async (t) => {
+  const f = fixture(t, { secondReview: { always: true } });
+  const loop = f.loop();
+  const review = await loop.start(f.builder, { land: "nLAPTOP" });
+  assert.equal(f.started.length, 1, "the same model is never started twice");
+  assert.deepEqual(review.second, { kind: "none", rule: "the project gives every pull request one", why: "the harness runs only claude-opus-5-5 and gpt-6-astra, and the project grants no Claude token for a Claude worker on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (`nexus project edit`)" });
+  assert.match(reviewText(review), /No second reviewer runs, though the project gives every pull request one: the harness runs only/);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  const hold = `The project asks for a second reviewer on another model, since the project gives every pull request one, and none could run: ${review.second!.kind === "none" && review.second!.why}.`;
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [hold] });
+  assert.deepEqual(holdRule("no-second-reviewer"), { holdsAgain: true, waivable: true, why: "Landing on one reviewer's approval where the project asks for two is yours to accept, and pressing Land here is you accepting it." });
+  loop.land(f.builder, "nLAPTOP", head1, [hold]);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "the person's waiver lands it");
+});
+
+test("the policy holds a landing the second reviewer has not approved, and reads its reserved cases", () => {
+  const second = { kind: "claude", rule: "the project gives every pull request one", thread: "th-second" as ThreadId, model: "claude-fable-5-1", expect: "rv-1:s", asked: "", since: 1, nudges: 0, outbox: null } as const;
+  const approval = { token: "t", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" };
+  const round = (secondVerdict: Verdict | null) => ({ head: head1, base: "main", verdict: approval, secondVerdict, check: { passed: true, output: "ok" }, live: { kind: "absent" } as const, answers: null, heldAt: { base: "main", holds: [] } });
+  const pr: PrSnapshot = { pr: testPr({ number: 7, head: head1, checks: "passing" }), detail: { head: head1, branch: "feature", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
+  const held = (r: Review) => landingHolds({ review: r, pr, heldAt: r.rounds.at(-1)!.heldAt! }).map((h) => h.text);
+  assert.deepEqual(held(testReview({ second, rounds: [round(null)] })), ["The second reviewer has not approved the latest commits."]);
+  const { secondVerdict: _, ...lost } = round(null);
+  assert.deepEqual(held(testReview({ second, rounds: [lost] })), ["The second reviewer has not approved the latest commits."], "a round that lost the verdict has no approval");
+  assert.deepEqual(held(testReview({ second, rounds: [round(approval)] })), []);
+  const reserved = { ...approval, reserved: [{ case: "auth" as const, why: "it loosens the probe's guard" }] };
+  assert.deepEqual(headHolds({ review: testReview({ second, rounds: [round(reserved)] }), files: [], nexus: true }).map((h) => [h.code, h.text]),
+    [["reserved:auth", `${personOnly}${reservedNames.auth}, by the second reviewer's reading (it loosens the probe's guard).`]]);
+});
+
+/**
+ * The pull requests of 2026-11-04 whose serious bug a diff read on a second model found after Nexus's reviewer passed
+ * them or while it read them: their changed files at the head with the bug, and the finding, as the builder recorded it.
+ */
+const missed: readonly { pr: number; files: ChangedFile[]; finding: { id: string; priority: "P1"; where: string; summary: string; detail: string } }[] = [
+  {
+    pr: 442,
+    files: [...sized(60, "src/deploy/worker.ts"), ...sized(40, "src/deploy/plan.ts"), ...sized(9, "src/deploy/install.ts"), ...sized(130, "src/deploy/worker.test.ts"), ...sized(10, "deploy/README.md")],
+    finding: { id: "F1", priority: "P1", where: "src/deploy/worker.ts:215", summary: "A read error after the stop leaves the control plane stopped", detail: "rollbackRefused stops nexus-control, then reads the registry's schema. If that read throws, the start never runs, install.ts records failed, and the control plane stays down with no API." },
+  },
+  {
+    pr: 444,
+    files: [...sized(57, "src/control/policy.ts"), ...sized(70, "src/control/review.test.ts"), ...sized(31, "docs/merge-policy.md")],
+    finding: { id: "F1", priority: "P1", where: "src/control/policy.ts:40", summary: "A line added beside a guard skips the reserved path hold", detail: "changes reads only added, deleted and hunk header lines, so `if (url.searchParams.has(\"debug\")) return backend.guest(id).stream([\"sh\"]);` above the probe's authorized() check holds nothing: an unauthenticated shell into a pylon." },
+  },
+  {
+    pr: 445,
+    files: [...sized(59, "src/control/review.ts"), ...sized(130, "src/control/review.test.ts"), ...sized(31, "docs/design.md")],
+    finding: { id: "F1", priority: "P1", where: "src/control/review.ts:144", summary: "A retargeted PR's next round reviews only the new commits", detail: "rewritten ignores retargeted, so after fixes on a PR retargeted from a stacked branch to main the reviewer reads git diff old..new and never the change against the new base." },
+  },
+];
+
+test("each pull request a second model caught on 2026-11-04 gets a second reviewer by default, and its finding stops the approval the first reviewer gave", async (t) => {
+  for (const { pr, files, finding } of missed) {
+    const f = fixture(t, { secondReview: defaultSecondReview, secrets: claudeToken });
+    f.files = files;
+    const loop = f.loop();
+    const review = await loop.start(f.builder, { land: "nLAPTOP" });
+    assert.equal(review.second?.kind, "claude", `#${pr} gets a second reviewer: ${review.second?.rule}`);
+    await loop.poll();
+    f.reply(review.reviewer, verdict(f.review(), {}));
+    f.reply(secondOf(f.review()).thread, secondVerdict(f.review(), { verdict: "changes", findings: [finding] }));
+    await loop.poll();
+    assert.equal(f.review().phase.kind, "fixing", `#${pr} goes back to its builder`);
+    assert.deepEqual(f.merges, [], `#${pr} does not land on the first reviewer's approval`);
+    assert.equal(landable(f.review()), false);
+    assert.match(f.sent.at(-1)!.message.text, new RegExp(`From the second reviewer on claude-fable-5-1:\\n\\n2-F1 \\(P1\\) ${finding.where}: ${finding.summary}`));
+  }
+  assert.match(secondReviewRule(defaultSecondReview, missed[1]!.files, true)!, /^the change has 158 changed lines/);
+  assert.equal(secondReviewRule({ always: false, lines: null, reserved: true }, missed[2]!.files, true), null, "#445 touched no reserved path, so only its size names it");
 });
