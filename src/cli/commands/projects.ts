@@ -1,6 +1,6 @@
 /** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
-import { defaultProjectResources, type Project } from "../../control/project.ts";
+import { defaultProjectResources, defaultSecondReview, type Project, type SecondReview } from "../../control/project.ts";
 import { secretHostPattern, secretNamePattern, type SecretGrant } from "../../secret-grants.ts";
 import { CliError } from "../transport.ts";
 import { type Command, str, strs, int, resourcesOf, placementOptions, table } from "../kit.ts";
@@ -24,6 +24,24 @@ const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart
 const pipelineText = (p: Project) => p.pipeline == null ? "pipeline off" : p.pipeline.autoStart ? "pipeline starts items" : "pipeline waits for approval";
 const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" : p.autoReview.land ? `auto review and land, for ${p.autoReview.enabledBy}` : `auto review, set by ${p.autoReview.enabledBy}`;
 
+const secondReviewText = (p: Project) => {
+  const rule = p.secondReview;
+  if (rule == null) return "no second reviewer";
+  if (rule.always) return "a second reviewer on another model for every pull request";
+  return `a second reviewer on another model for a pull request with ${[...rule.reserved ? ["a reserved path hold"] : [], ...rule.lines === null ? [] : [`at least ${rule.lines} changed lines`]].join(" or ")}`;
+};
+/** `--second-reviewer`: off, on for the default rule, always, or a rule of `reserved` and `lines=N`, such as reserved,lines=150. */
+function secondReviewOf(flag: string): SecondReview | null {
+  if (flag === "off") return null;
+  if (flag === "on") return defaultSecondReview;
+  if (flag === "always") return { always: true };
+  const parts = flag.split(",");
+  const lines = parts.filter((part) => part.startsWith("lines=")).map((part) => /^lines=([1-9]\d{0,8})$/.exec(part)?.[1]);
+  const valid = parts.every((part) => part === "reserved" || part.startsWith("lines=")) && lines.length <= 1 && lines.every((n) => n !== undefined) && new Set(parts).size === parts.length;
+  if (!valid) throw new CliError("invalid", "--second-reviewer takes off, on, always, or reserved, lines=N or both, such as reserved,lines=150");
+  return { always: false, lines: lines.length ? Number(lines[0]) : null, reserved: parts.includes("reserved") };
+}
+
 /** The text of `--rules-file`, read from stdin for `-`. The API trims it and refuses one that is empty or too long. */
 function rulesFileOf(path: string): string {
   try {
@@ -45,6 +63,7 @@ function projectText(p: Project): string {
     `hosts: ${listText(p.allowedHosts)}. logins: ${listText(p.logins)}. secrets: ${listText(p.secrets.map((grant) => grant.name))}`,
     ...p.gitIdentity == null ? [] : [`git identity: ${p.gitIdentity.name} <${p.gitIdentity.email}>`],
     `${autoReviewText(p)}, ${pipelineText(p)}`,
+    ...p.secondReview == null ? [] : [secondReviewText(p)],
     "",
     rulesText(p),
   ].join("\n");
@@ -75,6 +94,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
       "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
       "auto-review": { type: "string" }, pipeline: { type: "string" }, "rules-file": { type: "string" }, "clear-rules": { type: "boolean" },
+      "second-reviewer": { type: "string" },
     },
     async run(api, [id], v) {
       const patch: Record<string, unknown> = {};
@@ -101,13 +121,15 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
         if (!(items in pipelines)) throw new CliError("invalid", "--pipeline takes off, approve or start");
         patch.pipeline = pipelines[items as keyof typeof pipelines];
       }
+      const second = str(v, "second-reviewer");
+      if (second !== undefined) patch.secondReview = secondReviewOf(second);
       const rulesFile = str(v, "rules-file");
       if (v["clear-rules"] && rulesFile !== undefined) throw new CliError("invalid", "--clear-rules conflicts with --rules-file");
       if (v["clear-rules"]) patch.standingRules = null;
       else if (rulesFile !== undefined) patch.standingRules = rulesFileOf(rulesFile);
       const p = await api("PATCH", `/v1/projects/${encodeURIComponent(id!)}`, patch) as Project;
       const rules = patch.standingRules === undefined ? "" : p.standingRules?.text == null ? " It has no standing rules." : ` Builder threads started from now get its standing rules, revision ${p.standingRules.revision}.`;
-      return { json: p, text: `Updated project ${p.id}, ${autoReviewText(p)}, ${pipelineText(p)}. Existing threads keep their boot settings and grants; start a new thread to apply them.${rules}` };
+      return { json: p, text: `Updated project ${p.id}, ${autoReviewText(p)}, ${pipelineText(p)}${second === undefined ? "" : `, ${secondReviewText(p)}`}. Existing threads keep their boot settings and grants; start a new thread to apply them.${rules}` };
     },
   },
   "project add": {

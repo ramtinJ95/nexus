@@ -113,7 +113,7 @@ export function threadRole(c: Pick<Context, "registry" | "reviews">, id: ThreadI
   const t = c.registry.thread(id);
   if (t === undefined) return { kind: "builder" };
   const role = roleOf(t.startedBy);
-  const reviews = c.reviews().find((r) => r.reviewer === id);
+  const reviews = c.reviews().find((r) => r.reviewer === id || (r.second?.kind === "claude" && r.second.thread === id));
   if (role === "reviewer" || reviews !== undefined) return { kind: "reviewer", review: reviews ?? null };
   if (role === "check" || role === "verify") return { kind: role, review: c.reviews().find((r) => ranIn(r, id)) ?? null };
   return c.registry.planning(id) === null ? { kind: "builder" } : { kind: "planning" };

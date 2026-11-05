@@ -12,8 +12,9 @@
  * them. Every other condition is one no person can waive: it clears only when what failed changes.
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
+import type { SecondReview } from "./project.ts";
 import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, changedPaths, descriptionDigest, findingsOf, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
+import { answered, blocks, changedPaths, descriptionDigest, findingsOf, secondReads, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
 
 export interface LandingFacts {
   review: Review;
@@ -70,11 +71,37 @@ const hold = (code: HoldCode, text: string): Hold => ({ code, text });
 
 const sameModel = (review: Review): Hold[] => review.models.reviewer === review.models.builder ? [hold("same-model", `The reviewer ran the builder's own model, ${review.models.builder}.`)] : [];
 
-/** The holds the review's record alone decides: they hold every landing of its approved head, whatever GitHub says. */
+/**
+ * The holds the review's record alone decides: they hold every landing of its approved head, whatever GitHub says. A
+ * second reviewer only adds holds, so a Claude second reviewer's approval, which its pylon could write, stands in for
+ * no approval the first reviewer did not give.
+ */
 export const recordedHolds = (review: Review): Hold[] => [
   ...review.reviewerKind === "claude" ? [hold("claude-approved", "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.")] : [],
+  ...review.second?.kind === "none" ? [hold("no-second-reviewer", `The project asks for a second reviewer on another model, since ${review.second.rule}, and none could run: ${review.second.why}.`)] : [],
   ...(review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => hold(`reserved:${r.case}`, `${personOnly}${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`)),
+  ...(review.rounds.at(-1)!.secondVerdict?.reserved ?? []).map((r) => hold(`reserved:${r.case}`, `${personOnly}${reservedNames[r.case]}, by the second reviewer's reading (${r.why}).`)),
 ];
+
+/** The holds of the paths a change touches that need the person, which a second reviewer's rule reads. */
+const reservedPathHolds = (files: readonly ChangedFile[], nexus: boolean): Hold[] => [...changedChecks(files), ...nexus ? pathHolds(files) : []];
+
+/**
+ * Why `rule`, a project's setting, gives the pull request whose change is `files` a second reviewer, or null when it
+ * does not. Every added and deleted line counts, tests and docs too, and a file GitHub shows no patch for may change
+ * any number of them.
+ */
+export function secondReviewRule(rule: SecondReview, files: readonly ChangedFile[], nexus: boolean): string | null {
+  if (rule.always) return "the project gives every pull request one";
+  if (rule.lines !== null) {
+    const unshown = files.find((f) => f.patch === "");
+    if (unshown !== undefined) return `GitHub shows no patch for ${unshown.path}, so the change may be any size`;
+    const lines = files.reduce((n, f) => n + f.patch.split("\n").filter((line) => /^[+-]/.test(line)).length, 0);
+    if (lines >= rule.lines) return `the change has ${lines} changed lines, at least the ${rule.lines} the project sets`;
+  }
+  const held = rule.reserved ? reservedPathHolds(files, nexus) : [];
+  return held.length ? `the change has holds for the person on its paths: ${held.map((h) => h.code).join(", ")}` : null;
+}
 
 /**
  * The holds the head alone decides, which meet every landing of it whatever GitHub says: the record's, and the
@@ -84,11 +111,14 @@ export function headHolds({ review, files, nexus }: HeadFacts): Hold[] {
   return [
     ...sameModel(review),
     ...recordedHolds(review),
-    ...files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [hold("check-changed", "The pull request changes .nexus/check, the check this policy relies on.")] : [],
-    ...files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [hold("verify-changed", "The pull request changes .nexus/verify, the live check this policy relies on.")] : [],
-    ...nexus ? pathHolds(files) : [],
+    ...reservedPathHolds(files, nexus),
   ];
 }
+
+const changedChecks = (files: readonly ChangedFile[]): Hold[] => [
+  ...files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [hold("check-changed", "The pull request changes .nexus/check, the check this policy relies on.")] : [],
+  ...files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [hold("verify-changed", "The pull request changes .nexus/verify, the live check this policy relies on.")] : [],
+];
 
 function pathHolds(files: readonly ChangedFile[]): Hold[] {
   const hits = new Map<ReservedCase, string[]>();
@@ -157,6 +187,8 @@ const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
   ({ review }) => {
     const round = review.rounds.at(-1)!;
     if (round.verdict?.verdict !== "approve") return [hold("not-approved", "The reviewer has not approved the latest commits.")];
+    // A second reviewer that never answered, or whose round lost its verdict, has not approved.
+    if (secondReads(review) && round.secondVerdict?.verdict !== "approve") return [hold("not-approved", "The second reviewer has not approved the latest commits.")];
     const open = findingsOf(round).filter(blocks);
     return open.length ? [hold("open-findings", `Findings P0 to P2 are open: ${open.map((f) => f.id).join(", ")}.`)] : [];
   },

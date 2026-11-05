@@ -36,7 +36,7 @@ export const verdictSchema = z.object({
 }).transform((v) => ({ ...v, verdict: v.findings.some(blocks) ? "changes" as const : "approve" as const }));
 export const answersSchema = z.object({
   token: z.string(),
-  answers: z.array(z.object({ id: z.string().max(40), action: z.enum(["fixed", "rejected"]), reason: z.string().max(4_000) })).max(60),
+  answers: z.array(z.object({ id: z.string().max(42), action: z.enum(["fixed", "rejected"]), reason: z.string().max(4_000) })).max(110),
 });
 /** The reviewer's quote, asked for by a Land press at an approved head, of what the description now says could not be checked live. */
 export const quoteSchema = z.object({ token: z.string(), notCheckedLive: z.string().max(4_000).nullable() });
@@ -52,10 +52,12 @@ export type Answer = z.infer<typeof answersSchema>["answers"][number];
  */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; heldAt?: HeldAt }
+export interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; heldAt?: HeldAt }
 /** The holds a round's head alone decides, read from the PR's files against `base`. */
 export interface HeldAt { base: string; holds: Hold[] }
 /**
+ * `verdict` is the reviewer's, and `secondVerdict` the second reviewer's, set on every round of a review that has one
+ * and null until it answers, without either seeing the other's.
  * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
  * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
  * change at both is the same, so no reviewer round ran for it and it counts against no limit. Its checks run as any
@@ -171,6 +173,23 @@ export function changedPaths(a: Extract<Change, { kind: "known" }>, b: Extract<C
  */
 export interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: string; at: number; change?: Change | null; from?: string }
 
+/** A message saved before it is sent. `attempted` is when its first send began, saved before it. */
+export interface Outbox { id: string; text: string; attempted: number | null }
+
+/**
+ * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on another model than the
+ * builder's and the first reviewer's, in `thread`, with its side of the conversation, as the review's own fields keep
+ * the first's. `starting` until its thread starts, tried since `since` and last at `tried`, which failed for `why`.
+ * `none` when no such model could run or its thread did not start in time, for `why`, which holds the landing for the
+ * person.
+ */
+export type SecondReviewer =
+  | { kind: "claude"; rule: string; thread: ThreadId; model: string; expect: string; asked: string; since: number; nudges: number; failing?: ModelFailure; outbox: Outbox | null }
+  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null }
+  | { kind: "none"; rule: string; why: string };
+/** Whether the review has a second reviewer whose verdict each round it reviews needs. */
+export const secondReads = (r: Pick<Review, "second">) => r.second !== undefined && r.second.kind !== "none";
+
 export interface Review {
   /** Part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
   id: string;
@@ -186,6 +205,10 @@ export interface Review {
    * transcript in its pylon, where code it runs could write, so its approval never lands without the person.
    */
   reviewerKind: "harness" | "claude";
+  /** Absent when the project's rule gave the review no second reviewer. */
+  second?: SecondReviewer;
+  /** The builder's brief, its first message, cut as the description is, which each reviewer's first request carries. */
+  brief?: string | null;
   maxRounds: number;
   /**
    * Who asked for the PR to land once approved, or null to stop at approval. `fromProject` when the project's setting
@@ -202,10 +225,10 @@ export interface Review {
   waiver: Waiver | null;
   phase: Phase;
   /**
-   * The next message, saved before it is sent. `attempted` is when its first send began, saved before it, so a send
-   * that went through before a crash still dates the wait from then, and a reply that came meanwhile is read.
+   * The next message to the builder or the reviewer. A send that went through before a crash still dates the wait from
+   * its `attempted`, and a reply that came meanwhile is read.
    */
-  outbox: { to: "builder" | "reviewer"; id: string; text: string; attempted: number | null } | null;
+  outbox: (Outbox & { to: "builder" | "reviewer" }) | null;
   /** The text of the last message sent, which a turn that ended on a model failure gets again. */
   asked: string;
   /** When the agent the loop waits on was last sent something, and how many reminders in a row it has had. */
@@ -265,7 +288,9 @@ export function storedReview(record: Review): Review {
       holds: phase.holds ?? phase.reasons.map((text) => ({ code: legacyHoldCode(text), text })),
     } : phase,
     asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
-    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } }),
+    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } })
+      // A round of a review with a second reviewer that lacks its verdict has none, which never approves.
+      .map((round, i) => secondReads(record) && i === record.rounds.length - 1 && round.secondVerdict === undefined ? { ...round, secondVerdict: null } : round),
   };
 }
 
@@ -299,15 +324,23 @@ const gates = {
 export const gateFailure = (round: Round): GateFailure | null => round.check?.passed === false && reviewerApproved(round) ? gates.check(round.head, round.check.output)
   : round.live?.kind === "ran" && !round.live.passed ? gates.live(round.head, round.live.output)
   : round.conflict !== undefined ? gates.conflict(round.head, round.conflict.base) : null;
-/** What the builder must answer for a round: the reviewer's findings, and the finding of a gate that failed. */
+/** A second reviewer's finding as the builder answers it. No finding's own ID has a dot, so it never meets one of the first reviewer's. */
+export const secondId = (id: string) => `2.${id}`;
+/** The second reviewer's findings at the round, under the IDs the builder answers. */
+export const secondFindings = (round: Round): Finding[] => (round.secondVerdict?.findings ?? []).map((f) => ({ ...f, id: secondId(f.id) }));
+/** What the reviewers found at the round, the first's then the second's. */
+export const reviewersFindings = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...secondFindings(round)];
+/** What the builder must answer for a round: the reviewers' findings, and the finding of a gate that failed. */
 export const findingsOf = (round: Round): Finding[] => {
   const gate = gateFailure(round);
-  return [...round.verdict?.findings ?? [], ...gate === null ? [] : [gate.finding]];
+  return [...reviewersFindings(round), ...gate === null ? [] : [gate.finding]];
 };
-/** The reviewer approved the round, whatever a gate after it found. */
-export const reviewerApproved = (round: Round) => round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks);
+/** A round the review gives no second reviewer counts as its approval. One it gives one waits for that verdict, and a missing verdict never approves. */
+const secondApproves = (round: Round) => round.secondVerdict === undefined || (round.secondVerdict?.verdict === "approve" && !round.secondVerdict.findings.some(blocks));
+/** Every reviewer of the round approved it, whatever a gate after it found. */
+export const reviewerApproved = (round: Round) => round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks) && secondApproves(round);
 /** An approval with no blocking finding open, the check included. */
-export const approves = (round: Round) => round.verdict?.verdict === "approve" && !findingsOf(round).some(blocks);
+export const approves = (round: Round) => reviewerApproved(round) && !findingsOf(round).some(blocks);
 /**
  * Whether `nexus land` takes the review: approved, or held for the person after an approval whose check passed, at
  * the PR's head as far as the loop knows. A review that merged never lands again.
@@ -333,7 +366,7 @@ export function cannotLand(r: Review, builder: { status: ThreadStatus }, pr?: Pi
 export const heldForGate = (r: Review) => {
   const round = r.rounds.at(-1)!;
   return r.phase.kind === "needs-person" && r.phase.cause !== "rounds" && r.merged === null && roundsSpent(r) < r.maxRounds
-    && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks) && gateFailure(round) !== null;
+    && reviewerApproved(round) && gateFailure(round) !== null;
 };
 /**
  * The rounds that count against the limit. One that approves again the head its previous round approved on the same
@@ -341,7 +374,7 @@ export const heldForGate = (r: Review) => {
  */
 export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round, i) => {
   const previous = r.rounds[i - 1];
-  return round.carried === undefined && !(previous?.head === round.head && previous.base === round.base && previous.verdict?.verdict === "approve" && round.verdict?.verdict === "approve" && !round.verdict.findings.some(blocks));
+  return round.carried === undefined && !(previous?.head === round.head && previous.base === round.base && previous.verdict?.verdict === "approve" && secondApproves(previous) && reviewerApproved(round));
 }).length;
 /**
  * The head `pr` was read at, when it is open there at another head than the latest round's and than the one its hold
@@ -356,7 +389,7 @@ export const pushedHead = (r: Review, pr: Pick<PullRequest, "state" | "head"> | 
 export function roundNote(r: Review): string | null {
   const [previous, round] = r.rounds.slice(-2);
   if (round?.carried !== undefined) return `${round.carried.held ? "hold" : "approval"} carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
-  if (round === undefined || previous!.answers !== null || previous!.verdict?.verdict !== "approve") return null;
+  if (round === undefined || previous!.answers !== null || previous!.verdict?.verdict !== "approve" || !secondApproves(previous!)) return null;
   if (round.head === previous!.head && round.base !== previous!.base) return `a new round reviews ${round.head.slice(0, 12)} against ${round.base}, since the pull request's base changed from ${previous!.base} after its approval`;
   return `a new round reviews ${round.head.slice(0, 12)}, since the pull request's head moved from ${previous!.head.slice(0, 12)} after its approval`;
 }
@@ -365,7 +398,21 @@ const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, la
 export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.who === "person" ? `, cancelled by ${r.phase.by}` : `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
   : r.phase.kind === "merging" && r.phase.waiting !== undefined ? `, waiting while ${r.phase.waiting}`
   : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state]
-  : (r.phase.kind === "reviewing" || r.phase.kind === "fixing" || r.phase.kind === "quoting") && r.phase.failing ? `, the ${r.phase.kind === "fixing" ? "builder" : "reviewer"}'s model is failing (${r.phase.failing.count} in a row, last: ${r.phase.failing.last}), retrying at ${new Date(r.phase.failing.retryAt).toISOString().slice(11, 16)} UTC` : "";
+  : `${(r.phase.kind === "reviewing" || r.phase.kind === "fixing" || r.phase.kind === "quoting") && r.phase.failing ? failingNote(r.phase.kind === "fixing" ? "builder" : "reviewer", r.phase.failing) : ""}${r.phase.kind === "reviewing" && r.second?.kind === "claude" && r.second.failing ? failingNote("second reviewer", r.second.failing) : ""}`;
+const failingNote = (who: string, failing: ModelFailure) => `, the ${who}'s model is failing (${failing.count} in a row, last: ${failing.last}), retrying at ${new Date(failing.retryAt).toISOString().slice(11, 16)} UTC`;
+const verdictWord = (v: Verdict | null | undefined) => v === undefined ? "did not review it" : v === null ? "has not answered" : v.findings.some(blocks) ? `asks for changes (${v.findings.filter(blocks).map((f) => f.priority).join(", ")})` : "approves";
+/**
+ * Both reviewers of a review the project's rule gave a second one, and their verdicts at the latest round, as `nexus
+ * show` and the dashboard say them, or null for a review with one reviewer.
+ */
+export function reviewersNote(r: Review): string | null {
+  if (r.second === undefined) return null;
+  const round = r.rounds.at(-1)!;
+  const first = `round ${r.rounds.length}: the reviewer ${r.reviewer} on ${r.models.reviewer} ${verdictWord(round.verdict)}`;
+  if (r.second.kind === "none") return `${first}. No second reviewer runs, though ${r.second.rule}: ${r.second.why}`;
+  if (r.second.kind === "starting") return `${first}, and the second reviewer on ${r.second.model} is starting${r.second.why === null ? "" : `, after a start that failed: ${r.second.why}`}. It reviews since ${r.second.rule}`;
+  return `${first}, and the second reviewer ${r.second.thread} on ${r.second.model} ${verdictWord(round.secondVerdict)}. It reviews since ${r.second.rule}`;
+}
 /** The check thread `phase` holds: a checking round's, or a reviewing round's, which runs beside the reviewer. */
 export const checkThread = (phase: Phase): ThreadId | null => phase.kind === "checking" ? phase.thread : phase.kind === "reviewing" ? phase.check?.thread ?? null : null;
 /** What a reviewing round's check does beside the reviewer, which a review's line adds to its phase note, so it says whether the round waits on one or both. */

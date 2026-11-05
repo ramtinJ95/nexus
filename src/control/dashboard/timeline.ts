@@ -7,7 +7,7 @@ import type { ThreadDetail } from "../wire.ts";
 import { isOpen } from "../questions.ts";
 import type { ThreadId } from "../../ids.ts";
 import { keptPastDay } from "../../reconcile.ts";
-import { blocks, checkBeside, findingsOf, phaseNote, roundsSpent, type Review, type Round } from "../review-model.ts";
+import { blocks, checkBeside, findingsOf, phaseNote, reviewerApproved, reviewersNote, roundsSpent, type Review, type Round, type Verdict } from "../review-model.ts";
 import { Html, html, ago, short, dot, icon, limitText, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
@@ -68,8 +68,11 @@ const priorityTone = (priority: string) => priority === "P0" || priority === "P1
 /** A review round: the head it reviewed, the reviewer's verdict and findings with the builder's answers, and its checks. */
 function roundView(r: Review, round: Round, i: number, last: boolean): Html {
   const findings = findingsOf(round);
-  const verdict = round.carried !== undefined ? "approval carried over" : round.verdict === null ? (last ? "the reviewer is reading it" : "no verdict") : round.verdict.verdict === "approve" ? "approved" : "changes asked";
-  const tone: Tone = round.verdict === null ? "work" : round.verdict.verdict === "approve" ? "ok" : "bad";
+  const said = (v: Verdict | null) => v === null ? (last ? "reading" : "no verdict") : v.verdict === "approve" ? "approved" : "changes asked";
+  const verdict = round.carried !== undefined ? "approval carried over" : round.secondVerdict !== undefined ? `reviewer ${said(round.verdict)} · second reviewer ${said(round.secondVerdict)}`
+    : round.verdict === null ? (last ? "the reviewer is reading it" : "no verdict") : round.verdict.verdict === "approve" ? "approved" : "changes asked";
+  const asked = [round.verdict, round.secondVerdict].some((v) => v != null && v.verdict !== "approve");
+  const tone: Tone = asked ? "bad" : round.verdict === null || round.secondVerdict === null ? "work" : reviewerApproved(round) ? "ok" : "bad";
   return html`<li class="tl-round"><p class="tl-round-h">${dot(tone)}<b>Round ${i + 1}</b> at ${short(round.head)}<span class="tl-verdict tl-${tone}">${verdict}</span>${round.check !== null && html`<span class="tag ${round.check.passed ? "tag-ok" : "tag-bad"}">check ${round.check.passed ? "passed" : "failed"}</span>`}${round.live?.kind === "ran" && html`<span class="tag ${round.live.passed ? "tag-ok" : "tag-bad"}">live ${round.live.passed ? "passed" : "failed"}</span>`}</p>
 ${findings.length > 0 && html`<ul class="tl-findings">${findings.map((f) => {
   const answer = (round.answers ?? []).find((a) => a.id === f.id) ?? r.rounds.slice(i + 1).flatMap((rd) => rd.answers ?? []).find((a) => a.id === f.id);
@@ -130,6 +133,7 @@ ${outputs.length > 0 && html`<p class="tl-meta">${outputs.map((o, i) => html`${i
 ${heldAt("building")}`,
     review: html`${d.pullRequests.length === 0 && r === null ? html`<p class="empty">No pull request yet.</p>` : html`<ul class="tl-prs">${d.pullRequests.map((pr) => html`<li><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title} ↗</a> <span class="tag">${pr.state}</span> <span class="dim">checks ${pr.checks}${pr.review !== "" && ` · ${pr.review}`}</span></li>`)}</ul>`}
 ${r !== null && html`<p class="tl-meta">Reviewed by <a class="link" href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind}) · round ${roundsSpent(r)} of ${r.maxRounds}${r.land !== null && " · lands once approved"} · ${r.phase.kind.replace("-", " ")}${phaseNote(r)}${checkBeside(r)}</p>
+${reviewersNote(r) !== null && html`<p class="tl-meta">${reviewersNote(r)}</p>`}
 ${r.rounds.length > 0 && html`<ol class="tl-rounds">${r.rounds.map((round, i) => roundView(r, round, i, i === r.rounds.length - 1))}</ol>`}`}
 ${heldAt("review")}`,
     landing: html`${r === null ? html`<p class="empty">It lands once its review approves it.</p>` : landingView(c, r) || html`<p class="empty">${r.land === null ? "It lands once you press Land." : "It lands once its review approves it."}</p>`}

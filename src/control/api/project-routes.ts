@@ -30,11 +30,15 @@ export const projectSchema = z.strictObject({
 const rulesText = z.string().trim().min(1).max(standingRulesLimit).refine((text) => !text.includes("\0"), "standing rules cannot hold a NUL character, which no Claude prompt can");
 /** A caller gives standing rules as their text, and Nexus counts their revisions. */
 const projectAddSchema = projectSchema.extend({ standingRules: rulesText.optional() });
+const secondReviewSchema = z.union([
+  z.strictObject({ always: z.literal(true) }),
+  z.strictObject({ always: z.literal(false), lines: z.int().positive().nullable(), reserved: z.boolean() }).refine((rule) => rule.lines !== null || rule.reserved, "a second reviewer's rule names a size of change, reserved paths, or always"),
+]);
 /** Only an edit sets `autoReview`, and the API records its caller in it, so a project's add cannot name someone else. */
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true })
   .extend({
     resources: projectSchema.shape.resources.partial(), autoReview: z.strictObject({ land: z.boolean() }).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
-    standingRules: rulesText.nullable(),
+    standingRules: rulesText.nullable(), secondReview: secondReviewSchema.nullable(),
   }).partial();
 
 export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null | undefined }): readonly RouteEntry[] {
@@ -56,16 +60,17 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
 
   return [
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, { person: "edit a project" }, async ([, id], r) => {
-      const { autoReview, pipeline, standingRules, ...patch } = parse(projectEditSchema, await r.body());
+      const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
       if (autoReview?.land) mayLand(r.caller);
-      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, ...previous }) => {
+      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
         const review = autoReview === undefined ? kept : autoReview === null ? null : { land: autoReview.land, enabledBy: r.caller };
         // An off pipeline stays null, so the migration that turns it on for project nexus never turns it back on.
         const items = pipeline === undefined ? running : pipeline;
         const rules = standingRules === undefined ? standing : editedRules(standing, standingRules);
-        return { ...updated, ...review == null ? {} : { autoReview: review }, ...items === undefined ? {} : { pipeline: items }, ...rules == null ? {} : { standingRules: rules } };
+        const reviewers = secondReview === undefined ? second : secondReview;
+        return { ...updated, ...review == null ? {} : { autoReview: review }, ...items === undefined ? {} : { pipeline: items }, ...rules == null ? {} : { standingRules: rules }, ...reviewers == null ? {} : { secondReview: reviewers } };
       });
       if (pipeline !== undefined) void options.pipeline?.poll();
       if (project === undefined) throw new HttpError(404, `no project ${id}`);

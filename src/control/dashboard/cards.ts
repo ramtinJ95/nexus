@@ -5,7 +5,7 @@
 import type { ThreadDetail } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
-import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, roundNote, roundsSpent, type Review } from "../review-model.ts";
+import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, reviewersNote, roundNote, roundsSpent, type Review } from "../review-model.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { heldBy, landPress } from "../policy.ts";
 import { isOpen, type AnswerRefusal, type AskedQuestion, type NodeQuestion, type Question } from "../questions.ts";
@@ -211,7 +211,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
     : `Land pull request #${r.pr.number}, "${r.pr.title}", at commit ${round.head.slice(0, 12)}, waiving ${waived.length === 1 ? "the hold" : `the ${waived.length} holds`} the merge policy reserves for you? ${checks} everything else again, merges that commit${deploys}.`;
   const tag = (h: typeof rules[number]) => h.waivable ? html`<span class="tag tag-ok">you may waive</span>` : html`<span class="tag">${h.holdsAgain ? "holds again" : "not waivable"}</span>`;
   const nothing = html`<p class="land-note">Nothing holds it. The review stopped at approval because it was started without --land.</p>`;
-  const found = html`<h3>The reviewer's findings</h3>
+  const found = html`<h3>The ${r.second?.kind === "claude" ? "reviewers'" : "reviewer's"} findings</h3>
 ${findings.length === 0 ? html`<p class="land-note">None.</p>` : html`<ul class="land-findings">${findings.map((f) => {
   const answer = r.rounds.flatMap((rd) => rd.answers ?? []).findLast((a) => a.id === f.id);
   return html`<li><span class="tag${blocking(f) ? " tag-bad" : ""}">${f.priority}</span> <b>${f.id}</b>${f.where && html` <code>${f.where}</code>`}: ${f.summary}${answer && html` <span class="dim">(builder: ${answer.action}${answer.reason && `, ${answer.reason}`})</span>`}</li>`;
@@ -222,7 +222,7 @@ ${round.live?.kind === "ran" && html`<details id="${id("land-live")}"><summary>T
   return html`<section class="landing" ${named(title)}>
 ${top(title)}
 ${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}
-<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind})${!card && ` in round ${roundsSpent(r)} of ${r.maxRounds}`} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
+<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind})${r.second?.kind === "claude" && ` and ${r.second.model} (second reviewer)`}${r.second?.kind === "none" && " alone, with no second reviewer"}${!card && ` in round ${roundsSpent(r)} of ${r.maxRounds}`} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
 ${card ? html`${reasons.length === 0 ? nothing : html`<ul class="land-reasons">${rules.map((h, i) => html`<li><details id="${id(`land-hold-${i}`)}"><summary>${h.reason} ${tag(h)}</summary><span class="dim">${h.why}</span></details></li>`)}</ul>`}
 <details id="${id("land-why")}"><summary>Findings and checks</summary>${found}</details>`
   : html`<details id="${id("land-why")}" open><summary>Why it waits for you</summary>
@@ -252,7 +252,8 @@ function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeo
   const title = outside === "merged" ? "Merged outside its review" : outside === "closed" ? "Closed outside its review" : "Review needs you";
   return html`<section class="landing held-review" ${card ? html`aria-label="${title}"` : html`aria-labelledby="${id("landing-h")}"`}>
 ${!card && html`<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2><a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a></div>`}
-<p class="land-meta">${card ? "Reviewer" : `Ended in round ${roundsSpent(r)} of ${r.maxRounds} · reviewer`} <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})</p>
+<p class="land-meta">${card ? "Reviewer" : `Ended in round ${roundsSpent(r)} of ${r.maxRounds} · reviewer`} <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})${r.second?.kind === "claude" && html` · second reviewer <a href="/threads/${r.second.thread}">${r.second.thread}</a> on ${r.second.model}`}</p>
+${reviewersNote(r) !== null && html`<p class="land-note">${reviewersNote(r)}</p>`}
 ${r.phase.kind === "needs-person" && html`<ul class="error">${r.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
 ${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} merged on GitHub outside this review, so nothing is left to review or land.${c.deploys(r) && " Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run."} Cancel the review once nothing more is needed.</p>`
   : outside === "closed" ? html`<p class="land-note">Pull request #${r.pr.number} closed on GitHub, so nothing is left to review or land. Cancel the review once nothing more is needed.</p>`

@@ -54,7 +54,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
         sql("INSERT OR IGNORE INTO reviewed_prs (repo, number) VALUES (?, ?)").run(review.pr.repo, review.pr.number);
         const label = (r: Review | null) => r?.phase.kind === "needs-person" ? r.phase.label?.state : undefined;
         if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
-          appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, phase: review.phase, round: review.rounds.length });
+          appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, ...review.second?.kind === "claude" && { second: review.second.thread }, phase: review.phase, round: review.rounds.length });
         }
         const pr = { review: review.id, repo: review.pr.repo, pr: review.pr.number };
         const round = review.rounds.at(-1)!;
