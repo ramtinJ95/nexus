@@ -147,11 +147,20 @@ test("health.ts reads the release-commit file release.sh writes at the release's
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("the reserved cases each tracked file can hold a landing for are the snapshot's", () => {
+test("the reserved cases each tracked file holds a landing for, on every change or only on one that names their guard, are the snapshot's", () => {
   const review = testReview();
-  const cases = tracked.map((path) => ({ path, codes: headHolds({ review, nexus: true, files: [{ path, previous: null, patch: "" }] }).map((hold) => hold.code).sort() }))
-    .flatMap(({ path, codes }) => codes.map((code) => `${path}: ${code}`));
-  pinned("holdsByPath", cases, droppedHold);
+  const holds = (path: string, patch: string) => new Set(headHolds({ review, nexus: true, files: [{ path, previous: null, patch }] }).map((hold) => hold.code));
+  // GitHub's empty patch may change anything, so it meets every rule. A patch that names no guarded word meets only
+  // the rules that hold every change to the file.
+  const neutral = "@@ -1 +1 @@\n-x\n+y";
+  const every: string[] = [];
+  const named: string[] = [];
+  for (const path of tracked) {
+    const always = holds(path, neutral);
+    for (const code of [...holds(path, "")].sort()) (always.has(code) ? every : named).push(`${path}: ${code}`);
+  }
+  pinned("holdsOnEveryChange", every, droppedHold);
+  pinned("holdsWhenThePatchNamesTheGuard", named, droppedHold);
 });
 
 test("the files outside src/pylon-vm that import the fork are the snapshot's", () => {
