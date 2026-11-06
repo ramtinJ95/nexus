@@ -1184,6 +1184,10 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
   const migration = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,4 @@ export const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," };
   assert.deepEqual(headHolds({ review, nexus: true, files: [migration] }).map((h) => h.text), ["Always needs the person: anything irreversible, as it changes src/control/schema.ts."]);
   assert.deepEqual(holds("src/control/schema.ts", "src/control/db.ts"), []);
+  const dropped = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,2 @@ export const migrations: readonly string[] = [\n-  `UPDATE threads SET x = NULL;`," };
+  assert.deepEqual(headHolds({ review, nexus: true, files: [dropped] }).map((h) => h.code), ["reserved-path:irreversible"], "a hunk in the migrations holds even when it names no DDL");
+  const registry = { path: "src/control/registry.ts", previous: null, patch: "" };
+  assert.deepEqual(headHolds({ review, nexus: true, files: [registry] }), [], "the registry holds no migrations, so even GitHub's empty patch for it holds nothing");
 });
 
 test("a path that holds for what its patch changes holds for a change to what its case guards, not for every edit to it", () => {
