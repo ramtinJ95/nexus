@@ -36,7 +36,7 @@ const pinned = (key: string, actual: string[]) => {
 /** Type-only imports are erased when Node strips types, so they load nothing. */
 const typeOnly = /\b(?:import|export)\s+type\s[^;]*?\bfrom\s*["'][^"']+["']/g;
 const specifiers = (source: string, types: boolean) =>
-  [...(types ? source : source.replace(typeOnly, "")).matchAll(/(?:\bfrom\s+|\bimport\s+|\bimport\s*\(\s*)["']([^"']+)["']/g)].map((match) => match[1]!);
+  [...(types ? source : source.replace(typeOnly, "")).matchAll(/(?:\bfrom|\bimport|\bimport\s*\()\s*["']([^"']+)["']/g)].map((match) => match[1]!);
 
 /** The repo files `entry` loads at run time, and the packages it names outside the repo. */
 function closure(entry: string) {
@@ -79,8 +79,8 @@ test("every path the merge policy names is a tracked file or folder", () => {
 test("every relative link in the repo's markdown names a tracked file or folder", () => {
   // The notices quote third-party packages, whose links name files in those packages.
   const docs = tracked.filter((file) => file.endsWith(".md") && file !== "THIRD_PARTY_NOTICES.md");
-  const links = docs.flatMap((doc) => [...read(doc).matchAll(/\]\(([^)\s]+)\)/g)]
-    .map((match) => match[1]!.split("#")[0]!).filter((target) => target !== "" && !/^[a-z][a-z+.-]*:/i.test(target))
+  const links = docs.flatMap((doc) => [...read(doc).matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)|^\s*\[[^\]]+\]:\s*(\S+)/gm)]
+    .map((match) => (match[1] ?? match[2]!).split("#")[0]!).filter((target) => target !== "" && !/^[a-z][a-z+.-]*:/i.test(target))
     .map((target) => ({ doc, path: relative(root, resolve(root, dirname(doc), decodeURI(target))) })));
   assert.ok(links.length > 200, `${links.length} links`);
   assert.deepEqual(links.filter(({ path }) => !isTracked(path)).map(({ doc, path }) => `${doc} -> ${path}`), []);
