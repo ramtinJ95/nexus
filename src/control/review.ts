@@ -309,6 +309,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (registry.desiredRelease()?.commit !== commit) registry.setDesiredRelease({ commit, requestedBy: by, requestedAt: now() });
     return { ...r, phase: { ...phase, requested: true } };
   };
+  /** `r` while its release is pending before the deadline, which moves on while a node waits for idle to deploy, or null. */
+  const pending = (r: Review, phase: Extract<Phase, { kind: "deploying" | "rolling-back" }>, view: ReleaseView, outcome: ReturnType<typeof releaseOutcome>): Review | null => {
+    if (outcome !== "pending") return null;
+    if (view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) return { ...r, phase: { ...phase, deadline: now() + deployMs } };
+    return now() < phase.deadline ? r : null;
+  };
   /** A review that lands still decides whether a merge made outside it deploys. */
   const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
     state === "closed" || (state === "merged" && r.land === null) ? end(r, { kind: state }) : null;
@@ -843,10 +849,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const outcome = releaseOutcome(view, phase.commit);
       if (outcome === "healthy") return { ...r, phase: { kind: "landed", commit: phase.commit } };
       if (outcome === "superseded") return toPerson(r, "deploy", `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
-      if (outcome === "pending" && view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) {
-        return { ...r, phase: { ...phase, deadline: now() + deployMs } };
-      }
-      if (outcome === "pending" && now() < phase.deadline) return r;
+      const waiting = pending(r, phase, view, outcome);
+      if (waiting !== null) return waiting;
       const why = outcome === "failed"
         ? `The deploy of ${phase.commit} failed: ${failedNodes(view, phase.commit)}.`
         : `Not every service reported healthy at ${phase.commit} within ${deployMs / 60_000} minutes.`;
@@ -862,10 +866,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         : `${phase.commit} is still on the default branch, so revert it before the next deploy.`;
       if (outcome === "healthy") return toPerson(r, "deploy", phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
       if (outcome === "superseded") return toPerson(r, "deploy", phase.why, `Another release, ${view.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
-      if (outcome === "pending" && view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) {
-        return { ...r, phase: { ...phase, deadline: now() + deployMs } };
-      }
-      if (outcome === "pending" && now() < phase.deadline) return r;
+      const waiting = pending(r, phase, view, outcome);
+      if (waiting !== null) return waiting;
       const failed = outcome === "failed"
         ? failedNodes(view, phase.previous)
         : `not every service reported healthy within ${deployMs / 60_000} minutes`;
@@ -1084,6 +1086,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
   }
 
+  /** Refuses a review of the builder's while one that has not ended runs. */
+  function refuseIfRunning(builder: ThreadId): void {
+    const existing = registry.review(builder);
+    if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
+  }
+
   /** Starts a review of `pr`, a PR of the builder's: the reviewer thread, its first request, and the record. */
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
     const snapshot = await github.poll(repo, number);
@@ -1175,8 +1183,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (builder === undefined) throw new HttpError(404, `no thread ${builderId}`);
       if (builder.status !== "active") throw new HttpError(409, `thread ${builder.id} is ${builder.status}`);
       if (registry.isReviewer(builder.id)) throw new HttpError(409, `thread ${builder.id} is a reviewer`);
-      const existing = registry.review(builder.id);
-      if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of ${builder.id} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder.id} to start another` : ""}`);
+      refuseIfRunning(builder.id);
       const open = (registry.prWatch(builder.id)?.links ?? []).filter((l) => l.pr.state === "open" && (request.pr === undefined || l.pr.number === request.pr));
       if (open.length === 0) throw new HttpError(409, `thread ${builder.id} has no open pull request${request.pr === undefined ? "" : ` #${request.pr}`} that the PR watch linked`);
       if (open.length > 1) throw new HttpError(409, `thread ${builder.id} has ${open.length} open pull requests, so name one: ${open.map((l) => `#${l.pr.number}`).join(", ")}`);
@@ -1193,9 +1200,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (setting == null || startedByNexus(registry, t)) return;
       // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
       if (registry.prReviewed(pr.repo, pr.number)) return;
-      const existing = registry.review(t.id);
       try {
-        if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of pull request #${existing.pr.number} is ${existing.phase.kind}`);
+        refuseIfRunning(t.id);
         await begin(t, pr, { land: setting.land ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
       } catch (err) {
         if (!(err instanceof HttpError)) throw err;
