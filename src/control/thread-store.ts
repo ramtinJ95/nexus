@@ -610,7 +610,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       else sql("UPDATE thread_archives SET settle_failures = settle_failures + 1, settle_failure = ?, settle_failed_at = ? WHERE thread = ? AND usage_settled_at IS NULL AND usage_unread IS NULL AND archived_at = coalesce(?, archived_at)").run(failure, at, thread, archive);
       if (settling?.thread === thread) settling = { ...settling, phase: "pausing", since: at };
     },
-    /** The pylon a settle holds, or null. */
     settleHold: (): UsageHold | null => settling && { thread: settling.thread, phase: settling.phase, since: settling.since },
     /** A settle holds the thread's pylon, which it wants woken to read. */
     holdSettle(thread: ThreadId, now: number) {

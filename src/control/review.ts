@@ -1019,7 +1019,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * a way a land or a new head takes back to its rounds. Every step from there needs the reviewer open.
    */
   const usesReviewer = (r: Review) => !ended.has(r.phase.kind) || (r.merged === null && (landable(r) || heldForGate(r)));
-  /** The review's reviewer threads, its second's too. */
   const reviewersOf = (r: Review): ThreadId[] => [r.reviewer, ...r.second?.kind === "claude" ? [r.second.thread] : []];
   /** Reviewers begin() has started and not yet saved a review for. */
   let beginning = 0;

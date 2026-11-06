@@ -59,8 +59,6 @@ export const bootNetwork = (project: Project, dotfilesRepo: string): BootInputs[
   allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfilesRepo]), secrets: bootSecrets(project),
 });
 
-/** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
-
 /** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
 type SetupRead = { project: RemoteProject; inputs: SetupInputs } | { fresh: string };
 
@@ -71,6 +69,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
   async function readSetup(project: Project, request: StartRequest, branch: string): Promise<SetupRead> {
     const { commit } = request;
     if (!hasRemote(project)) return { fresh: "the project is scratch, so it has no template" };
+    // A shorter ID or a ref name may resolve to another commit by the time the pylon boots.
     if (commit !== undefined && !fullCommit.test(commit)) return { fresh: `the start named commit ${commit}, and only a full commit ID or a branch tip can use a template` };
     let inputs: SetupInputs | null;
     try {
