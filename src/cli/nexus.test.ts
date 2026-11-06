@@ -1729,7 +1729,7 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   const review = testReview({ phase: { kind: "approved" }, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [{ code: "reserved-path:egress", text: egress }, { code: "check-changed", text: check }] } }] });
   const api = (async (method: string, path: string) => {
     assert.deepEqual([method, path], ["GET", "/v1/threads/th-builder"]);
-    return { review };
+    return { review, questions: [] };
   }) as Api;
   const yes = confirmingTerminal("yes");
   assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { head: approvedRound.head, waive: [egress, check] });
@@ -1739,7 +1739,7 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   }
   await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("yes", false).terminal), (err: CliError) => err.kind === "invalid");
   const nothing = confirmingTerminal("yes");
-  const unheld = (async () => ({ review: { ...review, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [] } }] } })) as Api;
+  const unheld = (async () => ({ review: { ...review, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [] } }] }, questions: [] })) as Api;
   assert.deepEqual(await pressOf(unheld, "th-builder", nothing.terminal), { head: approvedRound.head }, "nothing to waive asks nothing");
   assert.equal(nothing.shown(), "");
 });

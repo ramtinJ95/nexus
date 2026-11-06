@@ -59,9 +59,9 @@ export const nodesCommands: Readonly<Record<string, Command>> = {
         json: nodes,
         text: nodes.length === 0 ? "No nodes." : table(nodes.map((n) => [
           n.name, n.state, n.observedAt === null ? "never observed" : `observed ${ago(Date.parse(n.observedAt))}`,
-          n.capacity === null ? "" : capacityText(n.capacity, n.overcommitted ?? false),
+          n.capacity === null ? "" : capacityText(n.capacity, n.overcommitted),
         ])).split("\n").flatMap((line, i) => {
-          const held = pylonsText(nodes[i]!.pylons ?? null);
+          const held = pylonsText(nodes[i]!.pylons);
           return held === "" ? [line] : [line, `  pylons: ${held}`];
         }).join("\n"),
       };
