@@ -112,11 +112,6 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
     await awaitSubmission(guest, launch.pane, launch.dir, harnesses[session.harness].agent!.kind, " before the probe lost the launch");
     return launch.pane;
   }
-  if (launch !== null) {
-    // A probe older than the launch record types without recording it, so its launch shows only as a running Claude.
-    const running = await claudePane(guest, resume!);
-    if (running?.runs === true) return running.pane.herdrPane;
-  }
   let opened: { workspace: string; pane: string } | null = launch?.progress === "opened" && (await livePanes(guest)).some((p) => p.herdrPane === launch.pane) ? launch : null;
   if (opened === null) {
     const created = parse(workspaceCreated, await herdr(guest, ["workspace", "create", "--cwd", session.cwd, "--label", session.title, "--no-focus"]), "herdr workspace create result");
