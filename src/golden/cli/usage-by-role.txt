@@ -1,0 +1,15 @@
+exit 0
+--- stdout
+Usage of all projects since 2027-01-09 00:00 UTC. Counting started <counting since>.
+Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  8.1M   1.8M    3.8M         26.8M       40.5M  498
+
+By role
+Role      Input  Output  Cache write  Cache read  Total  Calls
+builder   7M     1.5M    3.3M         23.4M       35.3M  435
+reviewer  407k   83.3k   90k          1.3M        1.9M   25
+check     346k   73.4k   240k         1.1M        1.8M   21
+verify    284k   62.4k   180k         954k        1.5M   17
+--- stderr

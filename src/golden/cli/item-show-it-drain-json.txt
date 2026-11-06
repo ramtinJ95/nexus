@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+{
+  "id": "it-drain",
+  "project": "nexus",
+  "title": "Drain the queue before a deploy",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799981400000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Drain the queue before a deploy.",
+  "thread": "th-drain",
+  "phase": {
+    "kind": "landing",
+    "why": "PR #400 is deploying"
+  },
+  "approved": null
+}
+--- stderr

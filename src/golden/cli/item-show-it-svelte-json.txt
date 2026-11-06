@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+{
+  "id": "it-svelte",
+  "project": "storefront",
+  "title": "Rewrite the cart in Svelte",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799841600000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Rewrite the cart in Svelte.",
+  "thread": null,
+  "phase": {
+    "kind": "cancelled",
+    "why": "cancelled by nLAPTOP"
+  },
+  "approved": null
+}
+--- stderr

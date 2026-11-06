@@ -1,0 +1,11 @@
+exit 0
+--- stdout
+it-applepay  Checkout: add the Apple Pay button
+project: storefront
+phase: reviewing, PR #88, round 2: reviewing
+thread: th-applepay
+worker: Nexus agent
+brief: Brief: Checkout: add the Apple Pay button.
+added by nLAPTOP 6h ago
+nexus show th-applepay shows its thread.
+--- stderr

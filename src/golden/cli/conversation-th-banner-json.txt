@@ -1,0 +1,58 @@
+exit 0
+--- stdout
+{
+  "conversation": {
+    "id": 4
+  },
+  "entries": [
+    {
+      "id": 1,
+      "conversationId": 4,
+      "kind": "pi.user",
+      "model": [
+        {
+          "role": "user",
+          "content": "Add a dismissible winter sale banner.",
+          "timestamp": 1799755320000
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "conversationId": 4,
+      "kind": "pi.assistant",
+      "model": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Added behind the `winterSale` flag."
+            }
+          ],
+          "stopReason": "stop",
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "timestamp": 1799755360000,
+          "usage": {
+            "input": 18400,
+            "output": 1250,
+            "cacheRead": 52000,
+            "cacheWrite": 0,
+            "totalTokens": 71650,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "docs": {}
+}
+--- stderr

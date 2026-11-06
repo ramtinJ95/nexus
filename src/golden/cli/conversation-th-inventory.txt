@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+> Sync inventory from the warehouse webhook into Postgres.
+
+The webhook signs with HMAC-SHA256, but the docs don't say which header carries it. Can you check the warehouse dashboard, or should I log the headers of the next delivery?
+--- stderr

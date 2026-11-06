@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+> When two devices edit one note offline, merge by paragraph instead of last-write-wins.
+
+Opened #57. Approved; the live check is running in a verify pylon.
+--- stderr

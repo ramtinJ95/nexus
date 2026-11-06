@@ -1,0 +1,43 @@
+exit 0
+--- stdout
+Usage of all projects since 2027-01-09 00:00 UTC. Counting started <counting since>.
+Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  8.1M   1.8M    3.8M         26.8M       40.5M  498
+
+By model
+Model              Input  Output  Cache write  Cache read  Total  Calls
+gpt-6-astra        2.9M   677k    960k         10.5M       15.1M  130
+claude-opus-5-5    1.8M   429k    180k         7M          9.5M   78
+gpt-6-astra-mini   1.4M   268k    1.3M         3.7M        6.6M   136
+claude-sonnet-5-5  1.3M   278k    540k         4.2M        6.3M   78
+claude-haiku-5-5   636k   104k    870k         1.4M        3M     76
+
+By project
+Project      Input  Output  Cache write  Cache read  Total  Calls
+nexus        3.5M   749k    1.7M         11.3M       17.2M  209
+storefront   3.2M   684k    1.3M         10.5M       15.7M  197
+field-notes  1.4M   322k    840k         5M          7.5M   92
+
+By agent
+Agent   Input  Output  Cache write  Cache read  Total  Calls
+pi      4.3M   945k    2.2M         14.2M       21.7M  266
+claude  3.8M   810k    1.6M         12.6M       18.8M  232
+
+By role
+Role      Input  Output  Cache write  Cache read  Total  Calls
+builder   7M     1.5M    3.3M         23.4M       35.3M  435
+reviewer  407k   83.3k   90k          1.3M        1.9M   25
+check     346k   73.4k   240k         1.1M        1.8M   21
+verify    284k   62.4k   180k         954k        1.5M   17
+
+By day (UTC)
+Day         Input  Output  Cache write  Cache read  Total  Calls
+2027-01-15  6.6M   1.4M    3.1M         21.7M       32.8M  404
+2027-01-14  899k   197k    360k         3M          4.5M   54
+2027-01-13  374k   86k     150k         1.3M        1.9M   24
+2027-01-12  170k   29k     90k          513k        802k   10
+2027-01-11  59.6k  18.4k   30k          270k        378k   5
+2027-01-10  9.5k   3k      30k          90k         133k   1
+--- stderr

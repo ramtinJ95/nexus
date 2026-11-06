@@ -1,0 +1,149 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-refunds",
+    "title": "End-to-end tests for the refund flow",
+    "project": "storefront",
+    "pylonId": "pylon-th-refunds",
+    "status": "active",
+    "conversationId": "11",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799985600000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800007200000,
+    "lastHumanActivityAt": 1799985600000,
+    "seenAt": 1800007260000,
+    "lastReplyAt": 1800007200000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": 1800007260000,
+  "lastReplyAt": 1800007200000,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-refunds",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [
+    {
+      "thread": "th-refunds",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/storefront/pull/90"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/storefront",
+      "number": 90,
+      "title": "test: end-to-end refund flow",
+      "url": "https://github.com/ramtinJ95/storefront/pull/90",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-90",
+    "builder": "th-refunds",
+    "reviewer": "th-refunds-review",
+    "pr": {
+      "repo": "ramtinJ95/storefront",
+      "number": 90,
+      "url": "https://github.com/ramtinJ95/storefront/pull/90",
+      "title": "test: end-to-end refund flow",
+      "branch": "nexus/90"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-90:t",
+    "sent": 3,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013200000,
+    "nudges": 0,
+    "startedAt": 1800003600000,
+    "rounds": [
+      {
+        "head": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [
+            {
+              "id": "N1",
+              "priority": "P3",
+              "where": "e2e/refund.spec.ts",
+              "summary": "The fixtures could share a factory.",
+              "detail": null
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "checking",
+      "startedAt": 1800014160000,
+      "thread": "th-refunds-check"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

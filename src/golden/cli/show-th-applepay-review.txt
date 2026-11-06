@@ -1,0 +1,15 @@
+exit 0
+--- stdout
+th-applepay-review  Review of #88: feat(checkout): Apple Pay via the Payment Request Button
+project: storefront
+attention: none
+status: active
+pylon: pylon-th-applepay-review on rj-firebat, running, observed 0s ago
+attach: nexus attach th-applepay-review
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+port: 5173
+port: 3000
+PR watch: off (no control-plane GitHub token configured)
+--- stderr

@@ -1,0 +1,143 @@
+exit 0
+--- stdout
+{
+  "node": "rj-firebat",
+  "readAt": "2027-01-15T12:00:00.000Z",
+  "cpus": 16,
+  "load": {
+    "one": 5.972431950882849,
+    "five": 5.375188755794564,
+    "fifteen": 4.7779455607062795
+  },
+  "memory": {
+    "totalGiB": 64,
+    "availableGiB": 28.425348838910892,
+    "swapTotalGiB": 8,
+    "swapFreeGiB": 7.1704261937497416
+  },
+  "disk": {
+    "path": "/var/lib/nexus",
+    "totalGiB": 1863,
+    "freeGiB": 520
+  },
+  "disks": [
+    {
+      "paths": [
+        "/var/lib/nexus"
+      ],
+      "totalGiB": 1863,
+      "freeGiB": 520,
+      "pylons": true
+    },
+    {
+      "paths": [
+        "/"
+      ],
+      "totalGiB": 120,
+      "freeGiB": 71
+    }
+  ],
+  "temperatures": [
+    {
+      "sensor": "Package id 0",
+      "celsius": 66.60548890227902
+    },
+    {
+      "sensor": "Composite",
+      "celsius": 40.45665493392595
+    }
+  ],
+  "pylons": [
+    {
+      "pylonId": "pylon-th-drain",
+      "processes": 40,
+      "cpuPercent": 80.66110566516204,
+      "residentGiB": 1.4477697075780265
+    },
+    {
+      "pylonId": "pylon-th-applepay-review",
+      "processes": 47,
+      "cpuPercent": 59.6945674026575,
+      "residentGiB": 1.7144863901743532
+    },
+    {
+      "pylonId": "pylon-th-applepay",
+      "processes": 54,
+      "cpuPercent": 64.33725014356082,
+      "residentGiB": 2.115702216466024
+    },
+    {
+      "pylonId": "pylon-th-attach",
+      "processes": 61,
+      "cpuPercent": 30.61715593586486,
+      "residentGiB": 2.524436070937539
+    },
+    {
+      "pylonId": "pylon-th-spin",
+      "processes": 68,
+      "cpuPercent": 41.68014664010565,
+      "residentGiB": 2.871576109874762
+    },
+    {
+      "pylonId": "pylon-th-rounding",
+      "processes": 75,
+      "cpuPercent": 82.06904437102843,
+      "residentGiB": 3.4228327466962973
+    },
+    {
+      "pylonId": "pylon-th-retention",
+      "processes": 82,
+      "cpuPercent": 71.82441185139811,
+      "residentGiB": 3.8274791462443583
+    },
+    {
+      "pylonId": "pylon-th-refunds",
+      "processes": 89,
+      "cpuPercent": 79.94316846367182,
+      "residentGiB": 4.148854627759966
+    },
+    {
+      "pylonId": "pylon-th-tokens",
+      "processes": 96,
+      "cpuPercent": 58.02384344860648,
+      "residentGiB": 4.566264688038354
+    },
+    {
+      "pylonId": "pylon-th-inventory",
+      "processes": 103,
+      "cpuPercent": 20.66229661078445,
+      "residentGiB": 4.839814334759493
+    },
+    {
+      "pylonId": "pylon-th-plan",
+      "processes": 110,
+      "cpuPercent": 54.52232264190133,
+      "residentGiB": 5.281300549900396
+    },
+    {
+      "pylonId": "pylon-th-flaky",
+      "processes": 117,
+      "cpuPercent": 67.85121315978525,
+      "residentGiB": 5.832758916391358
+    },
+    {
+      "pylonId": "pylon-th-backfill",
+      "processes": 124,
+      "cpuPercent": 75.5606840071567,
+      "residentGiB": 6.194341544442744
+    },
+    {
+      "pylonId": "pylon-th-graphs",
+      "processes": 131,
+      "cpuPercent": 90.46784067780662,
+      "residentGiB": 6.624786881738769
+    },
+    {
+      "pylonId": "pylon-th-refunds-check",
+      "processes": 138,
+      "cpuPercent": 43.06395370182483,
+      "residentGiB": 6.942589412932275
+    }
+  ]
+}
+--- stderr

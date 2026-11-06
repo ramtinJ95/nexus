@@ -1,0 +1,65 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-avif",
+    "title": "Serve product images as AVIF",
+    "project": "storefront",
+    "pylonId": "pylon-th-avif",
+    "status": "active",
+    "conversationId": "5",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799841600000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799870400000,
+    "lastHumanActivityAt": 1799841600000,
+    "seenAt": 1799870460000,
+    "lastReplyAt": 1799870400000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": 1799870460000,
+  "lastReplyAt": 1799870400000,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-avif",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "paused",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

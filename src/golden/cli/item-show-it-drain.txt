@@ -1,0 +1,11 @@
+exit 0
+--- stdout
+it-drain  Drain the queue before a deploy
+project: nexus
+phase: landing, PR #400 is deploying
+thread: th-drain
+worker: Nexus agent
+brief: Brief: Drain the queue before a deploy.
+added by nLAPTOP 9h ago
+nexus show th-drain shows its thread.
+--- stderr

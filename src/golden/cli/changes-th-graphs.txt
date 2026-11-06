@@ -1,0 +1,9 @@
+exit 0
+--- stdout
+Changes since the commit the pylon booted at, a06ce6f3ecfd:
+modified  +1 -1   README.md
+added     +5 -0   src/backoff.ts
+modified  +12 -2  src/client.ts
+deleted   +0 -1   src/legacy-retry.ts
+modified  +6 -0   test/client.test.ts
+--- stderr

@@ -1,0 +1,74 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-applepay-review",
+    "title": "Review of #88: feat(checkout): Apple Pay via the Payment Request Button",
+    "project": "storefront",
+    "pylonId": "pylon-th-applepay-review",
+    "status": "active",
+    "conversationId": "16",
+    "startedBy": "nexus-review",
+    "createdAt": 1799996400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800013800000,
+    "lastHumanActivityAt": 1799996400000,
+    "seenAt": 1800013860000,
+    "lastReplyAt": 1800013800000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": 1800013860000,
+  "lastReplyAt": 1800013800000,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-applepay-review",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

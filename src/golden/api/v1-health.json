@@ -1,0 +1,10 @@
+200 application/json
+{
+  "commit": null,
+  "version": "<version>",
+  "https": {
+    "status": "disabled",
+    "error": null,
+    "nextAttemptAt": null
+  }
+}

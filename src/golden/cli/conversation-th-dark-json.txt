@@ -1,0 +1,58 @@
+exit 0
+--- stdout
+{
+  "conversation": {
+    "id": 17
+  },
+  "entries": [
+    {
+      "id": 1,
+      "conversationId": 17,
+      "kind": "pi.user",
+      "model": [
+        {
+          "role": "user",
+          "content": "Add a dark mode to the reader that follows the system setting.",
+          "timestamp": 1799996520000
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "conversationId": 17,
+      "kind": "pi.assistant",
+      "model": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Done. The reader follows `prefers-color-scheme`, and the toggle in the header overrides it. The colours come from three tokens:\n\n```css\n:root { --ink: #1d1d1f; --paper: #fbfaf7; --accent: #2f6fde; }\n@media (prefers-color-scheme: dark) { :root { --ink: #e8e6e3; --paper: #16171a; } }\n```"
+            }
+          ],
+          "stopReason": "stop",
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "timestamp": 1799996560000,
+          "usage": {
+            "input": 18400,
+            "output": 1250,
+            "cacheRead": 52000,
+            "cacheWrite": 0,
+            "totalTokens": 71650,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "docs": {}
+}
+--- stderr

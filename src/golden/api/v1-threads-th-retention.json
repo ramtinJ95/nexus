@@ -1,0 +1,130 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-retention",
+    "title": "Choose the metrics retention",
+    "project": "nexus",
+    "pylonId": "pylon-th-retention",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800007200000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800007800000,
+    "lastHumanActivityAt": 1800007200000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "resume": null,
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-retention",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [
+    {
+      "id": "ask-toolu_0002",
+      "thread": "th-retention",
+      "text": "Raw: How long should raw samples be kept before they are downsampled?\nMax: Which series should keep a max as well as a mean?",
+      "options": [],
+      "reserved": null,
+      "answerer": "person",
+      "askedAt": 1800013680000,
+      "ask": {
+        "session": "th-retention-s1",
+        "toolUseId": "toolu_0002",
+        "questions": [
+          {
+            "question": "How long should raw samples be kept before they are downsampled?",
+            "header": "Raw",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "6 hours",
+                "description": "Smallest table. Spikes older than 6 h survive only as 5-minute means.",
+                "preview": "raw ▓▓░░░░░░░░ 6h\n5m  ▓▓▓▓▓▓▓▓▓▓ 31d"
+              },
+              {
+                "label": "48 hours",
+                "description": "Two days of full detail, about 3× the disk.",
+                "preview": "raw ▓▓▓▓▓▓░░░░ 48h\n5m  ▓▓▓▓▓▓▓▓▓▓ 31d"
+              }
+            ]
+          },
+          {
+            "question": "Which series should keep a max as well as a mean?",
+            "header": "Max",
+            "multiSelect": true,
+            "options": [
+              {
+                "label": "CPU load",
+                "description": "Short spikes matter for placement."
+              },
+              {
+                "label": "Temperatures",
+                "description": "Throttling shows in peaks."
+              },
+              {
+                "label": "Memory",
+                "description": "Swap pressure is gradual."
+              }
+            ]
+          }
+        ]
+      },
+      "answer": null
+    }
+  ],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": null
+}

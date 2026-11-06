@@ -1,0 +1,76 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-spin",
+    "title": "Investigate idle-CPU spin on paused pylons",
+    "project": "nexus",
+    "pylonId": "pylon-th-spin",
+    "status": "active",
+    "conversationId": "18",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800000000000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800014040000,
+    "lastHumanActivityAt": 1800000000000,
+    "seenAt": null,
+    "lastReplyAt": 1800014040001,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": "reply",
+  "seenAt": null,
+  "lastReplyAt": 1800014040001,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-spin",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

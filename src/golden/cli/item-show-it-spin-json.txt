@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+{
+  "id": "it-spin",
+  "project": "nexus",
+  "title": "Investigate idle-CPU spin on paused pylons",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799999400000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Investigate idle-CPU spin on paused pylons.",
+  "thread": "th-spin",
+  "phase": {
+    "kind": "building",
+    "why": "no pull request yet"
+  },
+  "approved": null
+}
+--- stderr

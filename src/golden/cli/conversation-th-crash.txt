@@ -1,0 +1,4 @@
+exit 0
+--- stdout
+> The app crashes opening an empty notebook.
+--- stderr

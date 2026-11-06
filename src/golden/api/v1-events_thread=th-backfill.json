@@ -1,0 +1,13 @@
+200 application/json
+[
+  {
+    "id": "24",
+    "time": 1799974860000,
+    "thread": "th-backfill",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "limited"
+    }
+  }
+]

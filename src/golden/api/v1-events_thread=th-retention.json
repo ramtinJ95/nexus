@@ -1,0 +1,13 @@
+200 application/json
+[
+  {
+    "id": "28",
+    "time": 1800007260000,
+    "thread": "th-retention",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  }
+]

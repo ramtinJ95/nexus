@@ -1,0 +1,15 @@
+exit 0
+--- stdout
+[
+  {
+    "port": 5173,
+    "service": null,
+    "preview": null
+  },
+  {
+    "port": 3000,
+    "service": null,
+    "preview": null
+  }
+]
+--- stderr

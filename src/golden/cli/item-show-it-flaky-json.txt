@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+{
+  "id": "it-flaky",
+  "project": "nexus",
+  "title": "Retry flaky probe reconnects",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799941800000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Retry flaky probe reconnects.",
+  "thread": "th-flaky",
+  "phase": {
+    "kind": "held",
+    "why": "its review ended for the person: Finding F3 (P2) is still open after the last round."
+  },
+  "approved": null
+}
+--- stderr

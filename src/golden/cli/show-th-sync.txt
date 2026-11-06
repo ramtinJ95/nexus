@@ -1,0 +1,19 @@
+exit 0
+--- stdout
+th-sync  Offline sync conflict resolver
+project: field-notes
+attention: none
+status: active
+pylon: pylon-th-sync on infra-testbench, running, observed 0s ago
+attach: nexus attach th-sync
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: infra-testbench, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at trunk: this test has no remote
+port: 5173
+port: 3000
+PR watch: off (no control-plane GitHub token configured)
+PR #57: feat(sync): merge offline edits by paragraph — open, checks passing, review none https://github.com/ramtinJ95/field-notes/pull/57
+review rv-57 of PR #57, started on its own: verifying, round 1 of 5, reviewer th-sync-review on gpt-6-astra
+live check running .nexus/verify at g1g1g1g1g1g1 in verify pylon th-sync-verify
+output: pull-request https://github.com/ramtinJ95/field-notes/pull/57
+--- stderr

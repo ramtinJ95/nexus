@@ -1,0 +1,11 @@
+exit 0
+--- stdout
+it-alerts  Turn the daily report into health alerts
+project: nexus
+phase: landed, PR #403 merged as f4f4f4f4f4f4
+thread: th-alerts
+worker: Nexus agent
+brief: Brief: Turn the daily report into health alerts.
+added by nLAPTOP 3d ago
+nexus show th-alerts shows its thread.
+--- stderr

@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+field-notes  node infra-testbench  branch trunk  auto review off  pipeline off                 https://github.com/ramtinJ95/field-notes.git
+nexus        node rj-firebat       branch main   auto review off  pipeline starts items        https://github.com/ramtinJ95/nexus.git
+storefront   node rj-firebat       branch main   auto review off  pipeline waits for approval  https://github.com/ramtinJ95/storefront.git
+--- stderr

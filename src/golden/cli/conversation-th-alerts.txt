@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+> Turn the daily report into health alerts on the dashboard.
+
+Merged as #403 and deployed.
+--- stderr

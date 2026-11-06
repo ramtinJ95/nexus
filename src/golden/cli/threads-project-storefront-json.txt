@@ -1,0 +1,321 @@
+exit 0
+--- stdout
+[
+  {
+    "id": "th-search",
+    "title": "Typo tolerance in product search",
+    "project": "storefront",
+    "pylonId": "pylon-th-search",
+    "status": "archived",
+    "conversationId": "2",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799668800000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799669400000,
+    "lastHumanActivityAt": 1799668800000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "archivedAt": 1800014400000,
+    "attention": null,
+    "desired": "paused",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "paused",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-banner",
+    "title": "Seasonal banner for the winter sale",
+    "project": "storefront",
+    "pylonId": "pylon-th-banner",
+    "status": "active",
+    "conversationId": "4",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799755200000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799755800000,
+    "lastHumanActivityAt": 1799755200000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "paused",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-avif",
+    "title": "Serve product images as AVIF",
+    "project": "storefront",
+    "pylonId": "pylon-th-avif",
+    "status": "active",
+    "conversationId": "5",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799841600000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799870400000,
+    "lastHumanActivityAt": 1799841600000,
+    "seenAt": 1799870460000,
+    "lastReplyAt": 1799870400000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "paused",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "paused",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rounding",
+    "title": "Fix cart rounding on discounted lines",
+    "project": "storefront",
+    "pylonId": "pylon-th-rounding",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799964000000,
+    "agentTurnRunning": true,
+    "lastAgentActivityAt": 1800014063000,
+    "lastHumanActivityAt": 1799964000000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": true,
+    "workingSince": 1800014063000,
+    "attention": "working",
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-refunds",
+    "title": "End-to-end tests for the refund flow",
+    "project": "storefront",
+    "pylonId": "pylon-th-refunds",
+    "status": "active",
+    "conversationId": "11",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799985600000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800007200000,
+    "lastHumanActivityAt": 1799985600000,
+    "seenAt": 1800007260000,
+    "lastReplyAt": 1800007200000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "paused",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-lighthouse",
+    "title": "Product page Lighthouse pass",
+    "project": "storefront",
+    "pylonId": "pylon-th-lighthouse",
+    "status": "active",
+    "conversationId": "13",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799989200000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799996400000,
+    "lastHumanActivityAt": 1799989200000,
+    "seenAt": 1799996460000,
+    "lastReplyAt": 1799996400000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "paused",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "paused",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-applepay",
+    "title": "Checkout: add the Apple Pay button",
+    "project": "storefront",
+    "pylonId": "pylon-th-applepay",
+    "status": "active",
+    "conversationId": "14",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799992800000,
+    "agentTurnRunning": true,
+    "lastAgentActivityAt": 1800012986000,
+    "lastHumanActivityAt": 1799992800000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": true,
+    "workingSince": 1800012986000,
+    "awaitedUntil": 1800015000000,
+    "attention": "working",
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-applepay-review",
+    "title": "Review of #88: feat(checkout): Apple Pay via the Payment Request Button",
+    "project": "storefront",
+    "pylonId": "pylon-th-applepay-review",
+    "status": "active",
+    "conversationId": "16",
+    "startedBy": "nexus-review",
+    "createdAt": 1799996400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800013800000,
+    "lastHumanActivityAt": 1799996400000,
+    "seenAt": 1800013860000,
+    "lastReplyAt": 1800013800000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "paused",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-inventory",
+    "title": "Inventory sync webhook",
+    "project": "storefront",
+    "pylonId": "pylon-th-inventory",
+    "status": "active",
+    "conversationId": "19",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800003600000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800012000000,
+    "lastHumanActivityAt": 1800003600000,
+    "seenAt": 1800012060000,
+    "lastReplyAt": 1800012000000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "sessionWaiting": true,
+    "sessionWaitingMessage": "Asked which header carries the signature",
+    "attention": "waiting",
+    "desired": "paused",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "running",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-refunds-check",
+    "title": "Check of nexus/90 at ffffffffffff",
+    "project": "storefront",
+    "pylonId": "pylon-th-refunds-check",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nexus-check",
+    "createdAt": 1800014100000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800014700000,
+    "lastHumanActivityAt": 1800014100000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "running",
+      "failed": null
+    }
+  }
+]
+--- stderr

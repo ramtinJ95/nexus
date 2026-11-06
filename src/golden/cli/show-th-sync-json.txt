@@ -1,0 +1,144 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-sync",
+    "title": "Offline sync conflict resolver",
+    "project": "field-notes",
+    "pylonId": "pylon-th-sync",
+    "status": "active",
+    "conversationId": "9",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799978400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800003600000,
+    "lastHumanActivityAt": 1799978400000,
+    "seenAt": 1800003660000,
+    "lastReplyAt": 1800003600000,
+    "placement": {
+      "how": "default",
+      "node": "infra-testbench"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at trunk: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": 1800003660000,
+  "lastReplyAt": 1800003600000,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-sync",
+    "node": "infra-testbench",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [
+    {
+      "thread": "th-sync",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/field-notes/pull/57"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/field-notes",
+      "number": 57,
+      "title": "feat(sync): merge offline edits by paragraph",
+      "url": "https://github.com/ramtinJ95/field-notes/pull/57",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-57",
+    "builder": "th-sync",
+    "reviewer": "th-sync-review",
+    "pr": {
+      "repo": "ramtinJ95/field-notes",
+      "number": 57,
+      "url": "https://github.com/ramtinJ95/field-notes/pull/57",
+      "title": "feat(sync): merge offline edits by paragraph",
+      "branch": "nexus/57"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-57:t",
+    "sent": 3,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013200000,
+    "nudges": 0,
+    "startedAt": 1800003600000,
+    "rounds": [
+      {
+        "head": "g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": {
+          "passed": true,
+          "output": "> nexus@0.0.0 test\n> node --test 'src/**/*.test.ts'\n\n✔ probe client reconnects after a reset (412ms)\n✔ probe client gives up after the deadline (1.2s)\n✔ backoff stays under its cap (3ms)\nℹ tests 1342\nℹ suites 0\nℹ pass 1342\nℹ fail 0\nℹ duration_ms 84213"
+        },
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "verifying",
+      "startedAt": 1800014040000,
+      "thread": "th-sync-verify"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

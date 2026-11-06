@@ -1,0 +1,10 @@
+exit 0
+--- stdout
+> /poteto-mode Retrain the note tagger on the October export and report precision per tag.
+
+[tool] Bash {"command":"python -m tagger.train --data exports/2026-10.jsonl --epochs 4"} (ok)
+
+Epoch 3 is at 0.82 F1. One more epoch, then the per-tag report.
+
+[tool] Bash {"command":"python -m tagger.train --resume --epochs 4"} (no result)
+--- stderr

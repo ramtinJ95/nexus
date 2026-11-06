@@ -1,0 +1,31 @@
+200 application/json
+[
+  {
+    "id": "63",
+    "time": 1800000000000,
+    "thread": "th-export",
+    "project": "field-notes",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "64",
+    "time": 1800014400000,
+    "thread": "th-export",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "65",
+    "time": 1800014400000,
+    "thread": "th-export",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  }
+]

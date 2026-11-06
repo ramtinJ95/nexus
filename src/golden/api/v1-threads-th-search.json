@@ -1,0 +1,64 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-search",
+    "title": "Typo tolerance in product search",
+    "project": "storefront",
+    "pylonId": "pylon-th-search",
+    "status": "archived",
+    "conversationId": "2",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799668800000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799669400000,
+    "lastHumanActivityAt": 1799668800000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "archivedAt": 1800014400000
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-search",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "paused",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

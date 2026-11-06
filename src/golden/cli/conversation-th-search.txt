@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+> Make search forgive one typo.
+
+Merged as #84.
+--- stderr

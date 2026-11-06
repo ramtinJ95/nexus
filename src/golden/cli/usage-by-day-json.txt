@@ -1,0 +1,78 @@
+exit 0
+--- stdout
+{
+  "since": 1799452800000,
+  "countingSince": <counting since>,
+  "project": null,
+  "thread": null,
+  "total": {
+    "input": 8083800,
+    "output": 1755300,
+    "cacheWrite": 3810000,
+    "cacheRead": 26802000,
+    "total": 40451100,
+    "calls": 498
+  },
+  "by": {
+    "day": [
+      {
+        "key": "2027-01-15",
+        "input": 6570950,
+        "output": 1421560,
+        "cacheWrite": 3150000,
+        "cacheRead": 21663000,
+        "total": 32805510,
+        "calls": 404
+      },
+      {
+        "key": "2027-01-14",
+        "input": 899100,
+        "output": 197360,
+        "cacheWrite": 360000,
+        "cacheRead": 3015000,
+        "total": 4471460,
+        "calls": 54
+      },
+      {
+        "key": "2027-01-13",
+        "input": 374300,
+        "output": 86040,
+        "cacheWrite": 150000,
+        "cacheRead": 1251000,
+        "total": 1861340,
+        "calls": 24
+      },
+      {
+        "key": "2027-01-12",
+        "input": 170350,
+        "output": 28960,
+        "cacheWrite": 90000,
+        "cacheRead": 513000,
+        "total": 802310,
+        "calls": 10
+      },
+      {
+        "key": "2027-01-11",
+        "input": 59600,
+        "output": 18380,
+        "cacheWrite": 30000,
+        "cacheRead": 270000,
+        "total": 377980,
+        "calls": 5
+      },
+      {
+        "key": "2027-01-10",
+        "input": 9500,
+        "output": 3000,
+        "cacheWrite": 30000,
+        "cacheRead": 90000,
+        "total": 132500,
+        "calls": 1
+      }
+    ]
+  },
+  "backfill": {
+    "state": "never"
+  }
+}
+--- stderr

@@ -1,0 +1,66 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-export",
+    "title": "Export notes to Markdown",
+    "project": "field-notes",
+    "pylonId": "pylon-th-export",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799992800000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800000000000,
+    "lastHumanActivityAt": 1799992800000,
+    "seenAt": 1800000060000,
+    "lastReplyAt": 1800000000000,
+    "placement": {
+      "how": "default",
+      "node": "infra-testbench"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at trunk: this test has no remote"
+    },
+    "working": false
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "resume": null,
+  "attention": null,
+  "seenAt": 1800000060000,
+  "lastReplyAt": 1800000000000,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-export",
+    "node": "infra-testbench",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "paused",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": null
+}

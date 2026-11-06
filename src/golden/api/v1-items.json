@@ -1,0 +1,214 @@
+200 application/json
+[
+  {
+    "id": "it-graphs",
+    "project": "nexus",
+    "title": "Graph node health with 31 days of history",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799920200000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Graph node health with 31 days of history.",
+    "thread": "th-graphs",
+    "phase": {
+      "kind": "reviewing",
+      "why": "PR #402 is open, before its review"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-flaky",
+    "project": "nexus",
+    "title": "Retry flaky probe reconnects",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799941800000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Retry flaky probe reconnects.",
+    "thread": "th-flaky",
+    "phase": {
+      "kind": "held",
+      "why": "its review ended for the person: Finding F3 (P2) is still open after the last round."
+    },
+    "approved": null
+  },
+  {
+    "id": "it-drain",
+    "project": "nexus",
+    "title": "Drain the queue before a deploy",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799981400000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Drain the queue before a deploy.",
+    "thread": "th-drain",
+    "phase": {
+      "kind": "landing",
+      "why": "PR #400 is deploying"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-alerts",
+    "project": "nexus",
+    "title": "Turn the daily report into health alerts",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799754600000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Turn the daily report into health alerts.",
+    "thread": "th-alerts",
+    "phase": {
+      "kind": "landed",
+      "why": "PR #403 merged as f4f4f4f4f4f4"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-spin",
+    "project": "nexus",
+    "title": "Investigate idle-CPU spin on paused pylons",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799999400000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Investigate idle-CPU spin on paused pylons.",
+    "thread": "th-spin",
+    "phase": {
+      "kind": "building",
+      "why": "no pull request yet"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-applepay",
+    "project": "storefront",
+    "title": "Checkout: add the Apple Pay button",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799992200000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Checkout: add the Apple Pay button.",
+    "thread": "th-applepay",
+    "phase": {
+      "kind": "reviewing",
+      "why": "PR #88, round 2: reviewing"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-search",
+    "project": "storefront",
+    "title": "Typo tolerance in product search",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799668200000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Typo tolerance in product search.",
+    "thread": "th-search",
+    "phase": {
+      "kind": "archived",
+      "why": "its thread is archived"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-prune",
+    "project": "nexus",
+    "title": "Prune events older than 90 days",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799942400000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Prune events older than 90 days.",
+    "thread": "th-queued-1",
+    "phase": {
+      "kind": "queued",
+      "why": "waits for Graph node health with 31 days of history: PR #402 is open"
+    },
+    "approved": {
+      "by": "nLAPTOP",
+      "at": 1799946000000
+    }
+  },
+  {
+    "id": "it-split",
+    "project": "nexus",
+    "title": "Split loop.ts by node phase",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799942400000,
+    "after": [
+      "it-prune"
+    ],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Split loop.ts by node phase.",
+    "thread": null,
+    "phase": {
+      "kind": "planned",
+      "why": "is queued on the pipeline's next pass"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-cleanup",
+    "project": "nexus",
+    "title": "Move cleanup onto the new model",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799942400000,
+    "after": [
+      "it-split"
+    ],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Move cleanup onto the new model.",
+    "thread": null,
+    "phase": {
+      "kind": "planned",
+      "why": "waits for Split loop.ts by node phase to be queued"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-giftcards",
+    "project": "storefront",
+    "title": "Gift cards at checkout",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799982000000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Gift cards at checkout.",
+    "thread": null,
+    "phase": {
+      "kind": "held",
+      "why": "project storefront waits for the person to approve each item: nexus item approve it-giftcards"
+    },
+    "approved": null
+  },
+  {
+    "id": "it-svelte",
+    "project": "storefront",
+    "title": "Rewrite the cart in Svelte",
+    "addedBy": "nLAPTOP",
+    "addedAt": 1799841600000,
+    "after": [],
+    "worker": "harness",
+    "model": null,
+    "brief": "Brief: Rewrite the cart in Svelte.",
+    "thread": null,
+    "phase": {
+      "kind": "cancelled",
+      "why": "cancelled by nLAPTOP"
+    },
+    "approved": null
+  }
+]

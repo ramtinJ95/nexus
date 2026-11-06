@@ -1,0 +1,208 @@
+200 text/html; charset=utf-8
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Live check of nexus/57 at gggggggggggg · Nexus</title>
+<script>{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }</script>
+<link rel="icon" href="/assets/favicon.svg?v=<hash>" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/style.css?v=<hash>">
+<script type="module" src="/assets/client.js?v=<hash>"></script>
+</head>
+<body>
+<div class="app has-inspect">
+<aside class="side" aria-label="Threads">
+<div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
+<label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
+<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you"><svg class="i i-inbox" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/></svg>Needs you<span class="side-count" id="needs-count" data-live>14</span></a><a class="side-link" href="/cluster"><svg class="i i-server" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01"/></svg>Cluster</a><a class="side-link" href="/usage"><svg class="i i-chart" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13.5h10M4.5 11V8M8 11V3.5M11.5 11V6"/></svg>Usage</a><div id="side-health" data-live><a class="side-link" id="health-link" href="/health" title="5 open problems, 4 not seen" data-change="9"><svg class="i i-cross" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>Health<span class="side-count">4</span></a></div></nav>
+<nav class="groups" id="side-threads" data-live aria-label="Threads by project">
+<details class="group" id="group-field-notes" open>
+<summary class="group-h"><svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg><svg class="i i-folder" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/></svg><span class="group-name"><span>field-notes</span><span class="group-branch">trunk</span></span></summary>
+<a class="group-new" href="/threads/new?project=field-notes" data-start="field-notes" aria-label="New thread in field-notes" title="New thread in field-notes"><svg class="i i-plus" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></a>
+<ul><li><a class="row active" href="/threads/th-sync-verify" aria-current="page"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-ok" role="img" aria-label="running" title="running"></span></span><span class="row-title">Live check of nexus/57 at gggggggggggg</span><span class="row-at">now</span></a></li><li><a class="row dim" href="/threads/th-tagger"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-work" role="img" aria-label="agent working" title="agent working"></span></span><span class="row-title">Train the tagger on the October export</span><span class="row-at">working <time data-since="1800013882000">8m 38s</time></span></a></li><li><a class="row" href="/threads/th-crash"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="failed" title="failed"></span></span><span class="row-title">Fix the crash on an empty notebook</span><span class="row-at">2 h</span></a></li><li><a class="row" href="/threads/th-parked"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="parked" title="parked"></span></span><span class="row-title">Re-index attachments after the schema change</span><span class="row-at">3 h</span></a></li><li><a class="row" href="/threads/th-dark"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-reply" role="img" aria-label="new reply" title="new reply"></span></span><span class="row-title">Dark mode for the reader</span><span class="row-at">15 min</span></a></li><li><a class="row dim" href="/threads/th-export"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-idle" role="img" aria-label="paused" title="paused"></span></span><span class="row-title">Export notes to Markdown</span><span class="row-at">4 h</span></a></li><li><a class="row dim" href="/threads/th-sync"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-ok" role="img" aria-label="running" title="running"></span></span><span class="row-title">Offline sync conflict resolver</span><span class="row-at">3 h</span></a></li></ul>
+
+<details class="archived" id="archived-field-notes"><summary>1 archived</summary><ul><li><a class="row" href="/threads/th-fts"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-muted" role="img" aria-label="archived" title="archived"></span></span><span class="row-title">Benchmark SQLite FTS against Tantivy</span><span class="row-at">5 d</span></a></li></ul></details>
+</details><details class="group" id="group-nexus" open>
+<summary class="group-h"><svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg><svg class="i i-folder" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/></svg><span class="group-name"><span>nexus</span><span class="group-branch">main</span></span></summary>
+<a class="group-new" href="/threads/new?project=nexus" data-start="nexus" aria-label="New thread in nexus" title="New thread in nexus"><svg class="i i-plus" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></a>
+<ul><li><a class="row" href="/threads/th-retention"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="needs your decision" title="needs your decision"></span></span><span class="row-title">Choose the metrics retention</span><span class="row-at">2 h</span></a></li><li><a class="row" href="/threads/th-spin"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-reply" role="img" aria-label="new reply" title="new reply"></span></span><span class="row-title">Investigate idle-CPU spin on paused pylons</span><span class="row-at">6 min</span></a></li><li><a class="row" href="/threads/th-tokens"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="needs your decision" title="needs your decision"></span></span><span class="row-title">Rotate the pylon&#39;s GitHub token on wake</span><span class="row-at">40 min</span></a></li><li><a class="row dim" href="/threads/th-attach"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-work" role="img" aria-label="agent working" title="agent working"></span></span><span class="row-title">Keep nexus attach alive across a deploy</span><span class="row-at">working <time data-since="1800013701000">11m 39s</time></span></a></li><li><a class="row" href="/threads/th-cert"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="failed" title="failed"></span></span><span class="row-title">Fix doctor&#39;s certificate check</span><span class="row-at">7 h</span></a></li><li><a class="row dim" href="/threads/th-drain"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-ok" role="img" aria-label="running" title="running"></span></span><span class="row-title">Drain the queue before a deploy</span><span class="row-at">1 h</span></a></li><li><a class="row" href="/threads/th-backfill"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="stopped on its usage limit until 14:00 UTC" title="stopped on its usage limit until 14:00 UTC"></span></span><span class="row-title">Rewrite the usage backfill</span><span class="row-at">11 h</span></a></li><li><a class="row" href="/threads/th-flaky"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="needs your decision" title="needs your decision"></span></span><span class="row-title">Retry flaky probe reconnects</span><span class="row-at">20 h</span></a></li><li><a class="row dim" href="/threads/th-graphs"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-work" role="img" aria-label="agent working" title="agent working"></span></span><span class="row-title">Graph node health with 31 days of history</span><span class="row-at">working <time data-since="1800013339000">17m 41s</time></span></a></li><li><a class="row" href="/threads/th-plan"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-bad" role="img" aria-label="needs your decision" title="needs your decision"></span></span><span class="row-title">Plan the maintenance wave</span><span class="row-at">25 min</span></a></li><li><a class="row" href="/threads/th-queued-1"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-idle" role="img" aria-label="queued" title="queued"></span></span><span class="row-title">Prune events older than 90 days</span><span class="row-at">queued</span></a></li></ul>
+
+<details class="archived" id="archived-nexus"><summary>1 archived</summary><ul><li><a class="row" href="/threads/th-alerts"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-muted" role="img" aria-label="archived" title="archived"></span></span><span class="row-title">Turn the daily report into health alerts</span><span class="row-at">3 d</span></a></li></ul></details>
+</details><details class="group" id="group-storefront" open>
+<summary class="group-h"><svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg><svg class="i i-folder" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/></svg><span class="group-name"><span>storefront</span><span class="group-branch">main</span></span></summary>
+<a class="group-new" href="/threads/new?project=storefront" data-start="storefront" aria-label="New thread in storefront" title="New thread in storefront"><svg class="i i-plus" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg></a>
+<ul><li><a class="row dim" href="/threads/th-refunds-check"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-ok" role="img" aria-label="running" title="running"></span></span><span class="row-title">Check of nexus/90 at ffffffffffff</span><span class="row-at">now</span></a></li><li><a class="row" href="/threads/th-inventory"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-idle" role="img" aria-label="Asked which header carries the signature" title="Asked which header carries the signature"></span></span><span class="row-title">Inventory sync webhook</span><span class="row-at">40 min</span></a></li><li><a class="row dim" href="/threads/th-applepay-review"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-ok" role="img" aria-label="running" title="running"></span></span><span class="row-title">Review of #88: feat(checkout): Apple Pay via the Payment Request Button</span><span class="row-at">10 min</span></a></li><li><a class="row dim" href="/threads/th-applepay"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-work" role="img" aria-label="agent working" title="agent working"></span></span><span class="row-title">Checkout: add the Apple Pay button</span><span class="row-at">working <time data-since="1800012986000">23m 34s</time></span></a></li><li><a class="row dim" href="/threads/th-lighthouse"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-idle" role="img" aria-label="paused" title="paused"></span></span><span class="row-title">Product page Lighthouse pass</span><span class="row-at">5 h</span></a></li><li><a class="row dim" href="/threads/th-refunds"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-ok" role="img" aria-label="running" title="running"></span></span><span class="row-title">End-to-end tests for the refund flow</span><span class="row-at">2 h</span></a></li><li><a class="row dim" href="/threads/th-rounding"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-work" role="img" aria-label="agent working" title="agent working"></span></span><span class="row-title">Fix cart rounding on discounted lines</span><span class="row-at">working <time data-since="1800014063000">5m 37s</time></span></a></li><li><a class="row" href="/threads/th-queued-2"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-idle" role="img" aria-label="queued" title="queued"></span></span><span class="row-title">Wishlist sharing links</span><span class="row-at">queued</span></a></li></ul>
+<details class="archived" id="side-quiet-storefront"><summary>2 quiet for over 8 hours</summary><ul><li><a class="row dim" href="/threads/th-avif"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-idle" role="img" aria-label="paused" title="paused"></span></span><span class="row-title">Serve product images as AVIF</span><span class="row-at">2 d</span></a></li><li><a class="row dim" href="/threads/th-banner"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-muted" role="img" aria-label="not on its node" title="not on its node"></span></span><span class="row-title">Seasonal banner for the winter sale</span><span class="row-at">3 d</span></a></li></ul></details>
+<details class="archived" id="archived-storefront"><summary>1 archived</summary><ul><li><a class="row" href="/threads/th-search"><span class="row-icon"><svg class="i i-branch" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2.5v11M5 13.5a1.5 1.5 0 1 0 0-.01M11 2.5a1.5 1.5 0 1 0 0 .01M11 4v1.5a3 3 0 0 1-3 3H5"/></svg><span class="dot dot-muted" role="img" aria-label="archived" title="archived"></span></span><span class="row-title">Typo tolerance in product search</span><span class="row-at">4 d</span></a></li></ul></details>
+</details>
+</nav>
+<div class="side-theme"><label class="theme-pick" title="Theme"><svg class="i i-palette" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 0 0 0 11c.8 0 1.2-.5 1.2-1.1 0-.7-.5-1-.5-1.6 0-.6.5-1 1.1-1h1.4a2.3 2.3 0 0 0 2.3-2.3C13.5 4.6 11.1 2.5 8 2.5zM5 8h.01M6.5 5.2h.01M9.7 5.2h.01"/></svg><span class="vh">Theme</span><select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option><option value="tokyo-night">Tokyo Night</option><option value="catppuccin-mocha">Catppuccin Mocha</option><option value="kanagawa-wave">Kanagawa Wave</option></select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark"><svg class="i i-contrast" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11zM8 2.5v11"/></svg></button></div>
+<a class="btn side-add" href="/projects/new" data-new-project>New project</a>
+</aside>
+<main class="main" data-poll-ms="5000" data-activity="th-sync-verify">
+<header class="bar" id="bar" data-live>
+<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you"><svg class="i i-inbox" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 9.5h3l1 1.5h3l1-1.5h3M2.5 9.5 4.3 4.2a1 1 0 0 1 .9-.7h5.6a1 1 0 0 1 .9.7l1.8 5.3v2.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/></svg></a>
+<div class="crumb"><a class="crumb-p" href="/">field-notes</a><span class="sep" aria-hidden="true">/</span><h1>Live check of nexus/57 at gggggggggggg</h1></div>
+<span class="chip chip-idle"><span class="dot dot-idle" aria-hidden="true"></span><span class="chip-label">agent idle</span></span>
+<div class="bar-actions" id="thread-actions"><button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="th-sync-verify">Archive</button><button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="th-sync-verify" data-confirm="Delete &quot;Live check of nexus/57 at gggggggggggg&quot;? Its pylon and disk are removed.">Delete</button></div><button type="button" class="icon-btn more" data-open="actions" aria-label="Thread actions" aria-controls="thread-actions">⋯</button>
+</header>
+<div class="life-bar" id="life" data-live><p class="role-line">Live check of <a class="link" href="https://github.com/ramtinJ95/field-notes/pull/57" target="_blank" rel="noreferrer">PR #57</a> for <a class="link" href="/threads/th-sync">Offline sync conflict resolver</a><span class="role-at">running</span></p></div>
+<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="th-sync-verify"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo"><svg class="i i-chat" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-3 2.5V11h.5A1.5 1.5 0 0 1 3 9.5z"/></svg><span class="tab-name">Live check of nexus/57 at gggggggggggg</span></button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach th-sync-verify gives"><svg class="i i-terminal" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v9h-11zM5 6.5l2 1.5-2 1.5M8.5 10h2.5"/></svg><span class="tab-name">Terminal</span></button></div>
+<div class="strip" id="strip" data-live><button type="button" class="mini" data-open="inspect" data-pane="pylon"><span class="dot dot-ok" aria-hidden="true"></span>running · infra-testbench</button>
+
+<button type="button" class="mini" data-open="inspect" data-pane="changes">Changes</button>
+<button type="button" class="mini" data-open="inspect" data-pane="pylon">0 outputs</button></div>
+<div id="facts" data-live hidden><span data-pylon="running" data-turn="false" data-agent-at="1800014580000" data-thread-status="active"></span></div>
+
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="" data-live>
+<p class="convo-meta"><code>th-sync-verify</code> · started <time datetime="2027-01-15T11:53:00.000Z" title="2027-01-15T11:53:00.000Z" data-ago>7 min ago</time></p>
+<p class="empty">This thread has no agent conversation.</p>
+</div></div>
+<section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
+<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
+<div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
+<div class="tv-host" id="term-host"></div>
+</section>
+<div class="dock">
+<p id="action-error" class="error" role="alert" hidden></p>
+<p id="action-status" class="comp-note" role="status" hidden></p>
+<div id="judgments" data-live></div>
+<div id="questions" data-live></div>
+<div id="nudge" data-live></div>
+<div id="resume" data-live></div>
+<div id="landing" data-live></div>
+<div id="run" data-live><div class="state-bar state-idle" id="agent-state" data-state="idle" role="status"><span class="dot dot-idle" aria-hidden="true"></span><span class="state-label">Idle</span><span class="state-detail"></span><span class="attach-line"><code id="attach-line">nexus attach th-sync-verify</code><button type="button" class="btn btn-xs btn-ghost" data-copy="attach-line" aria-label="Copy nexus attach th-sync-verify">Copy</button></span></div></div>
+<div id="composer" data-live></div>
+</div>
+</main>
+<aside class="inspect" aria-label="Thread details">
+<button type="button" class="icon-btn inspect-close" data-close aria-label="Close details">✕</button>
+<div class="seg-bar" role="radiogroup" aria-label="Inspector"><label class="seg-tab"><input type="radio" name="pane" value="changes" checked><svg class="i i-changes" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v6M5 5.5h6M5 12.5h6"/></svg><span class="seg-label">Changes</span></label><label class="seg-tab"><input type="radio" name="pane" value="previews"><svg class="i i-globe" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/></svg><span class="seg-label">Previews</span><span class="count" id="count-previews" data-live>2</span></label><label class="seg-tab"><input type="radio" name="pane" value="pylon"><svg class="i i-server" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h10v4H3zM3 9h10v4H3zM5.5 5h.01M5.5 11h.01"/></svg><span class="seg-label">Pylon</span></label></div>
+<section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="th-sync-verify">
+<h2 id="changes-h" class="vh">Changes</h2>
+<div class="ch-head"><label class="switch"><input type="checkbox" id="changes-head"><span class="switch-label">Only uncommitted</span></label><label class="switch"><input type="checkbox" id="changes-turn"><span class="switch-label">Latest turn</span></label><button type="button" class="icon-btn" id="changes-reload" aria-label="Read the changes again" title="Read the changes again">↻</button></div>
+<p class="ch-base dim small" id="changes-base">Since the pylon booted</p>
+<div id="changes-body"><p class="empty">The changes show once the page's script loads.</p></div>
+</section>
+<div class="pane-live" id="inspect" data-live><div class="ipane" id="pane-previews">
+<section aria-labelledby="previews-h"><h2 id="previews-h">Previews <span class="count">0</span></h2>
+<p class="empty">No previews.</p>
+</section>
+<section aria-labelledby="ports-h"><h2 id="ports-h">Ports <span class="count">2</span></h2>
+<ul class="list"><li class="pv pv-muted">
+<div class="pv-top"><span class="dot dot-muted" aria-hidden="true"></span><span class="pv-name">5173</span><button type="button" class="btn btn-xs" data-action="link-port" data-thread="th-sync-verify" data-port="5173" aria-label="Open port 5173">Open</button></div>
+</li><li class="pv pv-muted">
+<div class="pv-top"><span class="dot dot-muted" aria-hidden="true"></span><span class="pv-name">3000</span><button type="button" class="btn btn-xs" data-action="link-port" data-thread="th-sync-verify" data-port="3000" aria-label="Open port 3000">Open</button></div>
+</li></ul>
+</section>
+</div>
+<div class="ipane" id="pane-pylon">
+<section aria-labelledby="pylon-h"><h2 id="pylon-h">Pylon</h2>
+<dl class="kv">
+<dt>Desired</dt><dd><span class="state"><span class="dot dot-ok" aria-hidden="true"></span>running</span></dd>
+<dt>Observed</dt><dd><span class="state"><span class="dot dot-ok" aria-hidden="true"></span>running</span></dd>
+<dt>Node</dt><dd>infra-testbench</dd>
+<dt>Last seen</dt><dd><time datetime="2027-01-15T12:00:00.000Z" title="2027-01-15T12:00:00.000Z" data-ago>just now</time></dd>
+<dt>Human</dt><dd><time datetime="2027-01-15T11:53:00.000Z" title="2027-01-15T11:53:00.000Z" data-ago>7 min ago</time></dd>
+<dt>Agent</dt><dd><time datetime="2027-01-15T12:03:00.000Z" title="2027-01-15T12:03:00.000Z" data-ago>just now</time></dd>
+<dt>Tokens</dt><dd id="thread-usage" data-tokens="1480590"><span title="1,480,590">1.5M</span> <span class="dim">(<span title="284,150">in 284k</span> · <span title="62,440">out 62.4k</span> · <span title="180,000">cache write 180k</span> · <span title="954,000">cache read 954k</span>)</span></dd>
+</dl>
+<code class="id">pylon-th-sync-verify</code>
+
+
+</section>
+<section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs <span class="count">0</span></h2>
+<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>
+
+
+<p class="empty">No other outputs yet.</p>
+</section>
+
+<section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions <span class="count">0</span></h2>
+<p class="empty">No sessions.</p>
+<div class="s-new"><button type="button" class="btn btn-xs" data-action="open-session" data-thread="th-sync-verify" data-harness="shell">New shell</button><button type="button" class="btn btn-xs" data-action="open-session" data-thread="th-sync-verify" data-harness="pi">New pi</button><button type="button" class="btn btn-xs" data-action="open-session" data-thread="th-sync-verify" data-harness="claude-code">New Claude</button></div>
+<p class="dim small">Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, <code>nexus attach</code> included.</p>
+<p class="attach-h">Attach from a shell in the pylon</p>
+<div class="attach"><code id="attach-command">herdr --session nexus</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>
+</section>
+</div></div>
+</aside>
+</div>
+<p id="refresh-state" class="refresh-state" role="status"></p>
+<div class="scrim" data-close aria-hidden="true"></div>
+<template id="icons"><svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg><svg class="i i-folder" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/></svg></template>
+<dialog id="start-dialog" class="modal" aria-labelledby="start-h">
+<header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+<div id="start-body" data-live>
+<form id="start" class="form">
+
+<fieldset class="seg" id="start-worker"><legend>Worker</legend>
+<label class="seg-opt"><input type="radio" name="worker" value="claude" checked><span class="seg-name">Claude Code</span><span class="seg-repo">for code work</span></label>
+<label class="seg-opt"><input type="radio" name="worker" value="harness"><span class="seg-name">Nexus agent</span><span class="seg-repo">the control plane's own harness</span></label>
+</fieldset>
+<div id="start-claude-fields">
+<label for="start-claude">Prompt</label>
+<textarea id="start-claude" name="claude" required placeholder="What should Claude do?" autofocus></textarea>
+<p class="hint">Runs <code>/poteto-mode</code> with this prompt, as <code>nexus start --claude</code> does.</p>
+<label for="start-model">Model (optional)</label>
+<input id="start-model" name="model" autocomplete="off" placeholder="claude-opus-5-5">
+<p class="hint"><code>claude-opus-5-5</code> unless you name another.</p>
+</div>
+<div id="start-harness-fields" hidden>
+<label class="check"><input type="checkbox" id="start-planning" name="planning" value="true" disabled> Planning thread</label>
+<p class="hint">It plans with you and proposes items. Each becomes a card here that you accept into the pipeline or reject, as <code>nexus start --plan</code> does.</p>
+</div>
+<label for="start-title" id="start-title-label">Title (optional)</label>
+<input id="start-title" name="title" autocomplete="off" placeholder="The prompt's first line">
+<fieldset class="seg"><legend>Project</legend>
+<label class="seg-opt"><input type="radio" name="project" required value="field-notes" data-node="infra-testbench" data-branch="trunk" data-cpus="2" data-memory-gib="4" data-disk-gib="20" checked><span class="seg-name">field-notes</span><span class="seg-repo">https://github.com/ramtinJ95/field-notes.git</span></label><label class="seg-opt"><input type="radio" name="project" required value="nexus" data-node="rj-firebat" data-branch="main" data-cpus="2" data-memory-gib="4" data-disk-gib="20"><span class="seg-name">nexus</span><span class="seg-repo">https://github.com/ramtinJ95/nexus.git</span></label><label class="seg-opt"><input type="radio" name="project" required value="storefront" data-node="rj-firebat" data-branch="main" data-cpus="2" data-memory-gib="4" data-disk-gib="20"><span class="seg-name">storefront</span><span class="seg-repo">https://github.com/ramtinJ95/storefront.git</span></label>
+</fieldset>
+<div class="two">
+<div><label for="start-node">Node</label><select id="start-node" name="node">
+<option value="">infra-testbench (project default)</option>
+<option value="auto">auto, where it fits best</option>
+<option value="infra-testbench">infra-testbench</option><option value="rj-firebat">rj-firebat</option>
+</select></div>
+<div><label for="start-branch">Branch</label><input id="start-branch" name="branch" autocomplete="off" placeholder="trunk"></div>
+</div>
+<div class="two three">
+<div><label for="start-cpus">CPUs</label><input id="start-cpus" name="cpus" type="number" min="1" step="1" inputmode="numeric" placeholder="2"></div>
+<div><label for="start-memory">Memory (GiB)</label><input id="start-memory" name="memoryGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="4"></div>
+<div><label for="start-disk">Disk (GiB)</label><input id="start-disk" name="diskGiB" type="number" min="1" step="1" inputmode="numeric" placeholder="20"></div>
+</div>
+<p class="hint" id="start-hint" data-image="img-0123456789ab"></p>
+<p id="start-error" class="error" role="alert" hidden></p>
+<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread<kbd>⌘↵</kbd></button></footer>
+</form>
+</div>
+</dialog>
+<dialog id="project-dialog" class="modal" aria-labelledby="project-h">
+<header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
+<form id="project" class="form" data-resources="{&quot;cpus&quot;:2,&quot;memoryGiB&quot;:4,&quot;diskGiB&quot;:10}" data-github-grant="{&quot;name&quot;:&quot;GH_TOKEN&quot;,&quot;hosts&quot;:[&quot;api.github.com&quot;,&quot;github.com&quot;]}">
+<label for="project-id">ID</label>
+<input id="project-id" name="id" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-app" autofocus>
+<fieldset class="seg"><legend>Repository</legend>
+<label class="seg-opt"><input type="radio" name="repoKind" value="clone" checked><span class="seg-name">Clone a URL</span><span class="seg-repo">threads check out a branch</span></label>
+<label class="seg-opt"><input type="radio" name="repoKind" value="scratch"><span class="seg-name">Empty (scratch)</span><span class="seg-repo">git init, nothing kept</span></label>
+</fieldset>
+<label for="project-repo">Repository URL</label>
+<input id="project-repo" name="repoUrl" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="git@github.com:you/my-app.git">
+<div class="two">
+<div><label for="project-node">Node</label><select id="project-node" name="defaultNode">
+<option value="auto" selected>auto, where it fits best</option>
+<option value="infra-testbench">infra-testbench</option><option value="rj-firebat">rj-firebat</option>
+</select></div>
+<div><label for="project-branch">Branch</label><input id="project-branch" name="defaultBranch" required autocomplete="off" autocapitalize="off" spellcheck="false" value="main"></div>
+</div>
+<label class="check"><input type="checkbox" name="github"> GitHub access</label>
+<p class="hint">Threads clone the repository at this branch, or in a scratch project start an empty repository on it, and boot on this node unless they pick another. With auto, each boots on the node with the most room left among those that hold the image and the project's secrets. A scratch pylon keeps nothing once its thread is deleted, so its agent publishes what is worth keeping. GitHub access sends the node's <code>GH_TOKEN</code> to api.github.com and github.com, so agents can create repositories and push. Each pylon gets 2 CPUs, 4 GiB of memory and 10 GiB of disk. <code>nexus project add</code> can set those, allowed hosts, logins and other secrets.</p>
+<p id="project-error" class="error" role="alert" hidden></p>
+<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project<kbd>⌘↵</kbd></button></footer>
+</form>
+</dialog>
+<noscript><p class="noscript">Adding projects, starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
+</body>
+</html>
+

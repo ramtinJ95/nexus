@@ -1,0 +1,58 @@
+exit 0
+--- stdout
+{
+  "conversation": {
+    "id": 11
+  },
+  "entries": [
+    {
+      "id": 1,
+      "conversationId": 11,
+      "kind": "pi.user",
+      "model": [
+        {
+          "role": "user",
+          "content": "Write Playwright tests for full and partial refunds.",
+          "timestamp": 1799985720000
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "conversationId": 11,
+      "kind": "pi.assistant",
+      "model": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Opened #90 with 6 tests. Review approved; the checks are running now."
+            }
+          ],
+          "stopReason": "stop",
+          "api": "openai-responses",
+          "provider": "openai",
+          "model": "gpt-6-astra",
+          "timestamp": 1799985760000,
+          "usage": {
+            "input": 18400,
+            "output": 1250,
+            "cacheRead": 52000,
+            "cacheWrite": 0,
+            "totalTokens": 71650,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "docs": {}
+}
+--- stderr

@@ -1,0 +1,81 @@
+200 application/json
+{
+  "node": "infra-testbench",
+  "readAt": "2027-01-15T12:00:00.000Z",
+  "cpus": 8,
+  "load": {
+    "one": 2.8224319508763838,
+    "five": 2.5401887557887455,
+    "fifteen": 2.257945560701107
+  },
+  "memory": {
+    "totalGiB": 32,
+    "availableGiB": 14.212674419455446,
+    "swapTotalGiB": 8,
+    "swapFreeGiB": 1.4
+  },
+  "disk": {
+    "path": "/var/lib/nexus",
+    "totalGiB": 931,
+    "freeGiB": 31
+  },
+  "disks": [
+    {
+      "paths": [
+        "/var/lib/nexus"
+      ],
+      "totalGiB": 931,
+      "freeGiB": 31,
+      "pylons": true
+    },
+    {
+      "paths": [
+        "/"
+      ],
+      "totalGiB": 60,
+      "freeGiB": 18
+    }
+  ],
+  "temperatures": [
+    {
+      "sensor": "Package id 0",
+      "celsius": 54.005488902253155
+    },
+    {
+      "sensor": "Composite",
+      "celsius": 40.45665493392595
+    }
+  ],
+  "pylons": [
+    {
+      "pylonId": "pylon-th-tagger",
+      "processes": 40,
+      "cpuPercent": 80.66110566516204,
+      "residentGiB": 1.4477697075780265
+    },
+    {
+      "pylonId": "pylon-th-dark",
+      "processes": 47,
+      "cpuPercent": 59.6945674026575,
+      "residentGiB": 1.7144863901743532
+    },
+    {
+      "pylonId": "pylon-th-parked",
+      "processes": 54,
+      "cpuPercent": 64.33725014356082,
+      "residentGiB": 2.115702216466024
+    },
+    {
+      "pylonId": "pylon-th-sync",
+      "processes": 61,
+      "cpuPercent": 30.61715593586486,
+      "residentGiB": 2.524436070937539
+    },
+    {
+      "pylonId": "pylon-th-sync-verify",
+      "processes": 68,
+      "cpuPercent": 41.68014664010565,
+      "residentGiB": 2.871576109874762
+    }
+  ]
+}

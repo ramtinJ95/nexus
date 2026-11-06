@@ -1,0 +1,31 @@
+200 application/json
+[
+  {
+    "id": "32",
+    "time": 1800013800000,
+    "thread": "th-applepay-review",
+    "project": "storefront",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "33",
+    "time": 1800014400000,
+    "thread": "th-applepay-review",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "34",
+    "time": 1800014400000,
+    "thread": "th-applepay-review",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  }
+]

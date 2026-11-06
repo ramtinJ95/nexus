@@ -1,0 +1,4 @@
+exit 5
+--- stdout
+--- stderr
+nexus: thread th-sync-verify has no conversation

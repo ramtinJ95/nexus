@@ -1,0 +1,12 @@
+exit 0
+--- stdout
+th-search  Typo tolerance in product search
+project: storefront
+attention: none
+status: archived
+pylon: pylon-th-search on rj-firebat, paused, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+PR watch: off (no control-plane GitHub token configured)
+--- stderr

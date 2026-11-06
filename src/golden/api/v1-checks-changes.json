@@ -1,0 +1,93 @@
+200 application/json
+[
+  {
+    "id": 9,
+    "at": "2027-01-15T11:20:00.000Z",
+    "node": "rj-firebat",
+    "name": "pylons",
+    "status": "fail",
+    "from": "ok",
+    "text": "1 pylon is broken: Fix doctor's certificate check.",
+    "seenAt": null
+  },
+  {
+    "id": 8,
+    "at": "2027-01-15T10:00:00.000Z",
+    "node": "infra-testbench",
+    "name": "pylons",
+    "status": "warn",
+    "from": "ok",
+    "text": "1 pylon is broken: Fix the crash on an empty notebook.",
+    "seenAt": null
+  },
+  {
+    "id": 7,
+    "at": "2027-01-15T07:00:00.000Z",
+    "node": "infra-testbench",
+    "name": "disk",
+    "status": "fail",
+    "from": "warn",
+    "text": "33 GiB free of 931 GiB for pylons, under the 50 GiB floor. Answer the cleanup question on its page.",
+    "seenAt": null
+  },
+  {
+    "id": 6,
+    "at": "2027-01-15T03:00:00.000Z",
+    "node": "infra-testbench",
+    "name": "release",
+    "status": "warn",
+    "from": "ok",
+    "text": "Runs 4209370e1c2b, two releases behind.",
+    "seenAt": null
+  },
+  {
+    "id": 5,
+    "at": "2027-01-14T05:00:00.000Z",
+    "node": null,
+    "name": "backup",
+    "status": "warn",
+    "from": "ok",
+    "text": "The last backup is 25 hours old.",
+    "seenAt": "2027-01-14T16:00:00.000Z"
+  },
+  {
+    "id": 4,
+    "at": "2027-01-13T15:00:00.000Z",
+    "node": "rj-firebat",
+    "name": "disk",
+    "status": "ok",
+    "from": "warn",
+    "text": "523 GiB free after the cleanup.",
+    "seenAt": null
+  },
+  {
+    "id": 3,
+    "at": "2027-01-13T12:00:00.000Z",
+    "node": "rj-firebat",
+    "name": "disk",
+    "status": "warn",
+    "from": "ok",
+    "text": "61 GiB free for pylons, near the 50 GiB floor.",
+    "seenAt": null
+  },
+  {
+    "id": 2,
+    "at": "2027-01-11T12:20:00.000Z",
+    "node": "infra-testbench",
+    "name": "online",
+    "status": "ok",
+    "from": "fail",
+    "text": "Online again.",
+    "seenAt": null
+  },
+  {
+    "id": 1,
+    "at": "2027-01-11T12:00:00.000Z",
+    "node": "infra-testbench",
+    "name": "online",
+    "status": "fail",
+    "from": "ok",
+    "text": "Offline for 12 minutes: its probe does not answer.",
+    "seenAt": null
+  }
+]

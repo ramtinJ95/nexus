@@ -1,0 +1,15 @@
+exit 0
+--- stdout
+> The probe client gives up on the first reset. Make it retry with backoff and a deadline.
+
+Done in `protocol/client.ts`:
+
+```ts
+export function backoff(attempt: number, base = 500, cap = 30_000): number {
+  const ceiling = Math.min(cap, base * 2 ** attempt);
+  return Math.round(ceiling / 2 + Math.random() * (ceiling / 2));
+}
+```
+
+Opened #398. The review ran out of rounds on one finding I rejected, so it's held for you.
+--- stderr

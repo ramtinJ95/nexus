@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+5173  -  -
+3000  -  -
+`nexus preview th-graphs <port>` publishes a port.
+--- stderr

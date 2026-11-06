@@ -1,0 +1,1014 @@
+200 application/json
+[
+  {
+    "id": "1",
+    "time": 1799920860000,
+    "thread": "th-graphs",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 402,
+      "url": "https://github.com/ramtinJ95/nexus/pull/402",
+      "title": "feat: graph each node's health on its page",
+      "state": "open"
+    }
+  },
+  {
+    "id": "2",
+    "time": 1800014400000,
+    "thread": "th-graphs",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "working"
+    }
+  },
+  {
+    "id": "3",
+    "time": 1799996460000,
+    "thread": "th-attach",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 401,
+      "url": "https://github.com/ramtinJ95/nexus/pull/401",
+      "title": "feat: the dashboard's terminal and nexus attach survive a deploy and a slow pylon",
+      "state": "open"
+    }
+  },
+  {
+    "id": "4",
+    "time": 1800014400000,
+    "thread": "th-attach",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "working"
+    }
+  },
+  {
+    "id": "5",
+    "time": 1799906460000,
+    "thread": "th-plan",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  },
+  {
+    "id": "6",
+    "time": 1800012900000,
+    "thread": "th-plan",
+    "project": "nexus",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "7",
+    "time": 1799942460000,
+    "thread": "th-flaky",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 398,
+      "url": "https://github.com/ramtinJ95/nexus/pull/398",
+      "title": "fix: the probe client retries a reset with backoff",
+      "state": "open"
+    }
+  },
+  {
+    "id": "8",
+    "time": 1799942460000,
+    "thread": "th-flaky",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-398",
+      "reviewer": "th-flaky-review",
+      "phase": {
+        "kind": "needs-person",
+        "cause": "rounds",
+        "reasons": [
+          "Finding F3 (P2) is still open after the last round.",
+          "The builder has not answered F3 in round 3.",
+          "The pull request's GitHub checks are pending."
+        ],
+        "holds": [
+          {
+            "code": "open-findings",
+            "text": "Finding F3 (P2) is still open after the last round."
+          },
+          {
+            "code": "unanswered",
+            "text": "The builder has not answered F3 in round 3."
+          },
+          {
+            "code": "github-checks",
+            "text": "The pull request's GitHub checks are pending."
+          }
+        ],
+        "label": {
+          "state": "added"
+        }
+      },
+      "round": 3
+    }
+  },
+  {
+    "id": "9",
+    "time": 1799942460000,
+    "thread": "th-flaky",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  },
+  {
+    "id": "10",
+    "time": 1799996460000,
+    "thread": "th-tokens",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 408,
+      "url": "https://github.com/ramtinJ95/nexus/pull/408",
+      "title": "fix: a pylon gets a fresh GitHub token on wake",
+      "state": "open"
+    }
+  },
+  {
+    "id": "11",
+    "time": 1799996460000,
+    "thread": "th-tokens",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-408",
+      "reviewer": "th-tokens-review",
+      "phase": {
+        "kind": "needs-person",
+        "cause": "policy",
+        "reasons": [
+          "Always needs the person: changes to secrets, as it changes src/control/secrets.ts.",
+          "The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1."
+        ],
+        "holds": [
+          {
+            "code": "reserved-path:secrets",
+            "text": "Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
+          },
+          {
+            "code": "waiver-not-carried",
+            "text": "The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1."
+          }
+        ]
+      },
+      "round": 2
+    }
+  },
+  {
+    "id": "12",
+    "time": 1799996460000,
+    "thread": "th-tokens",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  },
+  {
+    "id": "13",
+    "time": 1800012000000,
+    "thread": "th-tokens",
+    "project": "nexus",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "14",
+    "time": 1799982060000,
+    "thread": "th-drain",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 400,
+      "url": "https://github.com/ramtinJ95/nexus/pull/400",
+      "title": "feat: a deploy drains running turns first",
+      "state": "open"
+    }
+  },
+  {
+    "id": "15",
+    "time": 1799982060000,
+    "thread": "th-drain",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-400",
+      "reviewer": "th-drain-review",
+      "phase": {
+        "kind": "deploying",
+        "commit": "c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7",
+        "previous": "fafafafafafafafafafafafafafafafafafafafa",
+        "requested": true,
+        "deadline": 1800014880000
+      },
+      "round": 2
+    }
+  },
+  {
+    "id": "16",
+    "time": 1800011400000,
+    "thread": "th-drain",
+    "project": "nexus",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "17",
+    "time": 1800014400000,
+    "thread": "th-drain",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "18",
+    "time": 1800014400000,
+    "thread": "th-drain",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  },
+  {
+    "id": "19",
+    "time": 1799755260000,
+    "thread": "th-alerts",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 403,
+      "url": "https://github.com/ramtinJ95/nexus/pull/403",
+      "title": "feat: turn the control plane's daily report into health alerts",
+      "state": "merged"
+    }
+  },
+  {
+    "id": "20",
+    "time": 1799755260000,
+    "thread": "th-alerts",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-403",
+      "reviewer": "th-alerts-review",
+      "phase": {
+        "kind": "landed",
+        "commit": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "21",
+    "time": 1799989260000,
+    "thread": "th-cert",
+    "project": "nexus",
+    "kind": "thread.failed",
+    "payload": {
+      "message": "pylon is broken: the controller exited"
+    }
+  },
+  {
+    "id": "22",
+    "time": 1799989260000,
+    "thread": "th-cert",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "failed"
+    }
+  },
+  {
+    "id": "23",
+    "time": 1799989260000,
+    "thread": "th-cert",
+    "project": "nexus",
+    "kind": "thread.failed",
+    "payload": {
+      "message": "pylon is broken: the controller exited"
+    }
+  },
+  {
+    "id": "24",
+    "time": 1799974860000,
+    "thread": "th-backfill",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "limited"
+    }
+  },
+  {
+    "id": "25",
+    "time": 1800014040000,
+    "thread": "th-spin",
+    "project": "nexus",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "26",
+    "time": 1800000060000,
+    "thread": "th-spin",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "27",
+    "time": 1800014040000,
+    "thread": "th-spin",
+    "project": "nexus",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "28",
+    "time": 1800007260000,
+    "thread": "th-retention",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  },
+  {
+    "id": "29",
+    "time": 1799992860000,
+    "thread": "th-applepay",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 88,
+      "url": "https://github.com/ramtinJ95/storefront/pull/88",
+      "title": "feat(checkout): Apple Pay via the Payment Request Button",
+      "state": "open"
+    }
+  },
+  {
+    "id": "30",
+    "time": 1799992860000,
+    "thread": "th-applepay",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-88",
+      "reviewer": "th-applepay-review",
+      "phase": {
+        "kind": "reviewing"
+      },
+      "round": 2
+    }
+  },
+  {
+    "id": "31",
+    "time": 1800014400000,
+    "thread": "th-applepay",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "working"
+    }
+  },
+  {
+    "id": "32",
+    "time": 1800013800000,
+    "thread": "th-applepay-review",
+    "project": "storefront",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "33",
+    "time": 1800014400000,
+    "thread": "th-applepay-review",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "34",
+    "time": 1800014400000,
+    "thread": "th-applepay-review",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  },
+  {
+    "id": "35",
+    "time": 1799964060000,
+    "thread": "th-rounding",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 91,
+      "url": "https://github.com/ramtinJ95/storefront/pull/91",
+      "title": "fix(cart): keep totals in integer cents",
+      "state": "open"
+    }
+  },
+  {
+    "id": "36",
+    "time": 1799964060000,
+    "thread": "th-rounding",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-91",
+      "reviewer": "th-rounding-review",
+      "phase": {
+        "kind": "fixing"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "37",
+    "time": 1800014400000,
+    "thread": "th-rounding",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "working"
+    }
+  },
+  {
+    "id": "38",
+    "time": 1799985660000,
+    "thread": "th-refunds",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 90,
+      "url": "https://github.com/ramtinJ95/storefront/pull/90",
+      "title": "test: end-to-end refund flow",
+      "state": "open"
+    }
+  },
+  {
+    "id": "39",
+    "time": 1799985660000,
+    "thread": "th-refunds",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-90",
+      "reviewer": "th-refunds-review",
+      "phase": {
+        "kind": "checking",
+        "startedAt": 1800014160000,
+        "thread": "th-refunds-check"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "40",
+    "time": 1800007200000,
+    "thread": "th-refunds",
+    "project": "storefront",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "41",
+    "time": 1800014400000,
+    "thread": "th-refunds",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "42",
+    "time": 1800014400000,
+    "thread": "th-refunds",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  },
+  {
+    "id": "43",
+    "time": 1799996400000,
+    "thread": "th-lighthouse",
+    "project": "storefront",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "44",
+    "time": 1800014400000,
+    "thread": "th-lighthouse",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "45",
+    "time": 1800014400000,
+    "thread": "th-lighthouse",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  },
+  {
+    "id": "46",
+    "time": 1800003660000,
+    "thread": "th-inventory",
+    "project": "storefront",
+    "kind": "session.waiting",
+    "payload": {
+      "at": 1800012000000,
+      "session": "w1:p1",
+      "message": "Asked which header carries the signature"
+    }
+  },
+  {
+    "id": "47",
+    "time": 1800003660000,
+    "thread": "th-inventory",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "waiting"
+    }
+  },
+  {
+    "id": "48",
+    "time": 1800012000000,
+    "thread": "th-inventory",
+    "project": "storefront",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "49",
+    "time": 1800014400000,
+    "thread": "th-inventory",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "50",
+    "time": 1800014400000,
+    "thread": "th-inventory",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "waiting"
+    }
+  },
+  {
+    "id": "51",
+    "time": 1799870400000,
+    "thread": "th-avif",
+    "project": "storefront",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "52",
+    "time": 1800014400000,
+    "thread": "th-avif",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "53",
+    "time": 1800014400000,
+    "thread": "th-avif",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  },
+  {
+    "id": "54",
+    "time": 1800014400000,
+    "thread": "th-tagger",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "working"
+    }
+  },
+  {
+    "id": "55",
+    "time": 1799978460000,
+    "thread": "th-sync",
+    "project": "field-notes",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/field-notes",
+      "number": 57,
+      "url": "https://github.com/ramtinJ95/field-notes/pull/57",
+      "title": "feat(sync): merge offline edits by paragraph",
+      "state": "open"
+    }
+  },
+  {
+    "id": "56",
+    "time": 1799978460000,
+    "thread": "th-sync",
+    "project": "field-notes",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-57",
+      "reviewer": "th-sync-review",
+      "phase": {
+        "kind": "verifying",
+        "startedAt": 1800014040000,
+        "thread": "th-sync-verify"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "57",
+    "time": 1800003600000,
+    "thread": "th-sync",
+    "project": "field-notes",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "58",
+    "time": 1800014400000,
+    "thread": "th-sync",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "59",
+    "time": 1800014400000,
+    "thread": "th-sync",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  },
+  {
+    "id": "60",
+    "time": 1800013500000,
+    "thread": "th-dark",
+    "project": "field-notes",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "61",
+    "time": 1799996460000,
+    "thread": "th-dark",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "62",
+    "time": 1800013500000,
+    "thread": "th-dark",
+    "project": "field-notes",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "63",
+    "time": 1800000000000,
+    "thread": "th-export",
+    "project": "field-notes",
+    "kind": "thread.turn-ended",
+    "payload": {}
+  },
+  {
+    "id": "64",
+    "time": 1800014400000,
+    "thread": "th-export",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "reply"
+    }
+  },
+  {
+    "id": "65",
+    "time": 1800014400000,
+    "thread": "th-export",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": null
+    }
+  },
+  {
+    "id": "66",
+    "time": 1800007260000,
+    "thread": "th-crash",
+    "project": "field-notes",
+    "kind": "thread.failed",
+    "payload": {
+      "message": "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2"
+    }
+  },
+  {
+    "id": "67",
+    "time": 1800007260000,
+    "thread": "th-crash",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "failed"
+    }
+  },
+  {
+    "id": "68",
+    "time": 1800007260000,
+    "thread": "th-crash",
+    "project": "field-notes",
+    "kind": "thread.failed",
+    "payload": {
+      "message": "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2"
+    }
+  },
+  {
+    "id": "69",
+    "time": 1800003660000,
+    "thread": "th-parked",
+    "project": "field-notes",
+    "kind": "thread.parked",
+    "payload": {}
+  },
+  {
+    "id": "70",
+    "time": 1800003660000,
+    "thread": "th-parked",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "parked"
+    }
+  },
+  {
+    "id": "71",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "infra-testbench",
+      "name": "online",
+      "status": "fail",
+      "text": "Offline for 12 minutes: its probe does not answer.",
+      "from": "ok",
+      "at": "2027-01-11T12:00:00.000Z",
+      "id": 1,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "72",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "infra-testbench",
+      "name": "online",
+      "status": "ok",
+      "text": "Online again.",
+      "from": "fail",
+      "at": "2027-01-11T12:20:00.000Z",
+      "id": 2,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "73",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "rj-firebat",
+      "name": "disk",
+      "status": "warn",
+      "text": "61 GiB free for pylons, near the 50 GiB floor.",
+      "from": "ok",
+      "at": "2027-01-13T12:00:00.000Z",
+      "id": 3,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "74",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "rj-firebat",
+      "name": "disk",
+      "status": "ok",
+      "text": "523 GiB free after the cleanup.",
+      "from": "warn",
+      "at": "2027-01-13T15:00:00.000Z",
+      "id": 4,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "75",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": null,
+      "name": "backup",
+      "status": "warn",
+      "text": "The last backup is 25 hours old.",
+      "from": "ok",
+      "at": "2027-01-14T05:00:00.000Z",
+      "id": 5,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "76",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "infra-testbench",
+      "name": "release",
+      "status": "warn",
+      "text": "Runs 4209370e1c2b, two releases behind.",
+      "from": "ok",
+      "at": "2027-01-15T03:00:00.000Z",
+      "id": 6,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "77",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "infra-testbench",
+      "name": "disk",
+      "status": "fail",
+      "text": "33 GiB free of 931 GiB for pylons, under the 50 GiB floor. Answer the cleanup question on its page.",
+      "from": "warn",
+      "at": "2027-01-15T07:00:00.000Z",
+      "id": 7,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "78",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "infra-testbench",
+      "name": "pylons",
+      "status": "warn",
+      "text": "1 pylon is broken: Fix the crash on an empty notebook.",
+      "from": "ok",
+      "at": "2027-01-15T10:00:00.000Z",
+      "id": 8,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "79",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "health.changed",
+    "payload": {
+      "node": "rj-firebat",
+      "name": "pylons",
+      "status": "fail",
+      "text": "1 pylon is broken: Fix doctor's certificate check.",
+      "from": "ok",
+      "at": "2027-01-15T11:20:00.000Z",
+      "id": 9,
+      "seenAt": null
+    }
+  },
+  {
+    "id": "80",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "release.changed",
+    "payload": {
+      "desired": {
+        "commit": "fac9ff725fd13db015758c7f31094f8df76077d0",
+        "requestedBy": "nLAPTOP",
+        "requestedAt": 1800007200000
+      }
+    }
+  },
+  {
+    "id": "81",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "release.changed",
+    "payload": {
+      "node": "rj-firebat",
+      "role": "control",
+      "commit": "fac9ff725fd13db015758c7f31094f8df76077d0",
+      "target": "fac9ff725fd13db015758c7f31094f8df76077d0",
+      "state": "healthy",
+      "reason": null
+    }
+  },
+  {
+    "id": "82",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "release.changed",
+    "payload": {
+      "node": "rj-firebat",
+      "role": "probe",
+      "commit": "fac9ff725fd13db015758c7f31094f8df76077d0",
+      "target": "fac9ff725fd13db015758c7f31094f8df76077d0",
+      "state": "healthy",
+      "reason": null
+    }
+  },
+  {
+    "id": "83",
+    "time": 1800014400000,
+    "thread": null,
+    "project": null,
+    "kind": "release.changed",
+    "payload": {
+      "node": "infra-testbench",
+      "role": "probe",
+      "commit": "4209370e1c2b5d1a9f0e3b7c6d8a2e4f1b3c5d7e",
+      "target": "fac9ff725fd13db015758c7f31094f8df76077d0",
+      "state": "waiting-for-idle",
+      "reason": "2 pylons have running turns"
+    }
+  }
+]

@@ -1,0 +1,4 @@
+403 application/json
+{
+  "error": "caller is not a tailnet node this control plane allows"
+}
