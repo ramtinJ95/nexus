@@ -166,7 +166,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
     },
-    /** Never retried here. commandPolicies in probe/run.ts says which kinds a caller may send again. */
+    /** Never retried here. */
     async command(pylonId, command) {
       const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
       const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);

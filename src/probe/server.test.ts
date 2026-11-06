@@ -1063,7 +1063,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
 });
 
-test("the command policy table gives each kind its lock, its memory by request ID, its snapshot publishing and whether it may be sent again", () => {
+test("the command policy table gives each kind its lock, its memory by request ID, and its snapshot publishing", () => {
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
   const sent = (resumed: boolean): CommandResult => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed });
   const samples: [string, PylonCommand, CommandResult?][] = [
@@ -1082,24 +1082,24 @@ test("the command policy table gives each kind its lock, its memory by request I
     ["unlink-port", { kind: "unlink-port", port: 3000 }],
   ];
   const listed = samples.map(([name, command, result]) => {
-    const { lock, remembered, publishes, retrySafe } = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
+    const { lock, remembered, publishes } = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
     const waits = typeof lock === "function" ? lock(command) : lock;
-    return `${name}: waits for ${waits === session ? "its Claude session" : waits ?? "nothing"}, ${remembered ? "remembered" : "not remembered"}, ${(typeof publishes === "function" ? publishes(result!) : publishes) ? "publishes" : "does not publish"}, retry safe: ${typeof retrySafe === "function" ? retrySafe(command) : retrySafe}`;
+    return `${name}: waits for ${waits === session ? "its Claude session" : waits ?? "nothing"}, ${remembered ? "remembered" : "not remembered"}, ${(typeof publishes === "function" ? publishes(result!) : publishes) ? "publishes" : "does not publish"}`;
   });
   assert.deepEqual(listed, [
-    "exec: waits for nothing, not remembered, does not publish, retry safe: false",
-    "open-session: waits for nothing, not remembered, publishes, retry safe: false",
-    "open-session with resume: waits for nothing, not remembered, publishes, retry safe: false",
-    "open-session with prompt and resume: waits for its Claude session, not remembered, publishes, retry safe: true",
-    "close-session: waits for nothing, not remembered, publishes, retry safe: false",
-    "drop-failed-session: waits for nothing, not remembered, does not publish, retry safe: false",
-    "send-claude that resumes its session: waits for its Claude session, remembered, publishes, retry safe: false",
-    "send-claude to a running session: waits for its Claude session, remembered, does not publish, retry safe: false",
-    "send-claude-outcome: waits for nothing, not remembered, does not publish, retry safe: true",
-    "interrupt-claude: waits for its Claude session, not remembered, does not publish, retry safe: false",
-    "service: waits for nothing, not remembered, does not publish, retry safe: false",
-    "link-port: waits for nothing, not remembered, publishes, retry safe: true",
-    "unlink-port: waits for nothing, not remembered, publishes, retry safe: true",
+    "exec: waits for nothing, not remembered, does not publish",
+    "open-session: waits for nothing, not remembered, publishes",
+    "open-session with resume: waits for nothing, not remembered, publishes",
+    "open-session with prompt and resume: waits for its Claude session, not remembered, publishes",
+    "close-session: waits for nothing, not remembered, publishes",
+    "drop-failed-session: waits for nothing, not remembered, does not publish",
+    "send-claude that resumes its session: waits for its Claude session, remembered, publishes",
+    "send-claude to a running session: waits for its Claude session, remembered, does not publish",
+    "send-claude-outcome: waits for nothing, not remembered, does not publish",
+    "interrupt-claude: waits for its Claude session, not remembered, does not publish",
+    "service: waits for nothing, not remembered, does not publish",
+    "link-port: waits for nothing, not remembered, publishes",
+    "unlink-port: waits for nothing, not remembered, publishes",
   ]);
   assert.deepEqual(Object.keys(commandPolicies).sort(), [...new Set(samples.map(([, c]) => c.kind))].sort(), "every kind is listed");
 });
