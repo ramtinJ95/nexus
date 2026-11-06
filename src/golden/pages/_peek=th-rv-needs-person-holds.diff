@@ -1,0 +1,22 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -1863,8 +1863,8 @@
+ </div>
+ </details>
+ </article>
+-<article class="need need-question" id="need-th-rv-needs-person-holds-holds-rv-97-af71cd87d35c9fd1" data-thread="th-rv-needs-person-holds" data-attention="decision" tabindex="-1" aria-label="Holds to waive: feat(db): drop the legacy carts table">
+-<details class="need-fold" id="fold-need-th-rv-needs-person-holds-holds-rv-97-af71cd87d35c9fd1">
++<article class="need need-question picked" id="need-th-rv-needs-person-holds-holds-rv-97-af71cd87d35c9fd1" data-thread="th-rv-needs-person-holds" data-attention="decision" tabindex="-1" aria-label="Holds to waive: feat(db): drop the legacy carts table">
++<details class="need-fold" id="fold-need-th-rv-needs-person-holds-holds-rv-97-af71cd87d35c9fd1" open>
+ <summary class="need-sum" data-why="Land pull request #97, &quot;feat(db): drop the legacy carts table&quot;, at e0e0e0e0e0e0, waiving database migrations that delete or rewrite existing data and a review without its second reviewer?">
+ <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
+ <path d="M6 4l4 4-4 4"/>
+@@ -2486,7 +2486,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </a>
+ </li>
+ <li>
+-<a class="fl-row" href="/?peek=th-rv-needs-person-holds" data-peek="th-rv-needs-person-holds">
++<a class="fl-row" href="/?peek=th-rv-needs-person-holds" data-peek="th-rv-needs-person-holds" aria-current="true">
+ <span class="dot dot-bad" role="img" aria-label="needs your decision" title="needs your decision">
+ </span>
+ <span class="fl-title">feat(db): drop the legacy carts table</span>

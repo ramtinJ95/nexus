@@ -1,0 +1,33 @@
+200 application/json
+{
+  "id": "th-queued-2",
+  "title": "Wishlist sharing links",
+  "project": "storefront",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1800014400000,
+  "status": "queued",
+  "after": [
+    "th-rounding"
+  ],
+  "waits": [
+    {
+      "thread": "th-rounding",
+      "state": "waiting",
+      "why": "PR #91 is open"
+    }
+  ],
+  "blocked": false,
+  "node": "rj-firebat",
+  "worker": "harness",
+  "model": null,
+  "prompt": "Let a shopper share a wishlist by link.",
+  "branch": null,
+  "commit": null,
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 4,
+    "diskGiB": 20
+  },
+  "startNow": null,
+  "lastError": null
+}

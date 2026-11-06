@@ -1,0 +1,117 @@
+exit 0
+--- stdout
+[
+  {
+    "name": "infra-testbench",
+    "tailnetHost": "infra-testbench.tail.ts.net",
+    "tailnetNodeId": "nINFRA-TESTBENCH",
+    "state": "online",
+    "capacity": {
+      "cpus": 8,
+      "committedCpus": 8,
+      "memoryGiB": 32,
+      "committedMemoryGiB": 26,
+      "diskFreeGiB": 33,
+      "committedDiskGiB": 120,
+      "disks": [
+        {
+          "paths": [
+            "/var/lib/nexus"
+          ],
+          "totalGiB": 931,
+          "freeGiB": 31,
+          "pylons": true
+        },
+        {
+          "paths": [
+            "/"
+          ],
+          "totalGiB": 60,
+          "freeGiB": 18
+        }
+      ]
+    },
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "overcommitted": false,
+    "pylons": {
+      "up": {
+        "pylons": 5,
+        "cpus": 10,
+        "memoryGiB": 20
+      },
+      "paused": {
+        "pylons": 1,
+        "cpus": 2,
+        "memoryGiB": 4
+      },
+      "archived": {
+        "pylons": 1,
+        "cpus": 2,
+        "memoryGiB": 4
+      },
+      "crashed": {
+        "pylons": 1,
+        "cpus": 2,
+        "memoryGiB": 4
+      },
+      "orphaned": []
+    }
+  },
+  {
+    "name": "rj-firebat",
+    "tailnetHost": "rj-firebat.tail.ts.net",
+    "tailnetNodeId": "nRJ-FIREBAT",
+    "state": "online",
+    "capacity": {
+      "cpus": 16,
+      "committedCpus": 12,
+      "memoryGiB": 64,
+      "committedMemoryGiB": 30,
+      "diskFreeGiB": 523,
+      "committedDiskGiB": 260,
+      "disks": [
+        {
+          "paths": [
+            "/var/lib/nexus"
+          ],
+          "totalGiB": 1863,
+          "freeGiB": 520,
+          "pylons": true
+        },
+        {
+          "paths": [
+            "/"
+          ],
+          "totalGiB": 120,
+          "freeGiB": 71
+        }
+      ]
+    },
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "overcommitted": false,
+    "pylons": {
+      "up": {
+        "pylons": 15,
+        "cpus": 30,
+        "memoryGiB": 60
+      },
+      "paused": {
+        "pylons": 2,
+        "cpus": 4,
+        "memoryGiB": 8
+      },
+      "archived": {
+        "pylons": 2,
+        "cpus": 4,
+        "memoryGiB": 8
+      },
+      "crashed": {
+        "pylons": 1,
+        "cpus": 2,
+        "memoryGiB": 4
+      },
+      "orphaned": []
+    }
+  }
+]
+--- stderr

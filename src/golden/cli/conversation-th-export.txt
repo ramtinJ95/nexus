@@ -1,0 +1,8 @@
+exit 0
+--- stdout
+> /poteto-mode Export a notebook as a folder of Markdown files.
+
+Done: `notes export --format md <notebook>`. Front matter keeps tags and dates.
+
+[turn] 840s
+--- stderr

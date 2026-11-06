@@ -1,0 +1,4 @@
+404 application/json
+{
+  "error": "no thread th-000000000000"
+}

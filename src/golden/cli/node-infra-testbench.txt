@@ -1,0 +1,15 @@
+exit 0
+--- stdout
+node: infra-testbench, read 2027-01-15T12:00:00.000Z
+load: 2.82 2.54 2.26 (1, 5, 15 min) on 8 CPUs
+memory: 14.2 of 32 GiB available
+swap: 6.6 of 8 GiB used
+disk: 31.0 of 931.0 GiB free at /var/lib/nexus, low
+disk: 18.0 of 60.0 GiB free at /, low
+temperatures: Package id 0 54.0 °C, Composite 40.5 °C
+pylon: pylon-th-tagger, 40 processes, 80.7% CPU, 1.4 GiB resident
+pylon: pylon-th-dark, 47 processes, 59.7% CPU, 1.7 GiB resident
+pylon: pylon-th-parked, 54 processes, 64.3% CPU, 2.1 GiB resident
+pylon: pylon-th-sync, 61 processes, 30.6% CPU, 2.5 GiB resident
+pylon: pylon-th-sync-verify, 68 processes, 41.7% CPU, 2.9 GiB resident
+--- stderr

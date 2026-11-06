@@ -1,0 +1,15 @@
+exit 0
+--- stdout
+th-dark  Dark mode for the reader
+project: field-notes
+attention: reply
+status: active
+pylon: pylon-th-dark on infra-testbench, running, observed 0s ago
+attach: nexus attach th-dark
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: infra-testbench, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at trunk: this test has no remote
+port: 5173
+port: 3000
+PR watch: off (no control-plane GitHub token configured)
+--- stderr

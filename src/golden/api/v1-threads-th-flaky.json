@@ -1,0 +1,235 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-flaky",
+    "title": "Retry flaky probe reconnects",
+    "project": "nexus",
+    "pylonId": "pylon-th-flaky",
+    "status": "active",
+    "conversationId": "8",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799942400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799943000000,
+    "lastHumanActivityAt": 1799942400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-flaky",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [
+    {
+      "thread": "th-flaky",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/398"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 398,
+      "title": "fix: the probe client retries a reset with backoff",
+      "url": "https://github.com/ramtinJ95/nexus/pull/398",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false,
+      "summary": "The probe client now retries a connection reset with jittered backoff, up to a 30 s deadline."
+    }
+  ],
+  "review": {
+    "id": "rv-398",
+    "builder": "th-flaky",
+    "reviewer": "th-flaky-review",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 398,
+      "url": "https://github.com/ramtinJ95/nexus/pull/398",
+      "title": "fix: the probe client retries a reset with backoff",
+      "branch": "nexus/398"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-398:t",
+    "sent": 3,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013200000,
+    "nudges": 0,
+    "startedAt": 1800003600000,
+    "rounds": [
+      {
+        "head": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "src/protocol/client.ts:212",
+              "summary": "The deadline restarts on each retry, so a node that flaps never gives up.",
+              "detail": null
+            },
+            {
+              "id": "F2",
+              "priority": "P3",
+              "where": "src/protocol/client.ts:190",
+              "summary": "Name the magic 500 ms.",
+              "detail": null
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "fixed",
+            "reason": "The deadline is set once per call now."
+          },
+          {
+            "id": "F2",
+            "action": "fixed",
+            "reason": "Named it baseDelayMs."
+          }
+        ]
+      },
+      {
+        "head": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F3",
+              "priority": "P2",
+              "where": "src/protocol/client.test.ts",
+              "summary": "No test covers a reset after the deadline.",
+              "detail": null
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F3",
+            "action": "rejected",
+            "reason": "probe client gives up after the deadline covers it, at line 140."
+          }
+        ]
+      },
+      {
+        "head": "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F3",
+              "priority": "P2",
+              "where": "src/protocol/client.test.ts",
+              "summary": "No test covers a reset after the deadline.",
+              "detail": "The cited test resets before the deadline, not after."
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "needs-person",
+      "cause": "rounds",
+      "reasons": [
+        "Finding F3 (P2) is still open after the last round.",
+        "The builder has not answered F3 in round 3.",
+        "The pull request's GitHub checks are pending."
+      ],
+      "holds": [
+        {
+          "code": "open-findings",
+          "text": "Finding F3 (P2) is still open after the last round."
+        },
+        {
+          "code": "unanswered",
+          "text": "The builder has not answered F3 in round 3."
+        },
+        {
+          "code": "github-checks",
+          "text": "The pull request's GitHub checks are pending."
+        }
+      ],
+      "label": {
+        "state": "added"
+      }
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

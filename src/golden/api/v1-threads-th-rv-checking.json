@@ -1,0 +1,154 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-rv-checking",
+    "title": "feat(search): rank exact SKU matches first",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-checking",
+    "status": "active",
+    "conversationId": "26",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-checking",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-checking",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/storefront/pull/93"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/storefront",
+      "number": 93,
+      "title": "feat(search): rank exact SKU matches first",
+      "url": "https://github.com/ramtinJ95/storefront/pull/93",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-93",
+    "builder": "th-rv-checking",
+    "reviewer": "th-rv-checking-review",
+    "pr": {
+      "repo": "ramtinJ95/storefront",
+      "number": 93,
+      "url": "https://github.com/ramtinJ95/storefront/pull/93",
+      "title": "feat(search): rank exact SKU matches first",
+      "branch": "nexus/93"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-93:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [
+            {
+              "id": "N1",
+              "priority": "P3",
+              "where": "src/search/rank.ts",
+              "summary": "The boost could be a named constant.",
+              "detail": null
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": null,
+        "secondVerdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        }
+      }
+    ],
+    "phase": {
+      "kind": "checking",
+      "startedAt": 1800014220000,
+      "thread": "th-rv-checking-check"
+    },
+    "second": {
+      "kind": "claude",
+      "rule": "the change touches search ranking",
+      "thread": "th-rv-checking-second",
+      "model": "claude-sonnet-5-5",
+      "expect": "t2",
+      "asked": "",
+      "since": 1800013680000,
+      "nudges": 0,
+      "outbox": null
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

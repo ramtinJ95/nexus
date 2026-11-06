@@ -1,0 +1,5 @@
+exit 0
+--- stdout
+th-queued-1  queued  waits for th-graphs: PR #402 is open  node rj-firebat  nexus       0s ago  Prune events older than 90 days
+th-queued-2  queued  waits for th-rounding: PR #91 is open   node rj-firebat  storefront  0s ago  Wishlist sharing links
+--- stderr

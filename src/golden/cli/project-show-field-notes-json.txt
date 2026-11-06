@@ -1,0 +1,24 @@
+exit 0
+--- stdout
+{
+  "id": "field-notes",
+  "repoUrl": "https://github.com/ramtinJ95/field-notes.git",
+  "defaultBranch": "trunk",
+  "defaultNode": "infra-testbench",
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 4,
+    "diskGiB": 20
+  },
+  "allowedHosts": [
+    "pypi.org",
+    "files.pythonhosted.org"
+  ],
+  "secrets": [],
+  "logins": [
+    "claude",
+    "chatgpt"
+  ],
+  "preSetup": null
+}
+--- stderr

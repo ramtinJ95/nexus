@@ -1,0 +1,7 @@
+exit 0
+--- stdout
+infra-testbench  online  observed 0s ago  8/8 CPUs, 26/32 GiB memory committed, 120 GiB disk committed, 33 GiB disk free, disk low at /var/lib/nexus, disk low at /
+  pylons: 5 up holding 10 CPUs and 20 GiB, 1 paused needing 4 GiB to wake, 1 archived, 1 crashed needing 4 GiB to retry
+rj-firebat       online  observed 0s ago  12/16 CPUs, 30/64 GiB memory committed, 260 GiB disk committed, 523 GiB disk free
+  pylons: 15 up holding 30 CPUs and 60 GiB, 2 paused needing 8 GiB to wake, 2 archived, 1 crashed needing 4 GiB to retry
+--- stderr

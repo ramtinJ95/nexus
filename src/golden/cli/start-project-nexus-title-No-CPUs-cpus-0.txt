@@ -1,0 +1,5 @@
+exit 64
+--- stdout
+--- stderr
+nexus: ✖ Too small: expected number to be >0
+  → at resources.cpus

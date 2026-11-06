@@ -1,0 +1,34 @@
+200 application/json
+[
+  {
+    "id": "123",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-reviewer",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 100,
+      "url": "https://github.com/ramtinJ95/storefront/pull/100",
+      "title": "fix(cart): a coupon applies once per cart",
+      "state": "open"
+    }
+  },
+  {
+    "id": "124",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-reviewer",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-100",
+      "reviewer": "th-seeded-1",
+      "phase": {
+        "kind": "cancelled",
+        "who": "reviewer",
+        "status": "deleted"
+      },
+      "round": 1
+    }
+  }
+]

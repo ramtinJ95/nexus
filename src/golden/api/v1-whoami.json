@@ -1,0 +1,7 @@
+200 application/json
+{
+  "node": "nLAPTOP",
+  "allowed": true,
+  "person": true,
+  "deployer": true
+}

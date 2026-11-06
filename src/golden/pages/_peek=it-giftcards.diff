@@ -1,0 +1,22 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -2105,8 +2105,8 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </div>
+ </details>
+ </article>
+-<article class="need need-held" id="need-it-giftcards" data-peek-key="it-giftcards" tabindex="-1" aria-label="Approve item: Gift cards at checkout">
+-<details class="need-fold" id="fold-need-it-giftcards">
++<article class="need need-held picked" id="need-it-giftcards" data-peek-key="it-giftcards" tabindex="-1" aria-label="Approve item: Gift cards at checkout">
++<details class="need-fold" id="fold-need-it-giftcards" open>
+ <summary class="need-sum" data-why="project storefront waits for the person to approve each item: nexus item approve it-giftcards">
+ <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
+ <path d="M6 4l4 4-4 4"/>
+@@ -2221,7 +2221,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </a>
+ </li>
+ <li>
+-<a class="fl-row" href="/?peek=it-giftcards" data-peek="it-giftcards">
++<a class="fl-row" href="/?peek=it-giftcards" data-peek="it-giftcards" aria-current="true">
+ <span class="dot dot-bad" role="img" aria-label="held" title="held">
+ </span>
+ <span class="fl-title">Gift cards at checkout</span>

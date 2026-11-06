@@ -1,0 +1,93 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -848,7 +848,7 @@
+ <input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>43</span>
+ </label>
+ </div>
+-<div class="split" id="split">
++<div class="split peeking" id="split">
+ <p id="action-error" class="error split-error" role="alert" hidden>
+ </p>
+ <section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>
+@@ -2183,6 +2183,81 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </div>
+ </section>
+ <div class="split-peek" id="peek" data-live>
++<section class="peek" aria-labelledby="peek-h" data-peek-key="it-search">
++<header class="peek-head">
++<span class="peek-proj">storefront<span class="dim"> item </span>
++<code>it-search</code>
++</span>
++<h2 id="peek-h">
++<span class="dot dot-muted" role="img" aria-label="archived" title="archived">
++</span>
++<span>Typo tolerance in product search</span>
++</h2>
++<a class="btn btn-xs" href="/threads/th-search">Open thread</a>
++<a class="icon-btn peek-close" href="/" data-peek="" aria-label="Close the preview" title="Close (Esc)">
++<svg class="i i-cross" viewBox="0 0 16 16" aria-hidden="true">
++<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>
++</svg>
++</a>
++</header>
++<ol class="life" aria-label="Where this work is">
++<li class="life-done">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Planned</span>
++</span>
++</li>
++<li class="life-done">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Queued</span>
++</span>
++</li>
++<li class="life-done">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Building</span>
++</span>
++</li>
++<li class="life-skipped">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">In review</span>
++</span>
++</li>
++<li class="life-skipped">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Landing</span>
++</span>
++</li>
++<li class="life-skipped">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Deployed</span>
++</span>
++</li>
++</ol>
++<div class="peek-next">
++<span class="peek-k">Next</span>
++<p>its thread is archived.</p>
++</div>
++
++<div class="peek-reply">
++<p class="peek-k">Brief</p>
++<div class="peek-text">
++<p>Brief: Typo tolerance in product search.</p>
++</div>
++</div>
++<p class="peek-meta">Added by nLAPTOP <time datetime="2027-01-11T11:50:00.000Z" title="2027-01-11T11:50:00.000Z" data-ago>4 d ago</time>, for the Nexus agent.</p>
++
++</section>
+ </div>
+ <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
+ <div class="ov-head flight-head">

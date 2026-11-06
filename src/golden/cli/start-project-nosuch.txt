@@ -1,0 +1,4 @@
+exit 64
+--- stdout
+--- stderr
+nexus: start needs --title, --message or --claude. Run nexus --help for usage

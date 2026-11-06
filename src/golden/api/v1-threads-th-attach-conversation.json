@@ -1,0 +1,133 @@
+200 application/json
+{
+  "kind": "claude",
+  "session": "th-attach-s1",
+  "entries": [
+    {
+      "kind": "prompt",
+      "at": 1799996520000,
+      "text": "/poteto-mode The dashboard's terminal and nexus attach drop when the control plane deploys. Make both reconnect on their own, and survive a slow pylon.",
+      "from": "person"
+    },
+    {
+      "kind": "reply",
+      "at": 1799996550000,
+      "text": "I'll reproduce the drop first. Reading the attach route and the client's reconnect logic."
+    },
+    {
+      "kind": "tool",
+      "at": 1799996570000,
+      "id": "toolu_0001",
+      "name": "Bash",
+      "input": {
+        "command": "rg -n 'reconnect' src/control/attach.ts src/attach-wire.ts",
+        "description": "Find reconnect code"
+      }
+    },
+    {
+      "kind": "result",
+      "at": 1799996575000,
+      "toolUseId": "toolu_0001",
+      "output": "src/control/attach.ts:118:  // A terminal that loses its socket does not reconnect.\nsrc/attach-wire.ts:40:export const attachRoute = ...",
+      "isError": false
+    },
+    {
+      "kind": "tool",
+      "at": 1799996595000,
+      "id": "toolu_0002",
+      "name": "Read",
+      "input": {
+        "file_path": "<repo>/src/control/attach.ts"
+      }
+    },
+    {
+      "kind": "result",
+      "at": 1799996600000,
+      "toolUseId": "toolu_0002",
+      "output": "     1\t/** A thread's terminal over a WebSocket... */\n   118\t  // A terminal that loses its socket does not reconnect.",
+      "isError": false
+    },
+    {
+      "kind": "reply",
+      "at": 1799996630000,
+      "text": "Found it. The socket closes with **1012** (service restart) during a deploy, and the client treats every close as final.\n\nPlan:\n\n1. Treat `1012` and `1006` as retryable\n2. Back off with jitter:\n\n```ts\nexport function backoff(attempt: number, base = 500, cap = 30_000): number {\n  const ceiling = Math.min(cap, base * 2 ** attempt);\n  return Math.round(ceiling / 2 + Math.random() * (ceiling / 2));\n}\n```\n\n3. Replay the screen from Herdr on reconnect so nothing is lost"
+    },
+    {
+      "kind": "tool",
+      "at": 1799996650000,
+      "id": "toolu_0003",
+      "name": "Edit",
+      "input": {
+        "file_path": "<repo>/src/control/dashboard/terminal.js",
+        "old_string": "ws.onclose = () => done();",
+        "new_string": "ws.onclose = (e) => retryable(e.code) ? reconnect() : done();"
+      }
+    },
+    {
+      "kind": "result",
+      "at": 1799996655000,
+      "toolUseId": "toolu_0003",
+      "output": "The file has been updated.",
+      "isError": false
+    },
+    {
+      "kind": "tool",
+      "at": 1799996675000,
+      "id": "toolu_0004",
+      "name": "Bash",
+      "input": {
+        "command": "npm test -- src/control/attach.test.ts",
+        "description": "Run attach tests"
+      }
+    },
+    {
+      "kind": "result",
+      "at": 1799996680000,
+      "toolUseId": "toolu_0004",
+      "output": "✔ a terminal reconnects after a 1012 close (1.4s)\n✔ a slow pylon's attach waits for its pane (2.1s)\nℹ pass 2",
+      "isError": false
+    },
+    {
+      "kind": "tool",
+      "at": 1799996700000,
+      "id": "toolu_0005",
+      "name": "Bash",
+      "input": {
+        "command": "git push -u origin feat/attach-survives-deploy && gh pr create --fill"
+      }
+    },
+    {
+      "kind": "result",
+      "at": 1799996705000,
+      "toolUseId": "toolu_0005",
+      "output": "https://github.com/ramtinJ95/nexus/pull/401",
+      "isError": false
+    },
+    {
+      "kind": "pull-request",
+      "at": 1799996706000,
+      "number": 401,
+      "url": "https://github.com/ramtinJ95/nexus/pull/401",
+      "repository": "ramtinJ95/nexus"
+    },
+    {
+      "kind": "reply",
+      "at": 1799996736000,
+      "text": "Pushed and opened #401. Now checking the CLI's `nexus attach` against a simulated deploy."
+    },
+    {
+      "kind": "tool",
+      "at": 1799996756000,
+      "id": "toolu_0006",
+      "name": "Bash",
+      "input": {
+        "command": "node scripts/simulate-deploy.ts --drain 20s",
+        "description": "Simulate a deploy"
+      }
+    }
+  ],
+  "dropped": 0,
+  "readAt": 1800014400000,
+  "working": false,
+  "usageLimit": null
+}

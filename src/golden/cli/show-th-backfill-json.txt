@@ -1,0 +1,83 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-backfill",
+    "title": "Rewrite the usage backfill",
+    "project": "nexus",
+    "pylonId": "pylon-th-backfill",
+    "status": "active",
+    "conversationId": null,
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799974800000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1799975400000,
+    "lastHumanActivityAt": 1799974800000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "usageLimit": {
+      "stoppedAt": 1799975001000,
+      "resetsAt": 1800021600000
+    }
+  },
+  "claudeWorker": {
+    "model": "claude-opus-5-5",
+    "state": "started"
+  },
+  "resume": null,
+  "attention": "limited",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-backfill",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": null
+}
+--- stderr

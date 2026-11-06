@@ -1,0 +1,181 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-applepay",
+    "title": "Checkout: add the Apple Pay button",
+    "project": "storefront",
+    "pylonId": "pylon-th-applepay",
+    "status": "active",
+    "conversationId": "14",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799992800000,
+    "agentTurnRunning": true,
+    "lastAgentActivityAt": 1800012986000,
+    "lastHumanActivityAt": 1799992800000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": true,
+    "workingSince": 1800012986000,
+    "awaitedUntil": 1800015000000
+  },
+  "attention": "working",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-applepay",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [
+    {
+      "pylon": "pylon-th-applepay",
+      "service": "web",
+      "httpsPort": 10201,
+      "ready": true,
+      "failed": null,
+      "url": "https://rj-firebat.tail.ts.net:10201/"
+    }
+  ],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [
+    {
+      "thread": "th-applepay",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/storefront/pull/88"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/storefront",
+      "number": 88,
+      "title": "feat(checkout): Apple Pay via the Payment Request Button",
+      "url": "https://github.com/ramtinJ95/storefront/pull/88",
+      "state": "open",
+      "checks": "pending",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-88",
+    "builder": "th-applepay",
+    "reviewer": "th-applepay-review",
+    "pr": {
+      "repo": "ramtinJ95/storefront",
+      "number": 88,
+      "url": "https://github.com/ramtinJ95/storefront/pull/88",
+      "title": "feat(checkout): Apple Pay via the Payment Request Button",
+      "branch": "nexus/88"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-88:t",
+    "sent": 3,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013200000,
+    "nudges": 0,
+    "startedAt": 1800003600000,
+    "rounds": [
+      {
+        "head": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "src/checkout/PaymentStep.tsx:31",
+              "summary": "canMakePayment() can reject in Safari private mode; the button then never hides.",
+              "detail": null
+            },
+            {
+              "id": "F2",
+              "priority": "P2",
+              "where": "src/checkout/PaymentStep.tsx:12",
+              "summary": "The amount is sent in dollars, Stripe wants cents.",
+              "detail": null
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "fixed",
+            "reason": "Caught, treated as unavailable."
+          },
+          {
+            "id": "F2",
+            "action": "fixed",
+            "reason": "Uses cart.totalCents."
+          }
+        ]
+      },
+      {
+        "head": "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+        "base": "main",
+        "verdict": null,
+        "check": null,
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "reviewing"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

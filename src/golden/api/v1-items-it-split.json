@@ -1,0 +1,20 @@
+200 application/json
+{
+  "id": "it-split",
+  "project": "nexus",
+  "title": "Split loop.ts by node phase",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799942400000,
+  "after": [
+    "it-prune"
+  ],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Split loop.ts by node phase.",
+  "thread": null,
+  "phase": {
+    "kind": "planned",
+    "why": "is queued on the pipeline's next pass"
+  },
+  "approved": null
+}

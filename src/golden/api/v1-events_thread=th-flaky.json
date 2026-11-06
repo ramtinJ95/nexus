@@ -1,0 +1,65 @@
+200 application/json
+[
+  {
+    "id": "7",
+    "time": 1799942460000,
+    "thread": "th-flaky",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 398,
+      "url": "https://github.com/ramtinJ95/nexus/pull/398",
+      "title": "fix: the probe client retries a reset with backoff",
+      "state": "open"
+    }
+  },
+  {
+    "id": "8",
+    "time": 1799942460000,
+    "thread": "th-flaky",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-398",
+      "reviewer": "th-flaky-review",
+      "phase": {
+        "kind": "needs-person",
+        "cause": "rounds",
+        "reasons": [
+          "Finding F3 (P2) is still open after the last round.",
+          "The builder has not answered F3 in round 3.",
+          "The pull request's GitHub checks are pending."
+        ],
+        "holds": [
+          {
+            "code": "open-findings",
+            "text": "Finding F3 (P2) is still open after the last round."
+          },
+          {
+            "code": "unanswered",
+            "text": "The builder has not answered F3 in round 3."
+          },
+          {
+            "code": "github-checks",
+            "text": "The pull request's GitHub checks are pending."
+          }
+        ],
+        "label": {
+          "state": "added"
+        }
+      },
+      "round": 3
+    }
+  },
+  {
+    "id": "9",
+    "time": 1799942460000,
+    "thread": "th-flaky",
+    "project": "nexus",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  }
+]

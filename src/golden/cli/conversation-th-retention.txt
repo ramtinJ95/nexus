@@ -1,0 +1,10 @@
+exit 0
+--- stdout
+> /poteto-mode The metrics table will grow. Pick a retention and downsampling plan, ask me if it's a trade-off.
+
+[tool] Bash {"command":"sqlite3 registry.db 'SELECT count(*), sum(length(values)) FROM node_samples'"} (ok)
+
+At this rate the table reaches 4.6 GB in a year. Two options trade disk against detail, so I'll ask.
+
+[tool] AskUserQuestion {"questions":[{"question":"How long should raw samples be kept before they are downsampled?","header":"Raw","multiSelect":false,"options":[{"label":"6 hours","description":"Smallest table. Spikes olde... (no result)
+--- stderr

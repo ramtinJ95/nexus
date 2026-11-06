@@ -1,0 +1,16 @@
+exit 0
+--- stdout
+Usage of all projects since 2027-01-09 00:00 UTC. Counting started <counting since>.
+Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.
+
+       Input  Output  Cache write  Cache read  Total  Calls
+Total  8.1M   1.8M    3.8M         26.8M       40.5M  498
+
+By model
+Model              Input  Output  Cache write  Cache read  Total  Calls
+gpt-6-astra        2.9M   677k    960k         10.5M       15.1M  130
+claude-opus-5-5    1.8M   429k    180k         7M          9.5M   78
+gpt-6-astra-mini   1.4M   268k    1.3M         3.7M        6.6M   136
+claude-sonnet-5-5  1.3M   278k    540k         4.2M        6.3M   78
+claude-haiku-5-5   636k   104k    870k         1.4M        3M     76
+--- stderr

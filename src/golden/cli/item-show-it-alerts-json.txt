@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+{
+  "id": "it-alerts",
+  "project": "nexus",
+  "title": "Turn the daily report into health alerts",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799754600000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Turn the daily report into health alerts.",
+  "thread": "th-alerts",
+  "phase": {
+    "kind": "landed",
+    "why": "PR #403 merged as f4f4f4f4f4f4"
+  },
+  "approved": null
+}
+--- stderr

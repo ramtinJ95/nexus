@@ -1,0 +1,9 @@
+exit 0
+--- stdout
+> Re-index every attachment under the new schema.
+
+[tool] bash {"command":"notes reindex --all"}
+
+[tool error] bash: re-indexed 12,400 of 31,882 attachments
+Killed
+--- stderr

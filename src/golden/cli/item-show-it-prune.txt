@@ -1,0 +1,12 @@
+exit 0
+--- stdout
+it-prune  Prune events older than 90 days
+project: nexus
+phase: queued, waits for Graph node health with 31 days of history: PR #402 is open
+thread: th-queued-1
+worker: Nexus agent
+brief: Brief: Prune events older than 90 days.
+added by nLAPTOP 20h ago
+approved by nLAPTOP 19h ago
+nexus show th-queued-1 shows its thread.
+--- stderr

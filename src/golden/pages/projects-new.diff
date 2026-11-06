@@ -1,0 +1,20 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -4,7 +4,7 @@
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+ <meta name="color-scheme" content="light dark">
+-<title>Threads · Nexus</title>
++<title>New project · Nexus</title>
+ <script>{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }</script>
+ <link rel="icon" href="/assets/favicon.svg?v=<hash>" type="image/svg+xml">
+ <link rel="stylesheet" href="/assets/style.css?v=<hash>">
+@@ -4227,7 +4227,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </form>
+ </div>
+ </dialog>
+-<dialog id="project-dialog" class="modal" aria-labelledby="project-h">
++<dialog id="project-dialog" class="modal" aria-labelledby="project-h" data-autoopen>
+ <header>
+ <h2 id="project-h">New project</h2>
+ <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>

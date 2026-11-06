@@ -1,0 +1,104 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -848,7 +848,7 @@
+ <input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>43</span>
+ </label>
+ </div>
+-<div class="split" id="split">
++<div class="split peeking" id="split">
+ <p id="action-error" class="error split-error" role="alert" hidden>
+ </p>
+ <section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>
+@@ -2183,6 +2183,83 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </div>
+ </section>
+ <div class="split-peek" id="peek" data-live>
++<section class="peek" aria-labelledby="peek-h" data-peek-key="it-split">
++<header class="peek-head">
++<span class="peek-proj">nexus<span class="dim"> item </span>
++<code>it-split</code>
++</span>
++<h2 id="peek-h">
++<span class="dot dot-idle" role="img" aria-label="planned" title="planned">
++</span>
++<span>Split loop.ts by node phase</span>
++</h2>
++<a class="icon-btn peek-close" href="/" data-peek="" aria-label="Close the preview" title="Close (Esc)">
++<svg class="i i-cross" viewBox="0 0 16 16" aria-hidden="true">
++<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>
++</svg>
++</a>
++</header>
++<ol class="life" aria-label="Where this work is">
++<li class="life-now" aria-current="step">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Planned</span>
++</span>
++</li>
++<li class="life-todo">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Queued</span>
++</span>
++</li>
++<li class="life-todo">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Building</span>
++</span>
++</li>
++<li class="life-todo">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">In review</span>
++</span>
++</li>
++<li class="life-todo">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Landing</span>
++</span>
++</li>
++<li class="life-todo">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Deployed</span>
++</span>
++</li>
++</ol>
++<div class="peek-next">
++<span class="peek-k">Next</span>
++<p>is queued on the pipeline&#39;s next pass.</p>
++</div>
++<p class="peek-meta">After <a class="link" href="/?peek=th-queued-1" data-peek="th-queued-1">Prune events older than 90 days</a>
++</p>
++<div class="peek-reply">
++<p class="peek-k">Brief</p>
++<div class="peek-text">
++<p>Brief: Split loop.ts by node phase.</p>
++</div>
++</div>
++<p class="peek-meta">Added by nLAPTOP <time datetime="2027-01-14T16:00:00.000Z" title="2027-01-14T16:00:00.000Z" data-ago>20 h ago</time>, for the Nexus agent.</p>
++<div class="need-act">
++<button type="button" class="btn btn-xs btn-ghost" data-action="cancel-item" data-item="it-split" data-confirm="Cancel Split loop.ts by node phase? It never becomes a thread.">Cancel</button>
++</div>
++</section>
+ </div>
+ <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
+ <div class="ov-head flight-head">
+@@ -2203,7 +2280,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </h3>
+ <ul class="fl-list">
+ <li>
+-<a class="fl-row" href="/?peek=it-split" data-peek="it-split">
++<a class="fl-row" href="/?peek=it-split" data-peek="it-split" aria-current="true">
+ <span class="dot dot-idle" role="img" aria-label="planned" title="planned">
+ </span>
+ <span class="fl-title">Split loop.ts by node phase</span>

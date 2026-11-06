@@ -1,0 +1,5 @@
+exit 0
+--- stdout
+Started th-new-52 on storefront: Golden start
+Sent the first message.
+--- stderr

@@ -1,0 +1,60 @@
+exit 0
+--- stdout
+{
+  "since": 1799452800000,
+  "countingSince": <counting since>,
+  "project": null,
+  "thread": null,
+  "total": {
+    "input": 8083800,
+    "output": 1755300,
+    "cacheWrite": 3810000,
+    "cacheRead": 26802000,
+    "total": 40451100,
+    "calls": 498
+  },
+  "by": {
+    "role": [
+      {
+        "key": "builder",
+        "input": 7046400,
+        "output": 1536140,
+        "cacheWrite": 3300000,
+        "cacheRead": 23427000,
+        "total": 35309540,
+        "calls": 435
+      },
+      {
+        "key": "reviewer",
+        "input": 406900,
+        "output": 83320,
+        "cacheWrite": 90000,
+        "cacheRead": 1314000,
+        "total": 1894220,
+        "calls": 25
+      },
+      {
+        "key": "check",
+        "input": 346350,
+        "output": 73400,
+        "cacheWrite": 240000,
+        "cacheRead": 1107000,
+        "total": 1766750,
+        "calls": 21
+      },
+      {
+        "key": "verify",
+        "input": 284150,
+        "output": 62440,
+        "cacheWrite": 180000,
+        "cacheRead": 954000,
+        "total": 1480590,
+        "calls": 17
+      }
+    ]
+  },
+  "backfill": {
+    "state": "never"
+  }
+}
+--- stderr

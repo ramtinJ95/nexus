@@ -1,0 +1,34 @@
+exit 0
+--- stdout
+{
+  "id": "storefront",
+  "repoUrl": "https://github.com/ramtinJ95/storefront.git",
+  "defaultBranch": "main",
+  "defaultNode": "rj-firebat",
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 4,
+    "diskGiB": 20
+  },
+  "allowedHosts": [
+    "registry.npmjs.org",
+    "api.stripe.com"
+  ],
+  "secrets": [
+    {
+      "name": "STRIPE_KEY",
+      "hosts": [
+        "api.stripe.com"
+      ]
+    }
+  ],
+  "logins": [
+    "claude",
+    "chatgpt"
+  ],
+  "preSetup": null,
+  "pipeline": {
+    "autoStart": false
+  }
+}
+--- stderr

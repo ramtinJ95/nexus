@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+> Add a dismissible winter sale banner.
+
+Added behind the `winterSale` flag.
+--- stderr

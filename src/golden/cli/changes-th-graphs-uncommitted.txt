@@ -1,0 +1,7 @@
+exit 0
+--- stdout
+Changes since HEAD, 1550ad2c5a6f:
+modified  +1 -1  README.md
+deleted   +0 -1  src/legacy-retry.ts
+modified  +6 -0  test/client.test.ts
+--- stderr

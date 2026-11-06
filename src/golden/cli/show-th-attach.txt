@@ -1,0 +1,19 @@
+exit 0
+--- stdout
+th-attach  Keep nexus attach alive across a deploy
+project: nexus
+Claude worker: started, model claude-opus-5-5
+attention: working
+status: active, agent working
+pylon: pylon-th-attach on rj-firebat, running, observed 0s ago
+attach: nexus attach th-attach
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+session: claude-code "worker" in pane w1:p1, working
+port: 5173
+port: 3000
+PR watch: off (no control-plane GitHub token configured)
+PR #401: feat: the dashboard's terminal and nexus attach survive a deploy and a slow pylon — open, checks pending, review none https://github.com/ramtinJ95/nexus/pull/401
+output: pull-request https://github.com/ramtinJ95/nexus/pull/401
+--- stderr

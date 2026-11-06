@@ -1,0 +1,10 @@
+exit 0
+--- stdout
+it-giftcards  Gift cards at checkout
+project: storefront
+phase: held, project storefront waits for the person to approve each item: nexus item approve it-giftcards
+thread: none yet
+worker: Nexus agent
+brief: Brief: Gift cards at checkout.
+added by nLAPTOP 9h ago
+--- stderr

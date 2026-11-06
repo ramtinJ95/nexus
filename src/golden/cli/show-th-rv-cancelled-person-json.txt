@@ -1,0 +1,124 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-rv-cancelled-person",
+    "title": "feat(cli): nexus logs --follow",
+    "project": "nexus",
+    "pylonId": "pylon-th-rv-cancelled-person",
+    "status": "active",
+    "conversationId": "38",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-cancelled-person",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-cancelled-person",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/418"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 418,
+      "title": "feat(cli): nexus logs --follow",
+      "url": "https://github.com/ramtinJ95/nexus/pull/418",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-418",
+    "builder": "th-rv-cancelled-person",
+    "reviewer": "th-rv-cancelled-person-review",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 418,
+      "url": "https://github.com/ramtinJ95/nexus/pull/418",
+      "title": "feat(cli): nexus logs --follow",
+      "branch": "nexus/418"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-418:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
+        "base": "main",
+        "verdict": null,
+        "check": null,
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "cancelled",
+      "who": "person",
+      "by": "laptop"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

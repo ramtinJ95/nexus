@@ -1,0 +1,4 @@
+exit 64
+--- stdout
+--- stderr
+nexus: unknown command nosuch. Run nexus --help for usage

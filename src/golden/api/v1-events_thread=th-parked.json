@@ -1,0 +1,21 @@
+200 application/json
+[
+  {
+    "id": "69",
+    "time": 1800003660000,
+    "thread": "th-parked",
+    "project": "field-notes",
+    "kind": "thread.parked",
+    "payload": {}
+  },
+  {
+    "id": "70",
+    "time": 1800003660000,
+    "thread": "th-parked",
+    "project": "field-notes",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "parked"
+    }
+  }
+]

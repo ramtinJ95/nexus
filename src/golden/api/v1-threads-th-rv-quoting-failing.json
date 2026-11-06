@@ -1,0 +1,140 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-rv-quoting-failing",
+    "title": "fix(orders): show refunds on the order page",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-quoting-failing",
+    "status": "active",
+    "conversationId": "28",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-quoting-failing",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-quoting-failing",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/storefront/pull/95"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/storefront",
+      "number": 95,
+      "title": "fix(orders): show refunds on the order page",
+      "url": "https://github.com/ramtinJ95/storefront/pull/95",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-95",
+    "builder": "th-rv-quoting-failing",
+    "reviewer": "th-rv-quoting-failing-review",
+    "pr": {
+      "repo": "ramtinJ95/storefront",
+      "number": 95,
+      "url": "https://github.com/ramtinJ95/storefront/pull/95",
+      "title": "fix(orders): show refunds on the order page",
+      "branch": "nexus/95"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": {
+      "requestedBy": "laptop"
+    },
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-95:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": {
+          "passed": true,
+          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
+        },
+        "answers": null,
+        "live": {
+          "kind": "absent"
+        }
+      }
+    ],
+    "phase": {
+      "kind": "quoting",
+      "asked": null,
+      "failing": {
+        "count": 4,
+        "last": "429 Too Many Requests: rate limit reached for gpt-6-astra",
+        "retryAt": 1800014580000
+      }
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+{
+  "submission": 7
+}
+--- stderr

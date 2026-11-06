@@ -1,0 +1,23 @@
+exit 0
+--- stdout
+th-search  archived  -                                          pylon paused     storefront  4d ago   Typo tolerance in product search
+th-banner  active    -                                          pylon absent     storefront  3d ago   Seasonal banner for the winter sale
+th-avif  active    -                                          pylon paused     storefront  2d ago   Serve product images as AVIF
+th-rounding  active    working                                    pylon running    storefront  14h ago  Fix cart rounding on discounted lines
+th-refunds  active    -                                          pylon running    storefront  8h ago   End-to-end tests for the refund flow
+th-lighthouse  active    -                                          pylon paused     storefront  7h ago   Product page Lighthouse pass
+th-applepay  active    working                                    pylon running    storefront  6h ago   Checkout: add the Apple Pay button
+th-applepay-review  active    -                                          pylon running    storefront  5h ago   Review of #88: feat(checkout): Apple Pay via the Payment Request Button
+th-inventory  active    -                                          pylon running    storefront  3h ago   Inventory sync webhook
+th-refunds-check  active    -                                          pylon running    storefront  5m ago   Check of nexus/90 at ffffffffffff
+th-rv-fixing-failing  active    -                                          pylon absent     storefront  0s ago   fix(checkout): keep the shipping quote across a reload
+th-rv-checking  active    -                                          pylon absent     storefront  0s ago   feat(search): rank exact SKU matches first
+th-rv-quoting-failing  active    -                                          pylon absent     storefront  0s ago   fix(orders): show refunds on the order page
+th-rv-needs-person-holds  active    -                                          pylon absent     storefront  0s ago   feat(db): drop the legacy carts table
+th-rv-closed  active    -                                          pylon absent     storefront  0s ago   feat(home): autoplay the hero video
+th-rv-approved  active    -                                          pylon absent     storefront  0s ago   chore(deps): bump stripe-js to 5.2
+th-rv-cancelled-reviewer  active    -                                          pylon absent     storefront  0s ago   fix(cart): a coupon applies once per cart
+th-rv-merged  active    -                                          pylon absent     storefront  0s ago   fix(emails): the receipt's VAT line
+th-rv-verifying  active    -                                          pylon absent     storefront  0s ago   feat(cart): save the cart for a signed-out shopper
+th-queued-2  queued    waits for th-rounding: PR #91 is open  node rj-firebat  storefront  0s ago   Wishlist sharing links
+--- stderr

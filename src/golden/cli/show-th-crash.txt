@@ -1,0 +1,14 @@
+exit 0
+--- stdout
+th-crash  Fix the crash on an empty notebook
+project: field-notes
+attention: failed
+status: active
+pylon: pylon-th-crash on infra-testbench, failed, observed 0s ago
+attach: nexus attach th-crash
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: infra-testbench, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at trunk: this test has no remote
+failed: pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2
+PR watch: off (no control-plane GitHub token configured)
+--- stderr

@@ -1,0 +1,11 @@
+exit 0
+--- stdout
+it-spin  Investigate idle-CPU spin on paused pylons
+project: nexus
+phase: building, no pull request yet
+thread: th-spin
+worker: Nexus agent
+brief: Brief: Investigate idle-CPU spin on paused pylons.
+added by nLAPTOP 4h ago
+nexus show th-spin shows its thread.
+--- stderr

@@ -1,0 +1,74 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-dark",
+    "title": "Dark mode for the reader",
+    "project": "field-notes",
+    "pylonId": "pylon-th-dark",
+    "status": "active",
+    "conversationId": "17",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799996400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800013500000,
+    "lastHumanActivityAt": 1799996400000,
+    "seenAt": null,
+    "lastReplyAt": 1800013500001,
+    "placement": {
+      "how": "default",
+      "node": "infra-testbench"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at trunk: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": "reply",
+  "seenAt": null,
+  "lastReplyAt": 1800013500001,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-dark",
+    "node": "infra-testbench",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [],
+  "review": null,
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

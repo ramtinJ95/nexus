@@ -1,0 +1,18 @@
+200 application/json
+{
+  "id": "it-graphs",
+  "project": "nexus",
+  "title": "Graph node health with 31 days of history",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799920200000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Graph node health with 31 days of history.",
+  "thread": "th-graphs",
+  "phase": {
+    "kind": "reviewing",
+    "why": "PR #402 is open, before its review"
+  },
+  "approved": null
+}

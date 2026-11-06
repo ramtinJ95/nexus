@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+> A deploy should wait for running turns to finish, up to two minutes, then drain.
+
+[tool] bash {"command":"npm test -- src/control/drain.test.ts"}
+
+[result] bash: > nexus@0.0.0 test
+> node --test 'src/**/*.test.ts'
+
+✔ probe client reconnects after a reset (412ms)
+✔ probe client gives up after the deadline (1.2s)
+✔ backoff stays under its cap (3ms)
+ℹ tests 1342
+ℹ suites 0
+ℹ pass 1342
+ℹ fail 0
+ℹ duration_ms 84213
+
+Opened #400. The reviewer approved round 2, checks passed, and it's landing now.
+--- stderr

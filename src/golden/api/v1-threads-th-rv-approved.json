@@ -1,0 +1,132 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-rv-approved",
+    "title": "chore(deps): bump stripe-js to 5.2",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-approved",
+    "status": "active",
+    "conversationId": "29",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": "decision",
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-approved",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-approved",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/storefront/pull/96"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/storefront",
+      "number": 96,
+      "title": "chore(deps): bump stripe-js to 5.2",
+      "url": "https://github.com/ramtinJ95/storefront/pull/96",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-96",
+    "builder": "th-rv-approved",
+    "reviewer": "th-rv-approved-review",
+    "pr": {
+      "repo": "ramtinJ95/storefront",
+      "number": 96,
+      "url": "https://github.com/ramtinJ95/storefront/pull/96",
+      "title": "chore(deps): bump stripe-js to 5.2",
+      "branch": "nexus/96"
+    },
+    "reviewerKind": "claude",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "claude-sonnet-5-5"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-96:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": {
+          "passed": true,
+          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
+        },
+        "answers": null,
+        "live": {
+          "kind": "absent"
+        }
+      }
+    ],
+    "phase": {
+      "kind": "approved"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

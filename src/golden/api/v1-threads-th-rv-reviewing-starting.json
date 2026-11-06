@@ -1,0 +1,134 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-rv-reviewing-starting",
+    "title": "feat(cli): nexus threads --watch",
+    "project": "nexus",
+    "pylonId": "pylon-th-rv-reviewing-starting",
+    "status": "active",
+    "conversationId": "22",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "awaitedUntil": 1800015600000
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-reviewing-starting",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-reviewing-starting",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/410"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 410,
+      "title": "feat(cli): nexus threads --watch",
+      "url": "https://github.com/ramtinJ95/nexus/pull/410",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-410",
+    "builder": "th-rv-reviewing-starting",
+    "reviewer": "th-rv-reviewing-starting-review",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 410,
+      "url": "https://github.com/ramtinJ95/nexus/pull/410",
+      "title": "feat(cli): nexus threads --watch",
+      "branch": "nexus/410"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-410:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
+        "base": "main",
+        "verdict": null,
+        "check": null,
+        "answers": null,
+        "secondVerdict": null
+      }
+    ],
+    "phase": {
+      "kind": "reviewing",
+      "check": {
+        "startedAt": 1800014340000,
+        "thread": null
+      }
+    },
+    "second": {
+      "kind": "starting",
+      "rule": "the change touches src/cli/",
+      "model": "claude-sonnet-5-5",
+      "since": 1800014280000,
+      "tried": null,
+      "why": null
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}

@@ -1,0 +1,134 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-rv-verifying",
+    "title": "feat(cart): save the cart for a signed-out shopper",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-verifying",
+    "status": "active",
+    "conversationId": "27",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-verifying",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-verifying",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/storefront/pull/94"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/storefront",
+      "number": 94,
+      "title": "feat(cart): save the cart for a signed-out shopper",
+      "url": "https://github.com/ramtinJ95/storefront/pull/94",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-94",
+    "builder": "th-rv-verifying",
+    "reviewer": "th-rv-verifying-review",
+    "pr": {
+      "repo": "ramtinJ95/storefront",
+      "number": 94,
+      "url": "https://github.com/ramtinJ95/storefront/pull/94",
+      "title": "feat(cart): save the cart for a signed-out shopper",
+      "branch": "nexus/94"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-94:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": {
+          "passed": true,
+          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
+        },
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "verifying",
+      "startedAt": 1800014280000,
+      "thread": null,
+      "refused": "rj-firebat has 2 GiB free, under the 4 GiB a verify pylon needs"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

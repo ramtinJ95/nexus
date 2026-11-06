@@ -1,0 +1,16 @@
+exit 0
+--- stdout
+th-alerts  Turn the daily report into health alerts
+project: nexus
+attention: none
+status: archived
+pylon: pylon-th-alerts on rj-firebat, paused, observed 0s ago
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+PR watch: off (no control-plane GitHub token configured)
+PR #403: feat: turn the control plane's daily report into health alerts — merged, checks passing, review none https://github.com/ramtinJ95/nexus/pull/403
+review rv-403 of PR #403, started on its own: landed as f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4, round 1 of 5, reviewer th-alerts-review on gpt-6-astra, landing when approved
+no live check: c1c1c1c1c1c1 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+output: pull-request https://github.com/ramtinJ95/nexus/pull/403
+--- stderr

@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+> A pylon that wakes after a day keeps yesterday's GitHub token. Rotate it on wake.
+
+[tool] bash {"command":"npm test -- src/control/secrets.test.ts"}
+
+[result] bash: > nexus@0.0.0 test
+> node --test 'src/**/*.test.ts'
+
+✔ probe client reconnects after a reset (412ms)
+✔ probe client gives up after the deadline (1.2s)
+✔ backoff stays under its cap (3ms)
+ℹ tests 1342
+ℹ suites 0
+ℹ pass 1342
+ℹ fail 0
+ℹ duration_ms 84213
+
+Opened #408. The reviewer approved round 2 and the checks passed; it touches the token broker, so it's held for you to land.
+--- stderr

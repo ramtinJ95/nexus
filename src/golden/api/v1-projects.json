@@ -1,0 +1,87 @@
+200 application/json
+[
+  {
+    "id": "field-notes",
+    "repoUrl": "https://github.com/ramtinJ95/field-notes.git",
+    "defaultBranch": "trunk",
+    "defaultNode": "infra-testbench",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "allowedHosts": [
+      "pypi.org",
+      "files.pythonhosted.org"
+    ],
+    "secrets": [],
+    "logins": [
+      "claude",
+      "chatgpt"
+    ],
+    "preSetup": null
+  },
+  {
+    "id": "nexus",
+    "repoUrl": "https://github.com/ramtinJ95/nexus.git",
+    "defaultBranch": "main",
+    "defaultNode": "rj-firebat",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "allowedHosts": [
+      "registry.npmjs.org",
+      "api.github.com"
+    ],
+    "secrets": [
+      {
+        "name": "GH_TOKEN",
+        "hosts": [
+          "api.github.com",
+          "github.com"
+        ]
+      }
+    ],
+    "logins": [
+      "claude",
+      "chatgpt"
+    ],
+    "preSetup": null,
+    "pipeline": {
+      "autoStart": true
+    }
+  },
+  {
+    "id": "storefront",
+    "repoUrl": "https://github.com/ramtinJ95/storefront.git",
+    "defaultBranch": "main",
+    "defaultNode": "rj-firebat",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "allowedHosts": [
+      "registry.npmjs.org",
+      "api.stripe.com"
+    ],
+    "secrets": [
+      {
+        "name": "STRIPE_KEY",
+        "hosts": [
+          "api.stripe.com"
+        ]
+      }
+    ],
+    "logins": [
+      "claude",
+      "chatgpt"
+    ],
+    "preSetup": null,
+    "pipeline": {
+      "autoStart": false
+    }
+  }
+]

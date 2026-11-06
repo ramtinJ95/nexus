@@ -1,0 +1,18 @@
+200 application/json
+{
+  "id": "it-search",
+  "project": "storefront",
+  "title": "Typo tolerance in product search",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799668200000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Typo tolerance in product search.",
+  "thread": "th-search",
+  "phase": {
+    "kind": "archived",
+    "why": "its thread is archived"
+  },
+  "approved": null
+}

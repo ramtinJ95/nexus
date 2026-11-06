@@ -1,0 +1,7 @@
+200 text/plain; charset=utf-8
+/** Full jitter: a delay between half the ceiling and the ceiling. */
+export function backoff(attempt: number, base = 500, cap = 30_000): number {
+  const ceiling = Math.min(cap, base * 2 ** attempt);
+  return Math.round(ceiling / 2 + Math.random() * (ceiling / 2));
+}
+

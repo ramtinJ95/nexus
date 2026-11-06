@@ -1,0 +1,186 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-drain",
+    "title": "Drain the queue before a deploy",
+    "project": "nexus",
+    "pylonId": "pylon-th-drain",
+    "status": "active",
+    "conversationId": "10",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1799982000000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 1800011400000,
+    "lastHumanActivityAt": 1799982000000,
+    "seenAt": 1800011460000,
+    "lastReplyAt": 1800011400000,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": 1800011460000,
+  "lastReplyAt": 1800011400000,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-drain",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "running",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [
+    {
+      "port": 5173,
+      "service": null,
+      "preview": null
+    },
+    {
+      "port": 3000,
+      "service": null,
+      "preview": null
+    }
+  ],
+  "outputs": [
+    {
+      "thread": "th-drain",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/400"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 400,
+      "title": "feat: a deploy drains running turns first",
+      "url": "https://github.com/ramtinJ95/nexus/pull/400",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-400",
+    "builder": "th-drain",
+    "reviewer": "th-drain-review",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 400,
+      "url": "https://github.com/ramtinJ95/nexus/pull/400",
+      "title": "feat: a deploy drains running turns first",
+      "branch": "nexus/400"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": {
+      "requestedBy": "nLAPTOP"
+    },
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-400:t",
+    "sent": 3,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013200000,
+    "nudges": 0,
+    "startedAt": 1800003600000,
+    "rounds": [
+      {
+        "head": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "changes",
+          "findings": [
+            {
+              "id": "F1",
+              "priority": "P1",
+              "where": "src/control/drain.ts:44",
+              "summary": "A turn that starts during the drain is not counted.",
+              "detail": null
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": [
+          {
+            "id": "F1",
+            "action": "fixed",
+            "reason": "The gate closes before counting."
+          }
+        ]
+      },
+      {
+        "head": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [
+            {
+              "id": "N1",
+              "priority": "P3",
+              "where": "src/control/drain.ts",
+              "summary": "Consider logging the drained count.",
+              "detail": null
+            }
+          ],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": {
+          "passed": true,
+          "output": "> nexus@0.0.0 test\n> node --test 'src/**/*.test.ts'\n\n✔ probe client reconnects after a reset (412ms)\n✔ probe client gives up after the deadline (1.2s)\n✔ backoff stays under its cap (3ms)\nℹ tests 1342\nℹ suites 0\nℹ pass 1342\nℹ fail 0\nℹ duration_ms 84213"
+        },
+        "answers": null,
+        "live": {
+          "kind": "absent"
+        }
+      }
+    ],
+    "phase": {
+      "kind": "deploying",
+      "commit": "c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7",
+      "previous": "fafafafafafafafafafafafafafafafafafafafa",
+      "requested": true,
+      "deadline": 1800014880000
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

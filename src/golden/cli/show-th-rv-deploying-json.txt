@@ -1,0 +1,140 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-rv-deploying",
+    "title": "fix(control): close idle SSE streams after 10 minutes",
+    "project": "nexus",
+    "pylonId": "pylon-th-rv-deploying",
+    "status": "active",
+    "conversationId": "32",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-deploying",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-deploying",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/415"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 415,
+      "title": "fix(control): close idle SSE streams after 10 minutes",
+      "url": "https://github.com/ramtinJ95/nexus/pull/415",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-415",
+    "builder": "th-rv-deploying",
+    "reviewer": "th-rv-deploying-review",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 415,
+      "url": "https://github.com/ramtinJ95/nexus/pull/415",
+      "title": "fix(control): close idle SSE streams after 10 minutes",
+      "branch": "nexus/415"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": {
+      "requestedBy": "laptop"
+    },
+    "auto": true,
+    "merged": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "waiver": null,
+    "expect": "rv-415:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": {
+          "passed": true,
+          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
+        },
+        "answers": null,
+        "live": {
+          "kind": "absent"
+        }
+      }
+    ],
+    "phase": {
+      "kind": "deploying",
+      "commit": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+      "previous": null,
+      "requested": false,
+      "deadline": 1800015000000
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

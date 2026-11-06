@@ -1,0 +1,38 @@
+exit 0
+--- stdout
+> /poteto-mode The dashboard's terminal and nexus attach drop when the control plane deploys. Make both reconnect on their own, and survive a slow pylon.
+
+I'll reproduce the drop first. Reading the attach route and the client's reconnect logic.
+
+[tool] Bash {"command":"rg -n 'reconnect' src/control/attach.ts src/attach-wire.ts","description":"Find reconnect code"} (ok)
+
+[tool] Read {"file_path":"<repo>/src/control/attach.ts"} (ok)
+
+Found it. The socket closes with **1012** (service restart) during a deploy, and the client treats every close as final.
+
+Plan:
+
+1. Treat `1012` and `1006` as retryable
+2. Back off with jitter:
+
+```ts
+export function backoff(attempt: number, base = 500, cap = 30_000): number {
+  const ceiling = Math.min(cap, base * 2 ** attempt);
+  return Math.round(ceiling / 2 + Math.random() * (ceiling / 2));
+}
+```
+
+3. Replay the screen from Herdr on reconnect so nothing is lost
+
+[tool] Edit {"file_path":"<repo>/src/control/dashboard/terminal.js","old_string":"ws.onclose = () => done();","new_string":"ws.onclose = (e) => retryable(e.code) ? reconnect() : done();"} (ok)
+
+[tool] Bash {"command":"npm test -- src/control/attach.test.ts","description":"Run attach tests"} (ok)
+
+[tool] Bash {"command":"git push -u origin feat/attach-survives-deploy && gh pr create --fill"} (ok)
+
+[pull request] Opened pull request #401: https://github.com/ramtinJ95/nexus/pull/401
+
+Pushed and opened #401. Now checking the CLI's `nexus attach` against a simulated deploy.
+
+[tool] Bash {"command":"node scripts/simulate-deploy.ts --drain 20s","description":"Simulate a deploy"} (no result)
+--- stderr

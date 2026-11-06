@@ -1,0 +1,32 @@
+200 application/json
+{
+  "path": "",
+  "entries": [
+    {
+      "name": ".git",
+      "kind": "dir",
+      "size": null
+    },
+    {
+      "name": "README.md",
+      "kind": "file",
+      "size": 120
+    },
+    {
+      "name": "package.json",
+      "kind": "file",
+      "size": 117
+    },
+    {
+      "name": "src",
+      "kind": "dir",
+      "size": null
+    },
+    {
+      "name": "test",
+      "kind": "dir",
+      "size": null
+    }
+  ],
+  "truncated": false
+}

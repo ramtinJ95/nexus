@@ -1,0 +1,20 @@
+exit 0
+--- stdout
+54 2027-01-15T12:00:00.000Z th-tagger attention.changed {"attention":"working"}
+55 2027-01-15T02:01:00.000Z th-sync pull-request.linked {"repo":"ramtinJ95/field-notes","number":57,"url":"https://github.com/ramtinJ95/field-notes/pull/57","title":"feat(sync): merge offline edits by paragraph","state":"open"}
+56 2027-01-15T02:01:00.000Z th-sync review.changed {"review":"rv-57","reviewer":"th-sync-review","phase":{"kind":"verifying","startedAt":1800014040000,"thread":"th-sync-verify"},"round":1}
+57 2027-01-15T09:00:00.000Z th-sync thread.turn-ended {}
+58 2027-01-15T12:00:00.000Z th-sync attention.changed {"attention":"reply"}
+59 2027-01-15T12:00:00.000Z th-sync attention.changed {"attention":null}
+60 2027-01-15T11:45:00.000Z th-dark thread.turn-ended {}
+61 2027-01-15T07:01:00.000Z th-dark attention.changed {"attention":"reply"}
+62 2027-01-15T11:45:00.000Z th-dark thread.turn-ended {}
+63 2027-01-15T08:00:00.000Z th-export thread.turn-ended {}
+64 2027-01-15T12:00:00.000Z th-export attention.changed {"attention":"reply"}
+65 2027-01-15T12:00:00.000Z th-export attention.changed {"attention":null}
+66 2027-01-15T10:01:00.000Z th-crash thread.failed {"message":"pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2"}
+67 2027-01-15T10:01:00.000Z th-crash attention.changed {"attention":"failed"}
+68 2027-01-15T10:01:00.000Z th-crash thread.failed {"message":"pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2"}
+69 2027-01-15T09:01:00.000Z th-parked thread.parked {}
+70 2027-01-15T09:01:00.000Z th-parked attention.changed {"attention":"parked"}
+--- stderr

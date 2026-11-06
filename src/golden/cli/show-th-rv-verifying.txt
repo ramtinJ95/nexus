@@ -1,0 +1,17 @@
+exit 0
+--- stdout
+th-rv-verifying  feat(cart): save the cart for a signed-out shopper
+project: storefront
+attention: none
+status: active
+pylon: pylon-th-rv-verifying on rj-firebat, absent, observed 0s ago
+attach: nexus attach th-rv-verifying
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+PR watch: off (no control-plane GitHub token configured)
+PR #94: feat(cart): save the cart for a signed-out shopper — open, checks passing, review none https://github.com/ramtinJ95/storefront/pull/94
+review rv-94 of PR #94, started on its own: verifying, round 1 of 5, reviewer th-rv-verifying-review on gpt-6-astra
+live check waiting for a node to take its verify pylon: rj-firebat has 2 GiB free, under the 4 GiB a verify pylon needs
+output: pull-request https://github.com/ramtinJ95/storefront/pull/94
+--- stderr

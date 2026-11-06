@@ -1,0 +1,131 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-rv-cancelled-builder",
+    "title": "chore: drop the v1 attach route",
+    "project": "nexus",
+    "pylonId": "pylon-th-rv-cancelled-builder",
+    "status": "archived",
+    "conversationId": "39",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "archivedAt": 1800014400000
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "paused",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-cancelled-builder",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-cancelled-builder",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/419"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 419,
+      "title": "chore: drop the v1 attach route",
+      "url": "https://github.com/ramtinJ95/nexus/pull/419",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-419",
+    "builder": "th-rv-cancelled-builder",
+    "reviewer": "th-rv-cancelled-builder-review",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 419,
+      "url": "https://github.com/ramtinJ95/nexus/pull/419",
+      "title": "chore: drop the v1 attach route",
+      "branch": "nexus/419"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-419:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": null,
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "cancelled",
+      "who": "builder",
+      "status": "archived"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

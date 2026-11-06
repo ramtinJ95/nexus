@@ -1,0 +1,36 @@
+200 application/json
+[
+  {
+    "id": "106",
+    "time": 1800014400000,
+    "thread": "th-rv-deploying",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 415,
+      "url": "https://github.com/ramtinJ95/nexus/pull/415",
+      "title": "fix(control): close idle SSE streams after 10 minutes",
+      "state": "open"
+    }
+  },
+  {
+    "id": "107",
+    "time": 1800014400000,
+    "thread": "th-rv-deploying",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-415",
+      "reviewer": "th-rv-deploying-review",
+      "phase": {
+        "kind": "deploying",
+        "commit": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "previous": null,
+        "requested": false,
+        "deadline": 1800015000000
+      },
+      "round": 1
+    }
+  }
+]

@@ -1,0 +1,56 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -848,7 +848,7 @@
+ <input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>43</span>
+ </label>
+ </div>
+-<div class="split" id="split">
++<div class="split peeking" id="split">
+ <p id="action-error" class="error split-error" role="alert" hidden>
+ </p>
+ <section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>
+@@ -2183,6 +2183,44 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </div>
+ </section>
+ <div class="split-peek" id="peek" data-live>
++<section class="peek" aria-labelledby="peek-h" data-peek-key="th-applepay-review">
++<header class="peek-head">
++<span class="peek-proj">storefront</span>
++<h2 id="peek-h">
++<span class="dot dot-ok" role="img" aria-label="running" title="running">
++</span>
++<span>Review of #88: feat(checkout): Apple Pay via the Payment Request Button</span>
++</h2>
++<a class="btn btn-xs btn-primary" href="/threads/th-applepay-review">Open thread</a>
++<a class="icon-btn peek-close" href="/" data-peek="" aria-label="Close the preview" title="Close (Esc)">
++<svg class="i i-cross" viewBox="0 0 16 16" aria-hidden="true">
++<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>
++</svg>
++</a>
++</header>
++<p class="role-line">Reviewer of <a class="link" href="https://github.com/ramtinJ95/storefront/pull/88" target="_blank" rel="noreferrer">PR #88</a> for <a class="link" href="/threads/th-applepay">Checkout: add the Apple Pay button</a>
++<span class="role-at">reviewing round 2</span>
++</p>
++<dl class="peek-facts">
++<dt>State</dt>
++<dd>running</dd>
++
++<dt>Pylon</dt>
++<dd>
++<span class="state">
++<span class="dot dot-ok" aria-hidden="true">
++</span>running</span> <span class="dim">on</span> rj-firebat</dd>
++</dl>
++<div class="peek-reply">
++<p class="peek-k">Latest reply <span class="dim">
++<time datetime="2027-01-15T11:50:00.000Z" title="2027-01-15T11:50:00.000Z" data-ago>10 min ago</time>
++</span>
++</p>
++<div class="peek-text">
++<p>Round 2 is under review: F1&#39;s fallback is in place, and I am checking F2&#39;s test.</p>
++</div>
++</div>
++</section>
+ </div>
+ <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
+ <div class="ov-head flight-head">

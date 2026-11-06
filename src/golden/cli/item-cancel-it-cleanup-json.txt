@@ -1,0 +1,4 @@
+exit 5
+--- stdout
+--- stderr
+{"error":"item it-cleanup is thread th-new-55 now, so it cannot be cancelled. nexus archive th-new-55 cancels it while it is queued","kind":"conflict","status":409,"code":null}

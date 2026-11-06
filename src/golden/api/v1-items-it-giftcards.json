@@ -1,0 +1,18 @@
+200 application/json
+{
+  "id": "it-giftcards",
+  "project": "storefront",
+  "title": "Gift cards at checkout",
+  "addedBy": "nLAPTOP",
+  "addedAt": 1799982000000,
+  "after": [],
+  "worker": "harness",
+  "model": null,
+  "brief": "Brief: Gift cards at checkout.",
+  "thread": null,
+  "phase": {
+    "kind": "held",
+    "why": "project storefront waits for the person to approve each item: nexus item approve it-giftcards"
+  },
+  "approved": null
+}

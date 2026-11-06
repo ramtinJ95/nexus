@@ -1,0 +1,6 @@
+exit 0
+--- stdout
+> Get the product page's Lighthouse performance above 90 on mobile.
+
+Up from 71 to 94: lazy-loaded the reviews widget, preloaded the hero image, and dropped 180 KB of moment.js.
+--- stderr
