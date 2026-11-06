@@ -6,7 +6,7 @@ const commit = "a".repeat(40);
 const input: DeployInput = {
   desired: { commit, requestedBy: "nMac", requestedAt: 1 }, role: "control",
   current: { commit: "b".repeat(40), healthy: true }, control: { commit, healthy: true },
-  attempts: [], turnRunning: false, drainStartedAt: null, drainTimeoutMs: 60_000, now: 100_000,
+  attempts: [], turnRunning: false,
 };
 
 test("release planning is idle without a desired release, and converges on healthy observations", () => {
@@ -23,11 +23,9 @@ test("probes require the desired control release to be healthy", () => {
   assert.deepEqual(planDeploy({ ...input, role: "probe", turnRunning: true }), { kind: "install", commit });
 });
 
-test("control drain waits past the old deadline, and installs only once idle", () => {
+test("control drain waits while a turn runs, and installs only once idle", () => {
   assert.deepEqual(planDeploy({ ...input, turnRunning: true }), { kind: "wait", reason: "idle" });
-  assert.deepEqual(planDeploy({ ...input, turnRunning: true, drainStartedAt: 40_001 }), { kind: "wait", reason: "idle" });
-  assert.deepEqual(planDeploy({ ...input, turnRunning: true, drainStartedAt: 40_000 }), { kind: "wait", reason: "idle" });
-  assert.deepEqual(planDeploy({ ...input, drainStartedAt: 40_000 }), { kind: "install", commit });
+  assert.deepEqual(planDeploy({ ...input, turnRunning: false }), { kind: "install", commit });
 });
 
 test("a failure recorded at the desired commit stops it before health or drain, and the report's reason comes first", () => {

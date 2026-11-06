@@ -108,7 +108,6 @@
     "src/probe/gateway.ts: reserved-path:auth",
     "src/probe/host.ts: reserved-path:auth",
     "src/probe/main.ts: reserved-path:auth",
-    "src/probe/previews-on-node.ts: reserved-path:auth",
     "src/probe/pylon-api.ts: reserved-path:auth",
     "src/probe/pylon-facts.ts: reserved-path:auth",
     "src/probe/redact.ts: reserved-path:auth",

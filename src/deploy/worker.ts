@@ -271,7 +271,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   }
   const current = { commit: await commitAt(link), healthy: await healthy() };
   const observedControl = controlHealth(view);
-  const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false, drainStartedAt: null, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
+  const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false });
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");
     if (role === "control" && desired !== null) await api("drain", { commit: desired, release: true } satisfies DrainBody).catch(() => {});
@@ -283,7 +283,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       const start = Date.now();
       while (true) {
         const status = await drain();
-        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: !status.idle, drainStartedAt: start, drainTimeoutMs: config.drainTimeoutMs, now: Date.now() });
+        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: !status.idle });
         if (next.kind === "install") break;
         if (next.kind === "stop") throw new Error(next.reason);
         await report("waiting-for-idle", desired, `Waiting for idle ${Math.floor((Date.now() - view.desired!.requestedAt) / 1000)}s since release request; threads: ${status.threads?.join(", ") || "unknown"}${status.entering ? "; submissions entering" : ""}`);

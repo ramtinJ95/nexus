@@ -97,7 +97,7 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
 
 type CommandKind = PylonCommand["kind"];
 
-/** How the probe runs one kind of command, and whether a caller may send it again. */
+/** How the probe runs one kind of command. */
 export interface CommandPolicy<K extends CommandKind> {
   /**
    * What it waits for. A function names the Claude session it waits on, if any, so the sends, launches and interrupts
@@ -108,24 +108,19 @@ export interface CommandPolicy<K extends CommandKind> {
   remembered: boolean;
   /** Whether its answer changes what the next snapshot lists, so the probe publishes one at once. */
   publishes: boolean | ((result: Extract<CommandResult, { kind: K }>) => boolean);
-  /**
-   * Whether a caller that lost the answer may send it again, which may run it twice. The probe client never does on
-   * its own. Of open-sessions, only a prompted launch with a resume ID is (sessions.ts openSession).
-   */
-  retrySafe: boolean | ((command: Extract<PylonCommand, { kind: K }>) => boolean);
 }
 
 export const commandPolicies: { readonly [K in CommandKind]: CommandPolicy<K> } = {
-  "exec": { lock: null, remembered: false, publishes: false, retrySafe: false },
-  "open-session": { lock: (c) => c.prompt === undefined ? undefined : c.resume, remembered: false, publishes: true, retrySafe: (c) => c.prompt !== undefined && c.resume !== undefined },
-  "close-session": { lock: null, remembered: false, publishes: true, retrySafe: false },
-  "drop-failed-session": { lock: null, remembered: false, publishes: false, retrySafe: false },
-  "send-claude": { lock: (c) => c.session, remembered: true, publishes: (r) => r.resumed, retrySafe: false },
-  "send-claude-outcome": { lock: null, remembered: false, publishes: false, retrySafe: true },
-  "interrupt-claude": { lock: (c) => c.session, remembered: false, publishes: false, retrySafe: false },
-  "service": { lock: null, remembered: false, publishes: false, retrySafe: false },
-  "link-port": { lock: null, remembered: false, publishes: true, retrySafe: true },
-  "unlink-port": { lock: null, remembered: false, publishes: true, retrySafe: true },
+  "exec": { lock: null, remembered: false, publishes: false },
+  "open-session": { lock: (c) => c.prompt === undefined ? undefined : c.resume, remembered: false, publishes: true },
+  "close-session": { lock: null, remembered: false, publishes: true },
+  "drop-failed-session": { lock: null, remembered: false, publishes: false },
+  "send-claude": { lock: (c) => c.session, remembered: true, publishes: (r) => r.resumed },
+  "send-claude-outcome": { lock: null, remembered: false, publishes: false },
+  "interrupt-claude": { lock: (c) => c.session, remembered: false, publishes: false },
+  "service": { lock: null, remembered: false, publishes: false },
+  "link-port": { lock: null, remembered: false, publishes: true },
+  "unlink-port": { lock: null, remembered: false, publishes: true },
 };
 
 /**

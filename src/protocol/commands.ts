@@ -12,8 +12,8 @@ import type { ServiceFact, SessionIdentity } from "./observations.ts";
 
 // Synchronous guest operations. They are not reconciled and not queued behind lifecycle jobs.
 // Everything runs as `user`. pi-sandbox fixes the shell user for the life of an instance, and `user`
-// has passwordless sudo, so a root command is `["sudo", ...]`. What each kind waits for, whether it publishes a
-// snapshot and whether a caller may send it again is commandPolicies in probe/run.ts.
+// has passwordless sudo, so a root command is `["sudo", ...]`. What each kind waits for and whether it publishes a
+// snapshot is commandPolicies in probe/run.ts.
 
 export type PylonCommand =
   /** When the timeout passes, the probe calls pi-sandbox's exec-kill and returns exitCode null. Timeout at most 60 s. */

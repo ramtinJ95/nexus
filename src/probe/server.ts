@@ -682,7 +682,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       if (entry.notAllowed !== undefined) return send(res, 405, `${req.method} is not allowed on ${path}${entry.notAllowed}`);
       break;
     }
-    if (route === "/v1/pylons") return send(res, 501, `${route} is not implemented in this slice`);
     return send(res, 404, `no route ${req.method} ${path}`);
   }
 
@@ -789,7 +788,7 @@ function refuse(socket: Duplex, status: number, body: string) {
 type RouteHandler = (req: IncomingMessage, res: ServerResponse, match: RegExpExecArray) => Promise<unknown> | void;
 /**
  * A route under routeAuth: its whole path and a handler per method. With `notAllowed`, any other method answers 405
- * with it after the reason. Without it, another method falls through to the 501 or 404 below.
+ * with it after the reason. Without it, another method falls through to the 404.
  */
 interface ProbeRoute { path: RegExp; GET?: RouteHandler; PUT?: RouteHandler; POST?: RouteHandler; notAllowed?: string }
 

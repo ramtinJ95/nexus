@@ -88,7 +88,7 @@ export type RelaunchOutcome =
   | { record: SessionRecord; result: "dropped"; herdrPane: string | null };
 
 /** A Herdr CLI error. `code` is Herdr's, such as `pane_not_found`, `server_not_running` or `agent_not_ready`. */
-export class HerdrError extends Error {
+class HerdrError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
     super(message);

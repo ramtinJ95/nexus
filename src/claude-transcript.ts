@@ -48,7 +48,7 @@ export type ClaudeEntry =
 export interface TranscriptImage { offset: number; bytes: number; sha256: string; index: number }
 
 /** `resetsAt` is in Unix milliseconds, null when Claude Code did not say. */
-export interface UsageLimit { resetsAt: number | null }
+interface UsageLimit { resetsAt: number | null }
 
 /**
  * The usage limit the newest entry that is not bookkeeping stopped on, or null. Bookkeeping is a turn's duration, a

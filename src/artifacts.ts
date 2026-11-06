@@ -52,7 +52,7 @@ export function artifactArchive(dir: string, manifest: string, signal?: AbortSig
 }
 
 /** How an artifact directory becomes the stream a peer fetches, and how a verified copy of it becomes the directory again. */
-export interface ArtifactCodec {
+interface ArtifactCodec {
   pack(dir: string, manifest: string, signal?: AbortSignal): Readable;
   /** Moves or extracts the verified archive file into an empty directory. */
   unpack(archive: string, dir: string): Promise<void>;
