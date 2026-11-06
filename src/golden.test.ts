@@ -61,7 +61,8 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
   const s = await testApi(context, {
     pipeline: true, planning: true, probes: demoProbes(() => s.registry, checkout),
     allowed: new Set([laptop, phone, node]),
-    deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: { [node]: tokenDigest(deployToken) } },
+    // `nexus deploy main` resolves main here, never against GitHub.
+    deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: { [node]: tokenDigest(deployToken) }, resolveMain: async () => "b".repeat(40) },
     health: () => report(),
     doctor: async () => report()!,
     reviews: { ...demoReviews(() => s.registry), answerHolds },
@@ -151,7 +152,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     return out.slice(out.indexOf("@@"));
   }
 
-  const call = (method: string, path: string, body?: unknown, signal?: AbortSignal, headers: Record<string, string> = {}) => new Promise<{ status: number; type: string; text: string }>((resolve, reject) => {
+  const call = (method: string, path: string, body?: unknown, signal?: AbortSignal, headers: Record<string, string> = {}) => new Promise<{ status: number; type: string; location: string | undefined; text: string }>((resolve, reject) => {
     request({
       host: "127.0.0.1", port: s.port, method, path, agent: false, signal,
       headers: { host: `127.0.0.1:${s.port}`, ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
@@ -159,11 +160,11 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
       let text = "";
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => { text += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode!, type: String(res.headers["content-type"] ?? ""), text }));
+      res.on("end", () => resolve({ status: res.statusCode!, type: String(res.headers["content-type"] ?? ""), location: res.headers.location, text }));
     }).on("error", reject).end(body === undefined ? undefined : JSON.stringify(body));
   });
-  const reply = (r: { status: number; type: string; text: string }) =>
-    `${r.status} ${r.type}\n${r.type.startsWith("application/json") ? json(r.text) : r.text}\n`;
+  const reply = (r: { status: number; type: string; location: string | undefined; text: string }) =>
+    `${r.status} ${r.type}\n${r.location === undefined ? "" : `location: ${r.location}\n`}${r.type.startsWith("application/json") ? json(r.text) : r.text}\n`;
 
   const api = (path: string, method = "GET", body?: unknown, headers?: Record<string, string>): Capture => ({
     file: `api/${method === "GET" ? "" : `${method}-`}${slug(path)}.json`,
@@ -173,7 +174,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     file: `pages/${slug(path)}.html`,
     async read(signal) {
       const r = await call("GET", path, undefined, signal);
-      return `${r.status} ${r.type}\n${r.type.startsWith("text/html") ? pretty(r.text) : r.text}\n`;
+      return `${r.status} ${r.type}\n${r.location === undefined ? "" : `location: ${r.location}\n`}${r.type.startsWith("text/html") ? pretty(r.text) : r.text}\n`;
     },
   });
   /** A page that is the home page with one region added or changed: what differs from pages/index.html. */
@@ -301,6 +302,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     ...both("changes", checked), ...both("changes", checked, "--uncommitted"), ...both("changes", checked, "--turn"),
     ...both("diff", checked), ...both("diff", checked, "README.md"),
   ];
+  const beforeWrites = s.registry.newestEvent();
   // Each changes the world, so they run one at a time in this order, after every read.
   const writes: Capture[] = [
     as(node, "deployer-node", api("/v1/deployer/release", "GET", undefined, reporterHeaders)),
@@ -324,7 +326,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     nexus("deploy", "main"), api("/v1/release", "PUT", { commit: "a".repeat(40) }),
     as(phone, "person", nexus("deploy", "a".repeat(40))), as(phone, "person", api("/v1/release", "PUT", { commit: "a".repeat(40) })),
     as(node, "node", nexus("start", "--project", "nexus", "--title", "From a node")), as(node, "node", api(`/v1/threads/${id("sync")}/archive`, "POST", {})),
-    ...[...both("threads", "--all"), api("/v1/events?kind=thread.archived")].map((c) => ({ ...c, file: c.file.replace(/^(\w+)\//, "$1/after-writes-") })),
+    ...[...both("threads", "--all"), api(`/v1/events?since=${beforeWrites}&kind=attention.changed&kind=review.changed&kind=review.waived&kind=release.changed`)].map((c) => ({ ...c, file: c.file.replace(/^(\w+)\//, "$1/after-writes-") })),
   ];
 
   const read = (c: Capture) => within(c).then(normal);
@@ -398,10 +400,16 @@ async function cliRunner(t: import("node:test").TestContext, env: Record<string,
   replies.on("line", (line) => waiting.shift()?.(line));
   let last = Promise.resolve();
   return (args: string[], signal: AbortSignal): Promise<{ code: number; stdout: string; stderr: string }> => {
-    const result = last.then(() => new Promise<string>((resolve) => {
-      waiting.push(resolve);
+    const result = last.then(() => new Promise<string>((resolve, reject) => {
+      if (signal.aborted) return reject(signal.reason);
+      // Only while this command runs: the signal outlives its capture, and the runner serves the next.
+      const kill = () => child.kill();
+      signal.addEventListener("abort", kill, { once: true });
+      waiting.push((line) => {
+        signal.removeEventListener("abort", kill);
+        resolve(line);
+      });
       child.stdin!.write(`${JSON.stringify({ args })}\n`);
-      signal.addEventListener("abort", () => child.kill(), { once: true });
     })).then((line) => JSON.parse(line));
     last = result.then(() => {}, () => {});
     return result;
