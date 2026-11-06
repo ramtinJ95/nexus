@@ -366,6 +366,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     };
   }
 
+  async function runningRefusal(pylonId: PylonId): Promise<string | null> {
+    const vm = await backend.state(pylonId);
+    return vm === "running" ? null : `${pylonId} is ${vm}, not running`;
+  }
+
   /** `ended` settles with the job's result once it is published. */
   function start(env: JobEnvelope, subject: Subject, deadlineMs = deadlines[env.job.kind]): { running: JobStatus; ended: Promise<JobStatus> } {
     const { job, jobId } = env;
@@ -539,8 +544,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       } catch (err) {
         return send(res, 400, (err as Error).message);
       }
-      const vm = await backend.state(pylonId);
-      if (vm !== "running") return send(res, 409, `${pylonId} is ${vm}, not running`);
+      const refused = await runningRefusal(pylonId);
+      if (refused !== null) return send(res, 409, refused);
       const asked = command;
       // Each kind's policy takes its own kind of command and result, which command.kind picks.
       const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
@@ -556,8 +561,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     path: /^\/v1\/pylons\/([^/]+)\/git$/,
     async POST(_req, res, match) {
       const pylonId = decodeURIComponent(match[1]!) as PylonId;
-      const vm = await backend.state(pylonId);
-      if (vm !== "running") return send(res, 409, `${pylonId} is ${vm}, not running`);
+      const refused = await runningRefusal(pylonId);
+      if (refused !== null) return send(res, 409, refused);
       // In the read queue, so no read in flight stores a git read from before the drop, and every snapshot published
       // after it reads git again.
       const before = await betweenReads(async () => { delete pylons.get(pylonId)?.git; return published; });
@@ -698,7 +703,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
     if (parsed === null) return refuse(socket, 404, `no upgrade route ${url.pathname} for ${req.headers.upgrade}`);
     const { pylonId, argv } = parsed;
-    if (await backend.state(pylonId) !== "running") return refuse(socket, 409, `${pylonId} is not running`);
+    const refused = await runningRefusal(pylonId);
+    if (refused !== null) return refuse(socket, 409, refused);
     const gone = AbortSignal.any([left, shutdown.signal]);
     if (gone.aborted) return void socket.destroy();
     const slow = AbortSignal.timeout(streamTiming.startMs);
