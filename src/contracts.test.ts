@@ -19,6 +19,11 @@ const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" 
 const trackedSet = new Set(tracked);
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 const isTracked = (path: string) => trackedSet.has(path) || tracked.some((file) => file.startsWith(path.endsWith("/") ? path : `${path}/`));
+/** A path this test names itself, which has to follow the file when it moves. */
+const listed = (path: string) => {
+  assert.ok(trackedSet.has(path), `${path} moved or is gone. contracts.test.ts names it, so change the test's own list to its new path`);
+  return path;
+};
 const missing = (paths: Iterable<string>) => [...new Set(paths)].filter((path) => !isTracked(path));
 
 const snapshotFile = join(import.meta.dirname, "contracts.snapshot.json");
@@ -50,17 +55,19 @@ const specifiers = (source: string, types: boolean) =>
 
 /** The repo files `entry` loads at run time, and the packages it names outside the repo. */
 function closure(entry: string) {
+  listed(entry);
   const files = new Set<string>();
   const packages = new Set<string>();
-  const walk = (file: string) => {
+  const walk = (file: string, from: string | null) => {
     if (files.has(file)) return;
+    assert.ok(from === null || trackedSet.has(file), `${from} imports ${file}, which is not tracked`);
     files.add(file);
     for (const specifier of specifiers(read(file), false)) {
-      if (specifier.startsWith(".")) walk(relative(root, resolve(root, dirname(file), specifier)));
+      if (specifier.startsWith(".")) walk(relative(root, resolve(root, dirname(file), specifier)), file);
       else packages.add(`${file} imports ${specifier}`);
     }
   };
-  walk(entry);
+  walk(entry, null);
   return { files: [...files].sort(), packages: [...packages] };
 }
 
@@ -83,7 +90,7 @@ test("every path code names inside an installed release is tracked", () => {
 });
 
 test("every path the merge policy names is a tracked file or folder", () => {
-  const named = [...read("src/control/policy.ts").matchAll(/"([\w.-]*\/[\w./-]*|[\w-]+\.json)"/g)].map((match) => match[1]!).filter((path) => !path.startsWith("./"));
+  const named = [...read(listed("src/control/policy.ts")).matchAll(/"([\w.-]*\/[\w./-]*|[\w-]+\.json)"/g)].map((match) => match[1]!).filter((path) => !path.startsWith("./"));
   assert.ok(named.length > 30, `${named.length} paths`);
   assert.deepEqual(missing(named), []);
 });
@@ -100,12 +107,13 @@ test("every relative link in the repo's markdown names a tracked file or folder"
 
 test("the modules other processes load as they are import nothing, so they need no node_modules or neighbours", () => {
   for (const file of ["src/control/schema.ts", "images/pylon/nexus-contract.ts", "images/pylon/agent-setup/manifest.ts"]) {
-    assert.deepEqual(specifiers(read(file), true), [], file);
+    assert.deepEqual(specifiers(read(listed(file)), true), [], file);
   }
 });
 
 test("the deployer reads the migrations of another release's src/control/schema.ts, which loads alone", async () => {
-  assert.match(read("src/deploy/worker.ts"), /"src\/control\/schema\.ts"/);
+  assert.match(read(listed("src/deploy/worker.ts")), /"src\/control\/schema\.ts"/);
+  listed("src/control/schema.ts");
   const dir = mkdtempSync(join(tmpdir(), "nexus-schema-"));
   try {
     mkdirSync(join(dir, "src/control"), { recursive: true });
@@ -126,14 +134,14 @@ test("what runs without node_modules imports only Node's builtins", () => {
 });
 
 test("install-deployer.sh copies every file the bootstrap worker loads", () => {
-  const script = read("deploy/install-deployer.sh");
+  const script = read(listed("deploy/install-deployer.sh"));
   const [, list, skip] = /^for source in (.+); do\n {2}\[\[ "\$source" = (\S+) \]\] \|\| install /m.exec(script) ?? assert.fail("the copy loop comes from the script");
   const copied = execFileSync("bash", ["-c", `for source in ${list}; do [[ "$source" = ${skip} ]] || echo "$source"; done`], { cwd: root, encoding: "utf8" }).trim().split("\n");
   assert.deepEqual(closure("src/deploy/worker.ts").files.filter((file) => !copied.includes(file)), []);
 });
 
 test("health.ts reads the release-commit file release.sh writes at the release's root", () => {
-  assert.match(read("deploy/release.sh"), /> "\$staging\/release-commit"/);
+  assert.match(read(listed("deploy/release.sh")), /> "\$staging\/release-commit"/);
   const dir = mkdtempSync(join(tmpdir(), "nexus-release-commit-"));
   try {
     const { files } = closure("src/deploy/health.ts");
