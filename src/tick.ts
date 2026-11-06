@@ -3,7 +3,7 @@
  * the node's latest observation, and submits it. The caller owns where the record lives: the control
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
-import { envelope, failureMessage, planPylon, type Attempts, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
+import { envelope, failureMessage, noAttempts, planPylon, type Attempts, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
 import type { CheckpointId, JobId, NodeName } from "./ids.ts";
 import type { Job, JobEnvelope, JobStatus } from "./protocol/jobs.ts";
 import type { NodeObservation } from "./protocol/observations.ts";
@@ -38,7 +38,7 @@ export interface PylonRecord {
 }
 
 export function newPylonRecord(fields: Omit<PylonRecord, "pauses" | "submitted" | "attempts" | "failed" | "retrying">): PylonRecord {
-  return { ...fields, pauses: 0, submitted: null, attempts: { count: 0, last: null }, failed: null, retrying: false };
+  return { ...fields, pauses: 0, submitted: null, attempts: noAttempts, failed: null, retrying: false };
 }
 
 export const nextCheckpoint = (pylon: PylonRecord): CheckpointId => `ckpt-${pylon.thread}-${pylon.pauses + 1}`;
@@ -189,7 +189,7 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
     pylon.attempts = failedAttempt(pylon, status.code, failureMessage(status.message, status.logTail), env.reading === true);
     return null;
   }
-  pylon.attempts = { count: 0, last: null };
+  pylon.attempts = noAttempts;
   pylon.retrying = false;
   if (status.kind === "pause") pylon.pauses += 1;
   return null;
@@ -209,7 +209,7 @@ function upgradeAttempts(attempts: Attempts): Attempts {
   const last: (FailedAttempt & { reading?: true }) | null = attempts.last;
   if (last?.reading !== true) return attempts;
   const { reading: _, ...readFailure } = last;
-  return { count: 0, last: null, readFailure };
+  return { ...noAttempts, readFailure };
 }
 
 /** One snapshot from a new observe stream, whose first event is always a snapshot. Null when the probe is unreachable. */

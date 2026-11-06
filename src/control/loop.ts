@@ -26,6 +26,7 @@ import type { NodeObservation, ProbeEvent, PylonObservation } from "../protocol/
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { pylonLive } from "./live.ts";
+import { gitIdentityOf } from "./project.ts";
 import { freeHeldRoom } from "./placement.ts";
 import { claudeLaunch } from "./claude-launch.ts";
 import type { Registry } from "./registry.ts";
@@ -154,7 +155,7 @@ export function startLoop(options: LoopOptions): Loop {
     const nodeObservation = observation(stored.node);
     const observed = nodeObservation?.pylons.find((p) => p.pylonId === stored.pylonId);
     if (nodeObservation !== null && (observed === undefined || observed.phase === "stopped") && stored.submitted === null) {
-      const gitIdentity = registry.project(thread.project)!.gitIdentity ?? options.gitIdentity;
+      const gitIdentity = gitIdentityOf(registry.project(thread.project)!, options.gitIdentity);
       if (JSON.stringify(gitIdentity) !== JSON.stringify(stored.boot.gitIdentity)) {
         stored = { ...stored, boot: { ...stored.boot, gitIdentity } };
         registry.savePylon(stored);

@@ -136,6 +136,7 @@ export interface PlanInput {
 /** `message` is the job's message and the end of its log, bounded by failureMessage. */
 export interface FailedAttempt { at: number; code: JobErrorCode; message: string }
 export interface Attempts { count: number; last: FailedAttempt | null; readFailure?: FailedAttempt }
+export const noAttempts: Readonly<Attempts> = Object.freeze({ count: 0, last: null });
 
 export type PlanStep =
   | { kind: "done" }

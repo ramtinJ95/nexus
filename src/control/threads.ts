@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { fullCommit } from "../deploy/model.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
-import { bootSecrets, effectiveAllowedHosts, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
+import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, type BootInputs, type RepoInit } from "../spawn.ts";
 import type { ImageId, ProjectId, TemplateId, ThreadId } from "../ids.ts";
@@ -59,8 +59,6 @@ export const bootNetwork = (project: Project, dotfilesRepo: string): BootInputs[
   allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfilesRepo]), secrets: bootSecrets(project),
 });
 
-/** A shorter ID or a ref name may resolve to another commit by the time the pylon boots. */
-
 /** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
 type SetupRead = { project: RemoteProject; inputs: SetupInputs } | { fresh: string };
 
@@ -71,6 +69,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
   async function readSetup(project: Project, request: StartRequest, branch: string): Promise<SetupRead> {
     const { commit } = request;
     if (!hasRemote(project)) return { fresh: "the project is scratch, so it has no template" };
+    // A shorter ID or a ref name may resolve to another commit by the time the pylon boots.
     if (commit !== undefined && !fullCommit.test(commit)) return { fresh: `the start named commit ${commit}, and only a full commit ID or a branch tip can use a template` };
     let inputs: SetupInputs | null;
     try {
@@ -156,7 +155,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = Date.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
-      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: project.gitIdentity ?? gitIdentity, network, repo, dotfiles };
+      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
       const t: Thread = {
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.

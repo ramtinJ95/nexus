@@ -70,6 +70,11 @@ export function builderNudger(options: {
   }
 
   const hasPullRequest = (t: Thread) => (registry.prWatch(t.id)?.links.length ?? 0) > 0 || registry.review(t.id) !== null;
+  /** The thread as the registry has it now, if a nudge may still go to it: an await may have let a turn, a PR link, or an archive in. */
+  const idleBuilder = (id: Thread["id"]) => {
+    const fresh = registry.thread(id);
+    return fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.turnDied !== undefined || fresh.working ? undefined : fresh;
+  };
 
   async function judge(t: Thread) {
     const record = registry.nudge(t.id);
@@ -87,8 +92,8 @@ export function builderNudger(options: {
       // It may never have gone out, so it waits for an ended turn and goes only to a thread that is not the person's.
       if (t.working) return;
       if (await personWroteTo(t)) return leaveAlone();
-      const fresh = registry.thread(t.id);
-      if (fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.turnDied !== undefined || fresh.working) return;
+      const fresh = idleBuilder(t.id);
+      if (fresh === undefined) return;
       return deliver(fresh, record);
     }
     if (record?.state === "person") {
@@ -105,9 +110,8 @@ export function builderNudger(options: {
       log(`${t.id}: nudge could not search GitHub for its pull request and will retry (${(err as Error).name})`);
       return;
     }
-    // The awaits above may have let a turn start, a pull request link, or an archive in.
-    const fresh = registry.thread(t.id);
-    if (fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.turnDied !== undefined || fresh.working || fresh.lastReplyAt !== turn) return;
+    const fresh = idleBuilder(t.id);
+    if (fresh === undefined || fresh.lastReplyAt !== turn) return;
     const count = record?.state === "nudged" ? record.count : 0;
     if (count >= maxNudges) return registry.saveNudge(t.id, { state: "person", turn });
     const sending: Nudge = { state: "sending", turn, count: count + 1 };
