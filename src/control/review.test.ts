@@ -1144,8 +1144,8 @@ test("the policy names every condition that fails and every reserved case, and h
   const f = fixture(t);
   f.files = [
     { path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" },
-    { path: "src/control/registry.ts", previous: null, patch: "@@ -240,3 +240,4 @@ const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," },
-    { path: "src/control/registry.ts.bak", previous: null, patch: "" },
+    { path: "src/control/schema.ts", previous: null, patch: "@@ -240,3 +240,4 @@ export const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," },
+    { path: "src/control/schema.ts.bak", previous: null, patch: "" },
   ];
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
   const loop = f.loop();
@@ -1158,7 +1158,7 @@ test("the policy names every condition that fails and every reserved case, and h
     "The reviewer's quote of what could not be checked live is not in the pull request's description.",
     "Always needs the person: breaking changes to the CLI's contract, by the reviewer's reading (renames --wait).",
     "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.",
-    "Always needs the person: anything irreversible, as it changes src/control/registry.ts.",
+    "Always needs the person: anything irreversible, as it changes src/control/schema.ts.",
   ] });
 });
 
@@ -1184,6 +1184,10 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
   const migration = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,4 @@ export const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," };
   assert.deepEqual(headHolds({ review, nexus: true, files: [migration] }).map((h) => h.text), ["Always needs the person: anything irreversible, as it changes src/control/schema.ts."]);
   assert.deepEqual(holds("src/control/schema.ts", "src/control/db.ts"), []);
+  const dropped = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,2 @@ export const migrations: readonly string[] = [\n-  `UPDATE threads SET x = NULL;`," };
+  assert.deepEqual(headHolds({ review, nexus: true, files: [dropped] }).map((h) => h.code), ["reserved-path:irreversible"], "a hunk in the migrations holds even when it names no DDL");
+  const registry = { path: "src/control/registry.ts", previous: null, patch: "" };
+  assert.deepEqual(headHolds({ review, nexus: true, files: [registry] }), [], "the registry holds no migrations, so even GitHub's empty patch for it holds nothing");
 });
 
 test("a path that holds for what its patch changes holds for a change to what its case guards, not for every edit to it", () => {
@@ -2519,7 +2523,7 @@ test("a check that passes after the PR merged or closed, before the PR watch saw
 const conflicting = (f: ReturnType<typeof fixture>) => { f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: true } }; };
 const rebased = (f: ReturnType<typeof fixture>) => { f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: false }, detail: { ...f.snapshot.detail, head: head2 } }; };
 /** Why a waiver at `from` did not carry to `to`, when GitHub shows no patch for the registry change at either. */
-const unshownChange = (from: string, to: string) => `Nexus cannot tell whether the change at ${to.slice(0, 12)} is the one nLAPTOP pressed Land for at ${from.slice(0, 12)}, as GitHub shows no patch for src/control/registry.ts, so that waiver does not carry over. Look at the change again, and press Land to waive the holds at ${to.slice(0, 12)}.`;
+const unshownChange = (from: string, to: string) => `Nexus cannot tell whether the change at ${to.slice(0, 12)} is the one nLAPTOP pressed Land for at ${from.slice(0, 12)}, as GitHub shows no patch for src/control/schema.ts, so that waiver does not carry over. Look at the change again, and press Land to waive the holds at ${to.slice(0, 12)}.`;
 
 test("a builder's PR in a project that lands on its own is reviewed with no command and lands for whoever turned it on", async (t) => {
   const f = fixture(t, { autoReview: { land: true, enabledBy: "nLAPTOP" } });
@@ -2753,12 +2757,12 @@ test("a PR stays reviewed once its builder's record moves on to a review of anot
 });
 
 const reservedHolds = [
-  "Always needs the person: anything irreversible, as it changes src/control/registry.ts.",
+  "Always needs the person: anything irreversible, as it changes src/control/schema.ts.",
 ];
 
 test("a held reserved path holds again when landed, and lands once the person waives it at the approved head", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "@@ -240,3 +240,4 @@ const migrations: readonly string[] = [\n+  `CREATE TABLE x (a TEXT) STRICT;`," }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "@@ -240,3 +240,4 @@ export const migrations: readonly string[] = [\n+  `CREATE TABLE x (a TEXT) STRICT;`," }];
   const loop = await approved(f, "nLAPTOP");
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
   loop.land(f.builder, "nLAPTOP", head1);
@@ -2782,7 +2786,7 @@ test("a held reserved path holds again when landed, and lands once the person wa
 
 test("a waiver lets the landing past only the holds it names, and only at the commit it names", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head2, reservedHolds), { status: 409, message: new RegExp(`is at ${head1}, not ${head2}`) });
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, ["The pull request's GitHub checks are pending."]), { status: 409, message: /not held by/ });
@@ -2845,7 +2849,7 @@ test("the person may waive the reserved cases, the reserved paths and a changed 
 
 test("a waived landing whose branch conflicts goes back to the builder to rebase, and the rebased head needs the person's waiver again", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   conflicting(f);
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
@@ -2864,7 +2868,7 @@ test("a waived landing whose branch conflicts goes back to the builder to rebase
 
 test("a review stored before hold codes reads its holds and its waiver with codes, and lands past the hold it waived", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   await approved(f, "nLAPTOP");
   const { holds: _, cause: __, ...reasonsOnly } = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
   f.registry.saveReview({ ...f.review(), phase: reasonsOnly as Review["phase"] });
@@ -2882,7 +2886,7 @@ test("a review stored before hold codes reads its holds and its waiver with code
 
 test("a waiver covers its hold by code, whatever the hold's text, and the reviewer's reading of a case never covers the paths that hit it", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null },
     waiver: { head: head1, holds: ["Always needs the person: anything irreversible, in words an older control plane used."], codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1 } });
@@ -2891,7 +2895,7 @@ test("a waiver covers its hold by code, whatever the hold's text, and the review
   assert.deepEqual(f.merges, [head1]);
 
   const g = fixture(t, { path: ":memory:" });
-  g.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  g.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const gLoop = g.loop();
   await gLoop.start(g.builder, { land: "nLAPTOP" });
   await gLoop.poll();
@@ -3069,7 +3073,7 @@ const pushed = (f: ReturnType<typeof fixture>, head: string) => {
 test("a landing held for the person reviews a head pushed after the hold in a new round, and holds again there without the old head's waiver", async (t) => {
   const f = fixture(t);
   const image = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
   await loop.poll();
@@ -3078,7 +3082,7 @@ test("a landing held for the person reviews a head pushed after the hold in a ne
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person", "a read of the same head changes nothing");
 
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   pushed(f, head2);
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing");
@@ -3117,7 +3121,7 @@ test("a review that stopped at approval reviews a head pushed after it in a new 
 
 test("a held review with no round left, or one held with the reviewer's changes open, names the head pushed after it and starts no round", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP", rounds: 1 });
   await loop.poll();
@@ -3237,7 +3241,7 @@ const holds: { kind: string; hold(f: ReturnType<typeof fixture>): Promise<void>;
     await silent(f, f.builder);
   } },
   { kind: "policy", cause: "policy", reasons: reservedHolds, landable: true, round: true, async hold(f) {
-    f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+    f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
     await approved(f, "nLAPTOP");
   } },
   { kind: "thread while reviewing", cause: "thread", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: false, round: false, async hold(f) {
@@ -3335,7 +3339,7 @@ test("a review that merged and is held over its deploy stays as it is whatever t
 test("a held review settles on the head GitHub reports when the PR watch read an older push, and still gets its label", async (t) => {
   const f = fixture(t);
   const head3 = "3".repeat(40);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP", rounds: 1 });
   await loop.poll();
@@ -3367,7 +3371,7 @@ test("a review that stopped at approval under a stopped PR watch waits for its l
 
 test("a force-push back to a head an earlier round reviewed gets a new round", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   pushed(f, head2);
   await loop.poll();
@@ -3381,7 +3385,7 @@ test("a force-push back to a head an earlier round reviewed gets a new round", a
 });
 
 /** The registry migration the reserved-path rule holds, whose hunk starts at `line`. */
-const migration = (line: number, table = "x"): ChangedFile[] => [{ path: "src/control/registry.ts", previous: null, patch: `@@ -${line},3 +${line},4 @@ const migrations: readonly string[] = [\n   \`CREATE TABLE a (b TEXT) STRICT;\`,\n+  \`CREATE TABLE ${table} (a TEXT) STRICT;\`,` }, { path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
+const migration = (line: number, table = "x"): ChangedFile[] => [{ path: "src/control/schema.ts", previous: null, patch: `@@ -${line},3 +${line},4 @@ export const migrations: readonly string[] = [\n   \`CREATE TABLE a (b TEXT) STRICT;\`,\n+  \`CREATE TABLE ${table} (a TEXT) STRICT;\`,` }, { path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
 const carriedEvents = (f: ReturnType<typeof fixture>) => f.registry.events("0", { kinds: ["review.approval-carried", "review.waiver-carried", "review.waived"], thread: f.builder }).map((e) => [e.kind, e.payload.from, e.payload.to]);
 
 /** A landing the person waived at head1, whose branch then conflicts, so the builder rebases it to head2 with `change`. */
@@ -3432,7 +3436,7 @@ test("a landing the person waived, rebased with a changed line, gets a counted r
   assert.equal(f.review().rounds[1]!.carried, undefined);
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
-    `The change at ${head2.slice(0, 12)} differs from the one nLAPTOP pressed Land for at ${head1.slice(0, 12)}, in src/control/registry.ts, so that waiver does not carry over. Look at that file again, and press Land to waive the holds at ${head2.slice(0, 12)}.`,
+    `The change at ${head2.slice(0, 12)} differs from the one nLAPTOP pressed Land for at ${head1.slice(0, 12)}, in src/control/schema.ts, so that waiver does not carry over. Look at that file again, and press Land to waive the holds at ${head2.slice(0, 12)}.`,
     ...reservedHolds,
   ] });
   assert.equal(f.review().waiver!.head, head1, "the waiver stays at the head the person pressed Land at");
@@ -3845,7 +3849,7 @@ test("fixes pushed to a pull request retargeted meanwhile are reviewed against t
 
 test("a landing the person waived, retargeted at the same head, needs the person's waiver again after its new round", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
@@ -3861,7 +3865,7 @@ test("a landing the person waived, retargeted at the same head, needs the person
 
 test("a waived landing retargeted with a push, then reset to the waived head, needs the person's waiver again", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
@@ -3889,7 +3893,7 @@ test("a round saved before rounds recorded their base never detects a retarget, 
   assert.deepEqual(f.merges, [head1], "with no base recorded, the landing has nothing to compare the new base with");
 
   const g = fixture(t);
-  g.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  g.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const held = await approved(g, "nLAPTOP");
   legacy(g);
   held.land(g.builder, "nLAPTOP", head1, reservedHolds);
@@ -3949,7 +3953,7 @@ test("a retargeted landing held for the person shows the holds read at the new b
   assert.deepEqual(heldBy(f.review()), [egress]);
   f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null } });
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
-  f.files = [{ path: "src/control/registry.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing", "a new base takes a round first");
   f.reply(f.review().reviewer, verdict(f.review(), {}));

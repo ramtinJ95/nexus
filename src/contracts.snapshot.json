@@ -92,7 +92,6 @@
     "src/control/main.ts: reserved-path:auth",
     "src/control/overlay.ts: reserved-path:egress",
     "src/control/project.ts: reserved-path:egress",
-    "src/control/registry.ts: reserved-path:irreversible",
     "src/control/releases.ts: reserved-path:auth",
     "src/control/schema.ts: reserved-path:irreversible",
     "src/control/threads.ts: reserved-path:egress",

@@ -51,8 +51,8 @@ const authWords = new RegExp(`whois|caller|allowed|person|deployer|mayLand|canDe
 
 /**
  * Nexus paths that may touch a reserved case, each a file whose every change might, or code whose patch names what the
- * case guards. A registry migration counts as irreversible even when it adds only: a control plane refuses a registry
- * newer than its code, so a rollback past one cannot start.
+ * case guards. A registry migration counts as irreversible even when it only adds a table: a control plane refuses a
+ * registry newer than its code, so a rollback past one cannot start.
  */
 const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
   { case: "secrets", matches: (p) => names(p, /secret|credential/i) || p === "src/probe/redact.ts" || shipsFrom(p, "deploy/") },
@@ -63,7 +63,7 @@ const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch:
     || (shipsFrom(p, "src/pylon-vm") && changes(patch, modeWords)) },
   { case: "tailnet", matches: (p) => names(p, /tailnet|tailscale/i) },
   { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/agent-setup.ts" },
-  { case: "irreversible", matches: (p, patch) => ["src/control/registry.ts", "src/control/schema.ts"].includes(p) && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },
+  { case: "irreversible", matches: (p, patch) => p === "src/control/schema.ts" && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },
   { case: "irreversible", matches: (p, patch) => p === "package.json" && (patch === "" || /^[+-].*@earendil-works\/pi-durable/m.test(patch)) },
 ];
 
