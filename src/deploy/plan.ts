@@ -14,9 +14,6 @@ export interface DeployInput {
   control: ReleaseHealth;
   attempts: readonly Attempt[];
   turnRunning: boolean;
-  drainStartedAt: number | null;
-  drainTimeoutMs: number;
-  now: number;
 }
 export type DeployStep =
   | { kind: "idle" }
