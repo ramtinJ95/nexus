@@ -132,7 +132,10 @@ function pathHolds(files: readonly ChangedFile[]): Hold[] {
   return [...hits].map(([c, paths]) => hold(`reserved-path:${c}`, `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`));
 }
 
-/** The holds the latest round's head decides, as recorded, or the record's alone for a round approved before Nexus recorded them, until the loop reads them. */
+/**
+ * The holds the latest round's head decides, as recorded, or the record's alone until the loop records them: for a
+ * round whose checks have not passed yet, and for one approved before Nexus recorded them, until the loop reads them.
+ */
 const headHeld = (review: Review): Hold[] => review.rounds.at(-1)!.heldAt?.holds ?? [...sameModel(review), ...recordedHolds(review)];
 
 /**
