@@ -30,17 +30,21 @@ const snapshotFile = join(import.meta.dirname, "contracts.snapshot.json");
 const snapshot = JSON.parse(readFileSync(snapshotFile, "utf8")) as Record<string, string[]>;
 const updating = process.env["NEXUS_UPDATE_CONTRACTS"] === "1";
 /**
- * Fails with the lines `actual` adds to or drops from the snapshot's `key`, or writes them when updating. `dropped`
- * says what a dropped line means when regenerating the snapshot is the wrong fix for it.
+ * Fails with the lines each of `actual`'s keys adds to or drops from the snapshot, or writes them when updating.
+ * `dropped` says what a dropped line means when regenerating the snapshot is the wrong fix for it, so drops in every
+ * key are reported before any addition.
  */
-const pinned = (key: string, actual: string[], dropped?: (line: string) => string) => {
-  const was = snapshot[key] ?? [];
-  snapshot[key] = actual;
+const pinned = (actual: Record<string, string[]>, dropped?: (line: string) => string) => {
+  const was = Object.fromEntries(Object.keys(actual).map((key) => [key, snapshot[key] ?? []]));
+  Object.assign(snapshot, actual);
   if (updating) return writeFileSync(snapshotFile, `${JSON.stringify(snapshot, null, 2)}\n`);
-  const gone = was.filter((line) => !actual.includes(line));
+  const gone = Object.entries(actual).flatMap(([key, lines]) => was[key]!.filter((line) => !lines.includes(line)));
   if (dropped !== undefined && gone.length > 0) assert.fail(gone.map(dropped).join("\n"));
-  const changed = [...actual.filter((line) => !was.includes(line)).map((line) => `+ ${line}`), ...gone.map((line) => `- ${line}`)];
-  assert.deepEqual(changed, [], `${key} moved. If that is meant, rerun with NEXUS_UPDATE_CONTRACTS=1 and review the snapshot's diff`);
+  const changed = Object.entries(actual).flatMap(([key, lines]) => [
+    ...lines.filter((line) => !was[key]!.includes(line)).map((line) => `+ ${key}: ${line}`),
+    ...was[key]!.filter((line) => !lines.includes(line)).map((line) => `- ${key}: ${line}`),
+  ]);
+  assert.deepEqual(changed, [], "the snapshot moved. If that is meant, rerun with NEXUS_UPDATE_CONTRACTS=1 and review its diff");
 };
 
 const droppedHold = (line: string) => {
@@ -169,12 +173,11 @@ test("the reserved cases each tracked file holds a landing for, on every change 
     const always = holds(path, neutral);
     for (const code of [...holds(path, "")].sort()) (always.has(code) ? every : named).push(`${path}: ${code}`);
   }
-  pinned("holdsOnEveryChange", every, droppedHold);
-  pinned("holdsWhenThePatchNamesTheGuard", named, droppedHold);
+  pinned({ holdsOnEveryChange: every, holdsWhenThePatchNamesTheGuard: named }, droppedHold);
 });
 
 test("the files outside src/pylon-vm that import the fork are the snapshot's", () => {
   const importers = tracked.filter((file) => /^(src|images)\/.*\.[jt]s$/.test(file) && !file.startsWith("src/pylon-vm/") && !/\.test\.[jt]s$/.test(file))
     .filter((file) => specifiers(read(file), true).some((specifier) => specifier.startsWith(".") && relative(root, resolve(root, dirname(file), specifier)).startsWith("src/pylon-vm/")));
-  pinned("pylonVmImporters", importers);
+  pinned({ pylonVmImporters: importers });
 });
