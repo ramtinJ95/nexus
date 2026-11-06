@@ -44,8 +44,6 @@ export type ServiceView = ServiceFact & { url: string | null };
  * NEXUS_API is http://nexus.pylon. Gondolin's onRequest hook answers that host from the probe on the node
  * (pi-sandbox change 4), so the call never leaves the machine and needs no tailnet route. The probe knows
  * which pylon is calling from the VM the request came through, so the guest holds no token.
- * If change 4 is refused, the fallback is a file pair with one writer each: the CLI writes requests under
- * /run/nexus/requests/ and the probe polls them through Gondolin's file API and writes the replies.
  */
 export type PylonApiRequest =
   | ({ op: "event" } & PylonEvent)
