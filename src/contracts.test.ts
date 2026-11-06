@@ -67,10 +67,12 @@ function closure(entry: string) {
 /** Where a script or unit names a repo path: bare, under a shell variable such as $repo, or under an installed release. */
 const repoPath = /(?:(?<![\w.$/-])|(?:\$\{?\w+\}?|\/opt\/nexus)(?:\/[\w.-]+)*?\/)((?:src|deploy|images)\/[\w./-]*\w)/g;
 
-test("every repo path a unit, installer or deploy script names is tracked", () => {
-  const named = tracked.filter((file) => file.startsWith("deploy/")).flatMap((file) => [...read(file).matchAll(repoPath)].map((match) => match[1]!));
-  assert.ok(named.length > 30, `${named.length} paths`);
-  assert.deepEqual(missing(named), []);
+test("every repo path a unit, an installer, an image build, a .nexus script or an npm script names is tracked", () => {
+  const scripts = Object.values((JSON.parse(read("package.json")) as { scripts: Record<string, string> }).scripts);
+  const sources = [...tracked.filter((file) => /^(deploy|images|\.nexus)\//.test(file)).map((file) => ({ file, text: read(file) })), ...scripts.map((text) => ({ file: "package.json", text }))];
+  const named = sources.flatMap(({ file, text }) => [...text.matchAll(repoPath)].map((match) => ({ file, path: match[1]! })));
+  assert.ok(named.length > 100, `${named.length} paths`);
+  assert.deepEqual([...new Set(named.filter(({ path }) => !isTracked(path)).map(({ file, path }) => `${file} names ${path}`))], []);
 });
 
 test("every path code names inside an installed release is tracked", () => {
