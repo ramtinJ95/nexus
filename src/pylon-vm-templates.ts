@@ -20,7 +20,7 @@ import { directory, readLogTail } from "./pylon-vm/storage.ts";
 
 const diskFile = "disk.qcow2";
 
-export interface TemplatePrepare {
+interface TemplatePrepare {
   /** The fork's config for the build: the image, the disk size, and setup as the clone, preSetup and `.nexus/setup`. */
   config: SandboxConfig;
   boot: BootSpec;

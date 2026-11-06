@@ -259,7 +259,7 @@ function gondolinVersion(): string {
 }
 
 /** A file or directory whose full permission bits the rootfs must get back. */
-export interface ModeFix {
+interface ModeFix {
   path: string;
   type: "f" | "d";
   mode: number; // permission bits, at most 0o7777
@@ -270,7 +270,7 @@ export interface ModeFix {
  * extraction loses: setuid, setgid, sticky, and group or other write, which gondolin-build.ts's 022 umask
  * strips. Each line is `<f|d> <octal mode> <path>`.
  */
-export const modeListingArgs = ["/", "-xdev", "(", "-type", "f", "-o", "-type", "d", ")", "-perm", "/7022", "-printf", "%y %m %p\\n"];
+const modeListingArgs = ["/", "-xdev", "(", "-type", "f", "-o", "-type", "d", ")", "-perm", "/7022", "-printf", "%y %m %p\\n"];
 
 /**
  * Sorted by path. Debian with sudo always has setuid files, so a listing without one means the listing
@@ -387,7 +387,7 @@ interface GondolinManifest {
 const smokeHost = "api.anthropic.com";
 const smokeSession = "nexus-smoke";
 
-export interface SmokeCheck {
+interface SmokeCheck {
   name: string;
   argv: readonly string[];
   /** Stdout and stderr together after a zero exit: exactly this string, or matching this pattern. */

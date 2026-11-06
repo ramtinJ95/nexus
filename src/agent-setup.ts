@@ -28,9 +28,9 @@ import { parseJson } from "./parse.ts";
 export type PluginFiles = ReadonlyMap<string, string>;
 
 /** How the reader showed that a commit is on its remote, or why it could not. */
-export type OriginEvidence = { shown: true; by: string } | { shown: false; why: string };
+type OriginEvidence = { shown: true; by: string } | { shown: false; why: string };
 
-export type MacMarketplace =
+type MacMarketplace =
   | { name: string; github: null }
   | {
     name: string;
@@ -94,7 +94,7 @@ export interface MacSetup {
 
 /** Each kind of capability a leave-out names, and its label in the capture's lines. */
 const leaveOutKinds = { "claude-plugin": "claude plugin", "pi-package": "pi package", skill: "skill", "pi-extension": "pi extension", "shepherdr-profile": "shepherdr profile" } as const;
-export type LeaveOutKind = keyof typeof leaveOutKinds;
+type LeaveOutKind = keyof typeof leaveOutKinds;
 /** One deliberate leave-out. The capture prints each with its reason, so nothing disappears silently. */
 export interface LeaveOut { kind: LeaveOutKind; name: string; why: string }
 
@@ -299,7 +299,7 @@ const profileFields = new Set(["accepts", "blocking", "description", "model", "p
  * neither node: nor a file in it, or a link
  * in it is absolute or leads to anything but a file in it. A link to a file in it counts as that file.
  */
-export function profileProblems(name: string, regularFiles: ReadonlyMap<string, string>, links: ReadonlyMap<string, string>): string[] {
+function profileProblems(name: string, regularFiles: ReadonlyMap<string, string>, links: ReadonlyMap<string, string>): string[] {
   const problem = (why: string) => `shepherdr profile ${name}: ${why}`;
   const files = new Map(regularFiles);
   const linkProblems: string[] = [];
@@ -469,7 +469,7 @@ async function profileTree(dir: string, prefix = "", tree = { files: new Map<str
  * rather than running `claude plugin list`, because a Claude Code start may update a marketplace with autoUpdate on.
  * Throws on a missing input.
  */
-export async function readMacSetup(home: string): Promise<MacSetup> {
+async function readMacSetup(home: string): Promise<MacSetup> {
   const claudeDir = join(home, ".claude");
   const root = (await git(await realpath(claudeDir), "rev-parse", "--show-toplevel")).trim();
   const url = httpsRemote((await git(root, "remote", "get-url", "origin")).trim());

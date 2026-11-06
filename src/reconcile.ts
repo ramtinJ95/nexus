@@ -143,7 +143,7 @@ export type PlanStep =
   | { kind: "submit"; job: Job }
   | { kind: "fail"; code: JobErrorCode; reason: string }; // the registry marks the pylon failed until a human retries
 
-export const maxAttempts = 5;
+const maxAttempts = 5;
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
 /** Wait after the `attempt`th consecutive failure, counting from 1. */
 export function backoffMs(attempt: number): number {
@@ -285,7 +285,7 @@ export function actualState(observed: PylonObservation | "absent", inFlight: Job
   return fromJob ?? observedState[observed === "absent" ? "absent" : observed.phase];
 }
 
-export const envelopeTtlMs = 30_000;
+const envelopeTtlMs = 30_000;
 export function envelope(job: Job, node: NodeName, now: number): JobEnvelope {
   return {
     jobId: randomUUID() as JobId,

@@ -11,7 +11,7 @@ import { z } from "zod";
  * so the pi-sandbox-derived backend needs only a path rewrite. The word is "preview" in the file, the
  * records, the CLI and the dashboard.
  */
-export interface ServicesFile {
+interface ServicesFile {
   services: Record<ServiceName, ServiceDecl>;
 }
 export type ServiceName = string; // /^[a-z0-9][a-z0-9-]{0,31}$/
@@ -45,10 +45,10 @@ export interface ServiceDecl {
   platforms?: readonly ("linux" | "darwin")[];
   timeoutMs?: number; // readiness deadline, default 30000
 }
-export interface PreviewLink { url: string; title: string; description?: string }
+interface PreviewLink { url: string; title: string; description?: string }
 
 /** Names `env` may not set. PUBLIC_URL is the https tailnet URL, because the guest sees x-forwarded-proto: http (S4). */
-export const managedEnv = ["PORT", "PUBLIC_URL"] as const; // plus every NEXUS_* name, such as NEXUS_THREAD_ID
+const managedEnv = ["PORT", "PUBLIC_URL"] as const; // plus every NEXUS_* name, such as NEXUS_THREAD_ID
 
 /**
  * The boundary for .nexus/services.yaml: callers trust the result. Throws on a file over 1 MiB, duplicate

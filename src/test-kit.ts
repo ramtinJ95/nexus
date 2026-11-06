@@ -71,8 +71,8 @@ export function testCapacity(over: Partial<NodeCapacity> = {}): NodeCapacity {
   return { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0, ...over };
 }
 
-export type RunningPylon = Extract<PylonObservation, { phase: "running" }>;
-export type StoppedPylon = Extract<PylonObservation, { phase: "stopped" }>;
+type RunningPylon = Extract<PylonObservation, { phase: "running" }>;
+type StoppedPylon = Extract<PylonObservation, { phase: "stopped" }>;
 
 /** A pylon running img-000000000000 since 2027-01-01, with nothing read from it yet. */
 export function runningPylon(pylonId: PylonId, over: Partial<Omit<RunningPylon, "pylonId" | "phase">> = {}): RunningPylon {
@@ -94,7 +94,7 @@ export function testObservation(node: NodeName, over: Partial<NodeObservation> =
   };
 }
 
-export interface CallOptions {
+interface CallOptions {
   host: string;
   port: number;
   method: string;

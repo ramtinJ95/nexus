@@ -16,7 +16,7 @@ import { checkoutDir } from "./session-harness.ts";
 
 export const outputsDir = "/home/user/.nexus/outputs";
 
-export type OutputDeclaration = { kind: "file"; path: string; title?: string } | { kind: "diff"; title?: string };
+type OutputDeclaration = { kind: "file"; path: string; title?: string } | { kind: "diff"; title?: string };
 
 /** A refusal the agent can act on, such as a missing file or a clean tree, rather than a failed guest. */
 export class OutputRefused extends Error {}

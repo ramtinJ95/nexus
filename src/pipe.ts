@@ -35,7 +35,7 @@ export async function openPython(open: OpenPipe, source: Uint8Array, args: reado
   return stream;
 }
 
-export interface PipeRead {
+interface PipeRead {
   deadlineMs: number;
   maxBytes: number;
   /** What the process prints, as in "the pylon did not read <what> within 20 s". */

@@ -27,7 +27,7 @@ export const agentLogs = { claude: claudeProjects, pi: "/home/user/.pi/agent/ses
 /** The calls one read prints at most, roughly. A pylon with more is read again from where this read stopped. */
 const limitBytes = 1 << 20;
 const maxReplyBytes = 4 * limitBytes;
-export const usageReadDeadlineMs = 60_000;
+const usageReadDeadlineMs = 60_000;
 
 /**
  * A guest's counts are bounded, so no sum of them can pass what SQLite's integers hold. No model call reads a billion
@@ -43,7 +43,7 @@ export type FileCursor = [offset: number, before: string];
 const cursorSchema = z.tuple([z.int().nonnegative().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^[0-9a-f]{64}$/)]);
 const endSchema = z.strictObject({ offsets: z.record(z.string().min(1).max(4096), cursorSchema), more: z.boolean() });
 
-export interface UsageRead { calls: AgentCall[]; offsets: Map<string, FileCursor>; more: boolean }
+interface UsageRead { calls: AgentCall[]; offsets: Map<string, FileCursor>; more: boolean }
 
 /** The calls recorded past `offsets`, and where the read stopped in each file it moved on in. */
 export async function readAgentUsage(open: OpenPipe, offsets: ReadonlyMap<string, FileCursor>, logs = agentLogs, deadlineMs = usageReadDeadlineMs): Promise<UsageRead> {

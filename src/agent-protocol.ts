@@ -27,7 +27,7 @@ export const planningPrefix = "[Nexus planning: automated, not a message from th
 export const judgmentPrefix = "[Nexus judgment — automated, not a message from the person]";
 export const senderPrefixes: Readonly<Record<Sender, string>> = { "pr-watch": prWatchPrefix, review: reviewPrefix, nudge: nudgePrefix, "usage-limit": usageLimitPrefix, resume: resumePrefix };
 
-export type ThreadRole = "builder" | "reviewer" | "check" | "verify" | "other";
+type ThreadRole = "builder" | "reviewer" | "check" | "verify" | "other";
 
 /** A reviewer, check or verify thread is one the review loop started, and a builder one a person started from a tailnet node. */
 export function roleOf(startedBy: string): ThreadRole {

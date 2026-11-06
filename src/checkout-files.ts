@@ -18,13 +18,13 @@ import type { ByteStream } from "./protocol/streams.ts";
 const helper = readFileSync(new URL("./checkout-files.py", import.meta.url));
 
 /** `start` is what the pylon booted at, which its first boot records as refs/nexus/base. */
-export type ChangesBase = "start" | "head" | "turn";
+type ChangesBase = "start" | "head" | "turn";
 
 export const maxFileBytes = 10 << 20;
 /** The helper's caps are 2000 entries, 3000 files and 4 MiB of diff. A JSON reply within them stays far below this. */
 const maxReplyBytes = 16 << 20;
 /** Longer than the helper's 45 s for one git command, so a slow git is the helper's refusal. */
-export const readDeadlineMs = 90_000;
+const readDeadlineMs = 90_000;
 /**
  * Pipes open at once across every pylon, counting those still draining after their read passed its deadline, so a
  * pylon that never finishes cannot pile them up.
