@@ -78,6 +78,9 @@ export function judgmentView(j: Judgment): JudgmentView {
   };
 }
 
+/** What a judgment's next step saves, what it does in the same write, and the nodes to wake after it. */
+type Plan = { next: Judgment; act?: () => void; nodes: NodeName[] };
+
 /** Every fact a judgment's brief states. */
 export interface Facts {
   token: string;
@@ -330,7 +333,7 @@ export function judgmentPass(options: {
   }
 
   /** The record once the person is asked, with the question, or done when nothing but leaving it failed could run. */
-  function ask(j: Judgment, verdict: Verdict, pylon: StoredPylon): { next: Judgment; act?: () => void; nodes: NodeName[] } {
+  function ask(j: Judgment, verdict: Verdict, pylon: StoredPylon): Plan {
     const retry = retryRefusal(observed(pylon));
     const where = move(pylon);
     if (retry !== null && "refused" in where) return done(j, verdict, `neither a retry nor a move can run, so the failure is the person's: ${retry}; ${where.refused}`);
@@ -349,8 +352,14 @@ export function judgmentPass(options: {
     };
   }
 
-  function done(j: Judgment, verdict: Verdict, why: string) {
-    return { next: { ...j, phase: { kind: "done" as const, verdict, outcome: { kind: "left" as const, why } } }, nodes: [] };
+  function done(j: Judgment, verdict: Verdict, why: string): Plan {
+    return { next: { ...j, phase: { kind: "done", verdict, outcome: { kind: "left", why } } }, nodes: [] };
+  }
+
+  /** Saves the judgment done for `why`, or else what `plan` makes of the thread's pylon, and wakes the nodes the plan names. */
+  function carryOut(j: Judgment, verdict: Verdict, why: string | null, plan: (pylon: StoredPylon) => Plan) {
+    const next = why !== null ? done(j, verdict, why) : plan(registry.pylon(registry.thread(j.thread)!.pylonId)!);
+    if (save(j, next.next, next.act)) for (const node of next.nodes) wake(node);
   }
 
   async function acting(j: Judgment, verdict: Verdict) {
@@ -361,12 +370,9 @@ export function judgmentPass(options: {
       if (last !== null) registry.recordUsage(j.thread, calls, [{ source: "harness", key: String(conversation), position: last, before: "" }]);
     }
     // Nothing below awaits, so what it reads is what the save acts on.
-    const why = settled(j);
-    const pylon = registry.pylon(registry.thread(j.thread)!.pylonId)!;
     const withheld = registry.project(registry.thread(j.thread)!.project)?.pipeline == null ? "the project's pipeline was turned off"
       : retriesSpent(j.thread) >= maxRetries ? `Nexus already retried this thread's pylon ${maxRetries} times on its own` : null;
-    const plan = (() => {
-      if (why !== null) return done(j, verdict, why);
+    carryOut(j, verdict, settled(j), (pylon) => {
       switch (verdict.answer) {
         case "retry": {
           const refused = retryRefusal(observed(pylon)) ?? withheld;
@@ -379,8 +385,7 @@ export function judgmentPass(options: {
         }
         case "person": return ask(j, verdict, pylon);
       }
-    })();
-    if (save(j, plan.next, "act" in plan ? plan.act : undefined)) for (const node of plan.nodes) wake(node);
+    });
   }
 
   function asked(j: Judgment, verdict: Verdict) {
@@ -389,9 +394,7 @@ export function judgmentPass(options: {
     // An unarchive before this pass leaves the failure on the pylon, and the question withdrawn.
     const why = settled(j) ?? (question?.withdrawn !== undefined ? "the thread was archived, which withdrew the question" : null);
     if (why === null && answer === null) return;
-    const pylon = registry.pylon(registry.thread(j.thread)!.pylonId)!;
-    const plan = (() => {
-      if (why !== null) return done(j, verdict, why);
+    carryOut(j, verdict, why, (pylon) => {
       switch (answer!.option) {
         case labels.retry: {
           const refused = retryRefusal(observed(pylon));
@@ -403,8 +406,7 @@ export function judgmentPass(options: {
         }
         default: return done(j, verdict, "the person left it failed");
       }
-    })();
-    if (save(j, plan.next, "act" in plan ? plan.act : undefined)) for (const node of plan.nodes) wake(node);
+    });
   }
 
   async function step(j: Judgment) {
