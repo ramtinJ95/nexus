@@ -12,11 +12,7 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 
-/** Who a credential serves. Every credential serves the whole install today. */
-export type Scope = "install";
-
 export interface Store {
-  scope: Scope;
   /** The machines that keep one: the control plane's machine, or every machine, each with its own. */
   machines: "control" | "every";
   file: string;
@@ -25,15 +21,16 @@ export interface Store {
 }
 
 /**
- * Where each kind of credential lives and whom it serves. This is the one place a per-person mode would change: it
- * would give a kind a store of scope "person" beside this one, so a shared install keeps its files where they are.
+ * Where each kind of credential lives. Every one serves the whole install. This is the one place a per-person mode
+ * would change: it would give a kind a per-person store beside this one, so a shared install keeps its files where
+ * they are.
  * A file here is the default a new install gets. Where an existing config names its own, `locations` reads that.
  */
 export const stores = {
-  harness: { scope: "install", machines: "control", file: "/var/lib/nexus-control/harness-credentials.json", owner: "nexus-control:nexus-control", mode: 0o600 },
-  claude: { scope: "install", machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
-  githubWatch: { scope: "install", machines: "control", file: "/etc/nexus/github-token", owner: "root:nexus-control", mode: 0o640 },
-  gitKey: { scope: "install", machines: "every", file: "/etc/nexus/git_ed25519", owner: "nexus:nexus", mode: 0o400 },
+  harness: { machines: "control", file: "/var/lib/nexus-control/harness-credentials.json", owner: "nexus-control:nexus-control", mode: 0o600 },
+  claude: { machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
+  githubWatch: { machines: "control", file: "/etc/nexus/github-token", owner: "root:nexus-control", mode: 0o640 },
+  gitKey: { machines: "every", file: "/etc/nexus/git_ed25519", owner: "nexus:nexus", mode: 0o400 },
 } as const satisfies Record<string, Store>;
 
 export const claudeNames = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;

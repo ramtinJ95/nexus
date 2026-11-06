@@ -127,7 +127,7 @@ The shared mode needs none of this. A company that wants usage per person but no
 
 This page recommends shipping the shared mode in I3 and leaving the per-person mode as a decision for the person. The person decided on 2026-10-29: shared credentials by default, with the option to switch to per-person credentials later, and I3 built only the shared mode.
 
-The place a per-person mode would start is `stores` in [`src/deploy/credentials.ts`](../../src/deploy/credentials.ts), the one table that says where each kind of credential lives, which machines keep one and whom it serves. Every entry's scope is `install` today. A per-person mode would add a store of scope `person` for a kind beside its shared one, such as a per-person file on the control plane's machine for the Claude token, so a shared install keeps its files where they are and needs no migration, and an install could fall back to the shared credential. The identity, routes and storage that mode needs, above, are not built.
+The place a per-person mode would start is `stores` in [`src/deploy/credentials.ts`](../../src/deploy/credentials.ts), the one table that says where each kind of credential lives and which machines keep one. Every entry serves the whole install today. A per-person mode would add a per-person store for a kind beside its shared one, such as a per-person file on the control plane's machine for the Claude token, so a shared install keeps its files where they are and needs no migration, and an install could fall back to the shared credential. The identity, routes and storage that mode needs, above, are not built.
 
 ## Adding machines
 
