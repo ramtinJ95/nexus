@@ -316,6 +316,285 @@ exit 0
       "actualState": "running",
       "failed": null
     }
+  },
+  {
+    "id": "th-rv-fixing-failing",
+    "title": "fix(checkout): keep the shipping quote across a reload",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-fixing-failing",
+    "status": "active",
+    "conversationId": "25",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-checking",
+    "title": "feat(search): rank exact SKU matches first",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-checking",
+    "status": "active",
+    "conversationId": "26",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-quoting-failing",
+    "title": "fix(orders): show refunds on the order page",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-quoting-failing",
+    "status": "active",
+    "conversationId": "28",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-needs-person-holds",
+    "title": "feat(db): drop the legacy carts table",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-needs-person-holds",
+    "status": "active",
+    "conversationId": "35",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": "decision",
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-closed",
+    "title": "feat(home): autoplay the hero video",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-closed",
+    "status": "active",
+    "conversationId": "37",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-approved",
+    "title": "chore(deps): bump stripe-js to 5.2",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-approved",
+    "status": "active",
+    "conversationId": "29",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": "decision",
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-cancelled-reviewer",
+    "title": "fix(cart): a coupon applies once per cart",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-cancelled-reviewer",
+    "status": "active",
+    "conversationId": "40",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-merged",
+    "title": "fix(emails): the receipt's VAT line",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-merged",
+    "status": "active",
+    "conversationId": "36",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
+  },
+  {
+    "id": "th-rv-verifying",
+    "title": "feat(cart): save the cart for a signed-out shopper",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-verifying",
+    "status": "active",
+    "conversationId": "27",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false,
+    "attention": null,
+    "desired": "running",
+    "pylon": {
+      "node": "rj-firebat",
+      "actualState": "absent",
+      "failed": null
+    }
   }
 ]
 --- stderr

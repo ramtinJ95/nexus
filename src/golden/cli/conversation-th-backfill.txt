@@ -6,7 +6,7 @@ exit 0
 
 The cursors exist but the backfill ignores them. Wiring them in.
 
-[tool] Edit {"file_path":"/home/user/workspace/repo/src/control/usage-backfill.ts","old_string":"from: 0","new_string":"from: cursor?.position ?? 0"} (ok)
+[tool] Edit {"file_path":"<repo>/src/control/usage-backfill.ts","old_string":"from: 0","new_string":"from: cursor?.position ?? 0"} (ok)
 
 [error] [Nexus usage limit — automated, not a message from the person] Claude usage limit reached. Your limit will reset at 6pm (Europe/Stockholm).
 

@@ -1,0 +1,22 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -1028,8 +1028,8 @@
+ </div>
+ </details>
+ </article>
+-<article class="need need-thread" id="need-th-cert-thread" data-thread="th-cert" data-attention="failed" tabindex="-1" aria-label="Failed: Fix doctor&#39;s certificate check">
+-<details class="need-fold" id="fold-need-th-cert-thread">
++<article class="need need-thread picked" id="need-th-cert-thread" data-thread="th-cert" data-attention="failed" tabindex="-1" aria-label="Failed: Fix doctor&#39;s certificate check">
++<details class="need-fold" id="fold-need-th-cert-thread" open>
+ <summary class="need-sum" data-why="pylon is broken: the controller exited">
+ <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
+ <path d="M6 4l4 4-4 4"/>
+@@ -2357,7 +2357,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </a>
+ </li>
+ <li>
+-<a class="fl-row" href="/?peek=th-cert" data-peek="th-cert">
++<a class="fl-row" href="/?peek=th-cert" data-peek="th-cert" aria-current="true">
+ <span class="dot dot-bad" role="img" aria-label="failed" title="failed">
+ </span>
+ <span class="fl-title">Fix doctor&#39;s certificate check</span>

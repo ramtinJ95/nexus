@@ -29,6 +29,25 @@ th-crash  active    -                                           pylon failed    
 th-tagger  active    working                                     pylon running    field-notes  1h ago   Train the tagger on the October export
 th-sync-verify  active    -                                           pylon running    field-notes  7m ago   Live check of nexus/57 at gggggggggggg
 th-refunds-check  active    -                                           pylon running    storefront   5m ago   Check of nexus/90 at ffffffffffff
+th-rv-reviewing-failing  active    -                                           pylon absent     nexus        0s ago   fix(probe): report a full disk before a boot fails
+th-rv-merging  active    -                                           pylon absent     nexus        0s ago   fix(secrets): rotate the broker's signing key on deploy
+th-rv-deploying  active    -                                           pylon absent     nexus        0s ago   fix(control): close idle SSE streams after 10 minutes
+th-rv-fixing-failing  active    -                                           pylon absent     storefront   0s ago   fix(checkout): keep the shipping quote across a reload
+th-rv-checking  active    -                                           pylon absent     storefront   0s ago   feat(search): rank exact SKU matches first
+th-rv-merging-waiting  active    -                                           pylon absent     nexus        0s ago   feat(dashboard): show each node's release
+th-rv-cancelled-person  active    -                                           pylon absent     nexus        0s ago   feat(cli): nexus logs --follow
+th-rv-quoting-failing  active    -                                           pylon absent     storefront   0s ago   fix(orders): show refunds on the order page
+th-rv-needs-person-holds  active    -                                           pylon absent     storefront   0s ago   feat(db): drop the legacy carts table
+th-rv-closed  active    -                                           pylon absent     storefront   0s ago   feat(home): autoplay the hero video
+th-rv-cancelled-builder  archived  -                                           pylon absent     nexus        0s ago   chore: drop the v1 attach route
+th-rv-approved  active    -                                           pylon absent     storefront   0s ago   chore(deps): bump stripe-js to 5.2
+th-rv-cancelled-reviewer  active    -                                           pylon absent     storefront   0s ago   fix(cart): a coupon applies once per cart
+th-rv-merged  active    -                                           pylon absent     storefront   0s ago   fix(emails): the receipt's VAT line
+th-rv-rolling-back  active    -                                           pylon absent     nexus        0s ago   perf(registry): index events by thread
+th-rv-landed  active    -                                           pylon absent     nexus        0s ago   docs: the review loop's phases
+th-rv-reviewing-second  active    -                                           pylon absent     nexus        0s ago   refactor(control): one module per node phase
+th-rv-verifying  active    -                                           pylon absent     storefront   0s ago   feat(cart): save the cart for a signed-out shopper
+th-rv-reviewing-starting  active    -                                           pylon absent     nexus        0s ago   feat(cli): nexus threads --watch
 th-queued-1  queued    waits for th-graphs: PR #402 is open  node rj-firebat  nexus        0s ago   Prune events older than 90 days
 th-queued-2  queued    waits for th-rounding: PR #91 is open   node rj-firebat  storefront   0s ago   Wishlist sharing links
 --- stderr

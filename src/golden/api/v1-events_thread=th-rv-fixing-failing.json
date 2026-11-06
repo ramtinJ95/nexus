@@ -1,0 +1,38 @@
+200 application/json
+[
+  {
+    "id": "90",
+    "time": 1800014400000,
+    "thread": "th-rv-fixing-failing",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 92,
+      "url": "https://github.com/ramtinJ95/storefront/pull/92",
+      "title": "fix(checkout): keep the shipping quote across a reload",
+      "state": "open"
+    }
+  },
+  {
+    "id": "91",
+    "time": 1800014400000,
+    "thread": "th-rv-fixing-failing",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-92",
+      "reviewer": "th-rv-fixing-failing-review",
+      "second": "th-rv-fixing-failing-second",
+      "phase": {
+        "kind": "fixing",
+        "failing": {
+          "count": 1,
+          "last": "500 Internal Server Error from claude-opus-5-5",
+          "retryAt": 1800014580000
+        }
+      },
+      "round": 1
+    }
+  }
+]

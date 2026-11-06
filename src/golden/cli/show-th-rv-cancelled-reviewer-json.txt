@@ -1,0 +1,124 @@
+exit 0
+--- stdout
+{
+  "thread": {
+    "id": "th-rv-cancelled-reviewer",
+    "title": "fix(cart): a coupon applies once per cart",
+    "project": "storefront",
+    "pylonId": "pylon-th-rv-cancelled-reviewer",
+    "status": "active",
+    "conversationId": "40",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-cancelled-reviewer",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-cancelled-reviewer",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/storefront/pull/100"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/storefront",
+      "number": 100,
+      "title": "fix(cart): a coupon applies once per cart",
+      "url": "https://github.com/ramtinJ95/storefront/pull/100",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-100",
+    "builder": "th-rv-cancelled-reviewer",
+    "reviewer": "th-seeded-1",
+    "pr": {
+      "repo": "ramtinJ95/storefront",
+      "number": 100,
+      "url": "https://github.com/ramtinJ95/storefront/pull/100",
+      "title": "fix(cart): a coupon applies once per cart",
+      "branch": "nexus/100"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": null,
+    "auto": true,
+    "merged": null,
+    "waiver": null,
+    "expect": "rv-100:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4",
+        "base": "main",
+        "verdict": null,
+        "check": null,
+        "answers": null
+      }
+    ],
+    "phase": {
+      "kind": "cancelled",
+      "who": "reviewer",
+      "status": "deleted"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
+--- stderr

@@ -1,0 +1,17 @@
+exit 0
+--- stdout
+th-rv-deploying  fix(control): close idle SSE streams after 10 minutes
+project: nexus
+attention: none
+status: active
+pylon: pylon-th-rv-deploying on rj-firebat, absent, observed 0s ago
+attach: nexus attach th-rv-deploying
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+PR watch: off (no control-plane GitHub token configured)
+PR #415: fix(control): close idle SSE streams after 10 minutes — open, checks passing, review none https://github.com/ramtinJ95/nexus/pull/415
+review rv-415 of PR #415, started on its own: deploying c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1, round 1 of 5, reviewer th-rv-deploying-review on gpt-6-astra, landing when approved
+no live check: bfbfbfbfbfbf has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+output: pull-request https://github.com/ramtinJ95/nexus/pull/415
+--- stderr

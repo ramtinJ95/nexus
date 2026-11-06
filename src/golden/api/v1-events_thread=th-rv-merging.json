@@ -1,0 +1,54 @@
+200 application/json
+[
+  {
+    "id": "101",
+    "time": 1800014400000,
+    "thread": "th-rv-merging",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 413,
+      "url": "https://github.com/ramtinJ95/nexus/pull/413",
+      "title": "fix(secrets): rotate the broker's signing key on deploy",
+      "state": "open"
+    }
+  },
+  {
+    "id": "102",
+    "time": 1800014400000,
+    "thread": "th-rv-merging",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-413",
+      "reviewer": "th-rv-merging-review",
+      "phase": {
+        "kind": "merging",
+        "authorized": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "103",
+    "time": 1800014400000,
+    "thread": "th-rv-merging",
+    "project": "nexus",
+    "kind": "review.waived",
+    "payload": {
+      "review": "rv-413",
+      "repo": "ramtinJ95/nexus",
+      "pr": 413,
+      "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+      "holds": [
+        "Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
+      ],
+      "codes": [
+        "reserved-path:secrets"
+      ],
+      "by": "laptop",
+      "at": 1800014160000
+    }
+  }
+]

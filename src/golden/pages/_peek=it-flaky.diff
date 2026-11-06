@@ -1,0 +1,22 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -857,8 +857,8 @@
+ <span class="count">16</span>
+ </div>
+ <div class="need-list">
+-<article class="need need-review" id="need-th-flaky-review" data-thread="th-flaky" data-attention="decision" tabindex="-1" aria-label="Review needs you: Retry flaky probe reconnects">
+-<details class="need-fold" id="fold-need-th-flaky-review">
++<article class="need need-review picked" id="need-th-flaky-review" data-thread="th-flaky" data-attention="decision" tabindex="-1" aria-label="Review needs you: Retry flaky probe reconnects">
++<details class="need-fold" id="fold-need-th-flaky-review" open>
+ <summary class="need-sum" data-why="Finding F3 (P2) is still open after the last round.">
+ <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
+ <path d="M6 4l4 4-4 4"/>
+@@ -2581,7 +2581,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </a>
+ </li>
+ <li>
+-<a class="fl-row" href="/?peek=th-flaky" data-peek="th-flaky">
++<a class="fl-row" href="/?peek=th-flaky" data-peek="th-flaky" aria-current="true">
+ <span class="dot dot-bad" role="img" aria-label="needs your decision" title="needs your decision">
+ </span>
+ <span class="fl-title">Retry flaky probe reconnects</span>

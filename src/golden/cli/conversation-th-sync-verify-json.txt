@@ -1,4 +1,0 @@
-exit 5
---- stdout
---- stderr
-{"error":"thread th-sync-verify has no conversation","kind":"conflict","status":409,"code":null}

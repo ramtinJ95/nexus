@@ -1,0 +1,7 @@
+exit 0
+--- stdout
+Started review rv-398 of PR #398, started on its own: needs-person, round 3 of 5, reviewer th-flaky-review on gpt-6-astra, labelled "needs human review"
+needs you: Finding F3 (P2) is still open after the last round.
+needs you: The builder has not answered F3 in round 3.
+needs you: The pull request's GitHub checks are pending.
+--- stderr

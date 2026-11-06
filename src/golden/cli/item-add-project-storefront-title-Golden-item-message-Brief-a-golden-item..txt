@@ -1,0 +1,4 @@
+exit 0
+--- stdout
+Added it-new-54 to storefront: Golden item. It is held: project storefront waits for the person to approve each item: nexus item approve it-new-54.
+--- stderr

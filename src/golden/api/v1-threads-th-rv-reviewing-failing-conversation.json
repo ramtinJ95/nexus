@@ -1,0 +1,8 @@
+200 application/json
+{
+  "conversation": {
+    "id": 23
+  },
+  "entries": [],
+  "docs": {}
+}

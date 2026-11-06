@@ -1,4 +1,0 @@
-exit 5
---- stdout
---- stderr
-{"error":"thread th-refunds-check has no conversation","kind":"conflict","status":409,"code":null}

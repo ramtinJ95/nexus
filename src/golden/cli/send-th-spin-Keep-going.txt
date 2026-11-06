@@ -1,0 +1,4 @@
+exit 0
+--- stdout
+Sent to th-spin.
+--- stderr

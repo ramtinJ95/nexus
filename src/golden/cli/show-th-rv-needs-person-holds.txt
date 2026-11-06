@@ -1,0 +1,24 @@
+exit 0
+--- stdout
+th-rv-needs-person-holds  feat(db): drop the legacy carts table
+project: storefront
+attention: decision
+status: active
+pylon: pylon-th-rv-needs-person-holds on rj-firebat, absent, observed 0s ago
+attach: nexus attach th-rv-needs-person-holds
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+PR watch: off (no control-plane GitHub token configured)
+PR #97: feat(db): drop the legacy carts table — open, checks passing, review none https://github.com/ramtinJ95/storefront/pull/97
+review rv-97 of PR #97, started on its own: needs-person, round 1 of 5, reviewer th-rv-needs-person-holds-review on gpt-6-astra
+round 1: the reviewer th-rv-needs-person-holds-review on gpt-6-astra approves. No second reviewer runs, though the change touches migrations/: no Claude model other than the builder's and the reviewer's could run
+no live check: e0e0e0e0e0e0 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live
+needs you: Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql.
+needs you: The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run.
+question holds-rv-97-af71cd87d35c9fd1: Land pull request #97, "feat(db): drop the legacy carts table", at e0e0e0e0e0e0, waiving database migrations that delete or rewrite existing data and a review without its second reviewer?
+  options: "Land", "Leave it"
+  reserved: database migrations that delete or rewrite existing data
+  needs a deployer
+output: pull-request https://github.com/ramtinJ95/storefront/pull/97
+--- stderr

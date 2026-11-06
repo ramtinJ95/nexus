@@ -1,0 +1,4 @@
+exit 0
+--- stdout
+Updated project storefront, auto review off, pipeline waits for approval. Existing threads keep their boot settings and grants; start a new thread to apply them.
+--- stderr

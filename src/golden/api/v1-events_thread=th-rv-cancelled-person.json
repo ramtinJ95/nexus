@@ -1,0 +1,34 @@
+200 application/json
+[
+  {
+    "id": "119",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-person",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 418,
+      "url": "https://github.com/ramtinJ95/nexus/pull/418",
+      "title": "feat(cli): nexus logs --follow",
+      "state": "open"
+    }
+  },
+  {
+    "id": "120",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-person",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-418",
+      "reviewer": "th-rv-cancelled-person-review",
+      "phase": {
+        "kind": "cancelled",
+        "who": "person",
+        "by": "laptop"
+      },
+      "round": 1
+    }
+  }
+]

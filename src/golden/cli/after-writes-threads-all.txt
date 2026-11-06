@@ -1,0 +1,59 @@
+exit 0
+--- stdout
+th-fts  deleted   -                                           pylon paused     field-notes  5d ago   Benchmark SQLite FTS against Tantivy
+th-search  archived  -                                           pylon paused     storefront   4d ago   Typo tolerance in product search
+th-alerts  archived  -                                           pylon paused     nexus        3d ago   Turn the daily report into health alerts
+th-banner  active    -                                           pylon absent     storefront   3d ago   Seasonal banner for the winter sale
+th-avif  active    -                                           pylon paused     storefront   2d ago   Serve product images as AVIF
+th-plan  active    -                                           pylon running    nexus        1d ago   Plan the maintenance wave
+th-graphs  active    working                                     pylon running    nexus        1d ago   Graph node health with 31 days of history
+th-flaky  active    -                                           pylon running    nexus        20h ago  Retry flaky probe reconnects
+th-rounding  active    working                                     pylon running    storefront   14h ago  Fix cart rounding on discounted lines
+th-backfill  active    stopped on its usage limit until 14:00 UTC  pylon running    nexus        11h ago  Rewrite the usage backfill
+th-sync  active    -                                           pylon running    field-notes  10h ago  Offline sync conflict resolver
+th-drain  active    -                                           pylon running    nexus        9h ago   Drain the queue before a deploy
+th-refunds  active    -                                           pylon running    storefront   8h ago   End-to-end tests for the refund flow
+th-lighthouse  active    -                                           pylon paused     storefront   7h ago   Product page Lighthouse pass
+th-cert  active    -                                           pylon failed     nexus        7h ago   Fix doctor's certificate check
+th-export  active    -                                           pylon paused     field-notes  6h ago   Export notes to Markdown
+th-applepay  active    working                                     pylon running    storefront   6h ago   Checkout: add the Apple Pay button
+th-applepay-review  active    -                                           pylon running    storefront   5h ago   Review of #88: feat(checkout): Apple Pay via the Payment Request Button
+th-attach  active    working                                     pylon running    nexus        5h ago   Keep nexus attach alive across a deploy
+th-dark  active    -                                           pylon running    field-notes  5h ago   Dark mode for the reader
+th-tokens  active    -                                           pylon running    nexus        5h ago   Rotate the pylon's GitHub token on wake
+th-spin  active    -                                           pylon running    nexus        4h ago   Investigate idle-CPU spin on paused pylons
+th-parked  active    -                                           pylon running    field-notes  3h ago   Re-index attachments after the schema change
+th-inventory  archived  -                                           pylon running    storefront   3h ago   Inventory sync webhook
+th-retention  active    -                                           pylon running    nexus        2h ago   Choose the metrics retention
+th-crash  active    -                                           pylon failed     field-notes  2h ago   Fix the crash on an empty notebook
+th-tagger  active    working                                     pylon running    field-notes  1h ago   Train the tagger on the October export
+th-sync-verify  active    -                                           pylon running    field-notes  7m ago   Live check of nexus/57 at gggggggggggg
+th-refunds-check  active    -                                           pylon running    storefront   5m ago   Check of nexus/90 at ffffffffffff
+th-rv-reviewing-failing  active    -                                           pylon absent     nexus        0s ago   fix(probe): report a full disk before a boot fails
+th-rv-merging  active    -                                           pylon absent     nexus        0s ago   fix(secrets): rotate the broker's signing key on deploy
+th-rv-deploying  active    -                                           pylon absent     nexus        0s ago   fix(control): close idle SSE streams after 10 minutes
+th-rv-fixing-failing  active    -                                           pylon absent     storefront   0s ago   fix(checkout): keep the shipping quote across a reload
+th-rv-checking  active    -                                           pylon absent     storefront   0s ago   feat(search): rank exact SKU matches first
+th-rv-merging-waiting  active    -                                           pylon absent     nexus        0s ago   feat(dashboard): show each node's release
+th-rv-cancelled-person  active    -                                           pylon absent     nexus        0s ago   feat(cli): nexus logs --follow
+th-rv-quoting-failing  active    -                                           pylon absent     storefront   0s ago   fix(orders): show refunds on the order page
+th-new-53  active    -                                           pylon absent     nexus        0s ago   Golden JSON start
+th-rv-needs-person-holds  active    -                                           pylon absent     storefront   0s ago   feat(db): drop the legacy carts table
+th-rv-closed  active    -                                           pylon absent     storefront   0s ago   feat(home): autoplay the hero video
+th-rv-cancelled-builder  archived  -                                           pylon absent     nexus        0s ago   chore: drop the v1 attach route
+th-rv-approved  active    -                                           pylon absent     storefront   0s ago   chore(deps): bump stripe-js to 5.2
+th-rv-cancelled-reviewer  active    -                                           pylon absent     storefront   0s ago   fix(cart): a coupon applies once per cart
+th-rv-merged  active    -                                           pylon absent     storefront   0s ago   fix(emails): the receipt's VAT line
+th-rv-rolling-back  active    -                                           pylon absent     nexus        0s ago   perf(registry): index events by thread
+th-rv-landed  active    -                                           pylon absent     nexus        0s ago   docs: the review loop's phases
+th-new-52  active    -                                           pylon absent     storefront   0s ago   Golden start
+th-rv-reviewing-second  active    -                                           pylon absent     nexus        0s ago   refactor(control): one module per node phase
+th-seeded-1  deleted   -                                           pylon absent     storefront   0s ago   Review of #100: fix(cart): a coupon applies once per cart
+th-rv-verifying  active    -                                           pylon absent     storefront   0s ago   feat(cart): save the cart for a signed-out shopper
+th-rv-reviewing-starting  active    -                                           pylon absent     nexus        0s ago   feat(cli): nexus threads --watch
+th-new-56  active    -                                           pylon absent     storefront   0s ago   Gift cards at checkout
+th-queued-1  queued    waits for th-graphs: PR #402 is open  node rj-firebat  nexus        0s ago   Prune events older than 90 days
+th-queued-2  queued    waits for th-rounding: PR #91 is open   node rj-firebat  storefront   0s ago   Wishlist sharing links
+th-new-57  queued    waits for th-queued-1: is queued        node rj-firebat  nexus        0s ago   Split loop.ts by node phase
+th-new-55  queued    waits for th-new-57: is queued        node rj-firebat  nexus        0s ago   Move cleanup onto the new model
+--- stderr

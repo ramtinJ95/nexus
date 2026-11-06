@@ -1,0 +1,105 @@
+200 text/html; charset=utf-8
+what differs from pages/index.html:
+@@ -848,7 +848,7 @@
+ <input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>43</span>
+ </label>
+ </div>
+-<div class="split" id="split">
++<div class="split peeking" id="split">
+ <p id="action-error" class="error split-error" role="alert" hidden>
+ </p>
+ <section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>
+@@ -2183,6 +2183,84 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </div>
+ </section>
+ <div class="split-peek" id="peek" data-live>
++<section class="peek" aria-labelledby="peek-h" data-peek-key="th-rv-merging">
++<header class="peek-head">
++<span class="peek-proj">nexus</span>
++<h2 id="peek-h">
++<span class="dot dot-muted" role="img" aria-label="not on its node" title="not on its node">
++</span>
++<span>fix(secrets): rotate the broker&#39;s signing key on deploy</span>
++</h2>
++<a class="btn btn-xs btn-primary" href="/threads/th-rv-merging">Open thread</a>
++<a class="icon-btn peek-close" href="/" data-peek="" aria-label="Close the preview" title="Close (Esc)">
++<svg class="i i-cross" viewBox="0 0 16 16" aria-hidden="true">
++<path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/>
++</svg>
++</a>
++</header>
++<ol class="life" aria-label="Where this work is">
++<li class="life-done">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Planned</span>
++</span>
++</li>
++<li class="life-done">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Queued</span>
++</span>
++</li>
++<li class="life-done">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Building</span>
++</span>
++</li>
++<li class="life-done">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">In review</span>
++</span>
++</li>
++<li class="life-now" aria-current="step">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Landing</span>
++</span>
++</li>
++<li class="life-todo">
++<span class="life-step">
++<span class="life-dot" aria-hidden="true">
++</span>
++<span class="life-name">Deployed</span>
++</span>
++</li>
++</ol>
++<div class="peek-next">
++<span class="peek-k">Next</span>
++<p>Merging.</p>
++</div>
++<dl class="peek-facts">
++<dt>State</dt>
++<dd>not on its node</dd>
++<dt>Pull request</dt>
++<dd>
++<a class="link" href="https://github.com/ramtinJ95/nexus/pull/413" target="_blank" rel="noreferrer">#413 fix(secrets): rotate the broker&#39;s signing key on deploy</a> <span class="dim">round 1 of 5</span>
++</dd>
++<dt>Pylon</dt>
++<dd>
++<span class="state">
++<span class="dot dot-muted" aria-hidden="true">
++</span>not on its node</span> <span class="dim">on</span> rj-firebat</dd>
++</dl>
++<p class="empty">No conversation yet.</p>
++</section>
+ </div>
+ <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
+ <div class="ov-head flight-head">
+@@ -2600,7 +2678,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+ </h3>
+ <ul class="fl-list">
+ <li>
+-<a class="fl-row dim" href="/?peek=th-rv-merging" data-peek="th-rv-merging">
++<a class="fl-row dim" href="/?peek=th-rv-merging" data-peek="th-rv-merging" aria-current="true">
+ <span class="dot dot-muted" role="img" aria-label="not on its node" title="not on its node">
+ </span>
+ <span class="fl-title">fix(secrets): rotate the broker&#39;s signing key on deploy</span>

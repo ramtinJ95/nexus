@@ -1,0 +1,27 @@
+exit 0
+--- stdout
+{
+  "id": "th-new-53",
+  "title": "Golden JSON start",
+  "project": "nexus",
+  "pylonId": "pylon-th-new-53",
+  "status": "active",
+  "conversationId": "43",
+  "startedBy": "nLAPTOP",
+  "createdAt": 1800014400000,
+  "agentTurnRunning": false,
+  "working": false,
+  "lastAgentActivityAt": 0,
+  "lastHumanActivityAt": 1800014400000,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "placement": {
+    "how": "default",
+    "node": "rj-firebat"
+  },
+  "setup": {
+    "how": "fresh",
+    "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+  }
+}
+--- stderr

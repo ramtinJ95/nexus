@@ -6,7 +6,7 @@ I'll reproduce the drop first. Reading the attach route and the client's reconne
 
 [tool] Bash {"command":"rg -n 'reconnect' src/control/attach.ts src/attach-wire.ts","description":"Find reconnect code"} (ok)
 
-[tool] Read {"file_path":"/home/user/workspace/repo/src/control/attach.ts"} (ok)
+[tool] Read {"file_path":"<repo>/src/control/attach.ts"} (ok)
 
 Found it. The socket closes with **1012** (service restart) during a deploy, and the client treats every close as final.
 
@@ -24,7 +24,7 @@ export function backoff(attempt: number, base = 500, cap = 30_000): number {
 
 3. Replay the screen from Herdr on reconnect so nothing is lost
 
-[tool] Edit {"file_path":"/home/user/workspace/repo/src/control/dashboard/terminal.js","old_string":"ws.onclose = () => done();","new_string":"ws.onclose = (e) => retryable(e.code) ? reconnect() : done();"} (ok)
+[tool] Edit {"file_path":"<repo>/src/control/dashboard/terminal.js","old_string":"ws.onclose = () => done();","new_string":"ws.onclose = (e) => retryable(e.code) ? reconnect() : done();"} (ok)
 
 [tool] Bash {"command":"npm test -- src/control/attach.test.ts","description":"Run attach tests"} (ok)
 

@@ -1,0 +1,57 @@
+200 application/json
+[
+  {
+    "id": "112",
+    "time": 1800014400000,
+    "thread": "th-rv-needs-person-holds",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 97,
+      "url": "https://github.com/ramtinJ95/storefront/pull/97",
+      "title": "feat(db): drop the legacy carts table",
+      "state": "open"
+    }
+  },
+  {
+    "id": "113",
+    "time": 1800014400000,
+    "thread": "th-rv-needs-person-holds",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-97",
+      "reviewer": "th-rv-needs-person-holds-review",
+      "phase": {
+        "kind": "needs-person",
+        "cause": "policy",
+        "reasons": [
+          "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql.",
+          "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
+        ],
+        "holds": [
+          {
+            "code": "reserved-path:destructive-migration",
+            "text": "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql."
+          },
+          {
+            "code": "no-second-reviewer",
+            "text": "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
+          }
+        ]
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "114",
+    "time": 1800014400000,
+    "thread": "th-rv-needs-person-holds",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  }
+]

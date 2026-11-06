@@ -1010,5 +1010,659 @@
       "state": "waiting-for-idle",
       "reason": "2 pylons have running turns"
     }
+  },
+  {
+    "id": "84",
+    "time": 1800014400000,
+    "thread": "th-rv-reviewing-starting",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 410,
+      "url": "https://github.com/ramtinJ95/nexus/pull/410",
+      "title": "feat(cli): nexus threads --watch",
+      "state": "open"
+    }
+  },
+  {
+    "id": "85",
+    "time": 1800014400000,
+    "thread": "th-rv-reviewing-starting",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-410",
+      "reviewer": "th-rv-reviewing-starting-review",
+      "phase": {
+        "kind": "reviewing",
+        "check": {
+          "startedAt": 1800014340000,
+          "thread": null
+        }
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "86",
+    "time": 1800014400000,
+    "thread": "th-rv-reviewing-failing",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 411,
+      "url": "https://github.com/ramtinJ95/nexus/pull/411",
+      "title": "fix(probe): report a full disk before a boot fails",
+      "state": "open"
+    }
+  },
+  {
+    "id": "87",
+    "time": 1800014400000,
+    "thread": "th-rv-reviewing-failing",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-411",
+      "reviewer": "th-rv-reviewing-failing-review",
+      "phase": {
+        "kind": "reviewing",
+        "failing": {
+          "count": 2,
+          "last": "429 Too Many Requests: rate limit reached for gpt-6-astra",
+          "retryAt": 1800014580000
+        }
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "88",
+    "time": 1800014400000,
+    "thread": "th-rv-reviewing-second",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 412,
+      "url": "https://github.com/ramtinJ95/nexus/pull/412",
+      "title": "refactor(control): one module per node phase",
+      "state": "open"
+    }
+  },
+  {
+    "id": "89",
+    "time": 1800014400000,
+    "thread": "th-rv-reviewing-second",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-412",
+      "reviewer": "th-rv-reviewing-second-review",
+      "second": "th-rv-reviewing-second-second",
+      "phase": {
+        "kind": "reviewing"
+      },
+      "round": 2
+    }
+  },
+  {
+    "id": "90",
+    "time": 1800014400000,
+    "thread": "th-rv-fixing-failing",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 92,
+      "url": "https://github.com/ramtinJ95/storefront/pull/92",
+      "title": "fix(checkout): keep the shipping quote across a reload",
+      "state": "open"
+    }
+  },
+  {
+    "id": "91",
+    "time": 1800014400000,
+    "thread": "th-rv-fixing-failing",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-92",
+      "reviewer": "th-rv-fixing-failing-review",
+      "second": "th-rv-fixing-failing-second",
+      "phase": {
+        "kind": "fixing",
+        "failing": {
+          "count": 1,
+          "last": "500 Internal Server Error from claude-opus-5-5",
+          "retryAt": 1800014580000
+        }
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "92",
+    "time": 1800014400000,
+    "thread": "th-rv-checking",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 93,
+      "url": "https://github.com/ramtinJ95/storefront/pull/93",
+      "title": "feat(search): rank exact SKU matches first",
+      "state": "open"
+    }
+  },
+  {
+    "id": "93",
+    "time": 1800014400000,
+    "thread": "th-rv-checking",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-93",
+      "reviewer": "th-rv-checking-review",
+      "second": "th-rv-checking-second",
+      "phase": {
+        "kind": "checking",
+        "startedAt": 1800014220000,
+        "thread": "th-rv-checking-check"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "94",
+    "time": 1800014400000,
+    "thread": "th-rv-verifying",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 94,
+      "url": "https://github.com/ramtinJ95/storefront/pull/94",
+      "title": "feat(cart): save the cart for a signed-out shopper",
+      "state": "open"
+    }
+  },
+  {
+    "id": "95",
+    "time": 1800014400000,
+    "thread": "th-rv-verifying",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-94",
+      "reviewer": "th-rv-verifying-review",
+      "phase": {
+        "kind": "verifying",
+        "startedAt": 1800014280000,
+        "thread": null,
+        "refused": "rj-firebat has 2 GiB free, under the 4 GiB a verify pylon needs"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "96",
+    "time": 1800014400000,
+    "thread": "th-rv-quoting-failing",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 95,
+      "url": "https://github.com/ramtinJ95/storefront/pull/95",
+      "title": "fix(orders): show refunds on the order page",
+      "state": "open"
+    }
+  },
+  {
+    "id": "97",
+    "time": 1800014400000,
+    "thread": "th-rv-quoting-failing",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-95",
+      "reviewer": "th-rv-quoting-failing-review",
+      "phase": {
+        "kind": "quoting",
+        "asked": null,
+        "failing": {
+          "count": 4,
+          "last": "429 Too Many Requests: rate limit reached for gpt-6-astra",
+          "retryAt": 1800014580000
+        }
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "98",
+    "time": 1800014400000,
+    "thread": "th-rv-approved",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 96,
+      "url": "https://github.com/ramtinJ95/storefront/pull/96",
+      "title": "chore(deps): bump stripe-js to 5.2",
+      "state": "open"
+    }
+  },
+  {
+    "id": "99",
+    "time": 1800014400000,
+    "thread": "th-rv-approved",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-96",
+      "reviewer": "th-rv-approved-review",
+      "phase": {
+        "kind": "approved"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "100",
+    "time": 1800014400000,
+    "thread": "th-rv-approved",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  },
+  {
+    "id": "101",
+    "time": 1800014400000,
+    "thread": "th-rv-merging",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 413,
+      "url": "https://github.com/ramtinJ95/nexus/pull/413",
+      "title": "fix(secrets): rotate the broker's signing key on deploy",
+      "state": "open"
+    }
+  },
+  {
+    "id": "102",
+    "time": 1800014400000,
+    "thread": "th-rv-merging",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-413",
+      "reviewer": "th-rv-merging-review",
+      "phase": {
+        "kind": "merging",
+        "authorized": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "103",
+    "time": 1800014400000,
+    "thread": "th-rv-merging",
+    "project": "nexus",
+    "kind": "review.waived",
+    "payload": {
+      "review": "rv-413",
+      "repo": "ramtinJ95/nexus",
+      "pr": 413,
+      "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+      "holds": [
+        "Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
+      ],
+      "codes": [
+        "reserved-path:secrets"
+      ],
+      "by": "laptop",
+      "at": 1800014160000
+    }
+  },
+  {
+    "id": "104",
+    "time": 1800014400000,
+    "thread": "th-rv-merging-waiting",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 414,
+      "url": "https://github.com/ramtinJ95/nexus/pull/414",
+      "title": "feat(dashboard): show each node's release",
+      "state": "open"
+    }
+  },
+  {
+    "id": "105",
+    "time": 1800014400000,
+    "thread": "th-rv-merging-waiting",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-414",
+      "reviewer": "th-rv-merging-waiting-review",
+      "phase": {
+        "kind": "merging",
+        "authorized": null,
+        "waiting": "another landing that deploys is under way, #413"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "106",
+    "time": 1800014400000,
+    "thread": "th-rv-deploying",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 415,
+      "url": "https://github.com/ramtinJ95/nexus/pull/415",
+      "title": "fix(control): close idle SSE streams after 10 minutes",
+      "state": "open"
+    }
+  },
+  {
+    "id": "107",
+    "time": 1800014400000,
+    "thread": "th-rv-deploying",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-415",
+      "reviewer": "th-rv-deploying-review",
+      "phase": {
+        "kind": "deploying",
+        "commit": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "previous": null,
+        "requested": false,
+        "deadline": 1800015000000
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "108",
+    "time": 1800014400000,
+    "thread": "th-rv-rolling-back",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 416,
+      "url": "https://github.com/ramtinJ95/nexus/pull/416",
+      "title": "perf(registry): index events by thread",
+      "state": "open"
+    }
+  },
+  {
+    "id": "109",
+    "time": 1800014400000,
+    "thread": "th-rv-rolling-back",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-416",
+      "reviewer": "th-rv-rolling-back-review",
+      "phase": {
+        "kind": "rolling-back",
+        "commit": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+        "previous": "fafafafafafafafafafafafafafafafafafafafa",
+        "why": "rj-firebat's control plane did not turn healthy in 5 minutes: the migration timed out",
+        "requested": true,
+        "deadline": 1800014760000
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "110",
+    "time": 1800014400000,
+    "thread": "th-rv-landed",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 417,
+      "url": "https://github.com/ramtinJ95/nexus/pull/417",
+      "title": "docs: the review loop's phases",
+      "state": "open"
+    }
+  },
+  {
+    "id": "111",
+    "time": 1800014400000,
+    "thread": "th-rv-landed",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-417",
+      "reviewer": "th-rv-landed-review",
+      "phase": {
+        "kind": "landed",
+        "commit": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "112",
+    "time": 1800014400000,
+    "thread": "th-rv-needs-person-holds",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 97,
+      "url": "https://github.com/ramtinJ95/storefront/pull/97",
+      "title": "feat(db): drop the legacy carts table",
+      "state": "open"
+    }
+  },
+  {
+    "id": "113",
+    "time": 1800014400000,
+    "thread": "th-rv-needs-person-holds",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-97",
+      "reviewer": "th-rv-needs-person-holds-review",
+      "phase": {
+        "kind": "needs-person",
+        "cause": "policy",
+        "reasons": [
+          "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql.",
+          "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
+        ],
+        "holds": [
+          {
+            "code": "reserved-path:destructive-migration",
+            "text": "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql."
+          },
+          {
+            "code": "no-second-reviewer",
+            "text": "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
+          }
+        ]
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "114",
+    "time": 1800014400000,
+    "thread": "th-rv-needs-person-holds",
+    "project": "storefront",
+    "kind": "attention.changed",
+    "payload": {
+      "attention": "decision"
+    }
+  },
+  {
+    "id": "115",
+    "time": 1800014400000,
+    "thread": "th-rv-merged",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 98,
+      "url": "https://github.com/ramtinJ95/storefront/pull/98",
+      "title": "fix(emails): the receipt's VAT line",
+      "state": "open"
+    }
+  },
+  {
+    "id": "116",
+    "time": 1800014400000,
+    "thread": "th-rv-merged",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-98",
+      "reviewer": "th-rv-merged-review",
+      "phase": {
+        "kind": "merged"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "117",
+    "time": 1800014400000,
+    "thread": "th-rv-closed",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 99,
+      "url": "https://github.com/ramtinJ95/storefront/pull/99",
+      "title": "feat(home): autoplay the hero video",
+      "state": "open"
+    }
+  },
+  {
+    "id": "118",
+    "time": 1800014400000,
+    "thread": "th-rv-closed",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-99",
+      "reviewer": "th-rv-closed-review",
+      "phase": {
+        "kind": "closed"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "119",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-person",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 418,
+      "url": "https://github.com/ramtinJ95/nexus/pull/418",
+      "title": "feat(cli): nexus logs --follow",
+      "state": "open"
+    }
+  },
+  {
+    "id": "120",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-person",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-418",
+      "reviewer": "th-rv-cancelled-person-review",
+      "phase": {
+        "kind": "cancelled",
+        "who": "person",
+        "by": "laptop"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "121",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-builder",
+    "project": "nexus",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/nexus",
+      "number": 419,
+      "url": "https://github.com/ramtinJ95/nexus/pull/419",
+      "title": "chore: drop the v1 attach route",
+      "state": "open"
+    }
+  },
+  {
+    "id": "122",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-builder",
+    "project": "nexus",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-419",
+      "reviewer": "th-rv-cancelled-builder-review",
+      "phase": {
+        "kind": "cancelled",
+        "who": "builder",
+        "status": "archived"
+      },
+      "round": 1
+    }
+  },
+  {
+    "id": "123",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-reviewer",
+    "project": "storefront",
+    "kind": "pull-request.linked",
+    "payload": {
+      "repo": "ramtinJ95/storefront",
+      "number": 100,
+      "url": "https://github.com/ramtinJ95/storefront/pull/100",
+      "title": "fix(cart): a coupon applies once per cart",
+      "state": "open"
+    }
+  },
+  {
+    "id": "124",
+    "time": 1800014400000,
+    "thread": "th-rv-cancelled-reviewer",
+    "project": "storefront",
+    "kind": "review.changed",
+    "payload": {
+      "review": "rv-100",
+      "reviewer": "th-seeded-1",
+      "phase": {
+        "kind": "cancelled",
+        "who": "reviewer",
+        "status": "deleted"
+      },
+      "round": 1
+    }
   }
 ]

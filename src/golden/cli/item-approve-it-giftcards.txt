@@ -1,0 +1,4 @@
+exit 0
+--- stdout
+Approved it-giftcards. It is queued: starts on the queue's next pass.
+--- stderr

@@ -1,0 +1,17 @@
+exit 0
+--- stdout
+th-rv-reviewing-failing  fix(probe): report a full disk before a boot fails
+project: nexus
+attention: none
+status: active
+pylon: pylon-th-rv-reviewing-failing on rj-firebat, absent, observed 0s ago
+attach: nexus attach th-rv-reviewing-failing
+size: 2 CPUs, 4 GiB memory, 20 GiB disk
+placement: rj-firebat, the project's default node
+setup: fresh boot runs .nexus/setup, because the control plane could not read .nexus/setup at main: this test has no remote
+PR watch: off (no control-plane GitHub token configured)
+PR #411: fix(probe): report a full disk before a boot fails — open, checks passing, review none https://github.com/ramtinJ95/nexus/pull/411
+review rv-411 of PR #411, started on its own: reviewing, round 1 of 5, reviewer th-rv-reviewing-failing-review on gpt-6-astra, the reviewer's model is failing (2 in a row, last: 429 Too Many Requests: rate limit reached for gpt-6-astra), retrying at 12:03 UTC
+round 1: the reviewer th-rv-reviewing-failing-review on gpt-6-astra has not answered, and the second reviewer on claude-sonnet-5-5 is starting, after a start that failed: no node had room for a 4 GiB pylon. It reviews since the change touches src/probe/
+output: pull-request https://github.com/ramtinJ95/nexus/pull/411
+--- stderr

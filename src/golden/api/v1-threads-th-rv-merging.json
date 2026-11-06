@@ -1,0 +1,149 @@
+200 application/json
+{
+  "thread": {
+    "id": "th-rv-merging",
+    "title": "fix(secrets): rotate the broker's signing key on deploy",
+    "project": "nexus",
+    "pylonId": "pylon-th-rv-merging",
+    "status": "active",
+    "conversationId": "30",
+    "startedBy": "nLAPTOP",
+    "createdAt": 1800014400000,
+    "agentTurnRunning": false,
+    "lastAgentActivityAt": 0,
+    "lastHumanActivityAt": 1800014400000,
+    "seenAt": null,
+    "lastReplyAt": null,
+    "placement": {
+      "how": "default",
+      "node": "rj-firebat"
+    },
+    "setup": {
+      "how": "fresh",
+      "reason": "the control plane could not read .nexus/setup at main: this test has no remote"
+    },
+    "working": false
+  },
+  "attention": null,
+  "seenAt": null,
+  "lastReplyAt": null,
+  "desired": "running",
+  "pylon": {
+    "grantsOutdated": false,
+    "id": "pylon-th-rv-merging",
+    "node": "rj-firebat",
+    "failed": null,
+    "observedAt": "2027-01-15T12:00:00.000Z",
+    "resources": {
+      "cpus": 2,
+      "memoryGiB": 4,
+      "diskGiB": 20
+    },
+    "actualState": "absent",
+    "retryRefused": null
+  },
+  "sessions": [],
+  "previews": [],
+  "ports": [],
+  "outputs": [
+    {
+      "thread": "th-rv-merging",
+      "kind": "pull-request",
+      "ref": "https://github.com/ramtinJ95/nexus/pull/413"
+    }
+  ],
+  "prWatch": {
+    "enabled": false,
+    "stopped": false,
+    "error": null
+  },
+  "pullRequests": [
+    {
+      "repo": "ramtinJ95/nexus",
+      "number": 413,
+      "title": "fix(secrets): rotate the broker's signing key on deploy",
+      "url": "https://github.com/ramtinJ95/nexus/pull/413",
+      "state": "open",
+      "checks": "passing",
+      "review": "none",
+      "conflict": false
+    }
+  ],
+  "review": {
+    "id": "rv-413",
+    "builder": "th-rv-merging",
+    "reviewer": "th-rv-merging-review",
+    "pr": {
+      "repo": "ramtinJ95/nexus",
+      "number": 413,
+      "url": "https://github.com/ramtinJ95/nexus/pull/413",
+      "title": "fix(secrets): rotate the broker's signing key on deploy",
+      "branch": "nexus/413"
+    },
+    "reviewerKind": "harness",
+    "models": {
+      "builder": "claude-opus-5-5",
+      "reviewer": "gpt-6-astra"
+    },
+    "maxRounds": 5,
+    "land": {
+      "requestedBy": "laptop"
+    },
+    "auto": true,
+    "merged": null,
+    "waiver": {
+      "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+      "holds": [
+        "Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
+      ],
+      "codes": [
+        "reserved-path:secrets"
+      ],
+      "by": "laptop",
+      "at": 1800014160000,
+      "change": null
+    },
+    "expect": "rv-413:t",
+    "sent": 2,
+    "outbox": null,
+    "asked": "",
+    "since": 1800013800000,
+    "nudges": 0,
+    "startedAt": 1800007200000,
+    "rounds": [
+      {
+        "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+        "base": "main",
+        "verdict": {
+          "token": "t",
+          "verdict": "approve",
+          "findings": [],
+          "reserved": [],
+          "notCheckedLive": null
+        },
+        "check": {
+          "passed": true,
+          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
+        },
+        "answers": null,
+        "live": {
+          "kind": "ran",
+          "thread": "th-verify-413",
+          "passed": true,
+          "output": "ok rotate: new key in 0.8 s"
+        }
+      }
+    ],
+    "phase": {
+      "kind": "merging",
+      "authorized": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d"
+    }
+  },
+  "questions": [],
+  "judgments": [],
+  "planning": false,
+  "attach": "herdr --session nexus",
+  "agent": {
+    "parkedTasks": 0
+  }
+}
