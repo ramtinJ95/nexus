@@ -24,13 +24,23 @@ const missing = (paths: Iterable<string>) => [...new Set(paths)].filter((path) =
 const snapshotFile = join(import.meta.dirname, "contracts.snapshot.json");
 const snapshot = JSON.parse(readFileSync(snapshotFile, "utf8")) as Record<string, string[]>;
 const updating = process.env["NEXUS_UPDATE_CONTRACTS"] === "1";
-/** Fails with the lines `actual` adds to or drops from the snapshot's `key`, or writes them when updating. */
-const pinned = (key: string, actual: string[]) => {
+/**
+ * Fails with the lines `actual` adds to or drops from the snapshot's `key`, or writes them when updating. `dropped`
+ * says what a dropped line means when regenerating the snapshot is the wrong fix for it.
+ */
+const pinned = (key: string, actual: string[], dropped?: (line: string) => string) => {
   const was = snapshot[key] ?? [];
   snapshot[key] = actual;
   if (updating) return writeFileSync(snapshotFile, `${JSON.stringify(snapshot, null, 2)}\n`);
-  const changed = [...actual.filter((line) => !was.includes(line)).map((line) => `+ ${line}`), ...was.filter((line) => !actual.includes(line)).map((line) => `- ${line}`)];
+  const gone = was.filter((line) => !actual.includes(line));
+  if (dropped !== undefined && gone.length > 0) assert.fail(gone.map(dropped).join("\n"));
+  const changed = [...actual.filter((line) => !was.includes(line)).map((line) => `+ ${line}`), ...gone.map((line) => `- ${line}`)];
   assert.deepEqual(changed, [], `${key} moved. If that is meant, rerun with NEXUS_UPDATE_CONTRACTS=1 and review the snapshot's diff`);
+};
+
+const droppedHold = (line: string) => {
+  const [path, code] = line.split(": ");
+  return `a reserved hold was dropped for ${path} (${code}): update reservedPaths in src/control/policy.ts to its new path, or say in the PR why the hold should go`;
 };
 
 /** Type-only imports are erased when Node strips types, so they load nothing. */
@@ -140,8 +150,8 @@ test("health.ts reads the release-commit file release.sh writes at the release's
 test("the reserved cases each tracked file can hold a landing for are the snapshot's", () => {
   const review = testReview();
   const cases = tracked.map((path) => ({ path, codes: headHolds({ review, nexus: true, files: [{ path, previous: null, patch: "" }] }).map((hold) => hold.code).sort() }))
-    .filter(({ codes }) => codes.length > 0).map(({ path, codes }) => `${path}: ${codes.join(" ")}`);
-  pinned("holdsByPath", cases);
+    .flatMap(({ path, codes }) => codes.map((code) => `${path}: ${code}`));
+  pinned("holdsByPath", cases, droppedHold);
 });
 
 test("the files outside src/pylon-vm that import the fork are the snapshot's", () => {
