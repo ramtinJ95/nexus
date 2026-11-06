@@ -123,7 +123,7 @@ A scheduler that places work on its own still needs:
 
 When a pylon's controller crashed, the only way to see why was to SSH to its node as root and read `controller.log`, and Tailscale SSH's login check stops an agent from doing that on `rj-firebat`. So a coordinator, an agent or the person could not tell a node's failure from the code's, as with the 13-second guest-command timeouts on `infra-testbench` on 2026-10-27 that only an SSH session found. Two read-only paths now answer it.
 
-A broken pylon's observation carries the last 60 lines, at most 8 KiB, of its instance's controller log, and the planner's failure for it ends with them, as a failed job's ends with its log. The registry stores the failure, so the lines outlive the node and a control-plane restart. The probe redacts the text first: the values it holds, Gondolin's placeholders, and the shapes of common credentials. It cannot know a secret it does not hold that has no known shape, so a setup script that prints a password in plain text still leaks it. [The CLI reference](cli.md#node-diagnostics-0360) lists what it catches.
+A broken pylon's observation carries the last 60 lines, at most 8 KiB, of its instance's controller log, and the planner's failure for it ends with them, as a failed job's ends with its log. The registry stores the failure, so the lines outlive the node and a control-plane restart. The probe redacts the text first: the values it holds, Gondolin's placeholders, and the shapes of common credentials. It cannot know a secret it does not hold that has no known shape, so a setup script that prints a password in plain text still leaks it. [The CLI reference](cli.md#node-diagnostics) lists what it catches.
 
 Each snapshot's capacity lists every filesystem Nexus writes to on the node, once, with the paths on it: the probe's state root `/var/lib/nexus/pylons`, where the pylons' disks and overlays are, the artifact store `/var/lib/nexus/artifacts`, the probe user's home `/var/lib/nexus`, which holds the Docker and Gondolin caches of image builds, `/var/lib/nexus-control` on the control-plane host, and `/opt/nexus/releases`. The probe reads each with `statfs`, groups the paths by device, and leaves out a path that does not exist on the node. A filesystem is low when it has under 10% or under 20 GiB free, whichever is larger, and the node's row in `nexus nodes` and in the dashboard's sidebar says so.
 
@@ -450,7 +450,7 @@ A thread the person talks to is theirs, and the pass leaves it alone. Once the p
 
 A Claude worker's turn can die with the work unfinished, and nothing else moves the thread. On 2026-11-04 builder th-3395408dcae4 reported `session.turn-started` at 11:15:22Z and `session.ended` three seconds later: no reply was recorded, so its attention went to none, the nudge had no turn end to judge, no pylon failed for a judgment, and the pylon idled until it paused, for over 7 hours, until the person's message resumed the session. On 2026-11-01 a builder's turn ended on a model API timeout after Claude Code's own retries, which records a reply, and it waited until someone read it. The control plane now resumes such a turn on its own (`src/control/resume.ts`).
 
-The registry marks a turn dead from what it already has. A `session.ended` whose session's previous report was a turn start or a heartbeat, so its turn had not ended, records when in the worker's row. A turn that ends with a background shell or subagent still running reports a heartbeat for its end, for up to 2 hours, so a session that ends after a turn whose end or interrupt the transcript shows did not die. A turn whose newest entry that is not bookkeeping is an error notice, as `Conversation.failure` reads it, ended on a model error, unless the notice is a usage limit, which [the usage-limit stop](cli.md#usage-limit-stops-0210) has. Either holds until a newer turn starts, by the pylon's clock, and shows as `Thread.turnDied`.
+The registry marks a turn dead from what it already has. A `session.ended` whose session's previous report was a turn start or a heartbeat, so its turn had not ended, records when in the worker's row. A turn that ends with a background shell or subagent still running reports a heartbeat for its end, for up to 2 hours, so a session that ends after a turn whose end or interrupt the transcript shows did not die. A turn whose newest entry that is not bookkeeping is an error notice, as `Conversation.failure` reads it, ended on a model error, unless the notice is a usage limit, which [the usage-limit stop](cli.md#usage-limit-stops) has. Either holds until a newer turn starts, by the pylon's clock, and shows as `Thread.turnDied`.
 
 A pass every 15 seconds reads the active and idle threads and those with a resume record. It resumes builders only: Claude worker threads the person started, not reviewers, checks or verify threads, which belong to the review loop, and not planning threads, which run in the harness, where no session ends. A builder whose review the loop handed to the person, `needs-person`, is the person's, so it gets no resume. Until a review finishes, the loop sends a builder whose turn ended on a model error its request again, with waits of its own, or its next message, which resumes it as well, so such a builder gets no resume for one. A session that ended is not a model failure to the loop, which would wait 3 hours for an answer, so that builder is still resumed, and its next turn answers the loop's request. A reviewer whose session ended does wait those 3 hours. Only a death in the last hour, by the pylon's clock against the control plane's, is resumed, so the first pass after a deploy leaves the turns that died long before alone rather than resume work the person may have moved on from. A turn that died gets one fixed message, prefixed `[Nexus resume — automated, not a message from the person]`, typed into the session, which starts Claude again where the session ended. The first goes a minute after the death, the second 10 and the third 30 minutes after theirs, so three resumes span the better part of an hour of a provider's outage, on top of the minutes Claude Code retries a failed call itself. A fourth death in a row is the person's: the record says why in a line, the attention becomes `decision`, and the thread page and Needs you show a card to write to it. A resume types a prompt, whose turn starts at once whatever the model does, so one that starts no turn within 10 minutes goes to the person too, and so does one the session takes for 10 minutes, as while it waits at a dialog. A turn that ends without dying ends the count.
 
@@ -458,7 +458,7 @@ Each message goes under the request ID `resume:<thread>:<death>`, where the deat
 
 ## Queued threads
 
-`nexus start --after A,B` records a thread now and starts it once A's and B's pull requests have merged, landed by the review loop or merged outside it. Builders branch from the default branch as it is when they start, so the start waits for the merge and not for a deploy. [The CLI's contract](cli.md#queued-threads-0290) has the rules and the types, and `src/control/queue.ts` holds them.
+`nexus start --after A,B` records a thread now and starts it once A's and B's pull requests have merged, landed by the review loop or merged outside it. Builders branch from the default branch as it is when they start, so the start waits for the merge and not for a deploy. [The CLI's contract](cli.md#queued-threads) has the rules and the types, and `src/control/queue.ts` holds them.
 
 A queued thread is not a `threads` row. It is a record in the registry's `queued_threads` table, keyed by the ID the thread will have, holding the start request as it was asked for, with its size filled in from the project's, the predecessors and a Nexus agent thread's first message. So nothing that reads threads sees it: the planner boots no pylon for it, placement counts no room for it, and the PR watch and the review loop pass it by. Only the API's views, the CLI and the dashboard show it.
 
@@ -468,7 +468,7 @@ What each predecessor means is read from its thread, its review and the PR watch
 
 ## Pipeline items
 
-A pipeline item is a brief lined up ahead, with the items whose work must merge first (`src/control/pipeline.ts`). It is a record in the registry's `pipeline_items` table, and it only ever becomes a queued thread: the queue starts it and the review loop reviews, lands and archives it, as for any builder. [The CLI's contract](cli.md#pipeline-items-0370) has the rules, the phases and the types.
+A pipeline item is a brief lined up ahead, with the items whose work must merge first (`src/control/pipeline.ts`). It is a record in the registry's `pipeline_items` table, and it only ever becomes a queued thread: the queue starts it and the review loop reviews, lands and archives it, as for any builder. [The CLI's contract](cli.md#pipeline-items) has the rules, the phases and the types.
 
 A pass every 15 seconds, beside the queue's, goes through the items in the order they were added. An item whose project runs the pipeline, that the person approved where the project asks for that, and whose items ahead each have a thread, is added to the queue after those threads. It is added under the request ID `pipeline:<item>`, which the queued record's own transaction stores, so the item's thread is whatever that request made: a pass after a crash finds it and adds nothing, and the item record never holds a thread ID that could disagree. The person who added the item starts its thread, so its `startedBy` and the policy's checks are theirs.
 
@@ -480,7 +480,7 @@ Which projects the pipeline runs for is `Project.pipeline`, set with `nexus proj
 
 ## Failure judgments
 
-When a builder's pylon fails in a project that runs the pipeline, a model judges whether the failure is an infrastructure fault worth retrying, worth retrying on another node, or one for the person, and the control plane acts on the judgment (`src/control/judgment.ts`). [The CLI's contract](cli.md#failure-judgments-0390) has the answers, the brief's facts and the types.
+When a builder's pylon fails in a project that runs the pipeline, a model judges whether the failure is an infrastructure fault worth retrying, worth retrying on another node, or one for the person, and the control plane acts on the judgment (`src/control/judgment.ts`). [The CLI's contract](cli.md#failure-judgments) has the answers, the brief's facts and the types.
 
 The judgment is a conversation in the control plane's harness, created with no tools, no extensions and no `cwd`, and with no `nexus.thread` document, so it has no pylon and no registry thread. Its environment factory returns no environment for a conversation without a `cwd`, so building one never reaches a pylon. It can read its brief and answer, and nothing more. The control plane writes the brief from its records: the thread, the whole `failed` text with the controller log it ends with, the pylon's failed jobs, whether its node lists it and whether its disk holds a checkpoint, the node's health read live through its probe with a 5-second limit, the room each other node has for the pylon as placement weighs it, the thread's earlier judgments, and what each answer would do and whether it can run. A fact the brief lacks is the judgment's reason to answer `person` and name it, and a later change adds it to the brief.
 
@@ -525,7 +525,7 @@ A planning thread is a Nexus agent thread, whose replies the control plane's har
 
 ## Retry-safe starts
 
-A start with a request ID can be repeated safely, so a client that lost an answer, or a pipeline step that crashed after it asked, sends the same start again instead of checking what exists. The control plane stores the request ID and a hash of the start's body in the transaction that inserts the thread's row, or the queued record, so a start that failed stores nothing and the ID stays free, and one that succeeded is found by every repeat. A repeat that arrives while the first is still starting shares it in the API's memory, which is enough because one control-plane process serves the API. An immediate start's first message goes to the thread under `brief:<thread>` before the start answers, and a repeat sends it again under that ID, which the harness answers with its first submission, so a start and its brief succeed or retry together without a record of whether the message went. The request IDs are global rather than per caller, because every caller is the person's own machine or the control plane. [The CLI reference](cli.md#retry-safe-starts-0340) has the contract.
+A start with a request ID can be repeated safely, so a client that lost an answer, or a pipeline step that crashed after it asked, sends the same start again instead of checking what exists. The control plane stores the request ID and a hash of the start's body in the transaction that inserts the thread's row, or the queued record, so a start that failed stores nothing and the ID stays free, and one that succeeded is found by every repeat. A repeat that arrives while the first is still starting shares it in the API's memory, which is enough because one control-plane process serves the API. An immediate start's first message goes to the thread under `brief:<thread>` before the start answers, and a repeat sends it again under that ID, which the harness answers with its first submission, so a start and its brief succeed or retry together without a record of whether the message went. The request IDs are global rather than per caller, because every caller is the person's own machine or the control plane. [The CLI reference](cli.md#retry-safe-starts) has the contract.
 
 ## Who starts a thread
 
@@ -749,7 +749,7 @@ skipped records. The CLI consumes those without printing them and waits for
 stdout drain before reading more response data or advancing its cursor. Network
 failure cannot start another reader around a pending output write.
 
-### Claude launch policy (0.16.0)
+### Claude launch policy
 
 Before every start/resume, merge `model: "claude-opus-5-5"` and
 `attribution: { commit: "", pr: "" }` into Claude settings, retaining unrelated
@@ -826,7 +826,7 @@ Other calls a probe restart can cut:
 - Opening a session for a person, with no prompt, opens a second workspace if the
   person asks again after a lost answer.
 
-### Claude worker conversations and steering (0.17.0)
+### Claude worker conversations and steering
 
 A Claude worker thread has no harness conversation, so its conversation is the
 transcript Claude Code writes for the worker's session in the pylon. The control
@@ -931,7 +931,7 @@ human activity: it wakes a paused pylon, and clients retry the 409 until it runs
 the same request ID. A message that comes while the wake still relaunches the session
 waits for the relaunch. Captures are in [`docs/verification/claude-thread-streaming/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/claude-thread-streaming/).
 
-### Usage-limit stops (0.21.0)
+### Usage-limit stops
 
 Claude workers share the project's Claude subscription, so when it runs out, every
 worker stops mid-task at once. Claude Code ends each turn with a synthetic assistant
