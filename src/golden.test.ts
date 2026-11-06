@@ -72,7 +72,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     const answered = s.registry.answerQuestion(question.id, { option, by, at: Date.now() });
     const r = s.registry.review(question.thread)!;
     if (option === "Land") {
-      const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: Date.now() };
+      const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: Date.now(), change: null };
       s.registry.saveReview({ ...r, waiver, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } }, [], r);
     }
     return answered;

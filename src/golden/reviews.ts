@@ -45,7 +45,7 @@ const specs: Spec[] = [
   {
     key: "rv-reviewing-starting", project: "nexus", number: 410, title: "feat(cli): nexus threads --watch",
     review: () => ({
-      rounds: [round("1a")],
+      rounds: [round("1a", { secondVerdict: null })],
       second: { kind: "starting", rule: "the change touches src/cli/", model: "claude-sonnet-5-5", since: Date.now() - 2 * minute, tried: null, why: null },
       phase: { kind: "reviewing", check: { startedAt: Date.now() - minute, thread: null } },
     }),
@@ -53,7 +53,7 @@ const specs: Spec[] = [
   {
     key: "rv-reviewing-failing", project: "nexus", number: 411, title: "fix(probe): report a full disk before a boot fails",
     review: () => ({
-      rounds: [round("2b")],
+      rounds: [round("2b", { secondVerdict: null })],
       second: { kind: "starting", rule: "the change touches src/probe/", model: "claude-sonnet-5-5", since: Date.now() - 15 * minute, tried: Date.now() - 5 * minute, why: "no node had room for a 4 GiB pylon" },
       phase: { kind: "reviewing", failing: failing(2, "429 Too Many Requests: rate limit reached for gpt-6-astra") },
     }),

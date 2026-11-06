@@ -132,7 +132,10 @@ function pathHolds(files: readonly ChangedFile[]): Hold[] {
   return [...hits].map(([c, paths]) => hold(`reserved-path:${c}`, `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`));
 }
 
-/** The holds the latest round's head decides, as recorded, or the record's alone for a round approved before Nexus recorded them, until the loop reads them. */
+/**
+ * The holds the latest round's head decides, as recorded, or the record's alone until the loop records them: for a
+ * round whose checks have not passed yet, and for one approved before Nexus recorded them, until the loop reads them.
+ */
 const headHeld = (review: Review): Hold[] => review.rounds.at(-1)!.heldAt?.holds ?? [...sameModel(review), ...recordedHolds(review)];
 
 /**
@@ -246,7 +249,6 @@ export function carryWaiver(review: Review, change: Change, holds: readonly Hold
   if (waiver === null || waiver.head === head) return { review, why: null };
   const [at, to] = [waiver.head.slice(0, 12), head.slice(0, 12)];
   const unknown = (why: string) => ({ review, why: hold("waiver-not-carried", `Nexus cannot tell whether the change at ${to} is the one ${waiver.by} pressed Land for at ${at}, as ${why}, so that waiver does not carry over. Look at the change again, and press Land to waive the holds at ${to}.`) });
-  if (waiver.change === undefined) return unknown("the waiver was saved before Nexus recorded the change it waives");
   if (waiver.change === null) return unknown("Nexus never read the change the waiver was for");
   if (waiver.change.kind === "unknown") return unknown(waiver.change.why);
   if (change.kind === "unknown") return unknown(change.why);

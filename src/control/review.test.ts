@@ -16,6 +16,7 @@ import { carryWaiver, headHolds, heldBy, landingHolds, landPress, secondReviewRu
 import { landing } from "./dashboard/cards.ts";
 import { cannotLand, changeOf, checkBeside, ended, findingsOf, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
+import { upgradeReview } from "./record-upgrade.ts";
 import { reviewText } from "../cli/thread-text.ts";
 import { defaultSecondReview } from "./project.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
@@ -267,6 +268,8 @@ function heldTurn(f: ReturnType<typeof fixture>, text: string) {
 }
 
 const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.setThreadStatus(id, "archived");
+/** Saves a record in a shape an older control plane wrote, as the registry's upgrade when it opens leaves it. */
+const saveOlder = (f: { registry: Registry }, record: unknown) => f.registry.saveReview(upgradeReview(record as Review));
 const verdict = (r: Review, fields: Record<string, unknown>) => `Done.\n\`\`\`nexus-review\n${JSON.stringify({ token: r.expect, verdict: "approve", findings: [], reserved: [], notCheckedLive: "the cache under real traffic", ...fields })}\n\`\`\``;
 const answers = (r: Review, list: unknown[]) => `Fixed.\n\`\`\`nexus-review-answers\n${JSON.stringify({ token: r.expect, answers: list })}\n\`\`\``;
 const serious = { id: "F1", priority: "P1", where: "src/cache.ts:1", summary: "The cache never expires", detail: "Add a TTL." };
@@ -2086,7 +2089,7 @@ function legacyReview(f: ReturnType<typeof fixture>, phase: "reviewing" | "fixin
   const old = { id: "F1", severity: "serious", where: "src/cache.ts:1", summary: "The cache never expires" };
   const round = (head: string) => ({ head, verdict: { token: "x", verdict: "changes", findings: [old, { id: "M1", severity: "minor", summary: "Name the constant" }], reserved: [], notCheckedLive: null }, check: null, answers: [{ id: "F1", action: "fixed", reason: "TTL" }] });
   const last = phase === "reviewing" ? { head: head1, verdict: null, check: null, answers: null } : { ...round(head1), answers: null };
-  f.registry.saveReview({ ...r, maxRounds: 10, phase: { kind: phase }, rounds: [round("a".repeat(40)), round("b".repeat(40)), round("c".repeat(40)), round("d".repeat(40)), last] } as never as Review);
+  saveOlder(f, { ...r, maxRounds: 10, phase: { kind: phase }, rounds: [round("a".repeat(40)), round("b".repeat(40)), round("c".repeat(40)), round("d".repeat(40)), last] });
 }
 
 test("a review stored with more rounds reads back capped at 5 with priorities, and stops at round 5 with the label", async (t) => {
@@ -2871,12 +2874,12 @@ test("a review stored before hold codes reads its holds and its waiver with code
   f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   await approved(f, "nLAPTOP");
   const { holds: _, cause: __, ...reasonsOnly } = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
-  f.registry.saveReview({ ...f.review(), phase: reasonsOnly as Review["phase"] });
+  saveOlder(f, { ...f.review(), phase: reasonsOnly });
   assert.deepEqual(f.review().phase, { kind: "needs-person", cause: "unrecorded", reasons: reservedHolds, holds: [{ code: "reserved-path:irreversible", text: reservedHolds[0] }] });
 
   const waiver = { head: head1, holds: reservedHolds, by: "nLAPTOP", at: 1 };
-  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, waiver: waiver as Review["waiver"], phase: { kind: "merging", authorized: null } });
-  assert.deepEqual(f.review().waiver, { ...waiver, codes: ["reserved-path:irreversible"] });
+  saveOlder(f, { ...f.review(), land: { requestedBy: "nLAPTOP" }, waiver, phase: { kind: "merging", authorized: null } });
+  assert.deepEqual(f.review().waiver, { ...waiver, codes: ["reserved-path:irreversible"], change: { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" } });
   const loop = f.loop();
   await loop.poll();
   await loop.poll();
@@ -2889,7 +2892,7 @@ test("a waiver covers its hold by code, whatever the hold's text, and the review
   f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null },
-    waiver: { head: head1, holds: ["Always needs the person: anything irreversible, in words an older control plane used."], codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1 } });
+    waiver: { head: head1, holds: ["Always needs the person: anything irreversible, in words an older control plane used."], codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1, change: null } });
   await loop.poll();
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
@@ -3280,10 +3283,10 @@ test("a hold stored before causes reads back as rounds that ran out when it has 
   const f = fixture(t);
   await holds[0]!.hold(f);
   const { cause: _, ...uncaused } = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
-  f.registry.saveReview({ ...f.review(), phase: uncaused as Review["phase"] });
+  saveOlder(f, { ...f.review(), phase: uncaused });
   assert.equal((f.review().phase as { cause: HoldCause }).cause, "rounds");
   const { label: __, ...unlabelled } = uncaused;
-  f.registry.saveReview({ ...f.review(), phase: unlabelled as Review["phase"] });
+  saveOlder(f, { ...f.review(), phase: unlabelled });
   assert.equal((f.review().phase as { cause: HoldCause }).cause, "unrecorded");
 });
 
@@ -3476,7 +3479,7 @@ test("an approval carried to the same change never carries past a hold the perso
   assert.deepEqual(carryWaiver({ ...review, waiver }, same, [irreversible]).review.waiver, { ...waiver, head: head2, from: head1 }, "the same change, hunks moved, carries the waiver");
   assert.deepEqual(carryWaiver({ ...review, waiver }, same, [irreversible, image]), { review: { ...review, waiver }, why: null }, "a new hold holds, and the waiver stays where it was");
   const { change: _, ...legacy } = waiver;
-  assert.match(carryWaiver({ ...review, waiver: legacy }, same, [irreversible]).why!.text, /the waiver was saved before Nexus recorded the change it waives/, "a waiver saved before changes holds at its own head alone");
+  assert.match(carryWaiver(upgradeReview({ ...review, waiver: legacy as Waiver }), same, [irreversible]).why!.text, /the waiver was saved before Nexus recorded the change it waives/, "a waiver saved before changes holds at its own head alone");
   assert.deepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -9 +9 @@ function f() {\n-a\n+b" }]), "only hunk headers are ignored");
   assert.notDeepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: "z.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]), "a rename's old path is part of the change");
   const script = (modes: [string, string]) => changeOf("main", [{ path: "a.sh", previous: null, patch: "@@ -1 +1 @@\n-a\n+b", modes }]);
@@ -3572,9 +3575,9 @@ test("a review stored before carried approvals and waiver changes still loads, a
   conflicting(f);
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
   const { change: _, ...old } = f.review().waiver!;
-  f.registry.saveReview({ ...f.review(), waiver: old as Waiver });
+  saveOlder(f, { ...f.review(), waiver: old });
   await loop.poll();
-  assert.equal(f.review().waiver!.change, undefined, "the old waiver loads as it was saved, and the landing records no change for it");
+  assert.deepEqual(f.review().waiver!.change, { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" }, "the old waiver loads with an unknown change, and the landing records none for it");
   rebased(f);
   f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
   await loop.poll();
@@ -4666,7 +4669,7 @@ test("a stored round of a review with a second reviewer that lacks its verdict h
   await loop.start(f.builder, { land: null });
   await loop.poll();
   const { secondVerdict: _, ...lost } = f.review().rounds[0]!;
-  f.registry.saveReview({ ...f.review(), rounds: [lost] });
+  saveOlder(f, { ...f.review(), rounds: [lost] });
   assert.equal(f.review().rounds[0]!.secondVerdict, null);
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
