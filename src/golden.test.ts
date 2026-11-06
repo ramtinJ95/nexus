@@ -115,7 +115,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
 
   const captures: Capture[] = [
     ...[
-      "/v1/health", "/v1/projects", "/v1/nodes", "/v1/images", "/v1/images/current", "/v1/release", "/v1/deployer/release",
+      "/v1/health", "/v1/whoami", "/v1/projects", "/v1/nodes", "/v1/images", "/v1/images/current", "/v1/release", "/v1/deployer/release",
       "/v1/threads", "/v1/threads?deleted=false", "/v1/threads?project=storefront", "/v1/queued", "/v1/items", "/v1/items?project=nexus",
       "/v1/events", "/v1/events?project=field-notes", "/v1/events?kind=thread.started", "/v1/checks", "/v1/checks/changes", "/v1/doctor",
       "/v1/usage", "/v1/usage?since=7d", "/v1/usage?since=30d&by=model&by=day", "/v1/usage?since=today&project=nexus", "/v1/usage?since=2027-01-10", "/v1/usage/backfill",
