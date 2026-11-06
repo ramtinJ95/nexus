@@ -8,7 +8,7 @@ import { z } from "zod";
 import { pylonEventSchema, type ReportedEvent } from "../events.ts";
 import { chatgptTokenGrant } from "../secret-grants.ts";
 import type { SessionHarness } from "../session-harness.ts";
-import { asSent, parseJson, unchecked } from "../parse.ts";
+import { asSent, parse, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import { pylonIdField, pylonIdSchema } from "./fields.ts";
 import { jobStatusSchema, type JobStatus } from "./jobs.ts";
@@ -207,7 +207,7 @@ const observationSchema = z.looseObject({
 }) satisfies z.ZodType<NodeObservation>;
 
 const probeEventSchema = z.discriminatedUnion("type", [
-  z.looseObject({ type: z.literal("snapshot"), contract: unchecked<unknown>(), observation: observationSchema }),
+  z.looseObject({ type: z.literal("snapshot"), contract: unchecked<unknown>(), observation: unchecked<unknown>() }),
   z.looseObject({ type: z.literal("session-event"), report: reportedEventSchema }),
   z.looseObject({ type: z.literal("pylon"), pylon: pylonSchema }),
   z.looseObject({ type: z.literal("job"), status: jobStatusSchema }),
@@ -218,10 +218,12 @@ export function parseProbeEvent(frame: string): ProbeEvent {
   const event = parseJson(asSent(probeEventSchema), frame, "event");
   switch (event.type) {
     case "snapshot": {
-      const { contract, observation } = event;
+      const { contract } = event;
       if (!(typeof contract === "number" && contract >= minProbeContract)) {
-        throw new Error(`${observation.node} runs a probe of contract ${typeof contract === "number" ? contract : 0}, older than the ${minProbeContract} this control plane reads. Upgrade it with nexus deploy`);
+        const node = (event.observation as { node?: unknown } | null)?.node;
+        throw new Error(`${typeof node === "string" ? node : "the node"} runs a probe of contract ${typeof contract === "number" ? contract : 0}, older than the ${minProbeContract} this control plane reads. Upgrade it with nexus deploy`);
       }
+      const observation = parse(asSent(observationSchema), event.observation, "event.observation");
       return { type: "snapshot", observation: { ...observation, pylons: observation.pylons.map(knownCause) } };
     }
     case "pylon": return { type: "pylon", pylon: knownCause(event.pylon) };

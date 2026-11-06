@@ -359,6 +359,8 @@ test("a snapshot from a probe below the contract this control plane reads is ref
   const observation = testObservation(node);
   const frame = (contract: unknown) => JSON.stringify({ type: "snapshot", ...contract === undefined ? {} : { contract }, observation });
   assert.deepEqual(parseProbeEvent(frame(minProbeContract)), { type: "snapshot", observation });
+  const { events: _, previewRoutes: __, ...older } = observation;
+  assert.throws(() => parseProbeEvent(JSON.stringify({ type: "snapshot", observation: older })), { message: new RegExp(`^${node} runs a probe of contract 0, older than`) }, "an older probe's shape gets the contract's refusal, not a field's");
   for (const contract of [undefined, minProbeContract - 1, "1"]) {
     assert.throws(() => parseProbeEvent(frame(contract)), { message: new RegExp(`^${node} runs a probe of contract \\d+, older than the ${minProbeContract} this control plane reads\\. Upgrade it with nexus deploy$`) }, String(contract));
   }
