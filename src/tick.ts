@@ -52,9 +52,9 @@ export interface TickContext {
   /** Called after every change to the record, including just before a submit. */
   save(pylon: PylonRecord): void;
   /** The desired phase as it stands now, read again after the waits on the probe, so no plan acts on one they overturned. */
-  desired?: () => DesiredPhase;
+  desired: () => DesiredPhase;
   /** The boot whose transcripts a settle sealed, read again with the desired phase. */
-  sealedBoot?: () => string | undefined;
+  sealedBoot: () => string | undefined;
 }
 
 export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanStep> {
@@ -80,11 +80,10 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
       observation = null;
     }
   }
-  if (ctx.desired !== undefined) {
-    pylon.desired = ctx.desired();
-    const failedNow = failedStep(pylon);
-    if (failedNow !== null) return failedNow;
-  }
+  pylon.desired = ctx.desired();
+  const failedNow = failedStep(pylon);
+  if (failedNow !== null) return failedNow;
+  const sealedBoot = ctx.sealedBoot();
 
   const step = planPylon({
     pylonId: pylon.pylonId,
@@ -103,7 +102,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     inFlight,
     attempts: pylon.attempts,
     retrying: pylon.retrying,
-    ...(ctx.sealedBoot?.() === undefined ? {} : { sealedBoot: ctx.sealedBoot()! }),
+    ...(sealedBoot === undefined ? {} : { sealedBoot }),
     holders: ctx.holders,
     artifactSha256: ctx.artifactSha256,
   }, Date.now());
