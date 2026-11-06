@@ -220,7 +220,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const backfill = usageBackfill({ registry, counter: usage, wake });
   const threads = threadServices({
     registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake, gate, log,
-    queue: github !== null, pipeline: true, planning: { replies: agents.replies },
+    queue: github !== null, planning: { replies: agents.replies },
   });
   const { startThread } = threads.api;
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
