@@ -13,7 +13,8 @@ import { keptPastDay } from "../reconcile.ts";
 import { checkBeside, liveNote, phaseNote, reviewersNote, roundNote, roundsSpent } from "../control/review-model.ts";
 import type { Changes, Listing } from "../checkout-files.ts";
 import type { ThreadSetup } from "../control/templates.ts";
-import { ago, table, clip, gib } from "./kit.ts";
+import { ago, table, clip } from "./kit.ts";
+import { gib } from "../control/placement.ts";
 
 const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;
 function placementText(p: Placement): string {

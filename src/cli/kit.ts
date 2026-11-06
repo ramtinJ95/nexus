@@ -85,8 +85,6 @@ export function table(rows: readonly (readonly string[])[]): string {
 
 export const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}...`;
 
-export const gib = (n: number) => Number(n.toFixed(1));
-
 export const waitMs = 120_000;
 /** The 409 codes that a wait fixes: the pylon not running yet, Claude not ready yet, or Claude's pane moved before it typed. */
 const waitedOut = new Set(["not-running", "not-ready", "moved"]);
