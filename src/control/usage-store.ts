@@ -13,9 +13,7 @@ import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals
  * How far a source of usage was read: a pylon's transcript, by its path, to a byte offset with the SHA-256 of the up
  * to 4 KiB before it, or a harness conversation to an entry, with no hash.
  */
-export interface UsageCursor { source: string; key: string; position: number; before: string }
-
-export type UsageStore = ReturnType<typeof usageStore>;
+interface UsageCursor { source: string; key: string; position: number; before: string }
 
 export function usageStore(db: Db, threadRecord: (id: ThreadId) => Row | undefined) {
   const { transaction, sql } = db;

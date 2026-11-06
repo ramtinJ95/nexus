@@ -45,8 +45,6 @@ export interface Judgment {
   phase: Phase;
 }
 
-export type JudgmentStore = ReturnType<typeof judgmentStore>;
-
 export function judgmentStore(db: Db) {
   const { transaction, sql, recordOf } = db;
   return {

@@ -11,8 +11,6 @@ import type { ThreadStatus } from "../reconcile.ts";
 import { askQuestionId, askRecord, isNodeQuestion, isOpen, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 
-export type QuestionStore = ReturnType<typeof questionStore>;
-
 export function questionStore(db: Db, clock: () => number, threadStatus: (id: ThreadId) => ThreadStatus | undefined, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql, recordOf } = db;
   function questionRecord(id: string): Question | null {

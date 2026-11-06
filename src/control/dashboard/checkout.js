@@ -216,9 +216,8 @@ export const tabsBar = document.getElementById("tabs");
 const fileView = document.getElementById("file-view");
 const termView = document.getElementById("term-view");
 export const terminalTab = Symbol("terminal");
-export const timelineTab = Symbol("timeline");
+const timelineTab = Symbol("timeline");
 const timelineView = document.getElementById("timeline-view");
-/** The tabs every thread page has, in their order, by their key, and what each shows: the conversation, the timeline or the terminal. */
 const fixedTabs = { convo: null, timeline: timelineTab, term: terminalTab };
 const tabsKey = `nexus.tabs.${thread}`;
 const maxTabs = 8;
@@ -358,7 +357,6 @@ async function showTerminal() {
   opened?.focus();
 }
 
-// The layout the reader picked for diffs, on every thread page.
 const layoutKey = "nexus.diff-layout";
 let diffLayout = localStorage.getItem(layoutKey) === "split" ? "split" : "unified";
 /** A window as narrow as a phone's, which draws unified, as split leaves each side too few characters to read. */

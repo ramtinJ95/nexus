@@ -10,8 +10,6 @@ import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "../agent-protocol.ts";
 import { builderAwaited, storedReview, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
 
-export type ReviewStore = ReturnType<typeof reviewStore>;
-
 export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void }) {
   const { transaction, sql, recordOf } = db;
   const { setThreadStatus, appendEvent, updateAttention } = core;

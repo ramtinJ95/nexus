@@ -22,7 +22,7 @@ export interface AutomatedMessage { id: string; text: string; sender: Sender }
 /** `later` typed nothing, such as while the pylon wakes. Send the same message again on a later pass. */
 export type Inbox = (t: Thread, message: AutomatedMessage) => Promise<"delivered" | "later">;
 
-export type ClaudeTyped =
+type ClaudeTyped =
   | { kind: "sent"; sent: ClaudeSent }
   /** Nothing was typed and the request ID is forgotten, so a resend types it. */
   | { kind: "nothing"; outcome: "blocked" | "starting" | "moved"; herdrPane: string }

@@ -7,7 +7,7 @@ import { linkedPort } from "../../services-file.ts";
 import { harnessNamed, type SessionHarness } from "../../session-harness.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { NodeRecord } from "../node-store.ts";
-import type { Preview, Thread, ThreadAgent } from "../thread-store.ts";
+import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { promptSenders } from "../inbox.ts";
 import type { AgentView } from "../conversation-view.ts";
@@ -57,7 +57,7 @@ function lookOf(d: ThreadDetail, p: Preview) {
 /** `streaming` is a poll from a page whose stream shows the conversation. */
 export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentView | Error | null, renderedReplyAt: number | null, streaming = false): Html {
   const { thread: t } = d;
-  const agent = c.registry.agent(t).kind;
+  const agent = c.registry.agent(t);
   const read = view === null || view instanceof Error ? null : view;
   const items = read === null ? [] : itemsOf(read, () => d.questions ?? [], t.id, () => promptSenders(c.registry, t.id));
   const run = runOf(d, read, items, c.now);
@@ -80,7 +80,7 @@ ${role.kind === "builder" ? html`<nav class="life-bar" id="life" data-live aria-
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
 ${life !== null && html`<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline" hidden><div class="tl-wrap" id="timeline" data-live>${timeline(c, d, items, life)}</div></section>`}
-<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent.kind !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
 <div class="dock">
@@ -92,9 +92,9 @@ ${t.status !== "deleted" && termView(t)}
 <div id="resume" data-live>${resumeCard(c, t)}</div>
 <div id="landing" data-live>${landing(c, d)}</div>
 <div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
-<div id="composer" data-live>${composer(d, agent, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
+<div id="composer" data-live>${composer(d, agent.kind, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
 </div>`,
-    inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total, workerSession(c.registry.agent(t))),
+    inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total, agent.kind === "claude" ? agent.worker.session : null),
   });
 }
 
@@ -134,7 +134,6 @@ ${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}
 </header>`;
 }
 
-/** A thread's Archive button while it is open or queued, and its Unarchive button once it is archived. */
 const archiveButton = (id: ThreadId, archived: boolean) => archived
   ? html`<button type="button" class="btn btn-ghost" id="unarchive" data-action="unarchive" data-thread="${id}">Unarchive</button>`
   : html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${id}">Archive</button>`;
@@ -301,11 +300,6 @@ ${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, 
 }
 
 const newSessions = [["shell", "New shell"], ["pi", "New pi"], ["claude-code", "New Claude"]] as const satisfies readonly (readonly [SessionHarness, string])[];
-
-/** The Claude Code session the thread's worker runs in, whose pane the page offers no Close for. */
-function workerSession(agent: ThreadAgent): string | null {
-  return agent.kind === "claude" ? agent.worker.session : null;
-}
 
 /**
  * A running session shows in the terminal. Any but the worker's own closes, and a failed one in no pane is dropped by

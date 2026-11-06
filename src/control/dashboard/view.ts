@@ -9,7 +9,7 @@ import type { ThreadId } from "../../ids.ts";
 import { usageLimitText } from "../../claude-transcript.ts";
 import { agoText, clock } from "./elapsed.ts";
 
-export interface Page { status: number; headers: Record<string, string>; body: string }
+interface Page { status: number; headers: Record<string, string>; body: string }
 
 /**
  * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
@@ -89,7 +89,6 @@ export const menu = html`<button type="button" class="icon-btn menu" data-open="
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
-/** What stopped a thread on its usage limit, and when it resets. */
 export const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLimitText(t.usageLimit ?? { resetsAt: null }, now);
 
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */

@@ -1,9 +1,6 @@
-/** The project store: each project's record, in `projects`. */
 import { json, type Db, type Row } from "./db.ts";
 import type { ProjectId } from "../ids.ts";
 import type { Project } from "./project.ts";
-
-export type ProjectStore = ReturnType<typeof projectStore>;
 
 export function projectStore(db: Db) {
   const { transaction, sql } = db;

@@ -26,8 +26,6 @@ export type Nudge =
    */
   | { state: "left-alone" };
 
-export type NudgeStore = ReturnType<typeof nudgeStore>;
-
 export function nudgeStore(db: Db, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql, recordOf, saveRecord } = db;
   return {

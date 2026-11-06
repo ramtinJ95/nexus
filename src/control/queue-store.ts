@@ -33,8 +33,6 @@ export interface QueuedRecord {
   firstMessage: "pending" | "sent" | null;
 }
 
-export type QueueStore = ReturnType<typeof queueStore>;
-
 export function queueStore(db: Db, saveStartKey: (key: StartKey, thread: ThreadId) => void) {
   const { transaction, sql, recordOf, saveRecord } = db;
   const queuedThread = (id: ThreadId): QueuedRecord | undefined => recordOf<QueuedRecord>("queued_threads", "id", id) ?? undefined;

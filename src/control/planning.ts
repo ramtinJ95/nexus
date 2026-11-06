@@ -27,9 +27,9 @@ import type { ThreadId } from "../ids.ts";
 
 type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
 
-export const planFence = "nexus-plan";
-export const acceptOption = "accept";
-export const rejectOption = "reject";
+const planFence = "nexus-plan";
+const acceptOption = "accept";
+const rejectOption = "reject";
 const itemIdPattern = /^it-[0-9a-f]{12}$/;
 
 const blockSchema = z.object({
@@ -59,7 +59,7 @@ export function planBlocks(replies: readonly string[], token: string): Proposal[
 }
 
 /** The index is padded, so the cards of one block, asked together, list in the block's order. */
-export const proposalId = (thread: ThreadId, p: Pick<Proposal, "block" | "index">) => `plan:${thread}:${p.block}:${String(p.index).padStart(2, "0")}`;
+const proposalId = (thread: ThreadId, p: Pick<Proposal, "block" | "index">) => `plan:${thread}:${p.block}:${String(p.index).padStart(2, "0")}`;
 /** The item an accepted proposal became. Made from the question, so the thread can be told it without a stored link. */
 export const proposalItem = (question: string) => `it-${createHash("sha256").update(question).digest("hex").slice(0, 12)}` as ItemId;
 

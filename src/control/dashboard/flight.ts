@@ -14,7 +14,7 @@ import type { Context, HeldWork } from "./context.ts";
 import { clock, span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
 import type { Item } from "./items.ts";
-import { itemsOf, lifeOfItem, lifeOfThread, needLabel, roleLine, stages, threadRole, type Life, type Stage } from "./lifecycle.ts";
+import { lifeOfItem, pipelineItems, lifeOfThread, needLabel, roleLine, stages, threadRole, type Life, type Stage } from "./lifecycle.ts";
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook, threadTitle } from "./shell.ts";
 
@@ -45,7 +45,7 @@ const queuedLine = (c: Context, q: QueuedThread): Line => ({ key: q.id, title: q
 const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.title, project: i.project, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], when: "item", dim: false, order: i.addedAt });
 
 /** How long a landed thread stays under Deployed once it is archived, as the review loop archives each builder that lands. */
-export const deployedForMs = 24 * 60 * 60 * 1000;
+const deployedForMs = 24 * 60 * 60 * 1000;
 
 /**
  * Every piece of work once, at its stage: items not yet threads, queued threads, and open builder threads, and an
@@ -55,7 +55,7 @@ export const deployedForMs = 24 * 60 * 60 * 1000;
 export function flightLines(c: Context): Map<Stage, Line[]> {
   const recent = (t: Thread) => t.status === "active" || t.status === "idle" || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
   const lines = [
-    ...itemsOf(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
+    ...pipelineItems(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
     ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
     ...c.threads().filter((t) => recent(t) && threadRole(c, t.id).kind === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
   ];
@@ -134,7 +134,7 @@ function latest(d: ThreadDetail, items: readonly Item[], now: number): Html {
 export function itemBrief(c: Context, i: PipelineItem): Html {
   // An item that became a thread previews as that thread, so one that waits on the person leads to its card.
   const after = i.after.map((id) => {
-    const x = itemsOf(c).find((y) => y.id === id);
+    const x = pipelineItems(c).find((y) => y.id === id);
     return { key: x?.thread ?? id, title: x?.title ?? id };
   });
   return html`${after.length > 0 && html`<p class="peek-meta">After ${after.map((x, n) => html`${n > 0 && ", "}<a class="link" href="${peekHref(x.key)}" data-peek="${x.key}">${x.title}</a>`)}</p>`}

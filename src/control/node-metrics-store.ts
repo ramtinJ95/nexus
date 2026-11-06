@@ -6,7 +6,7 @@ import type { Db } from "./db.ts";
 import { minSampleGapMs, seriesOf, servingOf, tiers, type HealthSample, type MetricSeries, type TierName } from "./node-metrics.ts";
 
 /** A node's series over a range, as the store serves them, before the API labels them. */
-export interface StoredMetrics { tier: TierName; bucketMs: number; sampledAt: number | null; series: Omit<MetricSeries, "label">[] }
+interface StoredMetrics { tier: TierName; bucketMs: number; sampledAt: number | null; series: Omit<MetricSeries, "label">[] }
 
 type Row = [series: string, t: number, min: number, avg: number, max: number, n: number];
 

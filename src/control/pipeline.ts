@@ -22,9 +22,9 @@ import type { ItemId, ItemRecord } from "./pipeline-store.ts";
 
 type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
 
-export const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
+const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
 
-export const phaseKinds = ["planned", "queued", "building", "reviewing", "landing", "landed", "held", "archived", "cancelled"] as const;
+const phaseKinds = ["planned", "queued", "building", "reviewing", "landing", "landed", "held", "archived", "cancelled"] as const;
 /** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */
 export interface ItemPhase { kind: typeof phaseKinds[number]; why: string }
 

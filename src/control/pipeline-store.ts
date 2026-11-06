@@ -29,8 +29,6 @@ export interface ItemRecord {
   lastError: string | null;
 }
 
-export type PipelineStore = ReturnType<typeof pipelineStore>;
-
 export function pipelineStore(db: Db) {
   const { sql, recordOf, saveRecord } = db;
   return {
