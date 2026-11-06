@@ -66,6 +66,8 @@ interface Pr {
 interface Comment { author_association: string; id: number; body: string | null; html_url: string; user: { login: string }; state?: string; submitted_at?: string | null }
 interface Check { id: number; name: string; status: string; conclusion: string | null; details_url: string | null; html_url?: string; completed_at: string | null }
 interface Status { id: number; context: string; state: string; target_url: string | null }
+interface FileEntry { filename: string; previous_filename?: string; patch?: string }
+const changedFile = (f: FileEntry): ChangedFile => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" });
 
 /**
  * Each resource has its own ETag: a PR's ETag says nothing about its checks or comments. The cache keeps the resources
@@ -175,7 +177,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       ], ...(unread ? { checksUnread: true as const } : {}) };
     },
     async files(repo, number) {
-      return (await list<{ filename: string; previous_filename?: string; patch?: string }>(`/repos/${repo}/pulls/${number}/files`)).map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "" }));
+      return (await list<FileEntry>(`/repos/${repo}/pulls/${number}/files`)).map(changedFile);
     },
     async change(repo, base, head) {
       const response = await call(`/repos/${repo}/compare/${encodeURIComponent(base)}...${head}`);
@@ -187,12 +189,12 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
         limited(response);
         throw new Error(`GitHub compare: HTTP ${response.status}`);
       }
-      const { files = [], merge_base_commit: mergeBase } = await response.json() as { files?: { filename: string; previous_filename?: string; patch?: string }[]; merge_base_commit: { sha: string } };
+      const { files = [], merge_base_commit: mergeBase } = await response.json() as { files?: FileEntry[]; merge_base_commit: { sha: string } };
       if (files.length >= 300) return null;
       const trees = await Promise.all([mergeBase.sha, head].map((commit) => get<{ tree: { path: string; mode: string }[]; truncated: boolean }>(`/repos/${repo}/git/trees/${commit}?recursive=1`)));
       if (trees.some(({ value }) => value.truncated)) return null;
       const [before, after] = trees.map(({ value }) => new Map(value.tree.map((entry) => [entry.path, entry.mode])));
-      return files.map((f) => ({ path: f.filename, previous: f.previous_filename ?? null, patch: f.patch ?? "", modes: [before!.get(f.previous_filename ?? f.filename) ?? null, after!.get(f.filename) ?? null] }));
+      return files.map((f) => ({ ...changedFile(f), modes: [before!.get(f.previous_filename ?? f.filename) ?? null, after!.get(f.filename) ?? null] }));
     },
     async merge(repo, number, head) {
       const { response, reply, message } = await write("PUT", `/repos/${repo}/pulls/${number}/merge`, { sha: head, merge_method: "squash" }, "merge");
