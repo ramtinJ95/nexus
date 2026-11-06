@@ -169,7 +169,7 @@ test("the probe trusts the control plane control-plane.json names, not the one a
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
 });
 
-test("a method a route does not serve gets that route's answer: 405, the 501 under /v1/pylons, or 404", async (t) => {
+test("a method a route does not serve gets that route's answer: 405 or 404", async (t) => {
   const { base, callAs } = await setup(t);
   const answer = async (method: string, path: string) => {
     const res = await fetch(`${base}${path}`, { method });
@@ -177,7 +177,7 @@ test("a method a route does not serve gets that route's answer: 405, the 501 und
   };
   assert.deepEqual(await answer("PATCH", "/v1/jobs/x"), [405, "PATCH is not allowed on /v1/jobs/x"]);
   assert.deepEqual(await answer("POST", "/v1/observe"), [404, "no route POST /v1/observe"]);
-  assert.deepEqual(await answer("GET", "/v1/pylons/x/commands"), [501, "/v1/pylons is not implemented in this slice"]);
+  assert.deepEqual(await answer("GET", "/v1/pylons/x/commands"), [404, "no route GET /v1/pylons/x/commands"]);
   assert.deepEqual(await answer("PUT", "/v1/manifests/img-000000000000"), [404, "no route PUT /v1/manifests/img-000000000000"]);
   assert.deepEqual(await answer("GET", "/v1/secrets/NEXUS_CHATGPT_TOKEN"), [405, "GET is not allowed on /v1/secrets/NEXUS_CHATGPT_TOKEN"]);
   assert.deepEqual(await answer("GET", "/v1/peers"), [405, "GET is not allowed on /v1/peers"]);
