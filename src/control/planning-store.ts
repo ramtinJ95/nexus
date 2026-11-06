@@ -5,7 +5,7 @@
 import { json, type Db } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
 
-export interface PlanningRecord {
+interface PlanningRecord {
   thread: ThreadId;
   /** The token a block must echo. Only the thread is told it, so a block quoted from elsewhere is never read. */
   token: string;
@@ -17,8 +17,6 @@ export interface PlanningRecord {
    */
   sent: readonly { requestId: string; guide: boolean; told: readonly string[]; delivered: boolean }[];
 }
-
-export type PlanningStore = ReturnType<typeof planningStore>;
 
 export function planningStore(db: Db) {
   const { sql, recordOf, saveRecord } = db;

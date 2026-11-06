@@ -133,17 +133,17 @@ export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
 
 /** Where the reader of a Claude worker's transcript is in its session's file, how many entries it dropped to keep maxEntries, and when it last read. */
-export interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
+interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
 /** What one read of a Claude worker's transcript found, from `from` to `cursor`. `reset` says the file was replaced, so `entries` start it over. */
-export interface ClaudeRead { session: string; from: TranscriptCursor; entries: readonly ClaudeEntry[]; cursor: TranscriptCursor; reset: boolean; readAt: number }
+interface ClaudeRead { session: string; from: TranscriptCursor; entries: readonly ClaudeEntry[]; cursor: TranscriptCursor; reset: boolean; readAt: number }
 /**
  * A message typed into a Claude worker, by its request ID. It is `sending` from before the probe is asked until the
  * probe answers, so a send whose answer was lost, which may have typed some of it, is not typed again. A thread keeps
  * every request ID until it is deleted, since a forgotten ID would be typed again on a resend however late it comes.
  */
-export type ClaudeMessage = { state: "sending" } | { state: "sent"; result: ClaudeSent };
+type ClaudeMessage = { state: "sending" } | { state: "sent"; result: ClaudeSent };
 /** Who typed a message into a Claude worker: the person, a Nexus sender, or `unknown` for a send recorded before senders were. */
-export type ClaudeMessageSender = Sender | "person" | "unknown";
+type ClaudeMessageSender = Sender | "person" | "unknown";
 /** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
 export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
 
@@ -213,9 +213,7 @@ export interface ThreadParticipant {
   startQueued?(thread: ThreadId, at: number): void;
 }
 
-export interface AwaitWindow { from: number; until: number }
-
-export type ThreadStore = ReturnType<typeof threadStore>;
+interface AwaitWindow { from: number; until: number }
 
 export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[], readingUsage: () => unknown) {
   const { transaction, sql, setting, setSetting } = db;
@@ -965,7 +963,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         const listed = new Set(write.sessions.map((s) => s.id));
         for (const { id } of sessions(write.pylonId)) if (!listed.has(id)) sql("DELETE FROM sessions WHERE pylon = ? AND id = ?").run(write.pylonId, id);
         for (const s of write.sessions) {
-          // A null status keeps the one the row has.
           sql(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
             VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
             ON CONFLICT (pylon, id) DO UPDATE SET herdr_pane = excluded.herdr_pane, harness = excluded.harness, harness_session_id = excluded.harness_session_id,

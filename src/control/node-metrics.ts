@@ -121,12 +121,6 @@ export function servingOf(from: number, to: number, now: number): { tier: Tier; 
   return { tier, bucketMs: Math.max(unit, Math.ceil(width / unit) * unit) };
 }
 
-/** A bucket of one series. A raw sample is a bucket of one, whose min, sum and max are its value. */
-export interface Bucket { min: number; sum: number; max: number; n: number }
-
-export const bucketOf = (value: number): Bucket => ({ min: value, sum: value, max: value, n: 1 });
-export const merged = (a: Bucket, b: Bucket): Bucket => ({ min: Math.min(a.min, b.min), sum: a.sum + b.sum, max: Math.max(a.max, b.max), n: a.n + b.n });
-
 /** A series as the API serves it: its points in time order, each the time of its first sample and its bucket's min, average and max. */
 export interface MetricSeries { key: string; series: Series; label: string; t: number[]; min: number[]; avg: number[]; max: number[]; n: number[] }
 
@@ -136,7 +130,6 @@ export interface MetricSeries { key: string; series: Series; label: string; t: n
  */
 export const maxPylons = 8;
 
-/** A pylon's identity in a series key: its pylon and thread. */
 export const pylonOf = (s: Series): string | null => s.kind === "pylonCpu" || s.kind === "pylonResident" ? `${s.pylon}:${s.thread ?? ""}` : null;
 
 type Served = Omit<MetricSeries, "label">;

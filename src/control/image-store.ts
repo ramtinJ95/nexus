@@ -45,8 +45,6 @@ function recordedImage(r: Row): RecordedImage {
   return { ...image, release: image.release ?? null };
 }
 
-export type ImageStore = ReturnType<typeof imageStore>;
-
 export function imageStore(db: Db) {
   const { transaction, sql, setting, setSetting } = db;
   function image(id: ImageId): RecordedImage | undefined {

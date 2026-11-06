@@ -9,8 +9,6 @@ import type { NodeName } from "../ids.ts";
 import type { DesiredRelease, Drain, ReleaseReport } from "../deploy/model.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
 
-export type ReleaseStore = ReturnType<typeof releaseStore>;
-
 export function releaseStore(db: Db, appendEvent: (kind: EventKind, thread: null, payload: Record<string, unknown>) => unknown) {
   const { sql, setting, setSetting } = db;
   return {

@@ -8,7 +8,7 @@ import type { ThreadId } from "../ids.ts";
 import type { Output } from "./thread-store.ts";
 import type { PullRequest } from "./github.ts";
 
-export interface PrLink {
+interface PrLink {
   pr: PullRequest;
   seen: string[];
   failed: boolean;
@@ -19,8 +19,6 @@ export interface PrWatchState {
   pending: { id: string; text: string } | null;
   error: string | null;
 }
-
-export type PrWatchStore = ReturnType<typeof prWatchStore>;
 
 export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown) {
   const { transaction, recordOf, saveRecord } = db;
