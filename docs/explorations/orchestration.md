@@ -171,7 +171,7 @@ What the tools needed goes away with them: a request ID per tool call, durable w
 
 Pipeline items exist since [nexus#180](https://github.com/ramtinJ95/nexus/pull/180), and only a person adds, approves or cancels one ([design](../design.md#pipeline-items)). So the question is how a model's help with planning reaches that list. Three shapes fit the pipeline:
 
-1. **The person adds items.** `nexus item add` takes a brief, the items it is after and the start's fields ([CLI](../cli.md#pipeline-items-0370)). The dashboard approves and cancels items, from an item's line in Needs you and from its preview on the home page, but cannot add one yet. The person can ask any thread to draft briefs and paste them in. This exists today.
+1. **The person adds items.** `nexus item add` takes a brief, the items it is after and the start's fields ([CLI](../cli.md#pipeline-items)). The dashboard approves and cancels items, from an item's line in Needs you and from its preview on the home page, but cannot add one yet. The person can ask any thread to draft briefs and paste them in. This exists today.
 2. **A planning thread's proposals become items.** The person opens a planning thread. It ends a turn with a fenced block of proposed items, and the control plane reads the block, as it reads a judgment thread's answer, and adds each item.
 3. **The person accepts each proposal on a card.** The same fenced block, but the control plane turns each proposal into a [question](../design.md#questions-for-the-person) on the planning thread, with options to add it or drop it. Only a person may answer it. An answer to add it makes a pipeline item through the same code as `nexus item add`, with the person who answered as its adder.
 

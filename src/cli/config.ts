@@ -11,7 +11,7 @@ import { type Values, str } from "./kit.ts";
  * The oldest control plane this CLI reads, raised when the CLI starts relying on something newer. 0.53.0 is the first
  * that reports its version, so one that reports none is older.
  */
-const minControlVersion = "0.53.0";
+export const minControlVersion = "0.53.0";
 /** A control plane older than `minControlVersion`, which no retry fixes. */
 class OutdatedControl extends CliError {}
 /** What a watch or a follow reports and retries through: a control plane unreachable or failing, though not one too old. */
