@@ -1,8 +1,8 @@
 /**
  * Review records saved by an older control plane, brought to the shape this code reads. The review store rewrites
  * each one once, when the registry opens.
- * The upgrade only fills in what the older record lacks, so a control plane rolled back to an older release still
- * reads what it wrote.
+ * The upgrade fills in what the older record lacks, caps its rounds and gives its findings priorities, as the read
+ * before it did, so a control plane rolled back to an older release reads the upgraded record unchanged.
  */
 import { reviewPrefix } from "../agent-protocol.ts";
 import { personOnly, reservedCases, reservedNames, type HoldCode } from "./holds.ts";
