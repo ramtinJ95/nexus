@@ -27,7 +27,7 @@ export interface Hold { code: HoldCode; text: string }
 const cases = Object.keys(reservedNames) as ReservedCase[];
 
 /** Whether a hold meets every landing of the same approved head again, and whether the person may waive it, and why. */
-export interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
+interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
 const reserved: HoldRule = { holdsAgain: true, waivable: true, why: "The policy reserves this for you, and pressing Land here is you waiving it." };
 const notWaivable = (why: string): HoldRule => ({ holdsAgain: false, waivable: false, why });
 const loopRule = notWaivable("Only what the policy reserves for you can be waived.");

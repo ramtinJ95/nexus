@@ -16,7 +16,7 @@ import type { SecondReview } from "./project.ts";
 import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
 import { answered, blocks, changedPaths, descriptionDigest, findingsOf, secondReads, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
 
-export interface LandingFacts {
+interface LandingFacts {
   review: Review;
   pr: PrSnapshot;
   /** The holds the latest round's head decides, as the loop recorded them against the PR's base now. */
@@ -24,7 +24,7 @@ export interface LandingFacts {
 }
 
 /** What the approved head alone decides its holds from: the review's record and the PR's files at that head. */
-export interface HeadFacts {
+interface HeadFacts {
   review: Review;
   files: readonly ChangedFile[];
   /** Whether the PR is Nexus's own, whose paths this module knows. */
@@ -76,7 +76,7 @@ const sameModel = (review: Review): Hold[] => review.models.reviewer === review.
  * second reviewer only adds holds, so a Claude second reviewer's approval, which its pylon could write, stands in for
  * no approval the first reviewer did not give.
  */
-export const recordedHolds = (review: Review): Hold[] => [
+const recordedHolds = (review: Review): Hold[] => [
   ...review.reviewerKind === "claude" ? [hold("claude-approved", "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.")] : [],
   ...review.second?.kind === "none" ? [hold("no-second-reviewer", `The project asks for a second reviewer on another model, since ${review.second.rule}, and none could run: ${review.second.why}.`)] : [],
   ...(review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => hold(`reserved:${r.case}`, `${personOnly}${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`)),
@@ -161,7 +161,7 @@ export const staleQuote = (round: Round, body: string) => quoteOf(round) !== nul
  * past. Otherwise it lands past the holds it `waives`, and `quotes` first when no live check ran and the landing needs
  * the reviewer's quote of what could not be checked live, which only a description the reviewer reads again can give.
  */
-export type LandPress = { kind: "stuck"; holds: Hold[] } | { kind: "lands"; waives: Hold[]; quotes: boolean };
+type LandPress = { kind: "stuck"; holds: Hold[] } | { kind: "lands"; waives: Hold[]; quotes: boolean };
 export function landPress(review: Review): LandPress {
   const holds = heldBy(review);
   const stuck = holds.filter((h) => holdRule(h.code).holdsAgain && !holdRule(h.code).waivable);

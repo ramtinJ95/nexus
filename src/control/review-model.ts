@@ -74,7 +74,7 @@ export const descriptionDigest = (body: string) => createHash("sha256").update(b
  * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
  * instead. `ran` when the script gave its verdict in verify pylon `thread`.
  */
-export type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: boolean; output: string };
+type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: boolean; output: string };
 
 /**
  * The agent's last `count` turns in a row ended because its model failed, the latest with the error `last`. The loop
@@ -174,7 +174,7 @@ export function changedPaths(a: Extract<Change, { kind: "known" }>, b: Extract<C
 export interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: string; at: number; change?: Change | null; from?: string }
 
 /** A message saved before it is sent. `attempted` is when its first send began, saved before it. */
-export interface Outbox { id: string; text: string; attempted: number | null }
+interface Outbox { id: string; text: string; attempted: number | null }
 
 /**
  * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on another model than the
@@ -247,7 +247,7 @@ export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person
  * How long after its request reached the reviewer a round keeps the builder's pylon up, so findings find it awake rather
  * than paused for 25 seconds of waking, and a reviewer that never answers holds no memory for the hours until the person.
  */
-export const builderAwaitedMs = 30 * 60_000;
+const builderAwaitedMs = 30 * 60_000;
 /**
  * Until when `r` keeps its builder's pylon up: while its reviewer reads a round, which may end in findings for the
  * builder, and until those findings are delivered, which counts as the builder's activity from then. Never while its
@@ -326,9 +326,7 @@ export const gateFailure = (round: Round): GateFailure | null => round.check?.pa
   : round.conflict !== undefined ? gates.conflict(round.head, round.conflict.base) : null;
 /** A second reviewer's finding as the builder answers it. No finding's own ID has a dot, so it never meets one of the first reviewer's. */
 export const secondId = (id: string) => `2.${id}`;
-/** The second reviewer's findings at the round, under the IDs the builder answers. */
 export const secondFindings = (round: Round): Finding[] => (round.secondVerdict?.findings ?? []).map((f) => ({ ...f, id: secondId(f.id) }));
-/** What the reviewers found at the round, the first's then the second's. */
 export const reviewersFindings = (round: Round): Finding[] => [...round.verdict?.findings ?? [], ...secondFindings(round)];
 /** What the builder must answer for a round: the reviewers' findings, and the finding of a gate that failed. */
 export const findingsOf = (round: Round): Finding[] => {

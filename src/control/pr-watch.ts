@@ -22,7 +22,7 @@ const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, 
 /** An open PR the watch linked but has not read yet, which its empty `url` marks in the stored link. */
 const unread = (repo: string, number: number): PullRequest => ({ repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null });
 /** Whether the watch never read the linked PR, so its first read baselines the comments it already has. */
-export const neverRead = (pr: Pick<PullRequest, "url">) => pr.url === "";
+const neverRead = (pr: Pick<PullRequest, "url">) => pr.url === "";
 const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
 /**
