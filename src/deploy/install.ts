@@ -64,7 +64,10 @@ export interface Transaction {
   backup?: string;
 }
 export interface InstallBoundary {
-  /** Builds and performs upgrade steps without switching links or restarting services. */
+  /**
+   * Builds and performs upgrade steps without switching links or restarting services. It refuses a commit that is not
+   * a full hash before it runs anything, as `checkoutMerged` does.
+   */
   prepare(commit: string): Promise<string>;
   beforeSwitch?(): Promise<void>;
   /**
@@ -102,7 +105,6 @@ export class ReleaseInstaller {
   }
 
   async install(commit: string): Promise<Transaction> {
-    if (!fullCommit.test(commit)) throw new Error("release must be a full lower-case commit hash");
     if ((await this.observed())?.state === "installing") throw new Error("an unfinished install must be recovered first");
     // Automatic deployment needs a bootstrapped, recoverable release.
     const previous = await readlink(this.link);
