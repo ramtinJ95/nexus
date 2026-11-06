@@ -99,7 +99,6 @@ test("a node's filesystems are ok with room, warn when one is low, and fail when
   expect(with_([{ ...pylonsDisk, freeGiB: 40 }, controlDisk]), peer, "disk", "warn", /40\.0 of 500\.0 GiB free.*low/);
   expect(with_([{ ...pylonsDisk, freeGiB: 20 }, controlDisk]), peer, "disk", "fail", /20\.0 of 500\.0 GiB free.*under the 25\.0 GiB it keeps free, so it refuses every start and wake/);
   expect(with_([pylonsDisk, { ...controlDisk, freeGiB: 2 }]), peer, "disk", "warn", /2\.0 of 100\.0 GiB free at \/var\/lib\/nexus-control, low/);
-  expect(healthy({ nodes: [nodeOf(peer, { capacity: { memoryGiB: 6, committedMemoryGiB: 0, diskFreeGiB: 100 } })] }), peer, "disk", "warn", /older than the filesystems it reports/);
   expect(healthy({ nodes: [nodeOf(peer, { capacity: testCapacity() })] }), peer, "disk", "warn", /older than the filesystems it reports/);
 });
 

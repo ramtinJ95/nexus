@@ -6,7 +6,6 @@
 import type { NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
 import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts } from "../reconcile.ts";
-import { countedCapacity } from "../protocol/observations.ts";
 import type { ReleaseReport, ReleaseView } from "../deploy/model.ts";
 import type { LoginState } from "../harness/credentials.ts";
 import type { BackupStatusRead } from "./backup-status.ts";
@@ -79,7 +78,7 @@ function release(report: ReleaseReport | undefined, desired: ReleaseView["desire
 }
 
 function disk(n: NodeSummary): Verdict {
-  const disks = countedCapacity(n.capacity)?.disks;
+  const disks = n.capacity?.disks;
   if (disks === undefined) return warn(n.capacity === null ? "no filesystems reported, since the node was never observed" : "its probe is older than the filesystems it reports, so update it with nexus deploy");
   const short = disks.filter((d) => d.pylons === true && d.freeGiB < keptFreeGiB(d.totalGiB));
   if (short.length > 0) return fail(`${short.map(diskText).join("; ")}, under the ${keptFreeGiB(short[0]!.totalGiB).toFixed(1)} GiB it keeps free, so it refuses every start and wake. Delete archived threads or free space there`);

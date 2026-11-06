@@ -33,8 +33,6 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
       { pylonId: crashed.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" },
       { pylonId: given.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }],
   });
-  observeNode(s, "old", { total: 6, committed: 8 });
-  s.registry.apply({ record: "node", node: "old" as NodeName, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
   const nodes = (await s.call("GET", "/v1/nodes")).body as { name: string; overcommitted: boolean; pylons: unknown }[];
   const of = (name: string) => nodes.find((n) => n.name === name)!;
   assert.equal(of("a").overcommitted, true);
@@ -42,25 +40,7 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
     up: { pylons: 2, cpus: 6, memoryGiB: 12 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
     crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"],
   }, "a VM whose service failed still holds its CPUs and memory, one whose controller exited holds only its disk, and with its thread archived it waits for an unarchive, not a retry");
-  assert.equal(of("old").overcommitted, false, "a probe from before pylons were counted reports a committed memory that means nothing");
   assert.deepEqual([of(node).overcommitted, of(node).pylons], [false, null], "a node never observed has no pylons to report");
-});
-
-test("a node whose stored observation is from a probe before routes, grants, counting and listening ports gets no thread, is not overcommitted, and its pylon's ports are unknown", async (t) => {
-  const s = await withThread(t);
-  const capacity = { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 };
-  s.registry.apply({ record: "node", node, state: "online", capacity: capacity as never });
-  const running = {
-    pylonId: s.thread.pylonId, phase: "running", liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash, bootedAt: "2027-01-01T00:00:00Z",
-    bootedFrom: { image: image.id, checkpoint: null }, services: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0,
-  };
-  s.registry.ingested({ node, observedAt: "2027-01-01T00:01:00Z", probeBootId: "b", events: [], capacity, artifacts: [image.id], jobs: [], pylons: [running] } as never, []);
-  assert.equal(((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).ports, null, "a probe that read no ports reports them unknown");
-  const nodes = (await s.call("GET", "/v1/nodes")).body as { name: string; overcommitted: boolean }[];
-  assert.equal(nodes.find((n) => n.name === node)!.overcommitted, false, "the committed memory of a probe from before pylons were counted means nothing");
-  const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" });
-  assert.equal(refused.status, 409);
-  assert.equal(refused.body.error, "no node can run this pylon: rj-firebat runs a probe too old to report what its pylons hold");
 });
 
 const health: NodeHealth = {

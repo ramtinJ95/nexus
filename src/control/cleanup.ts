@@ -7,12 +7,10 @@
  */
 import type { NodeName, PortableArtifactId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { ProbeHttpError } from "../protocol/http.ts";
 import { maxDrops, type ArtifactUsage, type DeleteOutcome } from "../protocol/cleanup.ts";
 import { releaseKeeps, type ReleaseInventory } from "../deploy/release-cleanup.ts";
 import { singleFlight } from "../single-flight.ts";
 import { lowDisk } from "../disk-space.ts";
-import { countedCapacity } from "../protocol/observations.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeQuestion } from "./questions.ts";
 import { artifactKept, bytesText, cleanupCandidates, cleanupDue, cleanupQuestion, grew, itemKey, undeleted, type CleanupItem, type NodeFacts } from "./cleanup-model.ts";
@@ -43,14 +41,9 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
     };
   }
 
-  /** What the probe says each artifact takes. A probe from before the cleanup route sizes none, so no artifact is asked about. */
   async function usageOn(node: NodeName): Promise<ArtifactUsage> {
     const probe = probes.get(node);
-    if (probe?.artifactUsage === undefined) return { artifacts: [] };
-    return probe.artifactUsage().catch((err: unknown) => {
-      if (err instanceof ProbeHttpError && err.status === 404) return { artifacts: [] };
-      throw err;
-    });
+    return probe?.artifactUsage === undefined ? { artifacts: [] } : probe.artifactUsage();
   }
 
   async function ask(node: NodeName) {
@@ -58,7 +51,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
     // An offline node's images and templates are unknown, and a question without them would be asked again with them.
     if (facts.held === null) return;
     const asked = registry.nodeQuestions(node);
-    const low = countedCapacity(registry.node(node)?.capacity ?? null)?.disks?.some(lowDisk) ?? false;
+    const low = registry.node(node)?.capacity?.disks?.some(lowDisk) ?? false;
     if (!cleanupDue(asked, low, now())) return;
     const deleting = new Set(asked.flatMap((q) => undeleted(q).map(itemKey)));
     const candidates = cleanupCandidates(node, facts, now()).filter((c) => !deleting.has(itemKey(c)));

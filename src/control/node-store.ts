@@ -4,9 +4,7 @@
  */
 import { jsonOrNull, type Db, type Row } from "./db.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
-import {
-  upgradeObservation, type NodeObservation, type OlderObservation, type ReportedCapacity,
-} from "../protocol/observations.ts";
+import type { NodeCapacity, NodeObservation } from "../protocol/observations.ts";
 
 export interface NodeRecord {
   name: NodeName;
@@ -14,18 +12,13 @@ export interface NodeRecord {
   tailnetNodeId: TailnetNodeId;
   state: "online" | "offline";
   /** As the probe reported it, which the API sends. Null for a node never observed. */
-  capacity: ReportedCapacity | null;
+  capacity: NodeCapacity | null;
   /** The probe's latest observation. While the node is offline the dashboard shows it, marked stale. */
   observation: NodeObservation | null;
 }
 
 /** A node that joined with a token rather than being named in control.json. `deployKey` is the digest of its deployer's token. */
 export interface JoinedNode extends Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId"> { deployKey: string; joinedAt: number }
-
-function observationOf(value: unknown): NodeObservation | null {
-  const o = jsonOrNull<OlderObservation>(value);
-  return o === null ? null : upgradeObservation(o);
-}
 
 function nodeRow(r: Row): NodeRecord {
   return {
@@ -34,7 +27,7 @@ function nodeRow(r: Row): NodeRecord {
     tailnetNodeId: r.tailnet_node_id as TailnetNodeId,
     state: r.state as NodeRecord["state"],
     capacity: jsonOrNull(r.capacity),
-    observation: observationOf(r.observation),
+    observation: jsonOrNull(r.observation),
   };
 }
 

@@ -8,7 +8,6 @@ import type { NodeName, ThreadId } from "../../ids.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import type { NodeRecord } from "../node-store.ts";
 import { diskText, lowDisk } from "../../disk-space.ts";
-import { countedCapacity } from "../../protocol/observations.ts";
 import { gib, nodePylons, overcommitted } from "../placement.ts";
 import { releaseView } from "../releases.ts";
 import { utc } from "../usage.ts";
@@ -83,11 +82,11 @@ function releaseLines(c: Context) {
   return releaseView(c.registry, c.registry.nodes().find((n) => n.name === control)?.tailnetNodeId, c.now).nodes;
 }
 
-const lowDisks = (n: NodeRecord) => countedCapacity(n.capacity)?.disks?.filter(lowDisk) ?? [];
+const lowDisks = (n: NodeRecord) => n.capacity?.disks?.filter(lowDisk) ?? [];
 
 /** A node's committed and total memory, and what its paused pylons need to wake. */
 function memoryLine(c: Context, n: NodeRecord): Html | false {
-  const capacity = countedCapacity(n.capacity);
+  const { capacity } = n;
   if (capacity === null) return false;
   const paused = nodePylons(c.registry, n)?.paused.memoryGiB ?? 0;
   return html`<small>${gib(capacity.committedMemoryGiB)}/${gib(capacity.memoryGiB)} GiB memory${paused > 0 && ` · ${gib(paused)} GiB to wake paused`}</small>`;

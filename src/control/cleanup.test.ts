@@ -201,7 +201,7 @@ test("items the person kept are not asked again after a question about others ca
   await pass.poll();
   assert.deepEqual(keysOf(registry), [[oldTemplate.id, older]]);
   answer(registry, "Keep");
-  registry.apply({ record: "node", node: testNode, state: "offline", capacity: null });
+  registry.apply({ record: "node", node: testNode, state: "offline", capacity: registry.node(testNode)!.capacity! });
   pass.releases(testNode, inventory());
   later();
   await pass.poll();

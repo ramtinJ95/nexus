@@ -360,7 +360,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       pylons: await Promise.all(listed.map(async (p) => afterShutdown(await observation(p), lastShutdown.get(p.pylonId)))),
       previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
       grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
-      spawnsWithoutRelaunch: true,
       ...backend.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
       heldSecrets,
     };

@@ -35,7 +35,7 @@ function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, 
   const capacity = testCapacity({ memoryGiB: memory.total, committedMemoryGiB: memory.committed });
   const observed = pylons.map(([pylonId, phase]) => phase === "stopped" ? stoppedPylon(pylonId, { checkpoint: `ckpt-${pylonId}-1` })
     : runningPylon(pylonId, phase === "since archive" ? { bootedAt: "2020-01-01T00:00:00Z", liveHash: "live-1" as LiveHash } : {}));
-  observeNode(registry, { node, probeBootId: "boot-1", capacity, artifacts: [image], pylons: observed, spawnsWithoutRelaunch: true, ...over });
+  observeNode(registry, { node, probeBootId: "boot-1", capacity, artifacts: [image], pylons: observed, ...over });
 }
 
 /** Records `calls` calls no read had counted, `tokens` in all, as a backfill's read of the thread does. */
@@ -162,7 +162,7 @@ test("a run wakes one archived thread's pylon at a time, across nodes, reads it 
   assert.deepEqual(counter.reads, [a.id, b.id]);
 });
 
-test("a run waits while the pylon's node is offline, runs an older probe, is busy with a job, or would be left too little memory, and says why", async (t) => {
+test("a run waits while the pylon's node is offline, is busy with a job, or would be left too little memory, and says why", async (t) => {
   const registry = opened(t);
   const a = addThread(registry, n1, "archived");
   const other = addThread(registry, n1, "other", "idle");
@@ -171,8 +171,6 @@ test("a run waits while the pylon's node is offline, runs an older probe, is bus
   job.start();
 
   await waiting("rj-firebat is offline");
-  observe(registry, n1, [[a.pylonId, "stopped"]], { spawnsWithoutRelaunch: undefined as never });
-  await waiting("rj-firebat runs a probe too old to wake a pylon without its sessions");
   observe(registry, n1, [[a.pylonId, "stopped"]], { jobs: [{ jobId: "j1" as JobId, subject: other.pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" }] });
   await waiting("rj-firebat is busy with a job");
   observe(registry, n1, [[a.pylonId, "stopped"]]);

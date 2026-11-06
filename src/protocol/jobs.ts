@@ -155,10 +155,7 @@ const bootSchema = z.looseObject({
   repo: z.discriminatedUnion("kind", [
     z.looseObject({ kind: z.literal("clone"), url: nonEmpty, checkout: z.looseObject({ branch: nonEmpty, commit: nonEmpty }) }),
     z.looseObject({ kind: z.literal("empty"), branch: nonEmpty }),
-  ], {
-    error: (issue) => issue.code === "invalid_union" && (issue.input as { kind?: unknown }).kind === undefined
-      ? "missing, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes" : undefined,
-  }),
+  ]),
   dotfiles: unchecked<BootInputs["dotfiles"]>(),
 }) satisfies z.ZodType<BootInputs>;
 

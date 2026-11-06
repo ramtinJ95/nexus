@@ -59,12 +59,12 @@ export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
   /**
    * `stalled`: a prompted launch showed no sign its first prompt went in, so its pane stays open for a person to check,
-   * and this says why. A probe from before the field throws a stall as an error instead.
+   * and this says why.
    */
   | { kind: "open-session"; herdrPane: string; stalled?: string }
   /**
    * `not-open`: no such pane is open. `moved`: the pane runs another session than the command names, such as one a wake
-   * put there after moving the named one. Both leave every pane as it was. A probe older than the field sends none.
+   * put there after moving the named one. Both leave every pane as it was.
    */
   | { kind: "close-session"; outcome: CloseSessionOutcome }
   /** `dropped` is false when the pylon holds no such failed session. */
@@ -152,7 +152,7 @@ const sendSchema = z.looseObject({ outcome: z.enum(sendClaudeOutcomes), herdrPan
 const commandResultSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), exitCode: unchecked<number | null>(), output: unchecked<string>(), truncated: unchecked<boolean>() }),
   z.looseObject({ kind: z.literal("open-session"), herdrPane: nonEmpty, stalled: nonEmpty.exactOptional() }),
-  z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(closeSessionOutcomes).nullish() }),
+  z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(closeSessionOutcomes) }),
   z.looseObject({ kind: z.literal("drop-failed-session"), dropped: z.boolean() }),
   z.looseObject({ kind: z.literal("send-claude"), ...sendSchema.shape }),
   z.looseObject({ kind: z.literal("send-claude-outcome"), send: z.union([z.enum(["failed", "unknown"]), sendSchema], { error: "expected failed, unknown or what the send became" }) }),
@@ -165,6 +165,5 @@ const commandResultSchema = z.discriminatedUnion("kind", [
 export function parseCommandResult(command: PylonCommand, body: string): CommandResult {
   const result = parseJson(asSent(commandResultSchema), body, "result");
   if (result.kind !== command.kind) throw new Error(`a ${command.kind} command got a ${result.kind} result`);
-  // A probe that reported every close as done sends no outcome.
-  return result.kind === "close-session" ? { ...result, outcome: result.outcome ?? "closed" } : result;
+  return result;
 }
