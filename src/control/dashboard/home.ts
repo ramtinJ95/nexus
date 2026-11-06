@@ -13,7 +13,7 @@ import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
-import { lifeOfThread, needWhy, itemsOf, roleLine, threadRole, type Life } from "./lifecycle.ts";
+import { lifeOfThread, needWhy, pipelineItems, roleLine, threadRole, type Life } from "./lifecycle.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
 import type { Item } from "./items.ts";
@@ -125,7 +125,7 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
   const carded = new Set(cards.flatMap((n) => n.kind === "cleanup" || n.kind === "held" ? [] : [n.d.thread.id]));
   const holds = (id: ThreadId) => threadPhase(c.registry, id).kind === "held";
   const held = [
-    ...itemsOf(c).filter((item) => item.thread === null && item.phase.kind === "held").map((item): Need => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
+    ...pipelineItems(c).filter((item) => item.thread === null && item.phase.kind === "held").map((item): Need => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
     ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): Need => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
     ...c.threads().filter((t) => (t.status === "active" || t.status === "idle") && !carded.has(t.id) && holds(t.id)).map((thread): Need => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
   ].sort((a, b) => a.since - b.since);
@@ -145,7 +145,6 @@ function heldSince(registry: Registry, r: Review): number {
 /** The key of the work a card is for, as the work in flight and the preview name it. A node's cleanup is no work's. */
 const keyOf = (n: Need) => n.kind === "cleanup" ? null : n.kind === "held" ? heldKey(n.work) : n.d.thread.id;
 
-/** Each piece of work with a card in Needs you. */
 const needCards = (c: Context) => new Set(c.needs().map(keyOf).filter((key) => key !== null));
 
 const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}`

@@ -10,13 +10,13 @@ const hour = 60 * minute;
 const day = 24 * hour;
 
 export const ranges = [["15m", 15 * minute], ["1h", hour], ["6h", 6 * hour], ["24h", day], ["7d", 7 * day], ["30d", 30 * day]] as const;
-export type RangeName = typeof ranges[number][0];
-export const defaultRange: RangeName = "1h";
+type RangeName = typeof ranges[number][0];
+const defaultRange: RangeName = "1h";
 export const rangeOf = (name: string | null): RangeName => ranges.find(([n]) => n === name)?.[0] ?? defaultRange;
 export const rangeMs = (name: RangeName): number => ranges.find(([n]) => n === name)![1];
 
 /** What the node page carries in `data-sample`: its health read as a sample, and a label for each pylon series. */
-export interface PageSample { at: number; values: Record<string, number>; labels: Record<string, string> }
+interface PageSample { at: number; values: Record<string, number>; labels: Record<string, string> }
 
 /** A series' points in time order: each point's time, the min, average and max of its samples, and how many. */
 export interface Points { t: number[]; min: number[]; avg: number[]; max: number[]; n: number[] }
@@ -91,7 +91,6 @@ export function appended(h: History, sample: PageSample): boolean {
   return true;
 }
 
-/** The pylons with lines of their own. */
 const ownPylons = (h: History) => new Set([...h.series.values()].flatMap((s) => pylonOf(s.series) ?? []));
 
 /** How often at most the page reads the range again for a pylon that `regroups`, as often as the background read. */
@@ -151,7 +150,7 @@ export function slotter() {
 }
 export type Slots = ReturnType<typeof slotter>;
 
-export interface Chart {
+interface Chart {
   id: string;
   title: string;
   /** The unit the caption names, if any. */
@@ -251,8 +250,8 @@ export const gapMs = (bucketMs: number): number => 2.5 * Math.max(bucketMs, back
  * A value of a line at an x of the columns: a number, null where its line breaks, and undefined where it has no point
  * but its line runs on, as uPlot reads them.
  */
-export type Cell = number | null | undefined;
-export interface Columns { x: number[]; lines: { min: Cell[]; avg: Cell[]; max: Cell[] }[] }
+type Cell = number | null | undefined;
+interface Columns { x: number[]; lines: { min: Cell[]; avg: Cell[]; max: Cell[] }[] }
 
 /**
  * The lines' points on one x array, as uPlot takes them. A line breaks just after a point that the next is more than

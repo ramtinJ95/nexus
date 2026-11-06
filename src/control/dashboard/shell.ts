@@ -70,7 +70,7 @@ ${projectDialog(c, page.addProject === true)}
 }
 
 /** How long an open thread whose pylon is down and whose agent is not working stays listed before it folds away as quiet. */
-export const quietAfterMs = 8 * 60 * 60 * 1000;
+const quietAfterMs = 8 * 60 * 60 * 1000;
 export const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
 
 /**
@@ -94,7 +94,6 @@ export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
   return q.blocked ? ["blocked", "bad"] : ["queued", "idle"];
 }
 
-/** A thread's title, started or queued. */
 export const threadTitle = (c: Context, id: ThreadId) => c.registry.thread(id)?.title ?? c.registry.queuedThread(id)?.title ?? id;
 export const quietLabel = (threads: readonly Thread[]) => `${threads.length} quiet for over ${quietAfterMs / 3_600_000} hours`;
 export function closedLabel(threads: readonly Thread[]): string {

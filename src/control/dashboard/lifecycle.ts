@@ -171,7 +171,7 @@ export function lifeOfItem(c: Pick<Context, "registry" | "needs" | "now">, item:
   return { stage: ofPhase[item.phase.kind], at: "planned", why: item.phase.why, needs: [] };
 }
 
-export const itemsOf = (c: Pick<Context, "registry">) => c.registry.items().map((i) => itemView(c.registry, i));
+export const pipelineItems = (c: Pick<Context, "registry">) => c.registry.items().map((i) => itemView(c.registry, i));
 
 /**
  * The track of steps a card or a page draws: each step done, the one it is at, held there or not, and those ahead.

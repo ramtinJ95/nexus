@@ -14,7 +14,7 @@ import { prose } from "./markdown.ts";
 import { promptLabel, type Item } from "./items.ts";
 import { clock } from "./elapsed.ts";
 import { landingAt, landingSteps } from "./cards.ts";
-import { itemsOf as pipelineItems, needLabel, stageLabel, stepStates, steps, type Life, type Step, type StepState } from "./lifecycle.ts";
+import { pipelineItems, needLabel, stageLabel, stepStates, steps, type Life, type Step, type StepState } from "./lifecycle.ts";
 
 /** One turn of the conversation: what started it and from whom, the tools it ran, and the answer it ended on. */
 interface Turn { from: string; text: string; at: number; queued: boolean; tools: number; failed: number; reply: string | null; took: string | null; running: boolean }

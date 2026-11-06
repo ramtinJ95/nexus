@@ -32,7 +32,7 @@ ${view === null ? html`<p class="empty">${t.status === "deleted" ? "The thread i
  * by its place among the region's `data-grow` elements. Each frame says which view the region then shows, and a
  * frame with only that comes when the view changed and the region did not.
  */
-export type LiveFrame = { convo: string; shows: string } | { grow: [index: number, inside: string][]; shows: string } | { shows: string };
+type LiveFrame = { convo: string; shows: string } | { grow: [index: number, inside: string][]; shows: string } | { shows: string };
 
 const digest = (text: string) => createHash("sha256").update(text).digest("base64url").slice(0, 22);
 const entryDigests = new WeakMap<readonly unknown[], string>();

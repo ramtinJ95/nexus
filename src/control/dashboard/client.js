@@ -44,9 +44,7 @@ if (document.getElementById("cluster-nodes") !== null) {
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
 setInterval(tick, 1000);
-if (pollMs > 0) {
-  setInterval(() => { if (document.visibilityState === "visible") void refreshNow(); }, pollMs);
-}
+setInterval(() => { if (document.visibilityState === "visible") void refreshNow(); }, pollMs);
 recordVisit();
 document.addEventListener("visibilitychange", () => {
   // The first frame on return is the region whole.
@@ -56,7 +54,7 @@ document.addEventListener("visibilitychange", () => {
   }
   recordVisit();
   follow(document.getElementById("convo")?.dataset.stream);
-  if (pollMs > 0) void refreshNow();
+  void refreshNow();
   askRows();
   // The visit wakes the pylon anyway, so a running one is worth reading again on return.
   if (changesPane !== null && canRead(factsNow())) void readChanges();
