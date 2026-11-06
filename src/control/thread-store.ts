@@ -18,7 +18,7 @@ import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
 import { HttpError } from "./http-error.ts";
 import { json, jsonOrNull, type Db, type Row } from "./db.ts";
-import { desiredPhase, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "../reconcile.ts";
+import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "../reconcile.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import type { HerdrStatus, NodeObservation } from "../protocol/observations.ts";
@@ -587,7 +587,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         if (thread === undefined) return;
         sql("UPDATE claude_transcripts SET byte_offset = ?, skipping = ?, before_hash = ? WHERE thread = ?")
           .run(transcriptStart.offset, transcriptStart.skipping ? 1 : 0, transcriptStart.before, thread);
-        sql(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 0 WHERE id = ?`).run(pylonId);
+        sql(`UPDATE pylons SET failed = NULL, attempts = '${JSON.stringify(noAttempts)}', retrying = 0 WHERE id = ?`).run(pylonId);
         updateAttention(thread);
       });
     },
@@ -869,7 +869,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       });
     },
     /** Forgets the pylon's failed jobs, and only those, as the usage backfill does for a wake it gave up on. */
-    clearPylonAttempts(pylonId: PylonId) { sql(`UPDATE pylons SET attempts = '{"count":0,"last":null}' WHERE id = ?`).run(pylonId); },
+    clearPylonAttempts(pylonId: PylonId) { sql(`UPDATE pylons SET attempts = '${JSON.stringify(noAttempts)}' WHERE id = ?`).run(pylonId); },
     /**
      * Moves a failed pylon to another node and clears its failure as retryPylon does, with its thread's new placement and
      * setup, in one transaction. False when the pylon is not failed on `from`.
@@ -878,7 +878,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       return transaction(() => {
         const thread = threadOfPylon(pylonId);
         if (thread === undefined) return false;
-        const moved = sql(`UPDATE pylons SET node = ?, first_boot = ?, live = ?, live_hash = ?, attempts = '{"count":0,"last":null}', failed = NULL, retrying = 0
+        const moved = sql(`UPDATE pylons SET node = ?, first_boot = ?, live = ?, live_hash = ?, attempts = '${JSON.stringify(noAttempts)}', failed = NULL, retrying = 0
           WHERE id = ? AND node = ? AND failed IS NOT NULL`).run(to.node, JSON.stringify(to.firstBoot), JSON.stringify(to.live), to.liveHash, pylonId, from).changes === 1;
         if (!moved) return false;
         sql("UPDATE threads SET placement = ?, setup = ? WHERE id = ?").run(JSON.stringify(to.placement), JSON.stringify(to.setup), thread);
@@ -888,7 +888,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     },
     /** Clears a failed pylon's verdict and attempts, and marks a human retry. False when the pylon has not failed. */
     retryPylon: (pylonId: PylonId): boolean => transaction(() => {
-      const changed = sql(`UPDATE pylons SET failed = NULL, attempts = '{"count":0,"last":null}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`).run(pylonId).changes === 1;
+      const changed = sql(`UPDATE pylons SET failed = NULL, attempts = '${JSON.stringify(noAttempts)}', retrying = 1 WHERE id = ? AND failed IS NOT NULL`).run(pylonId).changes === 1;
       const thread = threadOfPylon(pylonId);
       if (thread !== undefined) updateAttention(thread);
       return changed;
