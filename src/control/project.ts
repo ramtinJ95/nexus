@@ -73,6 +73,9 @@ export const loginHosts: { readonly [K in LoginKind]: readonly string[] } = {
   chatgpt: ["auth.openai.com", "chatgpt.com", "api.openai.com"],
 };
 
+/** The git identity a project's pylons boot with: its own, or else the one the control plane is configured with. */
+export const gitIdentityOf = (project: Pick<Project, "gitIdentity">, configured: GitIdentity | undefined): GitIdentity | undefined => project.gitIdentity ?? configured;
+
 /**
  * project.allowedHosts, plus the host of an HTTPS repoUrl, plus loginHosts for project.logins, plus every
  * SecretGrant host, sorted and deduped. Setup clones the repo through the allowlist, so a project always
