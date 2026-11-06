@@ -14,7 +14,7 @@ A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the o
 |---|---|---|
 | `PUT /v1/jobs/{jobId}` | Control plane (`rj-firebat`) | Submit one lifecycle job. Safe to repeat with the same `jobId` |
 | `GET /v1/jobs/{jobId}` | Control plane (`rj-firebat`) | Read a job's status, or 404 after a probe restart |
-| `GET /v1/observe` (NDJSON stream) | Control plane (`rj-firebat`) | A snapshot of the node, then events |
+| `GET /v1/observe` (NDJSON stream) | Control plane (`rj-firebat`) | A snapshot of the node, then events. Each snapshot carries the probe's `contract`, and the control plane refuses one below `minProbeContract` (`src/protocol/observations.ts`) |
 | `POST /v1/pylons/{id}/commands` | Control plane (`rj-firebat`) | Synchronous guest commands: exec, open or close a session or drop a failed one, service operations, linking a listening port as a preview |
 | `PUT /v1/secrets/{name}` | Control plane (`rj-firebat`) | Hand the probe a secret the control plane holds, today only `NEXUS_CHATGPT_TOKEN`, the harness's ChatGPT access token. The probe keeps it in memory and updates every running pylon that has the grant. Sent every minute, changed or not |
 | `GET /v1/pylons/{id}/stream` (WebSocket) | Control plane (`rj-firebat`) | A raw byte stream to a program in the pylon, for the harness channel and, through a pty relay, terminal attach |

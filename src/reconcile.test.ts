@@ -7,7 +7,7 @@ import {
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "./ids.ts";
 import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "./protocol/jobs.ts";
 import {
-  encodeProbeEvent, minProbeContract, parseProbeEvent, type PausedSession, type ProbeEvent,
+  encodeProbeEvent, minProbeContract, parseProbeEvent, probeContract, type PausedSession, type ProbeEvent,
   type PylonObservation, type RunningFacts, type SessionFact,
 } from "./protocol/observations.ts";
 import { chatgptTokenGrant } from "./secret-grants.ts";
@@ -356,13 +356,14 @@ test("a stopped pylon parses with the sessions its pause recorded", () => {
 });
 
 test("a snapshot from a probe below the contract this control plane reads is refused", () => {
+  assert.ok(probeContract >= minProbeContract, "a probe of this release meets its own floor");
   const observation = testObservation(node);
   const frame = (contract: unknown) => JSON.stringify({ type: "snapshot", ...contract === undefined ? {} : { contract }, observation });
   assert.deepEqual(parseProbeEvent(frame(minProbeContract)), { type: "snapshot", observation });
   const { events: _, previewRoutes: __, ...older } = observation;
-  assert.throws(() => parseProbeEvent(JSON.stringify({ type: "snapshot", observation: older })), { message: new RegExp(`^${node} runs a probe of contract 0, older than`) }, "an older probe's shape gets the contract's refusal, not a field's");
+  assert.throws(() => parseProbeEvent(JSON.stringify({ type: "snapshot", observation: older })), { message: new RegExp(`^${node} runs a probe of no contract, older than`) }, "an older probe's shape gets the contract's refusal, not a field's");
   for (const contract of [undefined, minProbeContract - 1, "1"]) {
-    assert.throws(() => parseProbeEvent(frame(contract)), { message: new RegExp(`^${node} runs a probe of contract \\d+, older than the ${minProbeContract} this control plane reads\\. Upgrade it with nexus deploy$`) }, String(contract));
+    assert.throws(() => parseProbeEvent(frame(contract)), { message: new RegExp(`^${node} runs a probe of (contract \\d+|no contract), older than the ${minProbeContract} this control plane reads\\. Upgrade it with nexus deploy$`) }, String(contract));
   }
 });
 

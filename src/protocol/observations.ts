@@ -221,7 +221,7 @@ export function parseProbeEvent(frame: string): ProbeEvent {
       const { contract } = event;
       if (!(typeof contract === "number" && contract >= minProbeContract)) {
         const node = (event.observation as { node?: unknown } | null)?.node;
-        throw new Error(`${typeof node === "string" ? node : "the node"} runs a probe of contract ${typeof contract === "number" ? contract : 0}, older than the ${minProbeContract} this control plane reads. Upgrade it with nexus deploy`);
+        throw new Error(`${typeof node === "string" ? node : "the node"} runs a probe of ${typeof contract === "number" ? `contract ${contract}` : "no contract"}, older than the ${minProbeContract} this control plane reads. Upgrade it with nexus deploy`);
       }
       const observation = parse(asSent(observationSchema), event.observation, "event.observation");
       return { type: "snapshot", observation: { ...observation, pylons: observation.pylons.map(knownCause) } };
