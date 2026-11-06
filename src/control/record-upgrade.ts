@@ -6,19 +6,21 @@
  */
 import { reviewPrefix } from "../agent-protocol.ts";
 import { personOnly, reservedCases, reservedNames, type HoldCode } from "./holds.ts";
-import { findingSchema, maxRounds, secondReads, type Review } from "./review-model.ts";
+import { findingSchema, maxRounds, secondReads, type Change, type Review } from "./review-model.ts";
+
+/** What a waiver saved before Nexus recorded the change it waives reads as, so it holds at its own head alone. */
+const unrecordedChange: Change = { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" };
 
 /**
  * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
  * priorities, one saved before waivers has none, holds and a waiver saved before hold codes get them from their texts,
- * and a hold saved before causes gets one from its label. A waiver saved before changes keeps none, so it holds at its
- * own head alone.
+ * a waiver saved before changes gets one that is unknown, and a hold saved before causes gets one from its label.
  */
 export function upgradeReview(record: Review): Review {
   const { phase, waiver } = record;
   return {
     ...record, maxRounds: Math.min(record.maxRounds, maxRounds), auto: record.auto ?? false,
-    waiver: waiver == null ? null : { ...waiver, codes: waiver.codes ?? waiver.holds.map(codeOfText) },
+    waiver: waiver == null ? null : { ...waiver, codes: waiver.codes ?? waiver.holds.map(codeOfText), change: waiver.change === undefined ? unrecordedChange : waiver.change },
     phase: phase.kind === "needs-person" ? {
       ...phase, cause: phase.cause ?? (phase.label === undefined ? "unrecorded" : "rounds"),
       holds: phase.holds ?? phase.reasons.map((text) => ({ code: codeOfText(text), text })),

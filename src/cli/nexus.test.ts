@@ -1651,7 +1651,7 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: reviewing, round 2 of 5, .*\na new round reviews 222222222222, since the pull request's head moved from 111111111111 after its approval$/m);
 
   const hold = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
-  s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9) } });
+  s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9), change: null } });
   const waived = await s.nexus(["show", thread.id]);
   assert.match(waived.stdout, new RegExp(`^waived by nLAPTOP at ${"1".repeat(40)}, 2026-10-27T09:00:00.000Z:\n  ${hold.replace(/[.()]/g, "\\$&")}$`, "m"));
   const events = await s.nexus(["events", "--thread", thread.id, "--kind", "review.waived"]);

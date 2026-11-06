@@ -2879,7 +2879,7 @@ test("a review stored before hold codes reads its holds and its waiver with code
 
   const waiver = { head: head1, holds: reservedHolds, by: "nLAPTOP", at: 1 };
   saveOlder(f, { ...f.review(), land: { requestedBy: "nLAPTOP" }, waiver, phase: { kind: "merging", authorized: null } });
-  assert.deepEqual(f.review().waiver, { ...waiver, codes: ["reserved-path:irreversible"] });
+  assert.deepEqual(f.review().waiver, { ...waiver, codes: ["reserved-path:irreversible"], change: { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" } });
   const loop = f.loop();
   await loop.poll();
   await loop.poll();
@@ -2892,7 +2892,7 @@ test("a waiver covers its hold by code, whatever the hold's text, and the review
   f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
   f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null },
-    waiver: { head: head1, holds: ["Always needs the person: anything irreversible, in words an older control plane used."], codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1 } });
+    waiver: { head: head1, holds: ["Always needs the person: anything irreversible, in words an older control plane used."], codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1, change: null } });
   await loop.poll();
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
@@ -3479,7 +3479,7 @@ test("an approval carried to the same change never carries past a hold the perso
   assert.deepEqual(carryWaiver({ ...review, waiver }, same, [irreversible]).review.waiver, { ...waiver, head: head2, from: head1 }, "the same change, hunks moved, carries the waiver");
   assert.deepEqual(carryWaiver({ ...review, waiver }, same, [irreversible, image]), { review: { ...review, waiver }, why: null }, "a new hold holds, and the waiver stays where it was");
   const { change: _, ...legacy } = waiver;
-  assert.match(carryWaiver({ ...review, waiver: legacy }, same, [irreversible]).why!.text, /the waiver was saved before Nexus recorded the change it waives/, "a waiver saved before changes holds at its own head alone");
+  assert.match(carryWaiver(upgradeReview({ ...review, waiver: legacy as Waiver }), same, [irreversible]).why!.text, /the waiver was saved before Nexus recorded the change it waives/, "a waiver saved before changes holds at its own head alone");
   assert.deepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -9 +9 @@ function f() {\n-a\n+b" }]), "only hunk headers are ignored");
   assert.notDeepEqual(changeOf("main", [{ path: "a.ts", previous: null, patch: "@@ -1 +1 @@\n-a\n+b" }]), changeOf("main", [{ path: "a.ts", previous: "z.ts", patch: "@@ -1 +1 @@\n-a\n+b" }]), "a rename's old path is part of the change");
   const script = (modes: [string, string]) => changeOf("main", [{ path: "a.sh", previous: null, patch: "@@ -1 +1 @@\n-a\n+b", modes }]);
@@ -3577,7 +3577,7 @@ test("a review stored before carried approvals and waiver changes still loads, a
   const { change: _, ...old } = f.review().waiver!;
   saveOlder(f, { ...f.review(), waiver: old });
   await loop.poll();
-  assert.equal(f.review().waiver!.change, undefined, "the old waiver loads as it was saved, and the landing records no change for it");
+  assert.deepEqual(f.review().waiver!.change, { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" }, "the old waiver loads with an unknown change, and the landing records none for it");
   rebased(f);
   f.reply(f.builder, answers(f.review(), [{ id: "CONFLICT", action: "fixed", reason: "Rebased onto main." }]));
   await loop.poll();

@@ -85,8 +85,15 @@ const fixtures: [string, unknown][] = [
   ["no second reviewer could run", testReview({ second: { kind: "none", rule: "the project gives every pull request one", why: "no model" } })],
 ];
 
-test("the upgrade gives every stored-review fixture what storedReview read", () => {
-  for (const [name, record] of fixtures) assert.deepEqual(upgradeReview(structuredClone(record) as Review), storedReview(structuredClone(record) as Review), name);
+const unrecordedChange = { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" };
+
+test("the upgrade gives every stored-review fixture what storedReview read, and a waiver saved before changes an unknown one", () => {
+  for (const [name, record] of fixtures) {
+    const before = storedReview(structuredClone(record) as Review);
+    const lacksChange = before.waiver !== null && !("change" in before.waiver);
+    const expected = lacksChange ? { ...before, waiver: { ...before.waiver!, change: unrecordedChange } } : before;
+    assert.deepEqual(upgradeReview(structuredClone(record) as Review), expected, name);
+  }
 });
 
 test("an upgraded record reads the same through storedReview, so an older control plane reads it, and upgrades no further", () => {

@@ -246,7 +246,6 @@ export function carryWaiver(review: Review, change: Change, holds: readonly Hold
   if (waiver === null || waiver.head === head) return { review, why: null };
   const [at, to] = [waiver.head.slice(0, 12), head.slice(0, 12)];
   const unknown = (why: string) => ({ review, why: hold("waiver-not-carried", `Nexus cannot tell whether the change at ${to} is the one ${waiver.by} pressed Land for at ${at}, as ${why}, so that waiver does not carry over. Look at the change again, and press Land to waive the holds at ${to}.`) });
-  if (waiver.change === undefined) return unknown("the waiver was saved before Nexus recorded the change it waives");
   if (waiver.change === null) return unknown("Nexus never read the change the waiver was for");
   if (waiver.change.kind === "unknown") return unknown(waiver.change.why);
   if (change.kind === "unknown") return unknown(change.why);
