@@ -4,9 +4,8 @@
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { reviewPrefix } from "../agent-protocol.ts";
 import type { ChangedFile, PullRequest } from "./github.ts";
-import { legacyHoldCode, reservedCases, type Hold, type HoldCode } from "./holds.ts";
+import { reservedCases, type Hold, type HoldCode } from "./holds.ts";
 import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 
@@ -17,7 +16,7 @@ export const humanLabel = "needs human review";
 export const priorities = ["P0", "P1", "P2", "P3"] as const;
 /** What a finding's severity, before priorities, reads as: a reviewer told the old shape, or a stored round, still answers with it. */
 const legacyPriority: Record<string, typeof priorities[number]> = { serious: "P1", minor: "P3" };
-const findingSchema = z.preprocess((v) => typeof v === "object" && v !== null && "severity" in v && !("priority" in v) ? { ...v, priority: legacyPriority[String(v.severity)] } : v, z.object({
+export const findingSchema = z.preprocess((v) => typeof v === "object" && v !== null && "severity" in v && !("priority" in v) ? { ...v, priority: legacyPriority[String(v.severity)] } : v, z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/),
   priority: z.enum(priorities),
   where: z.string().max(300).nullish(),
@@ -271,28 +270,6 @@ export const personPhase = (cause: HoldCause, ...items: readonly (Hold | string)
   const holds = items.map((h): Hold => typeof h === "string" ? { code: "loop", text: h } : h);
   return { kind: "needs-person" as const, cause, reasons: holds.map((h) => h.text), holds };
 };
-
-/**
- * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
- * priorities, one saved before waivers has none, holds and a waiver saved before hold codes get them from their texts,
- * and a hold saved before causes gets one from its label. A waiver saved before changes keeps none, so it holds at its
- * own head alone.
- */
-export function storedReview(record: Review): Review {
-  const { phase, waiver } = record;
-  return {
-    ...record, maxRounds: Math.min(record.maxRounds, maxRounds), auto: record.auto ?? false,
-    waiver: waiver == null ? null : { ...waiver, codes: waiver.codes ?? waiver.holds.map(legacyHoldCode) },
-    phase: phase.kind === "needs-person" ? {
-      ...phase, cause: phase.cause ?? (phase.label === undefined ? "unrecorded" : "rounds"),
-      holds: phase.holds ?? phase.reasons.map((text) => ({ code: legacyHoldCode(text), text })),
-    } : phase,
-    asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
-    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } })
-      // A round of a review with a second reviewer that lacks its verdict has none, which never approves.
-      .map((round, i) => secondReads(record) && i === record.rounds.length - 1 && round.secondVerdict === undefined ? { ...round, secondVerdict: null } : round),
-  };
-}
 
 /**
  * A gate that stopped an approval: the P0 `finding` the builder answers, what `failed`, the `verdict` its findings

@@ -8,30 +8,35 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "../agent-protocol.ts";
-import { builderAwaited, storedReview, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import { builderAwaited, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import { upgradeReview } from "./record-upgrade.ts";
 
 export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void }) {
   const { transaction, sql, recordOf } = db;
   const { setThreadStatus, appendEvent, updateAttention } = core;
-  const storedReviewOf = (builder: ThreadId): Review | null => {
-    const record = recordOf<Review>("reviews", "builder", builder);
-    return record === null ? null : storedReview(record);
-  };
-  const isCurrentReview = (review: Review) => JSON.stringify(storedReviewOf(review.builder)) === JSON.stringify(review);
+  // Each record an older control plane saved is upgraded once, with no event, so every read below gets this code's shape.
+  transaction(() => {
+    for (const row of sql("SELECT builder, record FROM reviews").all()) {
+      const upgraded = JSON.stringify(upgradeReview(json<Review>(row.record)));
+      if (upgraded !== row.record) sql("UPDATE reviews SET record = ? WHERE builder = ?").run(upgraded, row.builder as string);
+    }
+  });
+  const reviewOf = (builder: ThreadId): Review | null => recordOf<Review>("reviews", "builder", builder);
+  const isCurrentReview = (review: Review) => JSON.stringify(reviewOf(review.builder)) === JSON.stringify(review);
   return {
     participant: {
       needsPerson: (thread: ThreadId) => waitsOnPerson(recordOf<Review>("reviews", "builder", thread)),
       awaited: (threads: readonly ThreadId[]) => new Map(sql(`SELECT record FROM reviews WHERE builder IN (SELECT value FROM json_each(?))
-        AND json_extract(record, '$.phase.kind') IN ('reviewing', 'fixing')`).all(JSON.stringify(threads)).map((r) => storedReview(json<Review>(r.record)))
+        AND json_extract(record, '$.phase.kind') IN ('reviewing', 'fixing')`).all(JSON.stringify(threads)).map((r) => json<Review>(r.record))
         .flatMap((r) => { const hold = builderAwaited(r); return hold === null ? [] : [[r.builder, hold] as const]; })),
     },
-    review: storedReviewOf,
+    review: reviewOf,
     /** Whether `review` is the builder's review as stored, so no other save came since it was read. */
     isCurrentReview,
-    reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => storedReview(json<Review>(r.record))),
+    reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => json<Review>(r.record)),
     /** The reviews but those whose phase is one of `settled` with no message left to send. */
     reviewsToStep: (settled: readonly string[]): Review[] => sql(`SELECT record FROM reviews WHERE json_extract(record, '$.phase.kind') NOT IN (SELECT value FROM json_each(?))
-      OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(JSON.stringify(settled)).map((r) => storedReview(json<Review>(r.record))),
+      OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(JSON.stringify(settled)).map((r) => json<Review>(r.record)),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
@@ -45,7 +50,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     saveReview(review: Review, archive: readonly ThreadId[] = [], previous?: Review): boolean {
       return transaction(() => {
         if (previous !== undefined && !isCurrentReview(previous)) return false;
-        const before = storedReviewOf(review.builder);
+        const before = reviewOf(review.builder);
         for (const id of archive) setThreadStatus(id, "archived");
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
@@ -61,10 +66,10 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
         }
         // Reading the change a waiver is for, or carrying it to a later head, is not the person waiving again.
         const pressed = (w: Waiver | null | undefined) => w == null ? null : JSON.stringify({ ...w, head: w.from ?? w.head, change: undefined, from: undefined });
-        if (review.waiver != null && pressed(before?.waiver) !== pressed(review.waiver)) {
+        if (review.waiver !== null && pressed(before?.waiver) !== pressed(review.waiver)) {
           const { change: _, ...waiver } = review.waiver;
           appendEvent("review.waived", review.builder, { ...pr, ...waiver });
-        } else if (review.waiver != null && before?.waiver != null && before.waiver.head !== review.waiver.head) {
+        } else if (review.waiver !== null && before?.waiver != null && before.waiver.head !== review.waiver.head) {
           appendEvent("review.waiver-carried", review.builder, { ...pr, from: before.waiver.head, to: review.waiver.head, by: review.waiver.by });
         }
         updateAttention(review.builder);

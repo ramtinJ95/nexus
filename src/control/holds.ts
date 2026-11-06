@@ -62,31 +62,3 @@ export const waivedName = (code: HoldCode): string => {
   return c !== null ? reservedNames[c] : code === "check-changed" ? "a change to .nexus/check" : code === "verify-changed" ? "a change to .nexus/verify" : code === "no-second-reviewer" ? "a review without its second reviewer" : code;
 };
 
-/**
- * The code a hold's text had under the text rules, which reads records saved before holds carried codes: a
- * needs-person phase with only reasons, and a waiver with only texts.
- */
-export function legacyHoldCode(text: string): HoldCode {
-  for (const c of cases) {
-    if (text.startsWith(`${personOnly}${reservedNames[c]}, by the reviewer's reading (`)) return `reserved:${c}`;
-    if (text.startsWith(`${personOnly}${reservedNames[c]}, as it changes `)) return `reserved-path:${c}`;
-  }
-  const rules: readonly [HoldCode, (t: string) => boolean][] = [
-    ["check-changed", (t) => t === "The pull request changes .nexus/check, the check this policy relies on."],
-    ["verify-changed", (t) => t === "The pull request changes .nexus/verify, the live check this policy relies on."],
-    ["claude-approved", (t) => t.startsWith("A Claude reviewer approved it.")],
-    ["open-findings", (t) => t.startsWith("Findings P0 to P2 are open")],
-    ["not-approved", (t) => t.startsWith("The reviewer has not approved")],
-    ["unanswered", (t) => t.startsWith("The builder neither fixed nor rejected")],
-    ["check-failed", (t) => t.startsWith(".nexus/check ")],
-    ["live-failed", (t) => t.startsWith("The live check ")],
-    ["github-checks", (t) => /GitHub checks are/.test(t)],
-    ["not-approved-head", (t) => /, not the approved /.test(t)],
-    ["conflict", (t) => t === "The branch conflicts with its base."],
-    ["pr-not-open", (t) => /^Pull request #\d+ is /.test(t)],
-    ["same-model", (t) => t.startsWith("The reviewer ran the builder's own model")],
-    ["not-checked-live", (t) => /could not be checked live/.test(t)],
-    ["stale-head", (t) => /^The pull request's head moved to \S+ after this review was held/.test(t)],
-  ];
-  return rules.find(([, matches]) => matches(text))?.[0] ?? "loop";
-}
