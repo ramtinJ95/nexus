@@ -63,8 +63,8 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     pylon.attempts = attempts;
     ctx.save(pylon);
   }
-  // Delete still reaches the planner, whose rule 3 ignores failures.
-  if (pylon.failed !== null && pylon.desired !== "deleted") return { kind: "fail", code: pylon.attempts.last?.code ?? "backend", reason: pylon.failed };
+  const failed = failedStep(pylon);
+  if (failed !== null) return failed;
 
   const { probe } = ctx;
   let { observation } = ctx;
@@ -82,7 +82,8 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   }
   if (ctx.desired !== undefined) {
     pylon.desired = ctx.desired();
-    if (pylon.failed !== null && pylon.desired !== "deleted") return { kind: "fail", code: pylon.attempts.last?.code ?? "backend", reason: pylon.failed };
+    const failedNow = failedStep(pylon);
+    if (failedNow !== null) return failedNow;
   }
 
   const step = planPylon({
@@ -133,6 +134,11 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   if (sent !== "retry") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(sent.invalid, ""), pylon.desired === "reading");
   ctx.save(pylon);
   return step;
+}
+
+/** Delete still reaches the planner, whose rule 3 ignores failures. */
+function failedStep(pylon: PylonRecord): PlanStep | null {
+  return pylon.failed !== null && pylon.desired !== "deleted" ? { kind: "fail", code: pylon.attempts.last?.code ?? "backend", reason: pylon.failed } : null;
 }
 
 /**
