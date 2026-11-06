@@ -116,7 +116,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
       : s.state === "failed" ? `failed: ${s.message}` : s.status}`),
     ...previews.map((v) => `preview: ${v.service} at ${v.url}${v.failed !== null ? `, not ready: ${v.failed}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
-    ...(prWatch?.enabled ? [prWatch.stopped ? "PR watch: stopped (10 comment-only wakes)" : "PR watch: on", ...(prWatch.error ? [prWatch.error] : [])] : ["PR watch: off (no control-plane GitHub token configured)"]),
+    ...(prWatch.enabled ? [prWatch.stopped ? "PR watch: stopped (10 comment-only wakes)" : "PR watch: on", ...(prWatch.error ? [prWatch.error] : [])] : ["PR watch: off (no control-plane GitHub token configured)"]),
     ...pullRequests.map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
     ...review == null ? [] : [reviewText(review)],
     ...questions.map(questionText),

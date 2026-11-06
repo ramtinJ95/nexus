@@ -86,7 +86,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const view = await transcript(thread);
       const d = detail(registry.thread(thread.id)!);
       const read = view === null || view instanceof Error ? null : view;
-      return { kind: "thread", d, items: read === null ? [] : itemsOf(read, () => d.questions ?? [], thread.id, () => promptSenders(registry, thread.id)) };
+      return { kind: "thread", d, items: read === null ? [] : itemsOf(read, () => d.questions, thread.id, () => promptSenders(registry, thread.id)) };
     }
     const queued = registry.queuedThread(key as ThreadId);
     if (queued !== undefined && queued.status === "queued") return { kind: "queued", q: queuedView(registry, queued) };

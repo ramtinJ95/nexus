@@ -101,7 +101,7 @@ export async function pressOf(api: Api, id: string, terminal: Terminal): Promise
   needsTerminal(terminal);
   const { review, questions } = await api("GET", thread(id)) as ThreadDetail;
   if (review === null) return {};
-  const asking = (questions ?? []).find((q) => isOpen(q) && q.holds?.review === review.id);
+  const asking = questions.find((q) => isOpen(q) && q.holds?.review === review.id);
   if (asking?.holds !== undefined) {
     if (!await confirmWaiver(terminal, review.pr.number, asking.holds.head, asking.holds.holds.map((h) => h.text))) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
     return { question: asking.id, running: !ended.has(review.phase.kind) };

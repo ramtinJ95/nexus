@@ -110,10 +110,10 @@ export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queue
     const d = detail(t);
     const nudged = c.registry.nudge(t.id);
     // A review that asks about its holds has its question's card, which shows the review too.
-    const asking = (d.questions ?? []).some((q) => isOpen(q) && q.holds?.review === d.review?.id);
+    const asking = d.questions.some((q) => isOpen(q) && q.holds?.review === d.review?.id);
     const needs: ThreadNeed[] = [
       ...!asking && (d.review?.phase.kind === "needs-person" || (d.review?.phase.kind === "approved" && cannotLand(d.review, d.thread, prOf(d)) === null)) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
-      ...(d.questions ?? []).filter(isOpen).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
+      ...d.questions.filter(isOpen).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
       ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
       ...d.resume?.state === "person" ? [{ kind: "resume" as const, d, why: d.resume.why, since: d.resume.turn }] : [],
     ];
@@ -237,7 +237,7 @@ ${card}`];
       html`<button type="button" class="btn btn-xs danger" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its disk goes with the token usage on it unread.">Delete</button>`)];
     case "question": {
       const q = n.question;
-      const judgment = (d.judgments ?? []).filter((j) => j.question === q.id);
+      const judgment = d.judgments.filter((j) => j.question === q.id);
       if (q.holds !== undefined) return ["Holds to waive", html`${questionCard(c, q)}${landing(c, d, (name) => `${name}-${t.id}`, true)}`];
       return [q.ask !== undefined ? "Claude asks" : q.proposal !== undefined ? "Proposed item" : judgment.length > 0 ? "Judgment" : "Question",
         html`${judgment.length > 0 && judgmentCards(c, { ...d, judgments: judgment })}${questionCard(c, q)}`];

@@ -48,7 +48,7 @@ const answerers: Record<Question["answerer"], string> = { person: "You answer.",
  * Nexus did, with what the judgment was asked and what it answered. A question it asks is the question card below.
  */
 export function judgmentCards(c: Context, d: ThreadDetail): Html[] {
-  return (d.judgments ?? []).map((j) => {
+  return d.judgments.map((j) => {
     const did = j.outcome !== null ? `Nexus ${j.outcome}.` : j.question !== null ? "It waits for your answer below." : j.verdict === null ? "Nexus acts on its answer." : "Nexus acts on it now.";
     return html`<section class="landing judgment" data-judgment="${j.failure}" aria-label="Judgment of a failure">
 <div class="land-top"><h2>Failed on ${j.node}</h2><span class="land-meta">judged ${ago(j.startedAt, c.now)}</span></div>
@@ -66,7 +66,7 @@ ${j.brief !== null && html`<details><summary>What the judgment was asked and ans
  * conversation instead. As with landing, the page says up front when the answer route would refuse this device.
  */
 export function questionCards(c: Context, d: ThreadDetail): Html[] {
-  return (d.questions ?? []).filter((q) => q.ask === undefined || q.answer === null).map((q) => questionCard(c, q));
+  return d.questions.filter((q) => q.ask === undefined || q.answer === null).map((q) => questionCard(c, q));
 }
 
 export function questionCard(c: Context, q: Question): Html {
@@ -144,7 +144,7 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 }
 
 /** The review's PR as the PR watch last read it. */
-export const prOf = (d: ThreadDetail) => d.pullRequests?.find((p) => p.repo === d.review?.pr.repo && p.number === d.review.pr.number);
+export const prOf = (d: ThreadDetail) => d.pullRequests.find((p) => p.repo === d.review?.pr.repo && p.number === d.review.pr.number);
 
 /**
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
@@ -193,14 +193,14 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, id, card) : null;
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
-  const moved = d.prWatch?.stopped ? null : pushedHead(r, pr);
+  const moved = d.prWatch.stopped ? null : pushedHead(r, pr);
   const held = r.phase.kind === "needs-person";
   const reasons = heldBy(r);
   const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));
   const press = landPress(r);
   const waived = press.kind === "lands" ? press.waives.map((h) => h.text) : [];
   // The review's question about these holds is how the person waives them, so the card does not offer a second way.
-  const asking = (d.questions ?? []).find((q) => isOpen(q) && q.holds?.review === r.id && q.holds.head === round.head);
+  const asking = d.questions.find((q) => isOpen(q) && q.holds?.review === r.id && q.holds.head === round.head);
   // A hold that meets every landing again, and that the person cannot waive, leaves only merging on GitHub.
   const stuck = press.kind === "stuck";
   const checks = press.kind === "lands" && press.quotes ? "Nexus first asks the reviewer to quote, from the description as it is now, what could not be checked live, then checks" : "Nexus checks";
