@@ -41,7 +41,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
     const found = lookup(id);
     if ("thread" in found) return guard(found.thread, need);
     const { status } = found.queued;
-    throw new HttpError(409, status === "queued" ? `thread ${id} is queued, so it has no pylon or conversation yet` : `thread ${id} was ${status === "archived" ? "cancelled" : "deleted"} while queued, so it has no pylon or conversation`);
+    throw new HttpError(409, status === "queued" ? `thread ${id} is queued, so it has no pylon or conversation yet` : `thread ${id} was ${status === "archived" ? "cancelled" : "deleted"} while queued, so it has no pylon or conversation`, "queued");
   }
 
   /** Why the thread does not have what `need` asks of it, or null when it does. */
