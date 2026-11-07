@@ -10,7 +10,7 @@ import { maxEntries, type ClaudeConversation, type ClaudeEntry } from "../../con
 import { agentView, claudeFrames, queuedOf, type ClaudeFrame, type ViewFrame } from "../../control/conversation-view.ts";
 import type { ActualState } from "../../control/reconcile.ts";
 import { CliError } from "../transport.ts";
-import { type Api, type Follow, type Command, str, thread, int, clip, untilConsumerGone } from "../kit.ts";
+import { type Api, type Follow, type Command, str, thread, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
 import { entryText, type View, queuedTexts, busy, conversationText, claudeEntryText, claudeText } from "../conversation-text.ts";
 
@@ -219,8 +219,9 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
 
   const stop = new AbortController();
   /**
-   * A dropped stream is opened again after 100 ms, doubling up to the poll interval, and from 100 ms again once a
-   * frame arrives. A thread without a conversation, or a deleted one, refuses the stream, and never streams again.
+   * A dropped stream is opened again as reconnectMs says, at most the poll interval apart, and counts from the start
+   * again once a frame arrives. A thread without a conversation, or a deleted one, refuses the stream, and never
+   * streams again.
    */
   async function stream() {
     const claude = (await firstDetail.promise).claudeWorker !== undefined;
@@ -243,7 +244,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
         }
         failed("stream", err);
       }
-      await sleep(Math.min(100 * 2 ** attempt, intervalMs), undefined, { signal: stop.signal }).catch(() => {});
+      await sleep(reconnectMs(attempt, intervalMs), undefined, { signal: stop.signal }).catch(() => {});
     }
   }
   async function poll() {

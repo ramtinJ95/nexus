@@ -48,7 +48,8 @@ import { claudeProjects, transcriptStart, type ClaudeEntry } from "../control/cl
 import { testCertificate } from "../test-certificate.ts";
 import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-support/kit.ts";
 import { call, CliError, follow } from "./transport.ts";
-import type { Api } from "./kit.ts";
+import { whenRunning, type Api } from "./kit.ts";
+import { threadsCommands } from "./commands/threads.ts";
 import { answeredText, pressOf } from "./commands/release.ts";
 import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
@@ -2561,7 +2562,7 @@ async function closingApi(t: TestContext, close: "idle" | "request") {
     // Without Node's keep-alive hint, which would tell the client when the server closes a connection.
     const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json", connection: "keep-alive" }).end(JSON.stringify(body));
     if (!req.url!.includes("/files")) return reply(200, { thread: { status: "active" } });
-    if (++reads === 1) return reply(409, { error: "pylon pylon-x is not running yet", code: "not-running" });
+    if (++reads === 1) return reply(409, { error: "pylon pylon-x is not running yet", code: "not-running", retryable: true });
     reply(200, { path: "", entries: [], truncated: false });
   });
   const server = createHttpServer((req, res) => {
@@ -2642,4 +2643,40 @@ test("a reused connection takes each request's own idle timeout, and a silence o
     (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at 127.0.0.1:${port} sent nothing for 0.2s`);
   assert.deepEqual(seen, ["/fast", "/fast", "/slow"]);
   assert.equal(sockets.size, 1, "the three requests shared one connection");
+});
+
+test("show reads only a refusal coded queued as a queued thread, and passes any other 409 on", async () => {
+  const asked: string[] = [];
+  const refusing = (refusal: CliError): Api => async (method, path) => {
+    asked.push(`${method} ${path}`);
+    if (path === "/v1/threads/th-0123456789ab") throw refusal;
+    return { id: "th-0123456789ab", status: "queued" };
+  };
+  const blocked = new CliError("conflict", "the Claude worker waits at a prompt", 409, "blocked");
+  await assert.rejects(threadsCommands.show!.run(refusing(blocked), ["th-0123456789ab"], {}, null!, null!) as Promise<unknown>, blocked);
+  assert.deepEqual(asked, ["GET /v1/threads/th-0123456789ab"], "a 409 that is not queued asks for no queued thread");
+});
+
+test("whenRunning tries a retryable refusal again and fails at once on any other", async () => {
+  const api: Api = async () => ({ thread: { status: "active" } });
+  for (const refusal of [
+    new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running", true),
+    new CliError("conflict", "control plane is draining for deployment", 409, "draining", true),
+  ]) {
+    let tries = 0;
+    const waking = () => {
+      if (tries++ === 0) throw refusal;
+      return Promise.resolve("sent");
+    };
+    assert.equal(await whenRunning(api, "th-0123456789ab", waking, "nothing was sent"), "sent", refusal.code!);
+    assert.equal(tries, 2, refusal.code!);
+  }
+  for (const refusal of [
+    new CliError("conflict", "the Claude worker waits at a prompt", 409, "blocked"),
+    new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running"),
+  ]) {
+    let refusals = 0;
+    await assert.rejects(whenRunning(api, "th-0123456789ab", () => { refusals++; throw refusal; }, "nothing was sent"), refusal);
+    assert.equal(refusals, 1, `${refusal.code}: a refusal that is not retryable is not tried again, whatever its code`);
+  }
 });

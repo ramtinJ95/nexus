@@ -9,6 +9,7 @@ import { Agent, request } from "node:http";
 import { connect, isIP, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { WebSocket } from "ws";
+import type { RefusalCode } from "../control/refusal.ts";
 
 /** Every way a command fails. Each has its own exit code, so a caller can tell them apart without parsing text. */
 export type ErrorKind = "failed" | "unreachable" | "refused" | "not-found" | "conflict" | "invalid";
@@ -23,12 +24,15 @@ export class CliError extends Error {
   /** The API's HTTP status, or null when the CLI failed before or without a reply. */
   readonly status: number | null;
   /** The `code` of the API's error reply, or null when it sent none. */
-  readonly code: string | null;
-  constructor(kind: ErrorKind, message: string, status: number | null = null, code: string | null = null) {
+  readonly code: RefusalCode | null;
+  /** Whether the API said the same request asked again later can succeed. */
+  readonly retryable: boolean;
+  constructor(kind: ErrorKind, message: string, status: number | null = null, code: RefusalCode | null = null, retryable = false) {
     super(message);
     this.kind = kind;
     this.status = status;
     this.code = code;
+    this.retryable = retryable;
   }
 }
 
@@ -111,8 +115,8 @@ function reply(method: string, path: string, status: number, text: string): unkn
     throw new CliError("failed", `${method} ${path} answered ${status} with a body that is not JSON`, status);
   }
   if (status >= 200 && status < 300) return parsed;
-  const { error: message, code } = (parsed ?? {}) as { error?: unknown; code?: unknown };
-  throw new CliError(statusKinds[status] ?? "failed", typeof message === "string" ? message : `${method} ${path} failed with ${status}`, status, typeof code === "string" ? code : null);
+  const { error: message, code, retryable } = (parsed ?? {}) as { error?: unknown; code?: unknown; retryable?: unknown };
+  throw new CliError(statusKinds[status] ?? "failed", typeof message === "string" ? message : `${method} ${path} failed with ${status}`, status, typeof code === "string" ? code as RefusalCode : null, retryable === true);
 }
 
 /**

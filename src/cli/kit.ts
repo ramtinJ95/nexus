@@ -86,8 +86,6 @@ export function table(rows: readonly (readonly string[])[]): string {
 export const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}...`;
 
 export const waitMs = 120_000;
-/** The 409 codes that a wait fixes: the pylon not running yet, Claude not ready yet, or Claude's pane moved before it typed. */
-const waitedOut = new Set(["not-running", "not-ready", "moved"]);
 /** Longer than the probe takes to answer a command, at most 90 s. */
 export const pylonCommandMs = 120_000;
 export const waitPollMs = 1_000;
@@ -119,8 +117,8 @@ export async function pollUntil<T>(o: { deadlineMs: number; everyMs: number; tol
 
 /**
  * Sends a request that needs the pylon running, such as an unlink or a session open. Each try is human activity, so
- * the first wakes a paused pylon, and a 409 that waiting fixes is tried again once a second until the pylon runs,
- * unless the thread is archived or deleted. Any other 409, such as Claude waiting at a prompt, fails at once.
+ * the first wakes a paused pylon, and a retryable refusal is tried again once a second until the pylon runs, unless
+ * the thread is archived or deleted. Any other refusal, such as Claude waiting at a prompt, fails at once.
  * `undone` says what the failure after the wait leaves undone.
  */
 export async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undone: string): Promise<T> {
@@ -132,7 +130,7 @@ export async function whenRunning<T>(api: Api, id: string, send: () => Promise<T
     try {
       return await send();
     } catch (err) {
-      if (!(err instanceof CliError) || err.kind !== "conflict" || err.code === null || !waitedOut.has(err.code)) throw err;
+      if (!(err instanceof CliError) || !err.retryable) throw err;
       const { status } = (await api("GET", thread(id)) as ThreadDetail).thread;
       if (status === "archived" || status === "deleted") throw err;
       refused = err;
@@ -140,6 +138,9 @@ export async function whenRunning<T>(api: Api, id: string, send: () => Promise<T
     }
   });
 }
+
+/** How long a dropped stream or link waits before it opens again, after `failed` drops in a row: 1 s, doubling, at most `maxMs`. */
+export const reconnectMs = (failed: number, maxMs = 30_000) => Math.min(maxMs, 1000 * 2 ** failed);
 
 /**
  * Calls `onEnd` once the consumer of a stream is gone: on SIGINT, SIGTERM or SIGHUP, when it closes the pipe, or when

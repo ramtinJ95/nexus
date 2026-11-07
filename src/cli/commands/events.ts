@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { NexusEvent } from "../../events.ts";
 import { CliError } from "../transport.ts";
-import { type Command, str, strs, untilConsumerGone } from "../kit.ts";
+import { type Command, reconnectMs, str, strs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
 
 export const eventsCommands: Readonly<Record<string, Command>> = {
@@ -27,13 +27,14 @@ export const eventsCommands: Readonly<Record<string, Command>> = {
       const stop = new AbortController();
       const dispose = untilConsumerGone(() => { stop.abort(); process.exit(0); });
       try {
-        while (!stop.signal.aborted) {
-          try { await follow(`/v1/events?${query}`, (data) => print(data as NexusEvent, stop.signal), stop.signal, (id) => query.set("since", id)); }
+        for (let failed = 0; !stop.signal.aborted; failed++) {
+          const read = (data: unknown) => { failed = 0; return print(data as NexusEvent, stop.signal); };
+          try { await follow(`/v1/events?${query}`, read, stop.signal, (id) => query.set("since", id)); }
           catch (err) {
             if (err instanceof CliError && !transient(err)) throw err;
             if (!stop.signal.aborted) console.error(`nexus: ${(err as Error).message}; reconnecting`);
           }
-          await sleep(1000, undefined, { signal: stop.signal }).catch(() => undefined);
+          await sleep(reconnectMs(failed), undefined, { signal: stop.signal }).catch(() => undefined);
         }
       } finally {
         dispose();

@@ -168,7 +168,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
           p = await api("PATCH", `/v1/projects/${encodeURIComponent(added.id)}`, { autoReview: auto }) as Project;
         } catch (err) {
           if (!(err instanceof CliError)) throw err;
-          throw new CliError(err.kind, `Added project ${added.id}, but its auto review was not set: ${err.message}. Set it with nexus project edit ${added.id} --auto-review`, err.status, err.code);
+          throw new CliError(err.kind, `Added project ${added.id}, but its auto review was not set: ${err.message}. Set it with nexus project edit ${added.id} --auto-review`, err.status, err.code, err.retryable);
         }
       }
       const rules = p.standingRules == null ? "" : ", with standing rules";
