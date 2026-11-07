@@ -1,7 +1,7 @@
 import type { BootInputs } from "../spawn.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { diskRefusal } from "../disk-space.ts";
-import { countedCapacity, heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
+import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "../reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
@@ -47,7 +47,6 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const o = node.observation;
   if (node.state !== "online" || o === null) return refused("is offline");
   const { capacity: c } = o;
-  if (c === null) return refused("runs a probe too old to report what its pylons hold");
   if (!o.artifacts.includes(need.image)) return refused(`does not hold image ${need.image}`);
   if (need.resources.nestedVirtualization === true && o.nestedVirtualization !== true) return refused("cannot give a pylon KVM of its own: its probe does not report nested virtualization");
   // A probe gets a held secret soon after it starts, and the planner holds the boot until then.
@@ -96,7 +95,7 @@ const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => h
 export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releaseHold">, node: NodeName): ThreadId[] {
   const record = registry.nodes().find((n) => n.name === node);
   const o = record?.state === "online" ? record.observation : null;
-  if (o == null || o.capacity === null) return [];
+  if (o == null) return [];
   const now = Date.now();
   const held = heldOnly(registry, node, now).sort((a, b) => a.thread.awaitedUntil! - b.thread.awaitedUntil!);
   if (held.length === 0) return [];
@@ -179,7 +178,7 @@ function diskShort(c: NodeCapacity, left: Room, need: Room): string | null {
 export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need: Room): string | null {
   const node = registry.nodes().find((n) => n.name === name);
   const o = node?.state === "online" ? node.observation : null;
-  if (o == null || o.capacity === null || !o.capacity.disks?.some((d) => d.pylons === true)) return null;
+  if (o == null || !o.capacity.disks?.some((d) => d.pylons === true)) return null;
   return diskShort(o.capacity, roomLeft(registry, name, o, o.capacity, need).left, need);
 }
 
@@ -217,8 +216,7 @@ export function uncounted(p: StoredPylon, seen: PylonObservation | undefined): R
 export const gib = (n: number) => Number(n.toFixed(1));
 
 /** A node's committed memory exceeds its memory. */
-export function overcommitted(reported: NodeRecord["capacity"]): boolean {
-  const c = countedCapacity(reported);
+export function overcommitted(c: NodeRecord["capacity"]): boolean {
   return c !== null && c.committedMemoryGiB > c.memoryGiB;
 }
 

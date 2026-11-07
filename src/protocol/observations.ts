@@ -8,7 +8,7 @@ import { z } from "zod";
 import { pylonEventSchema, type ReportedEvent } from "../events.ts";
 import { chatgptTokenGrant } from "../secret-grants.ts";
 import type { SessionHarness } from "../session-harness.ts";
-import { asSent, parseJson, unchecked } from "../parse.ts";
+import { asSent, parse, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import { pylonIdField, pylonIdSchema } from "./fields.ts";
 import { jobStatusSchema, type JobStatus } from "./jobs.ts";
@@ -19,8 +19,7 @@ export interface NodeObservation {
   observedAt: string;
   /** A new value after every probe restart. It tells the control plane that in-memory job results are gone. */
   probeBootId: string;
-  /** Null from a probe from before pylons were counted (upgradeObservation). */
-  capacity: NodeCapacity | null;
+  capacity: NodeCapacity;
   /**
    * On pylon-vm, its checkpoints are those of the stopped pylons in `pylons`, taken from the same list. A pylon that
    * stops while the snapshot is read shows as stopped, with its checkpoint, in the next one.
@@ -42,11 +41,6 @@ export interface NodeObservation {
   /** What the node can give a pylon: the names of the secrets in its secret file, and whether it has a git SSH key. */
   grants: { secrets: readonly string[]; gitSsh: boolean };
   /**
-   * True from a probe that takes a spawn's `relaunch: false`. One older than the field ignores it and relaunches the
-   * sessions, so the usage backfill never wakes a pylon on its node.
-   */
-  spawnsWithoutRelaunch?: true;
-  /**
    * True from a probe whose backend can give a pylon KVM of its own: pylon-vm, on a host whose KVM module lets guests
    * nest. Only such a node takes a pylon whose boot asks for nested virtualization, such as a verify pylon.
    */
@@ -63,26 +57,19 @@ export interface NodeObservation {
 export interface NodeCapacity { cpus: number; committedCpus: number; memoryGiB: number; committedMemoryGiB: number; diskFreeGiB: number; committedDiskGiB: number; disks?: readonly DiskFact[] }
 /** A filesystem, once, with the paths Nexus writes to on it. `pylons`: it holds the pylons' disks and their overlays. */
 export interface DiskFact { paths: readonly string[]; totalGiB: number; freeGiB: number; pylons?: true }
-/**
- * A node's capacity as its probe reported it. A probe from before pylons were counted reports no CPUs and no committed
- * disk, and its committed memory is always 0.
- */
-export type ReportedCapacity = NodeCapacity | Pick<NodeCapacity, "memoryGiB" | "committedMemoryGiB" | "diskFreeGiB">;
-/** The capacity, or null where its probe was from before pylons were counted. */
-export const countedCapacity = (c: ReportedCapacity | null): NodeCapacity | null => c !== null && "committedDiskGiB" in c ? c : null;
 
 export interface PreviewRouteFact { httpsPort: number; pylonId: PylonId; service: string }
 
 /**
  * `wakeAfterBoot` on a stopped or broken pylon: the node's last shutdown or reboot found it running and paused it, or
  * began to, and no spawn or delete of it has succeeded since. The control plane takes it as new activity, so the
- * pylon wakes as if the node had never gone down. A probe older than the field never sends it.
+ * pylon wakes as if the node had never gone down.
  */
 export type PylonObservation =
   | { pylonId: PylonId; phase: "booting" | "stopping" | "deleting" }
   /**
    * `sessions`: what the wake brings back, as the pause recorded it. Null when the pause recorded nothing, such as with
-   * no Herdr server, or the pylon stopped without a pause, or from a probe older than the field. The wake then
+   * no Herdr server, or the pylon stopped without a pause. The wake then
    * relaunches what an earlier record holds, which only the checkpoint knows.
    */
   | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null; sessions: readonly PausedSession[] | null; wakeAfterBoot?: true }
@@ -103,7 +90,7 @@ export type PylonObservation =
  */
 export const brokenCauses = ["setup", "saved-setup", "services", "controller"] as const;
 export type BrokenCause = typeof brokenCauses[number];
-/** `unknown`: a backend that cannot tell why, or a cause this control plane does not know, or none, from a probe older or newer than it. */
+/** `unknown`: a backend that cannot tell why, or a cause this control plane does not know, from a probe newer than it. */
 const reportedCauses: readonly unknown[] = [...brokenCauses, "unknown"];
 
 export interface RunningFacts {
@@ -170,9 +157,18 @@ export type ProbeEvent =
 /** The secrets whose values the control plane holds and hands to every probe, which no node's secret file may set. */
 export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
 
+/**
+ * The probe-to-control contract this probe speaks, sent with every snapshot. The control plane refuses a snapshot below
+ * `minProbeContract`, and reads every field from one at or above it as sent. A probe that starts sending something the
+ * control plane will rely on raises `probeContract`. Once every probe runs it, `minProbeContract` follows, and the code
+ * that read older probes goes.
+ */
+export const probeContract = 1;
+export const minProbeContract = 1;
+
 /** One line of the observe stream, newline included. */
 export function encodeProbeEvent(event: ProbeEvent): string {
-  return JSON.stringify(event) + "\n";
+  return JSON.stringify(event.type === "snapshot" ? { ...event, contract: probeContract } : event) + "\n";
 }
 
 const reportedEventSchema = z.strictObject({
@@ -182,39 +178,38 @@ const reportedEventSchema = z.strictObject({
   time: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 }) satisfies z.ZodType<ReportedEvent>;
 
-const olderPylonSchema = z.discriminatedUnion("phase", [
+const pylonSchema = z.discriminatedUnion("phase", [
   z.looseObject({ pylonId: pylonIdField, phase: z.enum(["booting", "stopping", "deleting"]) }),
   z.looseObject({
     pylonId: pylonIdField, phase: z.literal("stopped"), checkpoint: unchecked<CheckpointId | null>(), sessions: unchecked<readonly PausedSession[] | null>(),
     wakeAfterBoot: unchecked<true>(),
   }),
-  z.looseObject({ pylonId: pylonIdField, phase: z.literal("broken"), detail: unchecked<string>(), cause: unchecked<string>(), logTail: unchecked<string>(), wakeAfterBoot: unchecked<true>() }),
+  z.looseObject({ pylonId: pylonIdField, phase: z.literal("broken"), detail: unchecked<string>(), cause: unchecked<BrokenCause | "unknown">(), logTail: unchecked<string>(), wakeAfterBoot: unchecked<true>() }),
   z.looseObject({
     pylonId: pylonIdField, phase: z.literal("running"), liveHash: unchecked<LiveHash | null>(), bootedAt: unchecked<string>(),
     bootedFrom: unchecked<RunningFacts["bootedFrom"]>(), services: unchecked<RunningFacts["services"]>(), listening: unchecked<RunningFacts["listening"]>(),
-    previews: unchecked<readonly OlderPreview[]>(), sessions: unchecked<readonly (SessionFact | OlderSession)[] | null>(), git: unchecked<GitFacts | null>(),
+    previews: unchecked<RunningFacts["previews"]>(), sessions: unchecked<RunningFacts["sessions"]>(), git: unchecked<GitFacts | null>(),
     declaredOutputs: unchecked<readonly DeclaredOutput[]>(), attachedClients: unchecked<number>(), notAnswering: unchecked<GuestNotAnswering>().exactOptional(),
   }),
-]) satisfies z.ZodType<OlderPylonObservation>;
+]) satisfies z.ZodType<PylonObservation>;
 
-const olderObservationSchema = z.looseObject({
+const observationSchema = z.looseObject({
   node: unchecked<NodeName>(), observedAt: unchecked<string>(), probeBootId: unchecked<string>(),
-  events: z.array(reportedEventSchema).max(100).exactOptional(),
-  capacity: unchecked<ReportedCapacity | null>(),
+  events: z.array(reportedEventSchema).max(100),
+  capacity: unchecked<NodeCapacity>(),
   artifacts: z.array(unchecked<ArtifactId>()),
   jobs: z.array(jobStatusSchema),
-  pylons: z.array(olderPylonSchema),
-  previewRoutes: z.array(unchecked<PreviewRouteFact>()).nullable().exactOptional(),
-  grants: unchecked<NodeObservation["grants"] | null>(),
-  spawnsWithoutRelaunch: unchecked<true>(),
+  pylons: z.array(pylonSchema),
+  previewRoutes: z.array(unchecked<PreviewRouteFact>()),
+  grants: unchecked<NodeObservation["grants"]>(),
   nestedVirtualization: unchecked<true>(),
   heldSecrets: unchecked<readonly string[]>(),
-}) satisfies z.ZodType<OlderObservation>;
+}) satisfies z.ZodType<NodeObservation>;
 
 const probeEventSchema = z.discriminatedUnion("type", [
-  z.looseObject({ type: z.literal("snapshot"), observation: olderObservationSchema }),
+  z.looseObject({ type: z.literal("snapshot"), contract: unchecked<unknown>(), observation: unchecked<unknown>() }),
   z.looseObject({ type: z.literal("session-event"), report: reportedEventSchema }),
-  z.looseObject({ type: z.literal("pylon"), pylon: olderPylonSchema }),
+  z.looseObject({ type: z.literal("pylon"), pylon: pylonSchema }),
   z.looseObject({ type: z.literal("job"), status: jobStatusSchema }),
   z.looseObject({ type: z.literal("preview-hit"), pylonId: pylonIdField, service: unchecked<string>(), at: unchecked<string>(), login: unchecked<string | null>() }),
 ]);
@@ -222,67 +217,20 @@ const probeEventSchema = z.discriminatedUnion("type", [
 export function parseProbeEvent(frame: string): ProbeEvent {
   const event = parseJson(asSent(probeEventSchema), frame, "event");
   switch (event.type) {
-    case "snapshot": return { type: "snapshot", observation: upgradeObservation(event.observation) };
-    case "pylon": return { type: "pylon", pylon: upgradePylon(event.pylon) };
+    case "snapshot": {
+      const { contract } = event;
+      if (!(typeof contract === "number" && contract >= minProbeContract)) {
+        const node = (event.observation as { node?: unknown } | null)?.node;
+        throw new Error(`${typeof node === "string" ? node : "the node"} runs a probe of ${typeof contract === "number" ? `contract ${contract}` : "no contract"}, older than the ${minProbeContract} this control plane reads. Upgrade it with nexus deploy`);
+      }
+      const observation = parse(asSent(observationSchema), event.observation, "event.observation");
+      return { type: "snapshot", observation: { ...observation, pylons: observation.pylons.map(knownCause) } };
+    }
+    case "pylon": return { type: "pylon", pylon: knownCause(event.pylon) };
     default: return event;
   }
 }
 
-/** An observation as a probe older than some of its fields sent it, which the registry may still hold, or an upgraded one. */
-export type OlderObservation = Omit<NodeObservation, "events" | "capacity" | "previewRoutes" | "grants" | "heldSecrets" | "pylons"> & {
-  events?: readonly ReportedEvent[];
-  capacity: ReportedCapacity | null;
-  previewRoutes?: readonly PreviewRouteFact[] | null;
-  grants?: NodeObservation["grants"] | null;
-  heldSecrets?: readonly string[];
-  pylons: readonly OlderPylonObservation[];
-};
-type OlderPylonObservation =
-  | Exclude<PylonObservation, { phase: "running" | "stopped" | "broken" }>
-  | (Omit<Extract<PylonObservation, { phase: "running" }>, "listening" | "previews" | "sessions"> & { listening?: readonly ListeningFact[] | null; previews: readonly OlderPreview[]; sessions: readonly (SessionFact | OlderSession)[] | null })
-  | (Omit<Extract<PylonObservation, { phase: "stopped" }>, "sessions"> & { sessions?: readonly PausedSession[] | null })
-  | (Omit<Extract<PylonObservation, { phase: "broken" }>, "cause" | "logTail"> & { cause?: string; logTail?: string });
-/** A session from a probe older than session states, which reported only sessions in panes. */
-type OlderPreview = RunningFacts["previews"][number] & { ready?: boolean };
-type OlderSession = Omit<Extract<SessionFact, { state: "running" }>, "id" | "state"> & { state?: undefined };
-
-/**
- * The only place that reads an observation from an older probe, at parse and on every registry read. What such a probe
- * left out reads as what it meant:
- * - No event backlog: none to replay.
- * - No preview routes: it routes none the registry does not know, so allocation goes by the registry alone, and a
- *   deleted pylon the node reports absent counts as gone.
- * - No grants, or no committed disk: it was from before pylons were counted, so its capacity is null, and placement
- *   never chooses its node.
- * - No held secrets: it takes none from the control plane. It would look for one in its secret file and fail the
- *   spawn for good, so the planner holds a boot that needs one (reconcile.ts).
- * - A running pylon's listening ports unknown, and sessions from before session states as running in their panes.
- * - A running pylon's previews without the `ready` an older probe sent, which was always true.
- * - A stopped pylon's sessions null, as from a pause that recorded nothing.
- * - A broken pylon's cause unknown, as is one this control plane does not know, and its log tail empty.
- * An observation it returned comes back unchanged.
- */
-export function upgradeObservation(o: OlderObservation): NodeObservation {
-  return {
-    ...o,
-    events: o.events ?? [],
-    capacity: o.grants == null ? null : countedCapacity(o.capacity),
-    previewRoutes: o.previewRoutes ?? [],
-    grants: o.grants ?? { secrets: [], gitSsh: false },
-    heldSecrets: o.heldSecrets ?? [],
-    pylons: o.pylons.map(upgradePylon),
-  };
-}
-
-function upgradePylon(p: OlderPylonObservation): PylonObservation {
-  switch (p.phase) {
-    case "running": return {
-      ...p, listening: p.listening ?? null,
-      previews: p.previews.map(({ service, httpsPort }) => ({ service, httpsPort })),
-      sessions: p.sessions?.map((s): SessionFact => s.state === undefined ? { ...s, state: "running", id: s.herdrPane } : s) ?? null,
-    };
-    case "stopped": return { ...p, sessions: p.sessions ?? null };
-    case "broken": return { ...p, cause: reportedCauses.includes(p.cause) ? p.cause as BrokenCause | "unknown" : "unknown", logTail: p.logTail ?? "" };
-    default: return p;
-  }
+function knownCause(p: PylonObservation): PylonObservation {
+  return p.phase === "broken" && !reportedCauses.includes(p.cause) ? { ...p, cause: "unknown" } : p;
 }

@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
 import { encodeSubmitReply, parseJobEnvelope, parseSubmitReply } from "./protocol/jobs.ts";
-import { brokenCauses, parseProbeEvent, upgradeObservation, type BrokenCause } from "./protocol/observations.ts";
+import { brokenCauses, parseProbeEvent, probeContract, type BrokenCause } from "./protocol/observations.ts";
 import {
   closeSessionOutcomes, interruptClaudeOutcomes, parsePylonCommand, sendClaudeOutcomes, type CloseSessionOutcome, type InterruptClaudeOutcome,
   type PylonCommand, type SendClaudeOutcome,
@@ -216,7 +216,7 @@ const observation = {
 };
 
 test("a probe event keeps the fields the control plane does not know inside its payload, and only there for a snapshot or a pylon", () => {
-  assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "snapshot", observation, ...unknown })), { type: "snapshot", observation });
+  assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "snapshot", contract: probeContract, observation, ...unknown })), { type: "snapshot", observation });
   assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "pylon", pylon: { pylonId, phase: "deleting", ...unknown }, ...unknown })), { type: "pylon", pylon: { pylonId, phase: "deleting", ...unknown } });
   for (const event of [
     { type: "job", status: { ...failed, ...unknown }, ...unknown },
@@ -225,18 +225,16 @@ test("a probe event keeps the fields the control plane does not know inside its 
   ]) assert.deepEqual(parseProbeEvent(JSON.stringify(event)), event);
 });
 
-test("a running pylon's previews from an older probe, which marked each ready, parse without the mark", () => {
+test("a running pylon parses with the previews it sent", () => {
   const pylon = runningPylon(pylonId as PylonId, { liveHash: "hash-1" as LiveHash, bootedFrom: { image, checkpoint: null }, previews: [{ service: "web", httpsPort: 10000 }] });
-  const older = { ...pylon, previews: [{ service: "web", httpsPort: 10000, ready: true }] };
-  assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "pylon", pylon: older })), { type: "pylon", pylon });
   assert.deepEqual(parseProbeEvent(JSON.stringify({ type: "pylon", pylon })), { type: "pylon", pylon });
 });
 
 test("the control plane refuses a probe event that fails any check of its fields", () => {
-  const snapshot = (o: object) => ({ type: "snapshot", observation: { ...observation, ...o } });
+  const snapshot = (o: object) => ({ type: "snapshot", contract: probeContract, observation: { ...observation, ...o } });
   const bad: unknown[] = [
     null, [], { type: "heartbeat" }, {}, { type: "snapshot" },
-    snapshot({ artifacts: null }), snapshot({ jobs: {} }), snapshot({ pylons: undefined }), snapshot({ previewRoutes: {} }), snapshot({ events: null }),
+    snapshot({ artifacts: null }), snapshot({ jobs: {} }), snapshot({ pylons: undefined }), snapshot({ previewRoutes: {} }), snapshot({ previewRoutes: null }), snapshot({ events: null }),
     snapshot({ events: Array.from({ length: 101 }, () => observation.events[0]) }), snapshot({ events: [{ ...observation.events[0], ...unknown }] }),
     snapshot({ jobs: [{ ...running, state: "paused" }] }), snapshot({ jobs: [{ ...failed, code: "gremlins" }] }), snapshot({ jobs: [{ ...running, kind: "" }] }),
     snapshot({ pylons: [{ pylonId, phase: "sleeping" }] }), snapshot({ pylons: [{ phase: "booting" }] }),
@@ -247,7 +245,6 @@ test("the control plane refuses a probe event that fails any check of its fields
   for (const value of bad) assert.throws(() => parseProbeEvent(JSON.stringify(value)), Error, JSON.stringify(value));
   const hundred = parseProbeEvent(JSON.stringify(snapshot({ events: Array.from({ length: 100 }, () => observation.events[0]) })));
   assert.ok(hundred.type === "snapshot" && hundred.observation.events.length === 100);
-  assert.ok(parseProbeEvent(JSON.stringify(snapshot({ previewRoutes: null }))).type === "snapshot");
   assert.ok(parseProbeEvent(JSON.stringify(snapshot({ jobs: [{ ...running, code: "gremlins" }] }))).type === "snapshot", "only a failed job's code is checked");
 });
 
@@ -277,7 +274,7 @@ async function stubProbe(t: import("node:test").TestContext) {
   return { client, answer(value: unknown, answerStatus = 200) { body = JSON.stringify(value); status = answerStatus; } };
 }
 
-test("a command result is read as the probe sent it, a close without an outcome as closed, and a result for another command is refused", async (t) => {
+test("a command result is read as the probe sent it, and a close without an outcome or a result for another command is refused", async (t) => {
   const { client, answer } = await stubProbe(t);
   const at = pylonId as PylonId;
   const send = { outcome: "queued", herdrPane: "w1:p1", resumed: false };
@@ -301,12 +298,8 @@ test("a command result is read as the probe sent it, a close without an outcome 
     answer(result);
     assert.deepEqual(await client.command(at, command), result);
   }
-  for (const outcome of [undefined, null]) {
-    answer({ kind: "close-session", outcome, ...unknown });
-    assert.deepEqual(await client.command(at, commands[5]!), { kind: "close-session", outcome: "closed", ...unknown });
-  }
   const bad: [PylonCommand, unknown][] = [
-    [commands[0]!, { kind: "open-session", herdrPane: "w1:p1" }], [commands[0]!, null], [commands[4]!, { kind: "open-session" }], [commands[4]!, { kind: "open-session", herdrPane: "w2:p1", stalled: "" }], [commands[5]!, { kind: "close-session", outcome: "gone" }],
+    [commands[0]!, { kind: "open-session", herdrPane: "w1:p1" }], [commands[0]!, null], [commands[4]!, { kind: "open-session" }], [commands[4]!, { kind: "open-session", herdrPane: "w2:p1", stalled: "" }], [commands[5]!, { kind: "close-session", outcome: "gone" }], [commands[5]!, { kind: "close-session" }], [commands[5]!, { kind: "close-session", outcome: null }],
     [commands[8]!, { kind: "drop-failed-session" }], [commands[9]!, { kind: "send-claude", ...send, outcome: "lost" }], [commands[9]!, { kind: "send-claude", ...send, herdrPane: "" }],
     [commands[9]!, { kind: "send-claude", ...send, resumed: "no" }], [commands[11]!, { kind: "send-claude-outcome", send: "pending" }], [commands[11]!, { kind: "send-claude-outcome" }],
     [commands[14]!, { kind: "link-port", service: "" }], [commands[15]!, { kind: "unlink-port" }], [commands[15]!, { kind: "unlink-port", refused: "" }],
@@ -410,7 +403,7 @@ test("each union's list holds exactly its type's members, and the parser that re
     answer(result);
     await assert.rejects(client.command(at, command), Error, JSON.stringify(result));
   }
-  const causes = (cause: string) => (upgradeObservation({ pylons: [{ pylonId, phase: "broken", detail: "", cause }] } as never).pylons[0] as { cause: string }).cause;
+  const causes = (cause: string) => (parseProbeEvent(JSON.stringify({ type: "pylon", pylon: { pylonId, phase: "broken", detail: "", cause, logTail: "" } })) as { pylon: { cause: string } }).pylon.cause;
   for (const cause of [...brokenCauses, "unknown"]) assert.equal(causes(cause), cause);
   assert.equal(causes("cosmic-ray"), "unknown", "a cause this control plane does not know");
 });

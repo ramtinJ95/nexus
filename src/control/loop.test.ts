@@ -17,7 +17,6 @@ import type {
 } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { upgradeObservation } from "../protocol/observations.ts";
 import { chatgptTokenGrant } from "../secret-grants.ts";
 import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
@@ -34,7 +33,7 @@ const previewPorts: PortRange = { first: 10200, last: 10209 };
  * A node as its probe presents it. Jobs run until `finish` unless `autoFinish` is set. Like the real probe, a
  * finished job is announced by a job event first and by a fresh snapshot a moment later.
  */
-function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes?: boolean; heldSecrets?: readonly string[]; artifacts?: readonly ImageId[] }) {
+function fakeNode(options: { autoFinish: boolean; node?: NodeName; heldSecrets?: readonly string[]; artifacts?: readonly ImageId[] }) {
   const node = options.node ?? firebat;
   /** The held secrets the node's probe takes. A spawn asking for another fails for good, as on a probe older than it. */
   let heldSecrets = options.heldSecrets;
@@ -56,13 +55,11 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; reportsRoutes
   };
   let reachable = true;
 
-  /** As the probe client hands it to the loop, upgraded from what the probe sent. */
-  const observation = (): NodeObservation => upgradeObservation({
+  const observation = (): NodeObservation => ({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
     capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
-    artifacts: options.artifacts ?? [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: options.reportsRoutes === false ? null : [...routes.values()],
-    spawnsWithoutRelaunch: true,
-    ...(heldSecrets === undefined ? {} : { heldSecrets }),
+    artifacts: options.artifacts ?? [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: [...routes.values()],
+    events: [], heldSecrets: heldSecrets ?? [],
   });
   const unroute = (pylonId: PylonId) => { for (const [port, route] of routes) if (route.pylonId === pylonId) routes.delete(port); };
   const emit = (event: ProbeEvent) => { for (const push of streams) push(event); };
@@ -1942,23 +1939,6 @@ test("a deleted thread whose Claude launch was cut off has the launch failed, th
   run(t, registry, fake.probe);
   await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
   assert.deepEqual(fake.submitted, []);
-});
-
-test("a probe that reports no routes still gets planned for, with ports allocated by the registry alone", async (t) => {
-  const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  const fake = fakeNode({ autoFinish: true, reportsRoutes: false });
-  run(t, registry, fake.probe, { ingest: realIngest });
-  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  fake.setServices(thread.pylonId, [web]);
-  await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
-  assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10200 }]);
-
-  fake.pylons.delete(thread.pylonId);
-  fake.announce();
-  registry.setThreadStatus(thread.id, "deleted");
-  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
-  assert.ok(!fake.submitted.some((job) => job.kind === "delete"), "with its routes unknown, an absent pylon of a deleted thread is gone, as before");
 });
 
 test("a used-up port range is logged, and the services that got a port are still published", async (t) => {

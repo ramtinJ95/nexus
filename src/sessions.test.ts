@@ -877,14 +877,6 @@ test("a launch typed before its probe died whose Claude is gone fails with the p
   assert.equal(pylon.panes.size, 1, "the pane stays for the person");
 });
 
-test("a launch an older probe typed records nothing, and its running Claude answers the second launch", async () => {
-  const pylon = launchPylon();
-  pylon.panes.set("w1:p1", { workspace: "w1", label: "worker", foreground: ["claude", "--session-id", launched, "--permission-mode", "bypassPermissions"] });
-  assert.equal(await openSession(pylon.probe(), prompted), "w1:p1");
-  assert.equal(pylon.typings(), 0);
-  assert.equal(herdrExecs(pylon.execs).some((c) => c.command === "workspace create"), false);
-});
-
 test("a launch an older probe lost before typing starts Claude once, beside the shell it left", async () => {
   const pylon = launchPylon();
   pylon.panes.set("w9:p1", { workspace: "w9", label: "worker", foreground: ["-bash"] });

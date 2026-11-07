@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
-import { ProbeHttpError } from "../protocol/http.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import { tokenDigest } from "../deploy/model.ts";
 import { joinControlPlane } from "../deploy/setup.ts";
@@ -99,7 +98,7 @@ test("the image build node is optional, and one given must be a configured node"
 });
 
 /** A control plane as `main` starts it, on loopback, with a fake tailscaled and a fake probe for each node it follows. */
-async function controlPlaneOf(t: import("node:test").TestContext, config: Record<string, unknown>, options: { before?: (db: string) => void; unaware?: readonly string[]; health?: ProbeClient["health"] } = {}) {
+async function controlPlaneOf(t: import("node:test").TestContext, config: Record<string, unknown>, options: { before?: (db: string) => void; health?: ProbeClient["health"] } = {}) {
   const dir = await tempDir("nexus-main-", t);
   let caller: string | null = null;
   const hosts = new Map<string, string>();
@@ -115,8 +114,6 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
 
   const followed: [string, string, string][] = [];
   const peers = new Map<string, readonly string[]>();
-  /** Nodes whose probe is from before peers were learned. */
-  const unaware = new Set(options.unaware);
   /** Each node whose deployer the control plane woke, with when. */
   const wakes: [string, number][] = [];
   /** Each pylon whose git the control plane asked its probe to read again. */
@@ -130,11 +127,10 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
       // Older than any snapshot the fake sends, so the read waits for none.
       async readGit(pylonId) { gitReads.push(pylonId); return "2000-01-01T00:00:00.000Z"; },
       async putPeers(list) {
-        if (unaware.has(node.name)) throw new ProbeHttpError(`${node.name}: PUT /v1/peers: HTTP 404: no route /v1/peers`, 404);
         peers.set(node.name, list);
       },
       async *observe(signal) {
-        yield { type: "snapshot", observation: testObservation(node.name, { probeBootId: node.name, capacity: null }) };
+        yield { type: "snapshot", observation: testObservation(node.name, { probeBootId: node.name }) };
         await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
       },
     };
@@ -236,8 +232,8 @@ test("each read of a node's health is recorded, and its history read back", asyn
   assert.deepEqual(body.series.map((s: { key: string; avg: number[] }) => [s.key, s.avg]), [["cpus", [16]], ["diskFree", [180.5]], ["diskTotal", [457]]]);
 });
 
-test("a machine that joins is followed without a restart, every probe learns it as a peer, and a probe that cannot learn peers keeps working", async (t) => {
-  const plane = await controlPlaneOf(t, today, { unaware: ["infra-testbench"] });
+test("a machine that joins is followed without a restart, and every probe learns it as a peer", async (t) => {
+  const plane = await controlPlaneOf(t, today);
   await until("rj-firebat has its peers", () => plane.peers.has("rj-firebat"));
   const registry = testRegistry(t, plane.db);
   const { token } = mintJoinToken(registry);
@@ -245,11 +241,12 @@ test("a machine that joins is followed without a restart, every probe learns it 
   const joined = await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("joiner-token"), name: "rj-firebat" });
   assert.deepEqual(joined, { status: 200, body: { node: "infra-2", tailnetNodeId: "nJoinerCNTRL" } });
   assert.deepEqual(plane.followed.at(-1), ["infra-2", "infra-2.example.ts.net", "nJoinerCNTRL"]);
-  await until("the new probe has its peers", () => plane.peers.has("infra-2"));
+  await until("every probe has the new peer", () => plane.peers.has("infra-2") && plane.peers.get("infra-testbench")?.includes("nJoinerCNTRL") === true);
   assert.deepEqual(Object.fromEntries(plane.peers), {
     "rj-firebat": ["nPeerProbeCNTRL", "nJoinerCNTRL"],
+    "infra-testbench": ["nControlPlaneCNTRL", "nJoinerCNTRL"],
     "infra-2": ["nControlPlaneCNTRL", "nPeerProbeCNTRL"],
-  }, "infra-testbench's probe answered 404, so it keeps probe.json's peers");
+  });
   await until("the new node is online", () => registry.node("infra-2" as NodeName)?.state === "online");
   assert.equal(registry.node("infra-testbench" as NodeName)?.state, "online");
   const report = { role: "probe", commit: null, target: null, state: "pending", reason: null };

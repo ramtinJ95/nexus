@@ -500,7 +500,7 @@ test("a spawn without its sessions reaches the backend as such, and its pylon re
   };
   const liveHash = async () => {
     for await (const e of client.observe(AbortSignal.timeout(5000))) {
-      assert.ok(e.type === "snapshot" && e.observation.spawnsWithoutRelaunch === true);
+      assert.ok(e.type === "snapshot");
       const p = e.observation.pylons[0];
       return p?.phase === "running" ? p.liveHash : assert.fail(`the pylon is ${p?.phase}`);
     }

@@ -7,7 +7,7 @@ import {
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "./ids.ts";
 import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "./protocol/jobs.ts";
 import {
-  encodeProbeEvent, parseProbeEvent, upgradeObservation, type OlderObservation, type PausedSession, type ProbeEvent,
+  encodeProbeEvent, minProbeContract, parseProbeEvent, probeContract, type PausedSession, type ProbeEvent,
   type PylonObservation, type RunningFacts, type SessionFact,
 } from "./protocol/observations.ts";
 import { chatgptTokenGrant } from "./secret-grants.ts";
@@ -279,14 +279,14 @@ test("envelope expires 30 s after issue", () => {
   assert.notEqual(envelope({ kind: "delete", pylonId }, node, now).jobId, env.jobId);
 });
 
-test("a probe takes a spawn whose repo is a clone or empty, and refuses one from a control plane older than scratch projects", () => {
+test("a probe takes a spawn whose repo is a clone or empty, and refuses one whose repo has no kind", () => {
   const spawnBody = (repo: unknown) => JSON.stringify(envelope({ kind: "spawn", pylonId, boot: { ...boot, repo, source: { kind: "fresh", preSetup: null } } as BootInputs, live, liveHash }, node, now));
   const clone = { kind: "clone", url: "git@example.com:r.git", checkout: { branch: "main", commit: "c0ffee" } };
   assert.deepEqual(parseJobEnvelope(spawnBody(clone)).job, { kind: "spawn", pylonId, boot: { ...boot, repo: clone, source: { kind: "fresh", preSetup: null } }, live, liveHash });
   const empty = { kind: "empty", branch: "main" };
   const scratch = parseJobEnvelope(spawnBody(empty)).job;
   assert.ok(scratch.kind === "spawn" && scratch.boot.repo.kind === "empty" && scratch.boot.repo.branch === "main");
-  assert.throws(() => parseJobEnvelope(spawnBody({ url: clone.url, checkout: clone.checkout })), { message: "envelope.job.boot.repo.kind: missing, so the control plane that sent it is older than this probe. Upgrade the control plane, then its probes" });
+  assert.throws(() => parseJobEnvelope(spawnBody({ url: clone.url, checkout: clone.checkout })), { message: "envelope.job.boot.repo.kind: Invalid discriminator value. Expected 'clone' | 'empty'" });
   assert.throws(() => parseJobEnvelope(spawnBody({ kind: "fork", branch: "main" })), { message: "envelope.job.boot.repo.kind: Invalid discriminator value. Expected 'clone' | 'empty'" });
   assert.throws(() => parseJobEnvelope(spawnBody({ kind: "empty" })), { message: "envelope.job.boot.repo.branch: Invalid input: expected string, received undefined" });
   assert.throws(() => parseJobEnvelope(spawnBody({ kind: "clone", url: clone.url })), { message: "envelope.job.boot.repo.checkout: Invalid input: expected object, received undefined" });
@@ -315,11 +315,8 @@ test("submit replies round-trip through the wire encoding", () => {
   }
 });
 
-test("a snapshot from a probe older than route reporting parses as routing nothing the registry does not know", () => {
+test("a snapshot parses with the preview routes it sent, and one whose routes are not a list is refused", () => {
   const observation = { node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [] };
-  const old = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation } as unknown as ProbeEvent));
-  assert.ok(old.type === "snapshot");
-  assert.deepEqual(old.observation.previewRoutes, []);
   const routes = [{ httpsPort: 10200, pylonId, service: "web" }];
   const current = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation: { ...observation, grants: { secrets: [], gitSsh: false }, previewRoutes: routes, heldSecrets: [] } }));
   assert.ok(current.type === "snapshot");
@@ -336,63 +333,38 @@ test("a snapshot as the probe every node runs sends it, claudeLaunchRepeatable a
     }),
     claudeLaunchRepeatable: true,
   };
-  const parsed = parseProbeEvent(JSON.stringify({ type: "snapshot", observation }));
+  const parsed = parseProbeEvent(encodeProbeEvent({ type: "snapshot", observation }));
   assert.ok(parsed.type === "snapshot");
   const { claudeLaunchRepeatable: _, ...facts } = observation;
   assert.deepEqual(Object.fromEntries(Object.keys(facts).map((key) => [key, (parsed.observation as unknown as Record<string, unknown>)[key]])), facts);
 });
 
-test("a broken pylon whose cause is missing, as from an older probe, or one this control plane does not know parses with its cause unknown", () => {
+test("a broken pylon whose cause this control plane does not know parses with its cause unknown", () => {
   const snapshot = (pylon: Record<string, unknown>) => encodeProbeEvent({ type: "snapshot", observation: {
     node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 }, artifacts: [], jobs: [], pylons: [pylon], previewRoutes: [], heldSecrets: [],
   } } as unknown as ProbeEvent);
-  const old = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs" }));
-  assert.ok(old.type === "snapshot");
-  assert.deepEqual(old.observation.pylons, [{ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "unknown", logTail: "" }], "an older probe sends no log tail");
-  const current = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }));
+  const current = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause: "saved-setup", logTail: "" }));
   assert.ok(current.type === "snapshot" && current.observation.pylons[0]?.phase === "broken" && current.observation.pylons[0].cause === "saved-setup");
-  const newer = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "x", cause: "cosmic-ray" }));
+  const newer = parseProbeEvent(snapshot({ pylonId, phase: "broken", detail: "x", cause: "cosmic-ray", logTail: "" }));
   assert.ok(newer.type === "snapshot" && newer.observation.pylons[0]?.phase === "broken" && newer.observation.pylons[0].cause === "unknown");
 });
 
-test("a stopped pylon parses with the sessions its pause recorded, or null from a probe older than the field", () => {
+test("a stopped pylon parses with the sessions its pause recorded", () => {
   const event = (pylon: Record<string, unknown>) => parseProbeEvent(JSON.stringify({ type: "pylon", pylon }));
   const recorded = [{ id: "failed-0123456789ab", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan" }];
   assert.deepEqual(event({ pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: recorded }), { type: "pylon", pylon: { pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: recorded } });
-  assert.deepEqual(event({ pylonId, phase: "stopped", checkpoint: lastCheckpoint }), { type: "pylon", pylon: { pylonId, phase: "stopped", checkpoint: lastCheckpoint, sessions: null } });
 });
 
-test("sessions from a probe older than session states parse as running in their panes", () => {
-  const old = parseProbeEvent(JSON.stringify({ type: "pylon", pylon: { ...running(liveHash), sessions: [{ herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] } }));
-  assert.ok(old.type === "pylon" && old.pylon.phase === "running");
-  assert.deepEqual(old.pylon.sessions, [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }]);
-});
-
-test("an observation from the oldest probe upgrades to what each field it left out meant, and an upgraded one stays as it is", () => {
-  const oldest = {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [], jobs: [],
-    pylons: [
-      { ...running(liveHash), listening: undefined, sessions: [{ herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] },
-      { pylonId: "pylon-t2", phase: "stopped", checkpoint: lastCheckpoint },
-      { pylonId: "pylon-t3", phase: "broken", detail: "x" },
-    ],
-  } as unknown as OlderObservation;
-  const upgraded = upgradeObservation(oldest);
-  assert.deepEqual(upgraded, {
-    node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "b", events: [], capacity: null, artifacts: [], jobs: [],
-    pylons: [
-      { ...running(liveHash), listening: null, sessions: [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, status: "idle" }] },
-      { pylonId: "pylon-t2", phase: "stopped", checkpoint: lastCheckpoint, sessions: null },
-      { pylonId: "pylon-t3", phase: "broken", detail: "x", cause: "unknown", logTail: "" },
-    ],
-    previewRoutes: [], grants: { secrets: [], gitSsh: false }, heldSecrets: [],
-  });
-  assert.deepEqual(upgradeObservation(upgraded), upgraded);
-  const counted = { cpus: 16, committedCpus: 2, memoryGiB: 64, committedMemoryGiB: 4, diskFreeGiB: 100, committedDiskGiB: 10 };
-  assert.equal(upgradeObservation({ ...oldest, capacity: counted }).capacity, null, "a probe that reports no grants is from before pylons were counted");
-  const { cpus: _, committedCpus: __, committedDiskGiB: ___, ...uncounted } = counted;
-  assert.equal(upgradeObservation({ ...oldest, capacity: uncounted, grants: { secrets: [], gitSsh: false } }).capacity, null, "so is one that reports no committed disk");
-  assert.deepEqual(upgradeObservation({ ...oldest, capacity: counted, grants: { secrets: [], gitSsh: false } }).capacity, counted);
+test("a snapshot from a probe below the contract this control plane reads is refused", () => {
+  assert.ok(probeContract >= minProbeContract, "a probe of this release meets its own floor");
+  const observation = testObservation(node);
+  const frame = (contract: unknown) => JSON.stringify({ type: "snapshot", ...contract === undefined ? {} : { contract }, observation });
+  assert.deepEqual(parseProbeEvent(frame(minProbeContract)), { type: "snapshot", observation });
+  const { events: _, previewRoutes: __, ...older } = observation;
+  assert.throws(() => parseProbeEvent(JSON.stringify({ type: "snapshot", observation: older })), { message: new RegExp(`^${node} runs a probe of no contract, older than`) }, "an older probe's shape gets the contract's refusal, not a field's");
+  for (const contract of [undefined, minProbeContract - 1, "1"]) {
+    assert.throws(() => parseProbeEvent(frame(contract)), { message: new RegExp(`^${node} runs a probe of (contract \\d+|no contract), older than the ${minProbeContract} this control plane reads\\. Upgrade it with nexus deploy$`) }, String(contract));
+  }
 });
 
 const working: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };

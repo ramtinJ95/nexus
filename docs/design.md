@@ -786,9 +786,8 @@ replaced it, only one types and the other waits for the receipt. A launch sent a
 reads them. If the command was typed, it only waits for the receipt, as the first
 one would have, and reports a stall the same way. If nothing was typed, it types
 into the pane the first one opened, or opens one if that pane is gone. A launch
-from a probe older than these files leaves none, so a pane whose Claude already
-runs the session ends it as started, and a session with a transcript but no
-running Claude fails without typing, since its prompt already went in. One that an
+from a probe older than these files leaves none, so a session with a transcript
+but no running Claude fails without typing, since its prompt already went in. One that an
 older probe lost before typing gets a new workspace, and the older probe's empty
 shell workspace stays beside it. Captures are in
 [`docs/verification/launch-survives-deploy/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/launch-survives-deploy/). The probe

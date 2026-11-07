@@ -995,14 +995,6 @@ test("the side nodes show each node's committed memory, mark an overcommitted on
   assert.doesNotMatch(fits, /overcommitted|to wake/);
 });
 
-test("the side nodes show no memory for a node whose capacity is from a probe before pylons were counted, and never mark it overcommitted", async (t) => {
-  const s = await seeded(t);
-  s.registry.apply({ record: "node", node, state: "online", capacity: { memoryGiB: 6, committedMemoryGiB: 8, diskFreeGiB: 100 } as never });
-  const nodes = textOf((await nodeHeads(s)));
-  assert.match(nodes, /rj-firebat/);
-  assert.doesNotMatch(nodes, /overcommitted|GiB memory/);
-});
-
 test("an offline node shows its pylons as unknown, and the last observation as stale", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");

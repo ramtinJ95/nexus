@@ -35,7 +35,7 @@ test("each put reads the nodes' tailnet IDs once, without their records, and a s
   assert.equal(idReads, 6);
 });
 
-test("a probe that answers 404 is told once that it cannot learn its peers yet, and any other failure is logged each time", async (t) => {
+test("every failed put is logged, a 404 as any other", async (t) => {
   const registry = seedRegistry(testRegistry(t), { nodes: names });
   let failure = new ProbeHttpError("rj-firebat: PUT /v1/peers: HTTP 404: ", 404);
   const probes = new Map(names.map((name) => [name, { putPeers: async () => { if (name === "rj-firebat") throw failure; } }]));
@@ -46,7 +46,7 @@ test("a probe that answers 404 is told once that it cannot learn its peers yet, 
   await handoff.close();
   handoff.observed(names[0]!, "boot-1");
   await handoff.close();
-  assert.deepEqual(logged, ["rj-firebat: its probe cannot learn its peers yet, so it keeps the peers in its probe.json until it is upgraded"]);
+  assert.deepEqual(logged, Array(2).fill("telling rj-firebat its peers failed: rj-firebat: PUT /v1/peers: HTTP 404: "));
 
   logged.length = 0;
   failure = new ProbeHttpError("rj-firebat: PUT /v1/peers: HTTP 500: disk full", 500);

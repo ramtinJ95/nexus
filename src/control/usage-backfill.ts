@@ -114,7 +114,6 @@ export function usageBackfill(options: {
     const node = registry.node(p.node);
     const o = node?.state === "online" ? node.observation : null;
     if (o == null) return `${p.node} is offline`;
-    if (o.spawnsWithoutRelaunch !== true || o.capacity === null) return `${p.node} runs a probe too old to wake a pylon without its sessions`;
     if (o.jobs.some((j) => j.state === "running") || registry.pylonsOn(p.node).some((other) => other.submitted !== null)) return `${p.node} is busy with a job`;
     const observed = o.pylons.find((seen) => seen.pylonId === p.pylonId);
     if (observed !== undefined && observed.phase !== "stopped" && observed.phase !== "running") return `its pylon is ${observed.phase}`;
