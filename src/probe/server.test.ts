@@ -14,7 +14,7 @@ import { nodeSecrets, parseProbeConfig, parseSecretsEnv, probeAuth } from "./con
 import { readControlPlane } from "../deploy/control-plane.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
-import type { DeclaredOutput, GitFacts, NodeObservation, ProbeEvent, ServiceFact } from "../protocol/observations.ts";
+import { gitPollMs, type DeclaredOutput, type GitFacts, type NodeObservation, type ProbeEvent, type ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
@@ -30,7 +30,6 @@ import type { ArtifactManifest, ImageManifest, TemplateManifest } from "../image
 import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
 import { outputsDir } from "./guest/outputs.ts";
 import { sessionsFile } from "./guest/sessions.ts";
-import { gitPollMs } from "./guest/git-facts.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
 import { tempDir, until } from "../test-kit.ts";

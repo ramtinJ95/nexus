@@ -1,5 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { cpSync, symlinkSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { testPr, testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { agentInbox, type Inbox } from "./inbox.ts";
@@ -10,14 +14,13 @@ import { prWatcher } from "./pr-watch.ts";
 import { pushedBranches } from "./pr-watch-model.ts";
 import type { GitHub, PullRequest } from "./github.ts";
 import { ingest } from "../reconcile.ts";
-import { gitPollMs } from "../probe/guest/git-facts.ts";
 import { checkCaller, nudgePrefix, reviewerCaller } from "../agent-protocol.ts";
 import { turnGate } from "./drain.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
-import type { PylonObservation } from "../protocol/observations.ts";
+import { gitPollMs, type PylonObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
@@ -623,4 +626,14 @@ test("a pass reads no archived or deleted thread, except to clear a nudge it lef
   read.length = 0;
   await nudger.poll();
   assert.deepEqual(read, [active]);
+});
+
+test("the nudger loads without the probe's git helper, which only a probe reads", async (t) => {
+  const root = join(import.meta.dirname, "../..");
+  const copy = await tempDir("nexus-nudge-import-", t);
+  cpSync(join(root, "src"), join(copy, "src"), { recursive: true, filter: (path) => !path.endsWith("git-facts.py") });
+  cpSync(join(root, "package.json"), join(copy, "package.json"));
+  symlinkSync(join(root, "node_modules"), join(copy, "node_modules"));
+  const loaded = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(join(copy, "src/control/nudge.ts")).href)})`], { encoding: "utf8" });
+  assert.equal(loaded.status, 0, loaded.stderr);
 });

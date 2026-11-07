@@ -141,6 +141,8 @@ export interface SessionIdentity { harness: SessionHarness; harnessSessionId: st
 /** A session a stopped pylon's wake brings back, under the `id` it had while the pylon ran. */
 export interface PausedSession { id: string; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; title: string }
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
+/** How long the probe reuses a pylon's git read, so a snapshot holds the branches pushed that long before it was taken. */
+export const gitPollMs = 60_000;
 export type DeclaredOutput =
   | { id: string; kind: "file"; path: string; title: string | null; sha256: string }
   /** base is HEAD's commit, or the empty tree's ID while the repository has no commit. The diff applies to base. */
