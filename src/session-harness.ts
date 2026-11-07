@@ -14,7 +14,7 @@ export const claudeSessionId = /^[A-Za-z0-9-]{1,200}$/;
 export const home = "/home/user";
 export const callTimeoutMs = 10_000;
 
-/** backend.ts's Guest satisfies it. This file stays free of backend.ts and of the Herdr driver. */
+/** backends/backend.ts's Guest satisfies it. This file stays free of backends/backend.ts and of the Herdr driver. */
 interface Guest {
   exec(argv: readonly string[], opts: { cwd: string; timeoutMs: number }): Promise<{ exitCode: number | null; output: string }>;
 }

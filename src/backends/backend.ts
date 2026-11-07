@@ -1,5 +1,5 @@
 /**
- * Probe contract, node side: the VM backend that the probe's job runner (probe/run.ts) drives.
+ * Probe contract, node side: the VM backend that the probe's job runner (src/probe/run.ts) drives.
  *
  * The backend is an in-process TypeScript interface, not an Amp-style dispatch program. Amp's provider
  * only needs spawn, pause and delete because the orb dials out to Amp for tools, terminals and portals.
@@ -10,7 +10,7 @@
  * instance has a detached controller that outlives the probe. The job shape stays Amp's, so an Amp
  * dispatch script can still back the lifecycle half later.
  *
- * The backend speaks its own types. Wire types from src/protocol/ stop at probe/run.ts's runJob and runCommand.
+ * The backend speaks its own types. Wire types from src/protocol/ stop at src/probe/run.ts's runJob and runCommand.
  */
 import type { Readable } from "node:stream";
 import type { CheckpointId, ImageId, NodeName, PortableArtifactId, PylonId, TemplateId } from "../ids.ts";
@@ -37,7 +37,7 @@ export interface VmBackend {
   ensureDeleted(pylonId: PylonId, signal: AbortSignal): Promise<void>;
   /** Boot the image, clone, preSetup, `.nexus/setup` as user, stop, publish. A setup failure publishes nothing. Published already: no-op. */
   buildTemplate(template: TemplateId, inputs: TemplateBuildInputs, signal: AbortSignal): Promise<void>;
-  /** buildImage in image-build.ts, into the artifact store under `image`, which must be the recipe's ID. Built already: no-op. */
+  /** buildImage in src/image-build.ts, into the artifact store under `image`, which must be the recipe's ID. Built already: no-op. */
   buildImage(image: ImageId, recipe: ImageRecipe, node: NodeName, signal: AbortSignal): Promise<void>;
   /** Cheap, with no guest exec. The probe layers guest facts (git, sessions, previews) on top. */
   list(): Promise<readonly BackendPylon[]>;
