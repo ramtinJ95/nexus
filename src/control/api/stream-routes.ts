@@ -3,11 +3,10 @@
  */
 import { HttpError } from "../http-error.ts";
 import { eventCursor, eventKinds, type EventFilter } from "../../events.ts";
-import { promptSenders } from "../inbox.ts";
 import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
 
 export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {
-  const { thread, stream, followEvents, registry, agents, live, agentOf } = kit;
+  const { thread, stream, followEvents, registry, agents } = kit;
 
   return [
     ["GET", /^\/v1\/events$/, (_, r) => {
@@ -29,12 +28,6 @@ export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {
     ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, ([, id]) => {
       const t = thread(id!, { status: "kept", agent: "claude" });
       return { stream: (res) => stream(res, t, () => agents.claude.watch(t), agents.claude.frames()) };
-    }],
-    ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
-      const t = thread(id!, { status: "kept" });
-      const agent = agentOf(t);
-      const reader = live(t, registry.claudeWorker(t.id)?.model ?? null, () => registry.questions(t.id), () => promptSenders(registry, t.id));
-      return { stream: (res) => stream(res, t, () => agent.watch(t), reader.frames, reader.leave) };
     }],
   ];
 }

@@ -39,12 +39,14 @@ import type { Peek } from "../dashboard/flight.ts";
 import { healthPage } from "../dashboard/health-page.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
+import { liveStreams } from "../dashboard/live-frames.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
 
-/** The dashboard's pages, each a GET route. */
+/** The dashboard's pages, each a GET route, and the thread page's stream. */
 export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; deployment?: DeploymentOptions | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry, detail } = kit;
   const deploys = (r: Review) => options.reviews?.deploys(r) ?? false;
+  const live = liveStreams();
 
   /** A failed read shows in the conversation, so the rest of the page still says what the pylon is doing. */
   async function transcript(t: Thread): Promise<AgentView | Error | null> {
@@ -129,6 +131,12 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
       return ok(threadPage(context(r.caller), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, r.query.has("streaming")));
+    }],
+    ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
+      const t = kit.thread(id!, { status: "kept" });
+      const agent = kit.agentOf(t);
+      const reader = live(t, registry.claudeWorker(t.id)?.model ?? null, () => registry.questions(t.id), () => promptSenders(registry, t.id));
+      return { stream: (res) => kit.stream(res, t, () => agent.watch(t), reader.frames, reader.leave) };
     }],
     ["GET", /^\/nodes\/([^/]+)$/, async (m, r) => {
       const c = context(r.caller);
