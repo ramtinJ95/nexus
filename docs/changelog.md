@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.69.0
+
+Adds the code `queued` to the 409 a thread route answers for a thread that has not started, and makes the clients branch on `code` and `retryable` rather than on the status: `show` reads `GET /v1/queued/<thread>` only after a 409 with code `queued`, and the CLI's and the dashboard's waits for a running pylon try again only a refusal whose `retryable` is true, so they now also wait through `draining`, and the dashboard no longer waits out a 409 that no wait fixes, such as `blocked`. `events --follow`, `watch` and `attach` reconnect on one schedule: 1 second, then twice as long each time, up to 30 seconds, and `watch` up to its interval. A control plane older than 0.69.0 sends no `queued`, so `show` of a queued thread fails with exit code 5, and one older than 0.68.0 sends no `retryable`, so a wait for a paused pylon fails at once with exit code 5.
+
 ## 0.68.0
 
 Adds `retryable` to the API's error body, and sets `code` on every error reply, null where the API sends no code, so the body is `{"error": string, "code": string | null, "retryable": boolean}`, as [Failures](cli.md#failures) describes. It also adds the codes `draining`, `probe-unreachable` and `probe-forbidden`. A control plane older than 0.68.0 sends no `retryable`, sends `code` only where it is set, and sends none of these three codes. The CLI reads a missing `code` as null, so it acts the same with either.
