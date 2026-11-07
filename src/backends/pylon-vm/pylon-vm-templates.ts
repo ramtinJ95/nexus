@@ -9,14 +9,15 @@ import { constants } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { refuseShortDisk } from "./disk-space.ts";
-import { JobFailure } from "./protocol/jobs.ts";
-import type { ArtifactDirectory } from "./artifacts.ts";
-import type { TemplateManifest } from "./images.ts";
-import type { ImageId, TemplateId } from "./ids.ts";
-import { run } from "./pylon-vm/client.ts";
-import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
-import { directory, readLogTail } from "./pylon-vm/storage.ts";
+import { refuseShortDisk } from "../../disk-space.ts";
+import { JobFailure } from "../../protocol/jobs.ts";
+import type { ArtifactDirectory } from "../../artifacts.ts";
+import type { TemplateManifest } from "../../images.ts";
+import type { ImageId, TemplateId } from "../../ids.ts";
+import { run } from "../../pylon-vm/client.ts";
+import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
+import { directory } from "../../pylon-vm/storage.ts";
+import { controllerLogTail } from "./pylon-guest.ts";
 
 const diskFile = "disk.qcow2";
 
@@ -64,11 +65,6 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
       failure = err; // the build's state on disk says what happened, on the next pass
     }
   }
-}
-
-/** The end of a build's or an instance's controller log, for a JobFailure's or a broken pylon's logTail. */
-export async function controllerLogTail(dir: string): Promise<string> {
-  return (await readLogTail(join(dir, "controller.log"), 60)).output.slice(-8192);
 }
 
 /** The disk a pylon booted from `template` copies in. The template must be over the pylon's image. */

@@ -1,7 +1,7 @@
 /**
  * Node validation for the pylon VM's Guest, run by hand on a node with the real pylon image:
  *
- *   node src/pylon-guest.check.ts <the image's directory in an artifact store> <state root>
+ *   node src/backends/pylon-vm/pylon-guest.check.ts <the image's directory in an artifact store> <state root>
  *
  * The state root must be at most 39 bytes, such as ~/nexus-spikes/pg. One pylon goes through an in-process
  * probe, the way the slice test drives one, with a fake `tailscale`, so the node's serve config is never
@@ -26,25 +26,25 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentReader } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createEnvConformance } from "@earendil-works/pi-durable/testing";
-import { pylonEnvs } from "./control/harness/pylon-env.ts";
-import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
-import { nodeSecrets } from "./probe/config.ts";
-import { startProbe } from "./probe/server.ts";
-import type { JobId, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
-import type { Job } from "./protocol/jobs.ts";
-import { connectProbe } from "./protocol/client.ts";
+import { pylonEnvs } from "../../control/harness/pylon-env.ts";
+import { fakeTailscale, nodeHost, viaGateway } from "../../probe/fake-tailscale.ts";
+import { nodeSecrets } from "../../probe/config.ts";
+import { startProbe } from "../../probe/server.ts";
+import type { JobId, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
+import type { Job } from "../../protocol/jobs.ts";
+import { connectProbe } from "../../protocol/client.ts";
 import { checkBackend, checkBoot } from "./pylon-vm-check-kit.ts";
-import { unstamped } from "./pylon-vm/controller-log.ts";
-import { envelope } from "./control/reconcile.ts";
-import { snapshot } from "./control/tick.ts";
-import { herdrSession, sessionFacts, sessionsFile } from "./probe/guest/sessions.ts";
-import { checkoutDir, harnesses as harnessTable, type SessionHarness } from "./session-harness.ts";
-import { loginHosts } from "./control/project.ts";
-import type { BootInputs, LiveSpec, OverlayFile } from "./spawn.ts";
-import { freePort } from "./test-support/kit.ts";
+import { unstamped } from "../../pylon-vm/controller-log.ts";
+import { envelope } from "../../control/reconcile.ts";
+import { snapshot } from "../../control/tick.ts";
+import { herdrSession, sessionFacts, sessionsFile } from "../../probe/guest/sessions.ts";
+import { checkoutDir, harnesses as harnessTable, type SessionHarness } from "../../session-harness.ts";
+import { loginHosts } from "../../control/project.ts";
+import type { BootInputs, LiveSpec, OverlayFile } from "../../spawn.ts";
+import { freePort } from "../../test-support/kit.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
-if (assets === undefined || stateRoot === undefined) throw new Error("usage: node src/pylon-guest.check.ts <image dir in an artifact store> <state root>");
+if (assets === undefined || stateRoot === undefined) throw new Error("usage: node src/backends/pylon-vm/pylon-guest.check.ts <image dir in an artifact store> <state root>");
 const harnesses = (process.env["NEXUS_CHECK_SESSIONS"] ?? "shell,claude-code,pi").split(",").filter(Boolean) as SessionHarness[];
 const unknown = harnesses.filter((h) => !["shell", "claude-code", "pi"].includes(h));
 if (unknown.length > 0) throw new Error(`NEXUS_CHECK_SESSIONS names no harness ${unknown.join(", ")}`);

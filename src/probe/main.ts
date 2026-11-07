@@ -11,7 +11,7 @@
  * A second signal during the close kills the probe at once.
  */
 import { createDockerBackend } from "../backends/docker-backend.ts";
-import { createPylonVmBackend } from "../pylon-vm-backend.ts";
+import { createPylonVmBackend } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import { sweepScratch } from "../pylon-vm/client.ts";
 import { localApiWhois } from "../tailscale.ts";
 import { readControlPlane } from "../deploy/control-plane.ts";

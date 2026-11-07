@@ -1,6 +1,6 @@
 /**
  * Node validation that a pause never leaves a guest exec hanging, run by hand on a home-lab node:
- *   node src/pylon-vm-stop-race.check.ts <image directory> <state root> [rounds, default 10] [readers, default 8]
+ *   node src/backends/pylon-vm/pylon-vm-stop-race.check.ts <image directory> <state root> [rounds, default 10] [readers, default 8]
  *
  * It boots one fresh pylon, then pauses and wakes it `rounds` times. Through each pause, `readers` loops run the
  * probe's listening read, a guest exec of `cat /proc/net/tcp` with a 3 s limit, as a probe snapshot does while a
@@ -17,13 +17,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { BootInputs } from "./spawn.ts";
-import type { CheckpointId, PylonId } from "./ids.ts";
+import type { BootInputs } from "../../spawn.ts";
+import type { CheckpointId, PylonId } from "../../ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
-import { unstamped } from "./pylon-vm/controller-log.ts";
+import { unstamped } from "../../pylon-vm/controller-log.ts";
 
 const [imageArg, stateArg, roundsArg, readersArg] = process.argv.slice(2);
-if (imageArg === undefined || stateArg === undefined) throw new Error("usage: node src/pylon-vm-stop-race.check.ts <image directory> <state root> [rounds] [readers]");
+if (imageArg === undefined || stateArg === undefined) throw new Error("usage: node src/backends/pylon-vm/pylon-vm-stop-race.check.ts <image directory> <state root> [rounds] [readers]");
 const imageDir = resolve(imageArg);
 const stateRoot = resolve(stateArg);
 const rounds = Number(roundsArg ?? 10);

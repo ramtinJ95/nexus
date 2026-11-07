@@ -28,7 +28,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { createDockerBackend } from "./backends/docker-backend.ts";
-import { createPylonVmBackend } from "./pylon-vm-backend.ts";
+import { createPylonVmBackend } from "./backends/pylon-vm/pylon-vm-backend.ts";
 import { run as pylonVm } from "./pylon-vm/client.ts";
 import { nodeSecrets, type NodeSecrets } from "./probe/config.ts";
 import { startProbe, type Probe } from "./probe/server.ts";

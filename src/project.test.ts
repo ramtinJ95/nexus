@@ -206,9 +206,9 @@ test("installFileCommand makes the parent as a user owner, as root for root, and
 test("code that runs on nodes never imports project.ts, the control plane's Project record and overlay", () => {
   const src = new URL("./", import.meta.url);
   const nodeFiles = [
-    ...["probe", "protocol", "pylon-vm"].flatMap((dir) => readdirSync(new URL(dir, src), { recursive: true, encoding: "utf8" })
+    ...["probe", "protocol", "pylon-vm", "backends/pylon-vm"].flatMap((dir) => readdirSync(new URL(dir, src), { recursive: true, encoding: "utf8" })
       .filter((file) => /\.[jt]s$/.test(file) && !/\.(test|check)\.[jt]s$/.test(file)).map((file) => `${dir}/${file}`)),
-    "backends/backend.ts", "backends/docker-backend.ts", "backends/docker-services.ts", "pylon-vm-backend.ts", "images.ts",
+    "backends/backend.ts", "backends/docker-backend.ts", "backends/docker-services.ts", "images.ts",
   ];
   const importers = nodeFiles.filter((file) => /\b(?:from|import)\s*\(?\s*["'][^"']*\/project\.ts["']/.test(readFileSync(new URL(file, src), "utf8")));
   assert.deepEqual(importers, []);

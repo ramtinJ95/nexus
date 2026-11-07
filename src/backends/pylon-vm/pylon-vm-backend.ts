@@ -14,30 +14,30 @@ import { existsSync, readFileSync } from "node:fs";
 import { chmod, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
-import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "./backends/backend.ts";
-import { JobFailure } from "./protocol/jobs.ts";
-import { buildImage as buildPylonImage } from "./image-build.ts";
-import { chatgptTokenGrant } from "./secret-grants.ts";
-import { requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "./spawn.ts";
-import { shellQuote as q } from "./shell.ts";
-import { type CheckpointId, type ImageId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "./ids.ts";
-import { pylonIdSchema } from "./protocol/fields.ts";
-import type { PausedSession } from "./protocol/observations.ts";
-import { imageIdOf, type TemplateManifest } from "./images.ts";
+import { artifactDirectory, manifestFiles, tarCodec } from "../../artifacts.ts";
+import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
+import { JobFailure } from "../../protocol/jobs.ts";
+import { buildImage as buildPylonImage } from "../../image-build.ts";
+import { chatgptTokenGrant } from "../../secret-grants.ts";
+import { requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../spawn.ts";
+import { shellQuote as q } from "../../shell.ts";
+import { type CheckpointId, type ImageId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
+import { pylonIdSchema } from "../../protocol/fields.ts";
+import type { PausedSession } from "../../protocol/observations.ts";
+import { imageIdOf, type TemplateManifest } from "../../images.ts";
 import * as templates from "./pylon-vm-templates.ts";
-import { publicUrls } from "./public-urls.ts";
-import { finishRelaunch, pauseSessions, type RelaunchMark } from "./probe/guest/session-wake.ts";
-import { checkoutDir, sessionHarnessSchema } from "./session-harness.ts";
-import { controlSocket, run, socketPathLimit, stopForRetry } from "./pylon-vm/client.ts";
-import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";
-import { bridgePylonHeader, hostBridgeSocket } from "./pylon-vm/host-bridge.ts";
-import { listenHostBridge, type HostBridge } from "./host-bridge.ts";
-import { asUser, controllerLog, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-vm/pylon-guest.ts";
-import { readJson, saveJson } from "./json-file.ts";
-import { diskBytes } from "./disk-space.ts";
-import { alive, readIdentity } from "./pylon-vm/identity.ts";
-import { directory, existsError, privateDirectory, readRecord } from "./pylon-vm/storage.ts";
+import { publicUrls } from "../../public-urls.ts";
+import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
+import { checkoutDir, sessionHarnessSchema } from "../../session-harness.ts";
+import { controlSocket, run, socketPathLimit, stopForRetry } from "../../pylon-vm/client.ts";
+import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
+import { bridgePylonHeader, hostBridgeSocket } from "../../pylon-vm/host-bridge.ts";
+import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
+import { asUser, controllerLog, controllerLogTail, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
+import { readJson, saveJson } from "../../json-file.ts";
+import { diskBytes } from "../../disk-space.ts";
+import { alive, readIdentity } from "../../pylon-vm/identity.ts";
+import { directory, existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";
 
 export interface PylonVmBackendOptions {
   /**
@@ -419,7 +419,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     const checkoutFailed = config.retrySetup && status.setupRecorded === false && setupFailed(status);
     const freshFailed = !config.retrySetup && setupFailed(status) && !hasCheckpoint(pylonId);
     // The startupError only points at the controller log, which holds what setup printed, so the log travels with the failure.
-    const log = await templates.controllerLogTail(instanceDir(pylonId));
+    const log = await controllerLogTail(instanceDir(pylonId));
     if (!checkoutFailed && !freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
     const name = instanceName(pylonId);
     await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
@@ -473,7 +473,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (record === null) return null;
       const up = vmHolds.safeParse(["starting", "unavailable", "running", "stopping"].includes(instance.status.state) ? instance.status.resources : undefined);
       const vm: BackendVm = state.vm === "stopped" ? { vm: "stopped", sessions: sidecar.sessions ?? null }
-        : state.vm === "broken" ? { ...state, logTail: await templates.controllerLogTail(instanceDir(pylonId)) } : state;
+        : state.vm === "broken" ? { ...state, logTail: await controllerLogTail(instanceDir(pylonId)) } : state;
       return {
         pylonId,
         ...vm,

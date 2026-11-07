@@ -1,6 +1,6 @@
 /**
  * Node validation that a pylon VM can use the memory it is given, run by hand on a home-lab node:
- *   node src/pylon-vm-memory.check.ts <image directory> <state root> [memory GiB, default 16] [GiB to touch, default memory - 2] [GiB to write to disk, default 3]
+ *   node src/backends/pylon-vm/pylon-vm-memory.check.ts <image directory> <state root> [memory GiB, default 16] [GiB to touch, default memory - 2] [GiB to write to disk, default 3]
  *
  * It boots one fresh pylon, has the guest write to that many GiB of memory and hold them, and samples the host's
  * MemAvailable and the VM's resident set meanwhile. Then it writes to the pylon's disk and checks where the
@@ -13,14 +13,14 @@
 import assert from "node:assert/strict";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { output } from "./exec.ts";
-import type { BootInputs } from "./spawn.ts";
-import type { CheckpointId, PylonId } from "./ids.ts";
-import { parseMeminfo } from "./probe/host.ts";
+import { output } from "../../exec.ts";
+import type { BootInputs } from "../../spawn.ts";
+import type { CheckpointId, PylonId } from "../../ids.ts";
+import { parseMeminfo } from "../../probe/host.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 
 const [imageArg, stateArg, memoryArg, touchArg, diskArg] = process.argv.slice(2);
-if (imageArg === undefined || stateArg === undefined) throw new Error("usage: node src/pylon-vm-memory.check.ts <image directory> <state root> [memory GiB] [GiB to touch]");
+if (imageArg === undefined || stateArg === undefined) throw new Error("usage: node src/backends/pylon-vm/pylon-vm-memory.check.ts <image directory> <state root> [memory GiB] [GiB to touch]");
 const imageDir = resolve(imageArg);
 const stateRoot = resolve(stateArg);
 const memoryGiB = Number(memoryArg ?? 16);
