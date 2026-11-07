@@ -2659,15 +2659,24 @@ test("show reads only a refusal coded queued as a queued thread, and passes any 
 
 test("whenRunning tries a retryable refusal again and fails at once on any other", async () => {
   const api: Api = async () => ({ thread: { status: "active" } });
-  let tries = 0;
-  const waking = () => {
-    if (tries++ === 0) throw new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running", true);
-    return Promise.resolve("sent");
-  };
-  assert.equal(await whenRunning(api, "th-0123456789ab", waking, "nothing was sent"), "sent");
-  assert.equal(tries, 2);
-  const blocked = new CliError("conflict", "the Claude worker waits at a prompt", 409, "blocked");
-  let refusals = 0;
-  await assert.rejects(whenRunning(api, "th-0123456789ab", () => { refusals++; throw blocked; }, "nothing was sent"), blocked);
-  assert.equal(refusals, 1, "a refusal that is not retryable is not tried again");
+  for (const refusal of [
+    new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running", true),
+    new CliError("conflict", "control plane is draining for deployment", 409, "draining", true),
+  ]) {
+    let tries = 0;
+    const waking = () => {
+      if (tries++ === 0) throw refusal;
+      return Promise.resolve("sent");
+    };
+    assert.equal(await whenRunning(api, "th-0123456789ab", waking, "nothing was sent"), "sent", refusal.code!);
+    assert.equal(tries, 2, refusal.code!);
+  }
+  for (const refusal of [
+    new CliError("conflict", "the Claude worker waits at a prompt", 409, "blocked"),
+    new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running"),
+  ]) {
+    let refusals = 0;
+    await assert.rejects(whenRunning(api, "th-0123456789ab", () => { refusals++; throw refusal; }, "nothing was sent"), refusal);
+    assert.equal(refusals, 1, `${refusal.code}: a refusal that is not retryable is not tried again, whatever its code`);
+  }
 });
