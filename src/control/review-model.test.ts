@@ -7,6 +7,8 @@ const before: [string, Phase, Partial<Review>, { ended: boolean; settled: boolea
   ["reviewing", { kind: "reviewing" }, {}, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: true }],
   ["reviewing, the reviewer's model failing", { kind: "reviewing", failing: { count: 1, last: "x", retryAt: 0 } }, {}, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: false }],
   ["fixing, findings unsent", { kind: "fixing" }, { outbox: { id: "m", text: "t", attempted: null, to: "builder" } }, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: true }],
+  ["fixing, findings unsent, the builder's model failing", { kind: "fixing", failing: { count: 1, last: "x", retryAt: 0 } }, { outbox: { id: "m", text: "t", attempted: null, to: "builder" } }, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: true }],
+  ["fixing, a message to the reviewer unsent", { kind: "fixing" }, { outbox: { id: "m", text: "t", attempted: null, to: "reviewer" } }, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: false }],
   ["fixing, findings delivered", { kind: "fixing" }, {}, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: false }],
   ["checking", { kind: "checking", startedAt: 0, thread: null }, {}, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: false }],
   ["verifying", { kind: "verifying", startedAt: 0, thread: null }, {}, { ended: false, settled: false, waitsOnPerson: false, landing: false, landingVerb: null, cancellable: true, builderAwaited: false }],
@@ -32,12 +34,13 @@ test("each phase's row gives the value every old set and predicate gave it", () 
   }
   assert.equal(waitsOnPerson(null), false, "no review waits on no one");
   assert.deepEqual(builderAwaited({ since: 10, outbox: null, phase: { kind: "reviewing" } } as unknown as Review), { from: 10, until: 10 + 30 * 60_000 }, "a round keeps the builder up for 30 minutes");
+  assert.deepEqual(builderAwaited({ since: 20, outbox: { to: "builder" }, phase: { kind: "fixing" } } as unknown as Review), { from: 20, until: 20 + 30 * 60_000 }, "undelivered findings keep the builder up for 30 minutes");
 });
 
 test("the store's SQL filters read the kinds they filtered before", () => {
   const sorted = (kinds: PhaseKind[]) => [...kinds].sort();
   assert.deepEqual(sorted(kindsWhere((row) => row.settled)), ["cancelled", "closed", "landed", "merged"]);
-  assert.deepEqual(sorted(kindsWhere((row) => row.awaitsBuilder !== undefined)), ["fixing", "reviewing"]);
+  assert.deepEqual(sorted(kindsWhere((row) => row.awaitsBuilder)), ["fixing", "reviewing"]);
 });
 
 test("every phase kind has a row", () => {

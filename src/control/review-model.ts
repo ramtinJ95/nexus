@@ -271,8 +271,11 @@ export type EndedKind = { [K in PhaseKind]: typeof phases[K]["ended"] extends tr
 // Each row's functions take its own phase, which `phase.kind` picks, so the row of any phase reads it.
 const rowAt = (kind: PhaseKind) => phases[kind] as unknown as PhaseRow<Phase>;
 const rowOf = (phase: Phase) => rowAt(phase.kind);
-/** The phase kinds whose row passes `has`, which the store's SQL filters read. */
-export const kindsWhere = (has: (row: PhaseRow<Phase>) => boolean) => (Object.keys(phases) as PhaseKind[]).filter((kind) => has(rowAt(kind)));
+/** The phase kinds whose row's flags pass `has`, which the store's SQL filters read. */
+export const kindsWhere = (has: (flags: { [F in keyof PhaseRow<Phase>]-?: boolean }) => boolean) => (Object.keys(phases) as PhaseKind[]).filter((kind) => {
+  const { landing, awaitsBuilder, ...row } = rowAt(kind);
+  return has({ ...row, landing: landing !== undefined, awaitsBuilder: awaitsBuilder !== undefined });
+});
 export const ended = (r: Pick<Review, "phase">) => rowOf(r.phase).ended;
 export const settled = (r: Pick<Review, "phase">) => rowOf(r.phase).settled;
 export const waitsOnPerson = (r: Review | null) => r !== null && rowOf(r.phase).waitsOnPerson;

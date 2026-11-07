@@ -22,7 +22,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     }
   });
   const reviewOf = (builder: ThreadId): Review | null => recordOf<Review>("reviews", "builder", builder);
-  const awaitedKinds = JSON.stringify(kindsWhere((row) => row.awaitsBuilder !== undefined));
+  const awaitedKinds = JSON.stringify(kindsWhere((row) => row.awaitsBuilder));
   const settledKinds = JSON.stringify(kindsWhere((row) => row.settled));
   const isCurrentReview = (review: Review) => JSON.stringify(reviewOf(review.builder)) === JSON.stringify(review);
   return {
