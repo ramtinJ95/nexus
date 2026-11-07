@@ -10,7 +10,7 @@ import type { Registry } from "../registry.ts";
 import type { StoredPylon, Thread } from "../thread-store.ts";
 import { CheckoutRefused, type RefusalKind as CheckoutRefusalKind } from "../../checkout-files.ts";
 import { Refusal, type RefusalKind } from "../refusal.ts";
-import { listsRunning, runsSealed } from "../observed.ts";
+import { runningNode, runsSealed } from "../locator.ts";
 import type { Access } from "./access.ts";
 
 /** What each refusal of a checkout read is. A missing base is unprocessable, not a conflict, because waiting cannot change it. */
@@ -63,10 +63,7 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
   const notRunning = (pylonId: PylonId, wakes: boolean) => wakes ? `pylon ${pylonId} is not running yet. This request wakes it, so ask again once it runs`
     : `pylon ${pylonId} is not running, and this request does not wake it`;
   /** Whether the node, online, reports the pylon running, as a Claude transcript's reads ask. */
-  function running(pylon: StoredPylon): boolean {
-    const node = registry.node(pylon.node);
-    return node?.state === "online" && listsRunning(node.observation, pylon.pylonId, registry.sealedBoot(pylon.pylonId));
-  }
+  const running = (pylon: StoredPylon): boolean => runningNode(registry, pylon.pylonId, "work") !== null;
 
   /** Runs `argv` in the thread's pylon as a command whose answer the API waits for, at most 15 s. */
   async function execInPylon(t: Thread, argv: readonly string[]): Promise<{ exitCode: number | null; output: string }> {

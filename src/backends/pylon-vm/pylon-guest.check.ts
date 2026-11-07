@@ -118,7 +118,7 @@ const answer = ({ status, body }: { status: number; body: string }) => [status, 
 const expected = { publicUrl: `https://${nodeHost}:${web.httpsPort}`, host: `${nodeHost}:${web.httpsPort}`, user: "user" };
 
 async function piEnv(): Promise<void> {
-  const envs = pylonEnvs({ awaitRunning: async () => ({ node, host: "127.0.0.1", port: probe.port, nodeId: probeId }) }, { tailscaled, log: (m) => console.log(m) });
+  const envs = pylonEnvs({ awaitRunning: async () => ({ address: { node, host: "127.0.0.1", port: probe.port, nodeId: probeId }, client }) }, { tailscaled, log: (m) => console.log(m) });
   try {
     const read = { snapshot: async () => ({ threadId: `check-${run}`, pylonId }) } as unknown as DocumentReader;
     const envAt = (cwd: string) => envs.env({ conversationId: 1 as ConversationId, cwd, read }, context) as Promise<ExecutionEnv>;

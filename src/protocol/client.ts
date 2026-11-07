@@ -42,16 +42,16 @@ export interface ProbeClient {
   /** GET /v1/node-health: the node's host as the probe reads it now. It answers after sampling its pylons' CPU for a second. */
   health(): Promise<NodeHealth>;
   /** GET /v1/cleanup: the bytes each image and template in the node's artifact directory takes. */
-  artifactUsage?(): Promise<ArtifactUsage>;
+  artifactUsage(): Promise<ArtifactUsage>;
   /** POST /v1/cleanup: deletes each artifact in order, unless the node finds it in use, and answers what each delete did. */
-  dropArtifacts?(ids: readonly PortableArtifactId[]): Promise<DropReply>;
+  dropArtifacts(ids: readonly PortableArtifactId[]): Promise<DropReply>;
   /** POST /v1/deployer/wake: starts the node's deployer now rather than at its timer's next tick. */
-  wakeDeployer?(): Promise<void>;
+  wakeDeployer(): Promise<void>;
   /**
    * POST /v1/pylons/{id}/git: has a snapshot read the pylon's git again, past the probe's reuse of its last read, and
    * answers once that snapshot is published, with when it was observed. It fails when none was published.
    */
-  readGit?(pylonId: PylonId): Promise<string>;
+  readGit(pylonId: PylonId): Promise<string>;
 }
 
 /**

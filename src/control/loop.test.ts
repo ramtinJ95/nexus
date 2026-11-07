@@ -200,6 +200,10 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; heldSecrets?:
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
     health: () => Promise.reject(new Error("unused")),
+    artifactUsage: () => Promise.reject(new Error("unused")),
+    dropArtifacts: () => Promise.reject(new Error("unused")),
+    wakeDeployer: () => Promise.reject(new Error("unused")),
+    readGit: () => Promise.reject(new Error("unused")),
     putPeers: async () => {},
     async putSecret(name) {
       if (!reachable) throw Object.assign(new Error("probe unreachable"), { code: "unreachable" });
@@ -2325,4 +2329,31 @@ test("a git read again settles once the registry holds the snapshot that read it
   await until("the read settles", read);
   assert.equal(registry.node(node)?.observation?.observedAt, "2026-11-04T10:00:01.000Z");
   assert.deepEqual(asked, ["pylon-th-1"]);
+});
+
+test("woken settles once the loop ingests the node's next event, so a wait for a pylon to run sees what it brought", async (t) => {
+  const registry = seedRegistry(openRegistry(":memory:"), { nodes: [node] });
+  t.after(() => registry.close());
+  const queued: ProbeEvent[] = [];
+  let push: (() => void) | null = null;
+  const send = (event: ProbeEvent) => { queued.push(event); push?.(); };
+  const probe = {
+    node,
+    async *observe(signal: AbortSignal) {
+      while (!signal.aborted) {
+        while (queued.length > 0) yield queued.shift()!;
+        await new Promise<void>((resolve) => { push = resolve; signal.addEventListener("abort", () => resolve(), { once: true }); });
+      }
+    },
+  } as unknown as ProbeClient;
+  const loop = startLoop({ registry, probes: [probe], ingest: realIngest, previewPorts, intervalMs: 60_000, log: assert.fail });
+  t.after(() => loop.close());
+  send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:00.000Z" }) });
+  await until("the first snapshot is ingested", () => registry.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.000Z");
+  const woken = watch(loop.woken());
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(await woken(), false, "nothing woke the loop yet");
+  send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:01.000Z" }) });
+  await until("the loop wakes", woken);
+  assert.equal(registry.node(node)?.observation?.observedAt, "2026-11-04T10:00:01.000Z", "the registry holds the event by then");
 });

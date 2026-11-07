@@ -17,6 +17,8 @@ import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import type { ConversationId, ModelRef } from "@earendil-works/pi-durable";
 import { openHarnessHost } from "./host.ts";
 import type { ProbeAddress } from "./pylon-env.ts";
+import { connectProbe } from "../../protocol/client.ts";
+import { localApiWhois } from "../../tailscale.ts";
 
 export const scriptedModel: ModelRef = { provider: "nexus-fixture", modelId: "scripted" };
 /** What each scripted answer reports it used. */
@@ -124,7 +126,9 @@ if (import.meta.main) {
     storagePath: args.storagePath,
     models: scriptedModels(),
     model: scriptedModel,
-    locator: { awaitRunning: async () => args.probe },
+    locator: {
+      awaitRunning: async () => ({ address: args.probe, client: connectProbe(args.probe.node, args.probe.host, args.probe.nodeId, { port: args.probe.port, whois: localApiWhois(args.tailscaled) }) }),
+    },
     tailscaled: args.tailscaled,
     threads: [{ threadId: args.threadId, conversationId: args.conversationId, agentTurnRunning: false }],
     deleted: [],

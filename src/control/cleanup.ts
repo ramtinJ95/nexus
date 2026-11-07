@@ -43,7 +43,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
 
   async function usageOn(node: NodeName): Promise<ArtifactUsage> {
     const probe = probes.get(node);
-    return probe?.artifactUsage === undefined ? { artifacts: [] } : probe.artifactUsage();
+    return probe === undefined ? { artifacts: [] } : probe.artifactUsage();
   }
 
   async function ask(node: NodeName) {
@@ -74,7 +74,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
    */
   async function deleteArtifacts(node: NodeName, q: NodeQuestion) {
     const probe = probes.get(node);
-    if (probe?.dropArtifacts === undefined) return;
+    if (probe === undefined) return;
     const ids = undeleted(q).flatMap((i) => i.kind === "release" ? [] : [i.id]);
     for (let at = 0; at < ids.length; at += maxDrops) {
       const facts = factsOf(node);

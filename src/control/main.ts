@@ -19,6 +19,7 @@ import { chatgptToken, harnessModels, loginState, openCredentials, requireModel 
 import { openHarnessHost, type ConversationId } from "./harness/host.ts";
 import { startApi } from "./api/server.ts";
 import { registryLocator } from "./locator.ts";
+import { jobDeadlineMs } from "../protocol/jobs.ts";
 import { startLoop } from "./loop.ts";
 import { openRegistry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
@@ -180,7 +181,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     storagePath: config.harness.storage,
     models,
     model: config.harness.model,
-    locator: registryLocator(registry),
+    locator: registryLocator({ registry, probes: probeMap, woken: loop.woken, waitMs: jobDeadlineMs.spawn }),
     tailscaled,
     threads: conversations.filter(({ thread }) => thread.status !== "deleted").map(({ thread, id }) => ({ threadId: thread.id, conversationId: id, agentTurnRunning: thread.agentTurnRunning })),
     deleted: conversations.filter(({ thread }) => thread.status === "deleted").map(({ id }) => id),
@@ -245,7 +246,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       void reviews?.wake(id as ThreadId);
     }
     if (!events.some((e) => wakesDeployers(registry, e))) return;
-    for (const probe of probeMap.values()) probe.wakeDeployer?.().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
+    for (const probe of probeMap.values()) probe.wakeDeployer().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
   }, (err) => log(`following events for wake-ups failed, going on from the newest: ${err.message}`));
   for (const poll of threads.polls) every(15_000, poll);
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });

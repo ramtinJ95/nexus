@@ -21,13 +21,13 @@ import { followEvents } from "./follow-events.ts";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { readableProbe } from "./observed.ts";
+import { runningProbe } from "./locator.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Watch } from "./conversation-view.ts";
 
-type ClaudeConversationRegistry = Pick<Registry, "appendClaudeRead" | "claudeEntries" | "claudeTranscript" | "claudeWorker" | "eventBatch" | "newestEvent" | "node" | "pylon" | "questions" | "setWaitingAsks" | "thread">;
+type ClaudeConversationRegistry = Pick<Registry, "appendClaudeRead" | "claudeEntries" | "claudeTranscript" | "claudeWorker" | "eventBatch" | "newestEvent" | "node" | "pylon" | "questions" | "sealedBoot" | "setWaitingAsks" | "thread">;
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
@@ -139,7 +139,7 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       const t = registry.thread(id);
       const session = registry.claudeWorker(id)?.session ?? null;
       if (t === undefined || t.status === "deleted" || session === null) return;
-      const probe = readableProbe(registry, probes, t);
+      const probe = runningProbe(registry, probes, t, "usage");
       if (probe === null) return;
       const stored = registry.claudeTranscript(id);
       const startedAt = Date.now();
