@@ -23,6 +23,8 @@ import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
+import { claudeNames } from "../deploy/credentials.ts";
+import { anthropicApiHost } from "./project.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { HttpError } from "./http-error.ts";
 import type { Inbox } from "./inbox.ts";
@@ -246,7 +248,7 @@ ${why === null ? "" : `${why.text}\n`}Land waives these at ${at}, and at a rebas
 }
 
 // A Claude worker logs in from a granted token. Interactive /login needs a person, so it cannot serve a reviewer.
-const grantsClaude = (secrets: readonly SecretGrant[]) => secrets.some((s) => (s.name === "CLAUDE_CODE_OAUTH_TOKEN" || s.name === "ANTHROPIC_API_KEY") && s.hosts.includes("api.anthropic.com"));
+const grantsClaude = (secrets: readonly SecretGrant[]) => secrets.some((s) => claudeNames.some((name) => name === s.name) && s.hosts.includes(anthropicApiHost));
 
 /** The reviewer's kind and model: another model family than the builder's where one can run. */
 export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } {
