@@ -31,10 +31,10 @@ test("a path that does not decode is a 400 to an allowed caller and a 403 to any
   assert.equal(bad.status, 400);
   assert.equal(typeof bad.body.error, "string");
   s.callAs("nSTRANGER" as TailnetNodeId);
-  assert.deepEqual(await s.call("GET", "/v1/%zz"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows" } });
+  assert.deepEqual(await s.call("GET", "/v1/%zz"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows", code: null, retryable: false } });
   s.callAs(laptop);
   for (const host of ["[zz", "a b"]) {
-    assert.deepEqual(await s.call("GET", "/v1/projects", undefined, { host }), { status: 403, body: { error: `the API does not answer to host ${host}` } }, host);
+    assert.deepEqual(await s.call("GET", "/v1/projects", undefined, { host }), { status: 403, body: { error: `the API does not answer to host ${host}`, code: null, retryable: false } }, host);
     assert.equal((await s.call("GET", "/v1/whoami", undefined, { host })).status, 403, `whoami under ${host}`);
   }
 });
@@ -53,10 +53,10 @@ test("any tailnet node may ask who it is and what it may do, under the API's nam
     { node: "nFIREBAT", allowed: true, person: false, deployer: false },
     { node: "nSTRANGER", allowed: false, person: false, deployer: false },
   ], asks.map(([, who]) => who).join(", "));
-  assert.deepEqual(await s.call("GET", "/v1/whoami", undefined, { host: "evil.example" }), { status: 403, body: { error: "the API does not answer to host evil.example" } });
-  assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows" } }, "it opens no other route to a stranger");
+  assert.deepEqual(await s.call("GET", "/v1/whoami", undefined, { host: "evil.example" }), { status: 403, body: { error: "the API does not answer to host evil.example", code: null, retryable: false } });
+  assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows", code: null, retryable: false } }, "it opens no other route to a stranger");
   s.callAs(null);
-  assert.deepEqual(await s.call("GET", "/v1/whoami"), { status: 403, body: { error: "caller is not a tailnet node" } });
+  assert.deepEqual(await s.call("GET", "/v1/whoami"), { status: 403, body: { error: "caller is not a tailnet node", code: null, retryable: false } });
 });
 
 const joinerKey = "b".repeat(64);
@@ -88,7 +88,7 @@ test("an unknown or expired token is refused with nothing recorded", async (t) =
   s.callAs(joiner);
   s.hosts.set(joiner, "infra-2.tail.ts.net");
   const unknown = await s.call("POST", "/v1/join", { token: "not-minted", deployKey: joinerKey });
-  assert.deepEqual(unknown, { status: 403, body: { error: "this join token is not one this control plane minted. Mint another with sudo deploy/install.sh --join-token on the control plane's machine" } });
+  assert.deepEqual(unknown, { status: 403, body: { error: "this join token is not one this control plane minted. Mint another with sudo deploy/install.sh --join-token on the control plane's machine", code: null, retryable: false } });
   const late = await s.call("POST", "/v1/join", { token: expired, deployKey: joinerKey });
   assert.equal(late.status, 403);
   assert.match(late.body.error, /^this join token expired at \d{4}-/);
@@ -219,7 +219,7 @@ test("a body over a mebibyte is refused with 413 and reaches no route", async (t
   const s = await testApi(t);
   const refused = await s.call("POST", "/v1/projects", "x".repeat((1 << 20) + 1));
   assert.equal(refused.status, 413);
-  assert.deepEqual(refused.body, { error: "request body over 1048576 bytes" });
+  assert.deepEqual(refused.body, { error: "request body over 1048576 bytes", code: null, retryable: false });
   assert.deepEqual(s.registry.projects(), []);
 });
 
@@ -532,7 +532,7 @@ test("only a person starts a thread, starts a queued one now or messages one, ne
     s.callAs(caller);
     for (const [action, path, body] of routes) {
       const error = `caller may not ${action}: only a person may, never the control plane, infrastructure nodes or pylons`;
-      assert.deepEqual(await s.call("POST", path, body), { status: 403, body: { error } }, `${who} may not ${action}`);
+      assert.deepEqual(await s.call("POST", path, body), { status: 403, body: { error, code: null, retryable: false } }, `${who} may not ${action}`);
     }
   }
   assert.equal(s.calls.length, 1, "no refused request started or messaged a thread");
@@ -578,7 +578,7 @@ test("only a person acts on a thread, its pylon or a project, never the control 
     s.callAs(caller);
     for (const [action, method, path, body] of routes) {
       const error = `caller may not ${action}: only a person may, never the control plane, infrastructure nodes or pylons`;
-      assert.deepEqual(await s.call(method, path, body), { status: 403, body: { error } }, `${who} may not ${action}`);
+      assert.deepEqual(await s.call(method, path, body), { status: 403, body: { error, code: null, retryable: false } }, `${who} may not ${action}`);
     }
     const attached = await attachTo(s.port, attachPathOf(id));
     assert.ok("status" in attached, `${who} is refused before the 101`);

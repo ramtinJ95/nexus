@@ -207,7 +207,7 @@ test("a start that names a branch the remote does not have is refused before it 
   observeNode(s, node, { total: 64, committed: 0 });
   s.remoteReads(async () => null);
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Gone", branch: "feat/gone" });
-  assert.deepEqual(refused, { status: 400, body: { error: gone, code: "no-branch" } });
+  assert.deepEqual(refused, { status: 400, body: { error: gone, code: "no-branch", retryable: false } });
   assert.deepEqual([s.registry.threads().length, s.fake.calls.filter(([kind]) => kind === "start").length, s.woken, s.registry.reserved(node)], [0, 0, [], []], "no thread, conversation, wake or room is left of it");
 
   const unnamed = (await s.call("POST", "/v1/threads", { project: "acme", title: "Default" })).body as Thread;

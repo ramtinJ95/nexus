@@ -49,7 +49,7 @@ test("only a deployer reads a node's metrics, of a node that exists, over a rang
   const s = await testApi(t, { deployment });
   const to = Date.now();
   const path = (query: string, name: string = node) => `/v1/nodes/${name}/metrics?${query}`;
-  const refused = (error: string) => ({ status: 400, body: { error } });
+  const refused = (error: string) => ({ status: 400, body: { error, code: null, retryable: false } });
   assert.deepEqual(await s.call("GET", path(`from=${to - hour}&to=${to}`)), { status: 200, body: { node, from: to - hour, to, tier: "raw", bucketMs: 4_000, sampledAt: null, series: [], otherPylons: [] } });
   assert.deepEqual(await s.call("GET", path("")), refused("from must be a whole number of milliseconds since the epoch"));
   for (const bad of ["from=1.5", "from=-1", "from=soon", `from=1&to=${to}x`]) assert.equal((await s.call("GET", path(bad))).status, 400, bad);
@@ -57,9 +57,9 @@ test("only a deployer reads a node's metrics, of a node that exists, over a rang
   assert.deepEqual(await s.call("GET", path(`from=${to - 31 * day - 1}&to=${to}`)), refused("the range must span at most 31 days, as long as the registry keeps a node's metrics"));
   assert.equal((await s.call("GET", path(`from=${to - 31 * day}&to=${to}`))).status, 200, "31 days exactly");
   assert.equal((await s.call("GET", path(`from=${to - hour}`))).body.to >= to, true, "to defaults to now");
-  assert.deepEqual(await s.call("GET", path(`from=${to - hour}`, "nowhere")), { status: 404, body: { error: "no node nowhere" } });
+  assert.deepEqual(await s.call("GET", path(`from=${to - hour}`, "nowhere")), { status: 404, body: { error: "no node nowhere", code: null, retryable: false } });
   s.callAs(phone);
-  assert.deepEqual(await s.call("GET", path(`from=${to - hour}`)), { status: 403, body: { error: "caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons" } });
+  assert.deepEqual(await s.call("GET", path(`from=${to - hour}`)), { status: 403, body: { error: "caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("GET", path(`from=${to - hour}`))).status, 403, "the control node is never a deployer, though listed");
   const off = await testApi(t);

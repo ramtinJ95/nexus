@@ -45,12 +45,12 @@ test("an image is recorded exactly when a probe's Docker backend can name it", a
 test("only a deployer may build, roll out or roll back an image, never the control node itself", async (t) => {
   const routes = [["/v1/images/build", {}], ["/v1/images/rollout", { image: image.id }], ["/v1/images/rollback", {}]] as const;
   const off = await testApi(t);
-  for (const [path, body] of routes) assert.deepEqual(await off.call("POST", path, body), { status: 403, body: { error: "caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons" } });
+  for (const [path, body] of routes) assert.deepEqual(await off.call("POST", path, body), { status: 403, body: { error: "caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
   const on = await testApi(t, { deployment });
   on.callAs("nFIREBAT" as TailnetNodeId);
   for (const [path, body] of routes) assert.equal((await on.call("POST", path, body)).status, 403, `the control node may not POST ${path}`);
   on.callAs(laptop);
-  for (const [path, body] of routes) assert.deepEqual(await on.call("POST", path, body), { status: 409, body: { error: "image builds are not configured" } });
+  for (const [path, body] of routes) assert.deepEqual(await on.call("POST", path, body), { status: 409, body: { error: "image builds are not configured", code: null, retryable: false } });
 });
 
 test("a deployer's image operations answer 200 once done and 202 while running, and the image routes show each image, its nodes and the operation", async (t) => {

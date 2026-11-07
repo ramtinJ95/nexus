@@ -301,7 +301,7 @@ test("a node that joined and was then added to control.json never joins again, a
   const registry = testRegistry(t, plane.db);
   const { token } = mintJoinToken(registry);
   plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
-  assert.deepEqual(await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("another-token") }), { status: 409, body: { error: "infra-2.example.ts.net is a node in control.json, which sets its deploy key" } });
+  assert.deepEqual(await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("another-token") }), { status: 409, body: { error: "infra-2.example.ts.net is a node in control.json, which sets its deploy key", code: null, retryable: false } });
   assert.equal(registry.joinToken(tokenDigest(token))?.usedAt, null);
   assert.equal(registry.joinedNodes()[0]?.deployKey, tokenDigest("joiner-token"), "the refused join replaced nothing");
 });

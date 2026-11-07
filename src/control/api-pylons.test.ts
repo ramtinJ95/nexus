@@ -69,13 +69,13 @@ test("a preview that finds no free port answers 503, and any other allocation fa
   assert.equal(full.status, 503);
   assert.match(full.body.error, /no https port is free for the preview of port-3000/);
   s.registry.allocatePreviews = () => { throw new Error("database is locked"); };
-  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 500, body: { error: "database is locked" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 500, body: { error: "database is locked", code: null, retryable: false } });
 });
 
 test("a node's probe that refuses the control plane answers 502", async (t) => {
   const s = await withThread(t);
   s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat refused this caller"), { code: "forbidden" }); });
-  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 502, body: { error: "rj-firebat refused this caller" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 502, body: { error: "rj-firebat refused this caller", code: "probe-forbidden", retryable: false } });
 });
 
 test("linking a port of a pylon that is not running, or of an archived or deleted thread, is refused with 409", async (t) => {
@@ -132,7 +132,7 @@ test("unpublishing a linked port goes through the node's probe, drops its previe
   s.registry.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
   const reason = "Port 5173 is the preview of service web, not a linked port. Remove the preview from /home/user/workspace/repo/.nexus/services.yaml to unpublish it";
   s.probeAnswers(async () => ({ kind: "unlink-port", refused: reason }));
-  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/5173`, {}), { status: 422, body: { error: reason } });
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/5173`, {}), { status: 422, body: { error: reason, code: null, retryable: false } });
   assert.deepEqual((await detail()).previews.map((p) => p.service), ["port-3000", "web"], "a refused unlink keeps every preview");
 
   s.commands.length = 0;
@@ -419,7 +419,7 @@ test("focusing a session runs Herdr's focus on its pane in the pylon as an argum
   assert.deepEqual(await focus("w3:p1"), { status: 204, body: null });
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "exec", argv: ["sh", "-c", focusScript, "focus", "w3:p1"], cwd: "/", timeoutMs: 15_000 }]]);
   s.probeAnswers(async () => ({ kind: "exec", exitCode: 1, output: "", truncated: false }));
-  assert.deepEqual(await focus("w9:p1"), { status: 404, body: { error: `no pane w9:p1 is open in pylon ${s.thread.pylonId}` } });
+  assert.deepEqual(await focus("w9:p1"), { status: 404, body: { error: `no pane w9:p1 is open in pylon ${s.thread.pylonId}`, code: null, retryable: false } });
   for (const pane of ["p1", "w1:p1;reboot", "$(id)", "w1:p1 w2:p1"]) {
     const refused = await focus(pane);
     assert.equal(refused.status, 400, pane);

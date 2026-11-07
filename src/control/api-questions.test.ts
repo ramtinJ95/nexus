@@ -21,12 +21,12 @@ test("a person answers a question, a deployer question needs a deployer, and no 
 
   s.callAs("nFIREBAT" as TailnetNodeId);
   for (const id of ["qn-person", "qn-deployer"]) {
-    assert.deepEqual(await answer(id, "Rebuild"), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons" } });
+    assert.deepEqual(await answer(id, "Rebuild"), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons", code: null, retryable: false } });
   }
   s.callAs(phone);
-  assert.deepEqual(await answer("qn-deployer", "Rebuild"), { status: 403, body: { error: "caller may not answer this question: its answer may deploy, so only deployers may" } });
-  assert.deepEqual(await answer("qn-unknown", "Rebuild"), { status: 404, body: { error: "no question qn-unknown" } });
-  assert.deepEqual(await answer("qn-person", "Maybe"), { status: 400, body: { error: `"Maybe" is not an option of question qn-person, which are "Rebuild", "Not now"` } });
+  assert.deepEqual(await answer("qn-deployer", "Rebuild"), { status: 403, body: { error: "caller may not answer this question: its answer may deploy, so only deployers may", code: null, retryable: false } });
+  assert.deepEqual(await answer("qn-unknown", "Rebuild"), { status: 404, body: { error: "no question qn-unknown", code: null, retryable: false } });
+  assert.deepEqual(await answer("qn-person", "Maybe"), { status: 400, body: { error: `"Maybe" is not an option of question qn-person, which are "Rebuild", "Not now"`, code: null, retryable: false } });
   assert.equal((await s.call("POST", "/v1/questions/qn-person/answer", { option: "Rebuild", by: laptop })).status, 400, "the answerer is the caller, never the body");
 
   const answered = await answer("qn-person", "Not now");
@@ -36,7 +36,7 @@ test("a person answers a question, a deployer question needs a deployer, and no 
   assert.equal((await detail()).attention, "decision", "the deployer question is still open");
   s.callAs(laptop);
   assert.deepEqual(await answer("qn-person", "Not now"), { status: 200, body: first }, "a retried answer gets the first one's record");
-  assert.deepEqual(await answer("qn-person", "Rebuild"), { status: 409, body: { error: `question qn-person was answered "Not now" by ${phone}` } });
+  assert.deepEqual(await answer("qn-person", "Rebuild"), { status: 409, body: { error: `question qn-person was answered "Not now" by ${phone}`, code: null, retryable: false } });
   assert.equal((await answer("qn-deployer", "Rebuild")).status, 200);
   const after = await detail();
   assert.notEqual(after.attention, "decision");
@@ -91,9 +91,9 @@ test("a person answers a Claude worker's AskUserQuestion with a choice per quest
   const choices = [{ picked: ["Tea"], notes: "no rush" }, { picked: ["Milk"], own: "Oat cream" }];
 
   s.callAs("nFIREBAT" as TailnetNodeId);
-  assert.deepEqual(await s.answer({ choices }), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons" } });
+  assert.deepEqual(await s.answer({ choices }), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs(laptop);
-  assert.deepEqual(await s.answer({ option: "Tea" }), { status: 400, body: { error: `question ask-toolu_1 is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks` } });
+  assert.deepEqual(await s.answer({ option: "Tea" }), { status: 400, body: { error: `question ask-toolu_1 is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks`, code: null, retryable: false } });
   for (const bad of [{ choices: choices.slice(1) }, { choices: [{ picked: ["Juice"] }, choices[1]] }, { choices: [{ picked: ["Tea"], own: "Water" }, choices[1]] }, { choices, option: "Tea" }]) {
     assert.equal((await s.answer(bad)).status, 400, JSON.stringify(bad));
   }
@@ -114,10 +114,10 @@ test("a person answers a Claude worker's AskUserQuestion with a choice per quest
 
   s.callAs(phone);
   assert.deepEqual(await s.answer({ choices }), { status: 200, body: first }, "a retried answer gets the first one's record");
-  assert.deepEqual(await s.answer({ choices: [{ picked: ["Coffee"] }, { picked: ["Sugar"] }] }), { status: 409, body: { error: `question ask-toolu_1 was answered "Drink: Tea; Extras: Milk, Oat cream" by ${laptop}` } });
+  assert.deepEqual(await s.answer({ choices: [{ picked: ["Coffee"] }, { picked: ["Sugar"] }] }), { status: 409, body: { error: `question ask-toolu_1 was answered "Drink: Tea; Extras: Milk, Oat cream" by ${laptop}`, code: null, retryable: false } });
   assert.equal(s.delivered().length, 1, "an answered ask is not handed to Claude again");
   s.registry.askQuestion({ id: "qn-plain", thread: s.thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 1 });
-  assert.deepEqual(await s.call("POST", "/v1/questions/qn-plain/answer", { choices }), { status: 400, body: { error: `question qn-plain is answered with {"option": "<one of its options>"}` } });
+  assert.deepEqual(await s.call("POST", "/v1/questions/qn-plain/answer", { choices }), { status: 400, body: { error: `question qn-plain is answered with {"option": "<one of its options>"}`, code: null, retryable: false } });
 });
 
 test("an answer to an AskUserQuestion nobody waits for any more withdraws it, and one a pylon's image cannot hand to Claude says to answer in its terminal", async (t) => {
@@ -126,11 +126,11 @@ test("an answer to an AskUserQuestion nobody waits for any more withdraws it, an
   const open = async () => (await s.detail()).questions.map((q) => [q.id, q.answer]);
   const old = `pylon ${s.thread.pylonId} runs an image from before AskUserQuestion could be answered from the dashboard, so answer it in the pylon's terminal (\`nexus attach ${s.thread.id}\`)`;
   s.exec(127, "sh: 1: /usr/local/bin/nexus-claude-hook: not found\n");
-  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: old } });
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: old, code: null, retryable: false } });
   s.exec(0, "");
-  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: old } }, "a hook from before asks exits 0 for a kind it does not know");
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: old, code: null, retryable: false } }, "a hook from before asks exits 0 for a kind it does not know");
   s.exec(21, "");
-  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: "another answer to question ask-toolu_1 reached Claude first" } });
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: "another answer to question ask-toolu_1 reached Claude first", code: null, retryable: false } });
   s.exec(null, "");
   assert.equal((await s.answer({ choices })).status, 502);
   assert.deepEqual(await open(), [["ask-toolu_1", null]], "an answer Claude did not get is not recorded");
@@ -139,7 +139,7 @@ test("an answer to an AskUserQuestion nobody waits for any more withdraws it, an
   await s.read();
   s.pylon.asks = [];
   s.exec(20, "");
-  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: "Claude no longer waits for this answer: it was answered in the terminal, its turn ended, or its pylon paused since. Send it to Claude as a message instead" } });
+  assert.deepEqual(await s.answer({ choices }), { status: 409, body: { error: "Claude no longer waits for this answer: it was answered in the terminal, its turn ended, or its pylon paused since. Send it to Claude as a message instead", code: null, retryable: false } });
   assert.deepEqual(await open(), []);
   assert.notEqual((await s.detail()).attention, "decision");
   await s.read();

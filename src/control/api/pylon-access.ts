@@ -8,13 +8,15 @@ import type { ProbeClient } from "../../protocol/client.ts";
 import type { ProbeError } from "../../protocol/http.ts";
 import type { Registry } from "../registry.ts";
 import type { StoredPylon, Thread } from "../thread-store.ts";
-import { CheckoutRefused, type RefusalKind } from "../../checkout-files.ts";
-import { HttpError } from "../http-error.ts";
+import { CheckoutRefused, type RefusalKind as CheckoutRefusalKind } from "../../checkout-files.ts";
+import { Refusal, type RefusalKind } from "../refusal.ts";
 import { listsRunning, runsSealed } from "../observed.ts";
 import type { Access } from "./access.ts";
 
-/** What each refusal of a checkout read answers. A missing base is a 422, not a 409, because waiting cannot change it. */
-const refusalStatus: Readonly<Record<RefusalKind, number>> = { missing: 404, outside: 400, kind: 400, large: 413, "no-base": 422, slow: 504, busy: 503, long: 400 };
+/** What each refusal of a checkout read is. A missing base is unprocessable, not a conflict, because waiting cannot change it. */
+const checkoutRefusal: Readonly<Record<CheckoutRefusalKind, RefusalKind>> = {
+  missing: "missing", outside: "invalid", kind: "invalid", large: "too-large", "no-base": "unprocessable", slow: "timeout", busy: "unavailable", long: "invalid",
+};
 
 export function pylonAccess({ registry, probes, wake, guard, current }: {
   registry: Registry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command" | "stream">>; wake(node: NodeName): void;
@@ -23,27 +25,27 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
   /**
    * Runs what a human asked for in the thread's pylon, such as a link, a session open or a checkout read. Asking is
    * human activity, as a message is, so a paused pylon is woken, but the request itself needs the pylon running and
-   * is refused with a 409 until it is.
+   * is refused as a conflict until it is.
    */
   async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>, wakes = true): Promise<T> {
     guard(t, { status: "pylon" });
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
-    if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
+    if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
     if (wakes) {
       registry.recordActivity(t.id, { human: Date.now() });
       wake(pylon.node);
-    } else if (!running(pylon)) throw new HttpError(409, notRunning(pylon.pylonId, false), "not-running");
+    } else if (!running(pylon)) throw new Refusal("conflict", notRunning(pylon.pylonId, false), "not-running");
     // A sealed boot runs no work, and the wake pauses it for the next.
-    if (runsSealed(registry, pylon)) throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
+    if (runsSealed(registry, pylon)) throw new Refusal("conflict", notRunning(pylon.pylonId, wakes), "not-running");
     let result: T;
     try {
       result = await act(probe, pylon.pylonId);
     } catch (err) {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
       guard(current(t), { status: "pylon" });
-      if ((err as Partial<ProbeError>).code === "not-running") throw new HttpError(409, notRunning(pylon.pylonId, wakes), "not-running");
-      if (err instanceof CheckoutRefused) throw new HttpError(refusalStatus[err.kind], err.message);
+      if ((err as Partial<ProbeError>).code === "not-running") throw new Refusal("conflict", notRunning(pylon.pylonId, wakes), "not-running");
+      if (err instanceof CheckoutRefused) throw new Refusal(checkoutRefusal[err.kind], err.message);
       throw err;
     }
     // A delete that landed meanwhile may have released the pylon's ports already.

@@ -1,4 +1,6 @@
 415 application/json
 {
-  "error": "requests that change state must have content-type application/json"
+  "error": "requests that change state must have content-type application/json",
+  "code": null,
+  "retryable": false
 }

@@ -47,7 +47,8 @@ import type { UsageBackfillJob } from "../usage-backfill.ts";
 import { attachRoute, parseAttachQuery } from "../../contract/attach-parse.ts";
 import { openTerminal } from "../../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "../attach.ts";
-import { HttpError, type ApiErrorCode } from "../http-error.ts";
+import { refusalStatus } from "../http-error.ts";
+import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
 import { ok, parse, type ApiKit, type Policy, type Route, type RouteEntry } from "./kit.ts";
 import { apiAccess } from "./access.ts";
 import { pylonAccess } from "./pylon-access.ts";
@@ -164,18 +165,17 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const views = threadViews(registry, agents, options);
   const { pylonState } = views;
 
-  /** The agent of a thread that has one. */
   function agentOf(t: Thread): ThreadAgents["harness" | "claude"] {
     const { kind } = registry.agent(t);
-    if (kind === "none") throw new HttpError(409, noConversation(t));
+    if (kind === "none") throw new Refusal("conflict", noConversation(t));
     return agents[kind];
   }
 
   /** A node's health says what runs on it, so only a deployer reads it. Nothing reached from here acts on the node. */
   async function nodeHealth(caller: TailnetNodeId, name: NodeName): Promise<NodeHealth> {
-    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons");
+    if (!canDeploy(registry, options.deployment, caller)) throw new Refusal("forbidden", "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons");
     const probe = registry.node(name) === undefined ? undefined : probes.get(name);
-    if (probe === undefined) throw new HttpError(404, `no node ${name}`);
+    if (probe === undefined) throw new Refusal("missing", `no node ${name}`);
     return probe.health();
   }
 
@@ -210,7 +210,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     } catch {
       hostname = undefined;
     }
-    if (hostname === undefined || !hostnames.has(hostname)) throw new HttpError(403, `the API does not answer to host ${req.headers.host}`);
+    if (hostname === undefined || !hostnames.has(hostname)) throw new Refusal("forbidden", `the API does not answer to host ${req.headers.host}`);
   }
 
   /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
@@ -219,7 +219,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const workerRoute = pathOf(req.url)?.startsWith("/v1/deployer/") ?? false;
     if (caller === null || (workerRoute
       ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
-      : !allowed.has(caller))) throw new HttpError(403, "caller is not a tailnet node this control plane allows");
+      : !allowed.has(caller))) throw new Refusal("forbidden", "caller is not a tailnet node this control plane allows");
     checkHost(req);
     return caller;
   }
@@ -230,7 +230,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function whoami(req: IncomingMessage): Promise<Whoami> {
     const node = await callerOf(req, whois);
-    if (node === null) throw new HttpError(403, "caller is not a tailnet node");
+    if (node === null) throw new Refusal("forbidden", "caller is not a tailnet node");
     checkHost(req);
     const person = allowed.has(node) && isPerson(registry, options.deployment, node);
     return { node, allowed: allowed.has(node), person, deployer: person && canDeploy(registry, options.deployment, node) };
@@ -239,7 +239,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   /** A token only root on the control plane's machine mints is what lets a machine that is not yet admitted call this. */
   async function join(req: IncomingMessage, joins: NonNullable<ApiOptions["joins"]>) {
     const caller = await callerOf(req, joins.whois);
-    if (caller === null) throw new HttpError(403, "caller is not a tailnet node");
+    if (caller === null) throw new Refusal("forbidden", "caller is not a tailnet node");
     checkHost(req);
     requireJson(req);
     const node = joinNode(registry, allowed, joins.configured, caller, parse(joinRequestSchema, await readJson(req)));
@@ -258,16 +258,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (req.method !== "GET") requireJson(req);
 
     const path = pathOf(req.url);
-    if (path === null) throw new HttpError(400, `the request path ${JSON.stringify(req.url)} is not a valid URL path`);
+    if (path === null) throw new Refusal("invalid", `the request path ${JSON.stringify(req.url)} is not a valid URL path`);
     const url = new URL(req.url ?? "/", "http://nexus");
     const matches = routes.flatMap((entry): { method: string; m: RegExpExecArray; policy?: Policy; route: Route }[] => {
       const m = entry[1].exec(path);
       if (m === null) return [];
       return entry[0] === "GET" ? [{ method: entry[0], m, route: entry[2] }] : [{ method: entry[0], m, policy: entry[2], route: entry[3] }];
     });
-    if (matches.length === 0) throw new HttpError(404, path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`, "no-route");
+    if (matches.length === 0) throw new Refusal("missing", path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`, "no-route");
     const match = matches.find((r) => r.method === req.method);
-    if (match === undefined) throw new HttpError(405, `${req.method} is not allowed on ${path}`);
+    if (match === undefined) throw new Refusal("method", `${req.method} is not allowed on ${path}`);
     if (match.policy !== undefined && "person" in match.policy) personOnly(caller, match.policy.person);
     const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
     const reply = match.policy?.startsTurn ? await gate.run(async () => route()) : await route();
@@ -285,7 +285,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return registry.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === session)?.herdrPane ?? null;
   }
 
-  /** The pylon of a thread, as serveAttach asks for it. */
   function door(t: Thread, { pylonId, node }: StoredPylon, probe: Pick<ProbeClient, "stream">): PylonDoor {
     return {
       thread: t.id,
@@ -324,23 +323,23 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     personOnly(await admit(req), "attach to a thread's pylon");
-    if (stopping) throw new HttpError(503, "the control plane is stopping");
+    if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
     const origin = req.headers.origin;
-    if (origin !== undefined && origin !== `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}`) throw new HttpError(403, `the attach route does not answer pages from ${origin}`);
+    if (origin !== undefined && origin !== `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}`) throw new Refusal("forbidden", `the attach route does not answer pages from ${origin}`);
     const t = thread(attachRoute.exec(pathOf(req.url)!)![1]!);
     let request: ReturnType<typeof parseAttachQuery>;
     try {
       request = parseAttachQuery(new URL(req.url ?? "/", "http://nexus").searchParams);
     } catch (err) {
-      throw new HttpError(400, (err as Error).message);
+      throw new Refusal("invalid", (err as Error).message);
     }
     guard(t, { status: "active" });
     const pylon = registry.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
-    if (probe === undefined) throw new HttpError(503, `no probe is configured for ${pylon.node}`);
-    if (open.size >= maxStreams) throw new HttpError(503, `${maxStreams} streams are open, the most this control plane serves at once`);
+    if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
+    if (open.size >= maxStreams) throw new Refusal("unavailable", `${maxStreams} streams are open, the most this control plane serves at once`);
     if (socket.destroyed) return;
     const stop = new AbortController();
     const handle = { thread: t.id, end: () => stop.abort("deleted" satisfies Ending) };
@@ -456,7 +455,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 }
 
 function requireJson(req: IncomingMessage) {
-  if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new HttpError(415, "requests that change state must have content-type application/json");
+  if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new Refusal("unsupported", "requests that change state must have content-type application/json");
 }
 
 async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown> {
@@ -465,7 +464,7 @@ async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown>
   try {
     return JSON.parse(body);
   } catch (err) {
-    throw new HttpError(400, `body is not JSON: ${(err as Error).message}`);
+    throw new Refusal("invalid", `body is not JSON: ${(err as Error).message}`);
   }
 }
 
@@ -486,18 +485,31 @@ function pathOf(url: string | undefined): string | null {
   }
 }
 
-/** A node's probe refusing the control plane is a bad gateway, not a refusal of the caller. */
-const probeStatus: Record<ProbeError["code"], number> = { unreachable: 503, "not-running": 409, forbidden: 502 };
-type ErrorReply = { status: number; body: { error: string; code?: ApiErrorCode } };
+/** A node's probe refusing the control plane is an upstream failure, not a refusal of the caller. */
+const probeRefusal: Readonly<Record<ProbeError["code"], readonly [RefusalKind, RefusalCode]>> = {
+  unreachable: ["unavailable", "probe-unreachable"], "not-running": ["conflict", "not-running"], forbidden: ["upstream", "probe-forbidden"],
+};
 
-function errorReply(err: unknown): ErrorReply {
-  const error = (err as Error).message;
-  if (err instanceof HttpError) return { status: err.status, body: err.code === undefined ? { error } : { error, code: err.code } };
-  if (err instanceof DeployDraining) return { status: 409, body: { error } };
-  if (err instanceof BodyTooLarge) return { status: 413, body: { error } };
+/** The refusal an error thrown under a route or an upgrade means, or null for a failure of the control plane. */
+function refusalOf(err: unknown): Refusal | null {
+  if (err instanceof Refusal) return err;
+  const message = (err as Error).message;
+  if (err instanceof DeployDraining) return new Refusal("conflict", message, "draining");
+  if (err instanceof BodyTooLarge) return new Refusal("too-large", message);
   const code = (err as Partial<ProbeError>).code;
-  if (code !== undefined && Object.hasOwn(probeStatus, code)) return { status: probeStatus[code], body: code === "not-running" ? { error, code } : { error } };
-  return { status: 500, body: { error } };
+  if (code === undefined || !Object.hasOwn(probeRefusal, code)) return null;
+  const [kind, refusalCode] = probeRefusal[code];
+  return new Refusal(kind, message, refusalCode);
+}
+
+type ErrorReply = { status: number; body: { error: string; code: RefusalCode | null; retryable: boolean } };
+
+/** The one place an error becomes an HTTP status. */
+export function errorReply(err: unknown): ErrorReply {
+  const error = (err as Error).message;
+  const refusal = refusalOf(err);
+  if (refusal === null) return { status: 500, body: { error, code: null, retryable: false } };
+  return { status: refusalStatus[refusal.kind], body: { error, code: refusal.code, retryable: refusal.retryable } };
 }
 
 /** An API error reply written on a socket that never upgraded. */

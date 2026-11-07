@@ -406,7 +406,7 @@ test("an archived thread's withdrawn failure question and its attention read the
   assert.ok(!card.includes("<button"));
   const events = JSON.parse((await s.call("GET", `/v1/events?thread=${fix.id}&kind=attention.changed`)).text) as { payload: { attention: string | null } }[];
   assert.deepEqual(events.map((e) => e.payload.attention), ["failed", null]);
-  assert.deepEqual(JSON.parse((await s.call("POST", "/v1/questions/judgment:7/answer", { option: "Retry" })).text), { error: "question judgment:7 was withdrawn when its thread was archived" });
+  assert.deepEqual(JSON.parse((await s.call("POST", "/v1/questions/judgment:7/answer", { option: "Retry" })).text), { error: "question judgment:7 was withdrawn when its thread was archived", code: null, retryable: false });
 });
 
 const drink = { question: "Which drink?", header: "Drink", multiSelect: false, options: [{ label: "Tea", description: "Hot", preview: "a cup of tea" }, { label: "Coffee", description: "Strong" }] };
