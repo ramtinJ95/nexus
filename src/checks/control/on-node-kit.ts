@@ -12,22 +12,22 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { artifactDirectory, tarCodec } from "../artifacts.ts";
-import { readControlPlane } from "../deploy/control-plane.ts";
-import { exit, type Exit } from "../exec.ts";
-import { shellQuote } from "../shell.ts";
-import { isImageId, type TailnetNodeId } from "../ids.ts";
-import { tailnetNodeIdSchema } from "../protocol/fields.ts";
-import { probePort } from "../protocol/routes.ts";
-import { scriptedModel, scriptedModels } from "./harness/test-fixture.ts";
-import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
-import { parseServeStatus, tailscaleCli } from "../probe/serve.ts";
-import { localApiWhois } from "../tailscale.ts";
-import { callText } from "../test-support/kit.ts";
-import type { ThreadDetail } from "./wire.ts";
-import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
-import { openRegistry } from "./registry.ts";
-import type { PortRange } from "./thread-store.ts";
+import { artifactDirectory, tarCodec } from "../../artifacts.ts";
+import { readControlPlane } from "../../deploy/control-plane.ts";
+import { exit, type Exit } from "../../exec.ts";
+import { shellQuote } from "../../shell.ts";
+import { isImageId, type TailnetNodeId } from "../../ids.ts";
+import { tailnetNodeIdSchema } from "../../protocol/fields.ts";
+import { probePort } from "../../protocol/routes.ts";
+import { scriptedModel, scriptedModels } from "../../control/harness/test-fixture.ts";
+import { parseSelfDnsName, readProbeConfig } from "../../probe/config.ts";
+import { parseServeStatus, tailscaleCli } from "../../probe/serve.ts";
+import { localApiWhois } from "../../tailscale.ts";
+import { callText } from "../../test-support/kit.ts";
+import type { ThreadDetail } from "../../control/wire.ts";
+import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "../../control/main.ts";
+import { openRegistry } from "../../control/registry.ts";
+import type { PortRange } from "../../control/thread-store.ts";
 
 /**
  * Reads the probe's config named by argv[2] and refuses to go on unless the probe runs pylon-vm, holds `image` (the
@@ -186,7 +186,7 @@ export function apiClient(host: string, port: () => number) {
   return { call, expect, detail, reaches, runTool, runCli, cleanup };
 }
 
-const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
+const cli = fileURLToPath(new URL("../../cli/nexus.ts", import.meta.url));
 
 export type ToolResult = { kind: string; model?: { content: { type: string; text?: string }[] }[] };
 

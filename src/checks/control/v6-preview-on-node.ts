@@ -1,7 +1,7 @@
 /**
  * Node validation that a server bound only to ::1 is listed and previewed, run by hand on a home-lab node as the
  * probe's user, whose probe runs this checkout:
- *   node src/control/v6-preview-on-node.ts [probe.json] [imageId] [holdSeconds, default 45]
+ *   node src/checks/control/v6-preview-on-node.ts [probe.json] [imageId] [holdSeconds, default 45]
  *
  * It starts a control plane in this process over a temporary directory, as thread-on-node.ts does, with the scripted
  * model, and drives the node's running probe through it. The agent starts three servers in a pylon: one on ::1 only,
@@ -16,7 +16,7 @@
  * Deleting the thread must leave `tailscale serve` as the check found it.
  *
  * At each hold it prints `CURL <url> <body>` for each preview, so a Mac can check them through ts-home's SOCKS proxy:
- *   ssh home-<node> 'cd <checkout> && sudo -u nexus node src/control/v6-preview-on-node.ts' | tee v6-preview.log |
+ *   ssh home-<node> 'cd <checkout> && sudo -u nexus node src/checks/control/v6-preview-on-node.ts' | tee v6-preview.log |
  *     while read -r tag url body; do [ "$tag" = CURL ] && echo "MAC $url $(curl -sS --max-time 20 --socks5-hostname localhost:1055 "$url") expected $body"; done
  * It prints PASS v6-preview-on-node last.
  */
@@ -25,10 +25,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { relayPorts } from "../services-file.ts";
-import { relayLog, relayStatus } from "../pylon-vm/relay.ts";
-import type { ThreadDetail } from "./wire.ts";
-import { defaultPreviewPorts } from "./main.ts";
+import { relayPorts } from "../../services-file.ts";
+import { relayLog, relayStatus } from "../../pylon-vm/relay.ts";
+import type { ThreadDetail } from "../../control/wire.ts";
+import { defaultPreviewPorts } from "../../control/main.ts";
 import { apiClient, fetchUntil, openNodeCheck, passLogger, toolText, until } from "./on-node-kit.ts";
 
 const { probeConfig, image, host, serveStatus, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3] || undefined, opens: "previews", resolvesToProbe: false });

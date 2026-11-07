@@ -131,7 +131,7 @@ export interface ControlPlane {
 type NodeAddress = Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">;
 
 /**
- * Everything but the model login, so src/control/thread-on-node.ts runs this same wiring with a scripted model.
+ * Everything but the model login, so src/checks/control/thread-on-node.ts runs this same wiring with a scripted model.
  * `chatgptToken` reads the token every probe is handed for the chatgpt login. Without it, probes get none. Tests pass
  * `probe` to stand in for each node's probe.
  */

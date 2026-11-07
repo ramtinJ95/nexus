@@ -1,8 +1,8 @@
 /**
  * Node validation for a registry and a node that drift apart, run by hand on a home-lab node as the probe's user:
- *   node src/control/drift-on-node.ts [probe.json] [imageId]
+ *   node src/checks/control/drift-on-node.ts [probe.json] [imageId]
  *
- * Like src/control/thread-on-node.ts, it runs control planes in this process over temporary registries, with the
+ * Like src/checks/control/thread-on-node.ts, it runs control planes in this process over temporary registries, with the
  * scripted model, and drives the node's running probe through their HTTP API. Each preview needs a pylon booted
  * from the image, so the check takes several minutes.
  *
@@ -21,12 +21,12 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PylonId } from "../ids.ts";
-import type { JobStatus } from "../protocol/jobs.ts";
-import { readRoutes } from "../probe/serve.ts";
-import { defaultPreviewPorts } from "./main.ts";
+import type { PylonId } from "../../ids.ts";
+import type { JobStatus } from "../../protocol/jobs.ts";
+import { readRoutes } from "../../probe/serve.ts";
+import { defaultPreviewPorts } from "../../control/main.ts";
 import { apiClient, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
-import { openRegistry } from "./registry.ts";
+import { openRegistry } from "../../control/registry.ts";
 
 const { probeConfig, stateRoot, previews, host, serveJson, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "previews", resolvesToProbe: true });
 

@@ -1,7 +1,7 @@
 /**
  * Local validation that an answer streams from pi-durable to `nexus watch --json` and to the thread page as it is
  * written, run by hand on a machine that may listen on loopback:
- *   node src/control/stream.check.ts [seconds the answer takes, default 4]
+ *   node src/checks/control/stream.check.ts [seconds the answer takes, default 4]
  *
  * It opens a real pi-durable harness, without an environment, over the scripted model that writes one word every
  * 20 ms, behind the real API. It sends the thread a message and follows it with the CLI's watch and the dashboard's
@@ -19,14 +19,14 @@ import { fileURLToPath } from "node:url";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createRegistry, Harness, type ConversationId } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "./harness/test-fixture.ts";
-import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
-import { testImage } from "../test-support/kit.ts";
-import { startApi } from "./api/server.ts";
-import type { ThreadHarness } from "./thread-agent.ts";
-import { threadStarter } from "./threads.ts";
-import { readEvents } from "../test-support/event-reader.ts";
-import { openRegistry } from "./registry.ts";
+import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "../../control/harness/test-fixture.ts";
+import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../ids.ts";
+import { testImage } from "../../test-support/kit.ts";
+import { startApi } from "../../control/api/server.ts";
+import type { ThreadHarness } from "../../control/thread-agent.ts";
+import { threadStarter } from "../../control/threads.ts";
+import { readEvents } from "../../test-support/event-reader.ts";
+import { openRegistry } from "../../control/registry.ts";
 
 const seconds = Number(process.argv[2] ?? 4);
 const words = Math.round((seconds * 1000) / streamedWordMs);
@@ -86,7 +86,7 @@ const post = async (path: string, body: unknown) => {
 
 try {
   const thread = await post("/v1/threads", { project: "acme", title: "Stream check" });
-  const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
+  const cli = fileURLToPath(new URL("../../cli/nexus.ts", import.meta.url));
   const watch = spawn(process.execPath, [cli, "watch", thread.id, "--json", "--url", url, "--socks", "none"], { stdio: ["ignore", "pipe", "inherit"] });
   const lines = createInterface({ input: watch.stdout })[Symbol.asyncIterator]();
   const next = async () => {
