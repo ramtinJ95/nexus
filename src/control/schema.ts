@@ -2,7 +2,11 @@
  * The registry's schema: every migration, in order, under the one user_version that db.ts reads. Each table is made
  * here, so the log stays one ordered history across features. The merge policy holds a change to it as irreversible.
  */
-/** Applied in order. The database's user_version counts the ones already applied. Never edit one that has shipped. */
+/**
+ * Applied in order. The database's user_version counts the ones already applied. Never edit one that has shipped.
+ * From the passkeys' migration on, one that alters and drops no table an earlier migration made applies again unchanged
+ * to a registry rewound past it, which schema.test.ts checks.
+ */
 export const migrations: readonly string[] = [
   `
   CREATE TABLE nodes (
@@ -181,19 +185,15 @@ export const migrations: readonly string[] = [
   `CREATE TABLE reviewed_prs (repo TEXT NOT NULL, number INTEGER NOT NULL, PRIMARY KEY (repo, number)) STRICT;
    INSERT OR IGNORE INTO reviewed_prs SELECT json_extract(record, '$.pr.repo'), json_extract(record, '$.pr.number') FROM reviews;`,
   // The person's passkeys, public keys only, and the codes root on the control plane's host makes to enrol one, hashed.
-  // It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL) STRICT;
    CREATE TABLE IF NOT EXISTS passkey_codes (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER) STRICT;`,
   // Threads queued to start once other threads' pull requests merge, keyed by the ID the thread gets when it starts.
-  // It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
   `CREATE TABLE IF NOT EXISTS queued_threads (id TEXT PRIMARY KEY, record TEXT NOT NULL) STRICT;`,
-  // Landing from the dashboard no longer asks for a passkey, so their tables go. They never held a row, and dropping
-  // them touches nothing an earlier migration needs, so a registry rewound past it applies it again unchanged.
+  // Landing from the dashboard no longer asks for a passkey, so their tables go. They never held a row.
   `DROP TABLE IF EXISTS passkeys;
    DROP TABLE IF EXISTS passkey_codes;`,
   // Every model call an agent made, by the ID its own record gives it, their sums per UTC day, and how far each source
-  // was read. usage_since holds when counting started. It touches nothing an earlier migration made, so a registry rewound past it applies it
-  // again unchanged.
+  // was read. usage_since holds when counting started.
   `CREATE TABLE IF NOT EXISTS usage_records (id TEXT PRIMARY KEY, thread TEXT NOT NULL, project TEXT NOT NULL, role TEXT NOT NULL, agent TEXT NOT NULL,
      model TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_write INTEGER NOT NULL, cache_read INTEGER NOT NULL) STRICT;
    CREATE INDEX IF NOT EXISTS usage_records_at ON usage_records(at);
@@ -204,67 +204,57 @@ export const migrations: readonly string[] = [
    CREATE TABLE IF NOT EXISTS usage_cursors (source TEXT NOT NULL, key TEXT NOT NULL, position INTEGER NOT NULL, before TEXT NOT NULL, PRIMARY KEY (source, key)) STRICT;
    CREATE TABLE IF NOT EXISTS usage_since (at INTEGER NOT NULL) STRICT;
    INSERT INTO usage_since SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE NOT EXISTS (SELECT 1 FROM usage_since);`,
-  // The usage backfill's run, with the pylon it holds and what it waits for, and each thread a run listed. It touches
-  // nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // The usage backfill's run, with the pylon it holds and what it waits for, and each thread a run listed.
   `CREATE TABLE IF NOT EXISTS usage_backfill (id INTEGER PRIMARY KEY CHECK (id = 1), state TEXT NOT NULL CHECK (state IN ('running', 'stopped', 'done')),
      started_at INTEGER NOT NULL, finished_at INTEGER, thread TEXT, phase TEXT CHECK (phase IN ('reading', 'pausing')), since INTEGER, waiting TEXT,
      CHECK ((thread IS NULL) = (phase IS NULL) AND (thread IS NULL) = (since IS NULL))) STRICT;
    CREATE TABLE IF NOT EXISTS usage_backfill_threads (thread TEXT PRIMARY KEY REFERENCES threads (id), state TEXT NOT NULL CHECK (state IN ('pending', 'done', 'skipped')),
      reason TEXT, calls INTEGER NOT NULL, tokens INTEGER NOT NULL, at INTEGER,
      CHECK ((state = 'skipped') = (reason IS NOT NULL)), CHECK ((state = 'pending') = (at IS NULL))) STRICT;`,
-  // Each start's request ID, the thread it made, started or queued, and a hash of the body it was asked with. It touches
-  // nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // Each start's request ID, the thread it made, started or queued, and a hash of the body it was asked with.
   `CREATE TABLE IF NOT EXISTS start_requests (request_id TEXT PRIMARY KEY, thread TEXT NOT NULL, body TEXT NOT NULL) STRICT;`,
-  // Each question a thread asked the person, keyed by the ID its asker chose, with its answer once there is one. It
-  // touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // Each question a thread asked the person, keyed by the ID its asker chose, with its answer once there is one.
   `CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, thread TEXT NOT NULL REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
-  // Each builder's nudges toward a pull request. It touches nothing an earlier migration made, so a registry rewound
-  // past it applies it again unchanged.
+  // Each builder's nudges toward a pull request.
   `CREATE TABLE IF NOT EXISTS nudges (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
   // Pipeline items, and the pipeline on for project nexus, whose items start on their own. A project whose pipeline the
   // person turned off keeps it as null, so a registry rewound past this applies it again without turning it back on.
   `CREATE TABLE IF NOT EXISTS pipeline_items (id TEXT PRIMARY KEY, record TEXT NOT NULL) STRICT;
    UPDATE projects SET record = json_set(record, '$.pipeline', json('{"autoStart":true}')) WHERE id = 'nexus' AND json_type(record, '$.pipeline') IS NULL;`,
   // Each failed pylon's judgment, keyed by the thread.failed event of its failure, and the newest event when judgments
-  // began, so no failure from before is ever judged. It touches nothing an earlier migration made, so a registry rewound
-  // past it applies it again unchanged.
+  // began, so no failure from before is ever judged.
   `CREATE TABLE IF NOT EXISTS judgments (failure INTEGER PRIMARY KEY, thread TEXT NOT NULL REFERENCES threads (id), record TEXT NOT NULL) STRICT;
    CREATE TABLE IF NOT EXISTS judgment_since (event INTEGER NOT NULL) STRICT;
    INSERT INTO judgment_since SELECT (SELECT coalesce(max(id), 0) FROM events) WHERE NOT EXISTS (SELECT 1 FROM judgment_since);`,
-  // Each planning thread's token and what the control plane read from it and told it. It touches nothing an earlier
-  // migration made, so a registry rewound past it applies it again unchanged.
+  // Each planning thread's token and what the control plane read from it and told it.
   `CREATE TABLE IF NOT EXISTS planning_threads (thread TEXT PRIMARY KEY REFERENCES threads (id), record TEXT NOT NULL) STRICT;`,
   // The asks whose AskUserQuestion dialogs each thread's pylon last reported waiting, which open its Claude worker's
-  // questions. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // questions.
   `CREATE TABLE IF NOT EXISTS waiting_asks (thread TEXT PRIMARY KEY REFERENCES threads (id), report TEXT NOT NULL) STRICT;`,
   // The join tokens root on the control plane's machine mints, hashed, and the nodes that joined with one, beside the
-  // nodes control.json names. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // nodes control.json names.
   `CREATE TABLE IF NOT EXISTS join_tokens (hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, used_at INTEGER, used_by TEXT) STRICT;
    CREATE TABLE IF NOT EXISTS joined_nodes (name TEXT PRIMARY KEY REFERENCES nodes (name), deploy_key TEXT NOT NULL, joined_at INTEGER NOT NULL) STRICT;`,
-  // Each deleted thread's conversation the harness aborted, so a start aborts only those a crashed delete left. It
-  // touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // Each deleted thread's conversation the harness aborted, so a start aborts only those a crashed delete left.
   `CREATE TABLE IF NOT EXISTS aborted_conversations (conversation TEXT PRIMARY KEY) STRICT;`,
-  // The dashboard and the API list a node's orphans from its observation, so nothing read this table. Dropping it
-  // touches nothing an earlier migration needs, so a registry rewound past it applies it again unchanged.
+  // The dashboard and the API list a node's orphans from its observation, so nothing read this table.
   `DROP TABLE IF EXISTS orphans;`,
   // Who typed each message in claude_messages, and a SHA-256 of its text as typed, so a transcript's prompt reads as
   // Nexus's only when Nexus typed exactly that text. A message recorded before has no row here, so its sender is
-  // unknown. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // unknown.
   `CREATE TABLE IF NOT EXISTS claude_senders (thread TEXT NOT NULL, request_id TEXT NOT NULL, sender TEXT NOT NULL, text_sha256 TEXT NOT NULL,
      PRIMARY KEY (thread, request_id)) STRICT;`,
   // When each archived thread was archived, which deletes its pylon a day later, and each pylon whose delete that cleanup
   // sent, until its node no longer has it. A thread archived before has no time, so it gets this migration's, and no disk
-  // goes until a day after it. It touches nothing an earlier migration made, so a registry rewound past it applies it
-  // again unchanged.
+  // goes until a day after it.
   `CREATE TABLE IF NOT EXISTS thread_archives (thread TEXT PRIMARY KEY REFERENCES threads (id), archived_at INTEGER NOT NULL) STRICT;
    CREATE TABLE IF NOT EXISTS disk_cleanups (pylon TEXT PRIMARY KEY REFERENCES pylons (id), thread TEXT NOT NULL REFERENCES threads (id), requested_at INTEGER NOT NULL) STRICT;
    INSERT OR IGNORE INTO thread_archives SELECT id, CAST(strftime('%s', 'now') AS INTEGER) * 1000 FROM threads WHERE status = 'archived';`,
-  // Each daily report of nexus doctor's checks, kept 30 days. It touches nothing an earlier migration made, so a registry
-  // rewound past it applies it again unchanged.
+  // Each daily report of nexus doctor's checks, kept 30 days.
   `CREATE TABLE IF NOT EXISTS doctor_reports (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, record TEXT NOT NULL) STRICT;`,
   // Each node's health samples, kept whole in tier raw and as buckets in the coarser tiers, by the bucket's start. The
   // key leads with the node, the tier and the time, so a node's range and pruning a node's tier are each one range of
-  // it. It touches nothing an earlier migration made, so a registry rewound past it applies it again unchanged.
+  // it.
   `CREATE TABLE IF NOT EXISTS node_metrics (node TEXT NOT NULL, tier TEXT NOT NULL, at INTEGER NOT NULL, series TEXT NOT NULL,
      min REAL NOT NULL, sum REAL NOT NULL, max REAL NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (node, tier, at, series)) STRICT, WITHOUT ROWID;`,
   // The daily reports become the changes of nexus doctor's checks: a row each time a check's status changes, whose
