@@ -137,17 +137,17 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     checks: {
       async start(_, __, head, ifRoom) {
         if (checkStartFails) throw new Error("no node took the check pylon");
-        if (ifRoom && !checkRoom) throw new Refusal("conflict", "no node has room for this pylon: node is overcommitted");
+        if (ifRoom && !checkRoom) return { refused: "no node has room for this pylon: node is overcommitted" };
         checkIfRoom.push(ifRoom === true);
-        const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return id;
+        const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return { thread: id };
       },
       poll: (id, _, opens) => { pollOpens.push(opens !== false); return forgotten.has(id) ? { kind: "void" } : check; },
       discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
     },
     live: {
       async start() {
-        if (refuse !== null) throw new Refusal("conflict", refuse);
-        const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return id;
+        if (refuse !== null) return { refused: refuse };
+        const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return { thread: id };
       },
       poll: () => live,
       discard(id) { archived.push(id); registry.setThreadStatus(id, "archived"); },

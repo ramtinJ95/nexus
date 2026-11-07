@@ -248,11 +248,11 @@ ${why === null ? "" : `${why.text}\n`}Land waives these at ${at}, and at a rebas
 // A Claude worker logs in from a granted token. Interactive /login needs a person, so it cannot serve a reviewer.
 const grantsClaude = (secrets: readonly SecretGrant[]) => secrets.some((s) => (s.name === "CLAUDE_CODE_OAUTH_TOKEN" || s.name === "ANTHROPIC_API_KEY") && s.hosts.includes("api.anthropic.com"));
 
-/** The reviewer's kind and model: another model family than the builder's where one can run. */
-export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } {
+/** The reviewer's kind and model: another model family than the builder's where one can run, or why none can. */
+export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } | { why: string } {
   if (builder.claude) return { claude: false, model: harnessModel };
   if (grantsClaude(secrets)) return { claude: true, model: defaultClaudeModel };
-  throw new Refusal("conflict", `no reviewer on another model can run for this thread: its agent runs ${builder.model} in the harness, and its project grants no Claude token. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`), or start the builder as a Claude worker`);
+  return { why: `no reviewer on another model can run for this thread: its agent runs ${builder.model} in the harness, and its project grants no Claude token. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`), or start the builder as a Claude worker` };
 }
 
 /** The Claude models a second reviewer may run, the strongest first. */
@@ -452,13 +452,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (check.thread === null) {
       const gone = await endedOnGitHub(r);
       if (gone !== null) return gone;
-      try {
-        return { ...r, phase: { ...phase, check: { ...check, thread: await checks.start(builder, r.pr.branch, round.head, true) } } };
-      } catch (err) {
-        // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
-        if (!(err instanceof Refusal)) throw err;
-        return { ...r, phase: { ...phase, check: { ...check, refused: err.message } } };
-      }
+      // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
+      return { ...r, phase: { ...phase, check: { ...check, ...await checks.start(builder, r.pr.branch, round.head, true) } } };
     }
     const state = checks.poll(check.thread, round.head);
     if (state.kind === "unrunnable") {
@@ -748,7 +743,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // The check clones the head commit alone, so a result there, such as one from beside the reviewer, is kept, as the live check is.
       if (phase.thread === null && round.check !== null) return round.check.passed ? await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify")) : gateFailed(r, r);
       if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
-      if (phase.thread === null) return await endedOnGitHub(r) ?? { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
+      if (phase.thread === null) {
+        const gone = await endedOnGitHub(r);
+        if (gone !== null) return gone;
+        const started = await checks.start(builder, r.pr.branch, round.head);
+        // Only the check beside the reviewer waits for room, so a start refused here fails the step, which the next pass tries again.
+        if ("refused" in started) throw new Error(started.refused);
+        return { ...r, phase: { ...phase, thread: started.thread } };
+      }
       const state = checks.poll(phase.thread, round.head);
       if (state.kind === "void") {
         checks.discard(phase.thread);
@@ -771,13 +773,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (phase.thread === null) {
         const gone = await endedOnGitHub(r);
         if (gone !== null) return gone;
-        try {
-          return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: await live.start(builder, r.pr.branch, round.head) } };
-        } catch (err) {
-          // No node nests KVM with room to spare right now, which may change before the deadline.
-          if (!(err instanceof Refusal)) throw err;
-          return phase.refused === err.message ? r : { ...r, phase: { ...phase, refused: err.message } };
-        }
+        const started = await live.start(builder, r.pr.branch, round.head);
+        if ("thread" in started) return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: started.thread } };
+        // No node nests KVM with room to spare right now, which may change before the deadline.
+        return phase.refused === started.refused ? r : { ...r, phase: { ...phase, refused: started.refused } };
       }
       const state = live.poll(phase.thread, round.head);
       if (state.kind === "void") {
@@ -1120,6 +1119,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const builderModel = agent.kind === "claude" ? agent.worker.model ?? defaultClaudeModel : deps.harnessModel;
     const project = registry.project(builder.project)!;
     const kind = reviewerFor({ claude: agent.kind === "claude", model: builderModel }, project.secrets, deps.harnessModel);
+    if ("why" in kind) throw new Refusal("conflict", kind.why);
     const models = { builder: builderModel, reviewer: kind.model };
     // A later round whose head the rule names gets a second reviewer then, which stays for every round after it.
     const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(repo, number), deploys({ pr: { repo } }));
