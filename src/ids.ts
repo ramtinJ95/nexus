@@ -39,6 +39,9 @@ export type PortableArtifactId = Exclude<ArtifactId, CheckpointId>;
  * Image and template IDs as the control plane mints them, a kind and a few lowercase letters or digits. They
  * name directories in a node's artifact store, so an ID with a separator or a dot is refused before it is used.
  */
+/** The ID for a sha256 hex digest of what the image or template is built from. */
+export const imageIdFrom = (sha256: string): ImageId => `img-${sha256.slice(0, 12)}`;
+export const templateIdFrom = (sha256: string): TemplateId => `tpl-${sha256.slice(0, 12)}`;
 export const isImageId = (id: unknown): id is ImageId => typeof id === "string" && /^img-[a-z0-9]{1,40}$/.test(id);
 export const isTemplateId = (id: unknown): id is TemplateId => typeof id === "string" && /^tpl-[a-z0-9]{1,40}$/.test(id);
 export const isPortableArtifactId = (id: unknown): id is PortableArtifactId => isImageId(id) || isTemplateId(id);

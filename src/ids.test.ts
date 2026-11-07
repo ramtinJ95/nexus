@@ -5,7 +5,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   checkpointId, isArtifactId, isCheckpointId, isItemId, isNodeName, isPipelineRequestId, isPortableArtifactId, isPylonId,
-  itemIdFrom, newItemId, newThreadId, pylonIdOf, requestIds, shutdownCheckpointId, threadOfPylon, type ItemId, type ThreadId,
+  imageIdFrom, isImageId, isTemplateId, itemIdFrom, newItemId, templateIdFrom, newThreadId, pylonIdOf, requestIds, shutdownCheckpointId, threadOfPylon, type ItemId, type ThreadId,
 } from "./ids.ts";
 import { nodeNameSchema, pylonIdSchema } from "./protocol/fields.ts";
 
@@ -67,6 +67,10 @@ test("minted IDs are the strings their callers used to build", () => {
   assert.ok(old.pylon(pylonIdOf(thread)));
   assert.equal(threadOfPylon(pylonIdOf(thread)), thread);
   assert.equal(itemIdFrom("plan:th-1:abc:01"), `it-${createHash("sha256").update("plan:th-1:abc:01").digest("hex").slice(0, 12)}`);
+  const digest = createHash("sha256").update("recipe").digest("hex");
+  assert.equal(imageIdFrom(digest), `img-${digest.slice(0, 12)}`);
+  assert.equal(templateIdFrom(digest), `tpl-${digest.slice(0, 12)}`);
+  assert.ok(isImageId(imageIdFrom(digest)) && isTemplateId(templateIdFrom(digest)));
   assert.equal(checkpointId(thread, 3), `ckpt-${thread}-3`);
   assert.equal(shutdownCheckpointId(pylonIdOf(thread), 1700), `ckpt-${pylonIdOf(thread).replace(/^pylon-/, "")}-shutdown-1700`);
   assert.deepEqual(
