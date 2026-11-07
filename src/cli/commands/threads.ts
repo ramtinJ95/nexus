@@ -93,9 +93,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       try {
         d = await api("GET", thread(id!)) as ThreadDetail;
       } catch (err) {
-        // A queued thread has no row, which the thread route answers with a 409.
-        if (!(err instanceof CliError) || err.status !== 409) throw err;
-        const q = await api("GET", `/v1/queued/${encodeURIComponent(id!)}`).catch(() => { throw err; }) as QueuedThread;
+        if (!(err instanceof CliError) || err.code !== "queued") throw err;
+        const q = await api("GET", `/v1/queued/${encodeURIComponent(id!)}`) as QueuedThread;
         return { json: q, text: queuedText(q) };
       }
       return { json: d, text: detailText(d) };

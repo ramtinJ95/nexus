@@ -197,8 +197,8 @@ export function recordVisit() {
 
 /**
  * Sends a request that needs the pylon running, as the CLI's whenRunning does: the first try wakes a paused pylon,
- * and a 409 is tried again once a second for up to 120 s, unless the thread is archived or deleted. `waiting` hears
- * each refusal while it waits.
+ * and a retryable refusal is tried again once a second for up to 120 s, unless the thread is archived or deleted.
+ * `waiting` hears each refusal while it waits.
  */
 export async function whenRunning(thread, send, waiting = () => {}) {
   const deadline = Date.now() + 120_000;
@@ -206,7 +206,7 @@ export async function whenRunning(thread, send, waiting = () => {}) {
     try {
       return await send();
     } catch (err) {
-      if (err.status !== 409 || Date.now() >= deadline) throw err;
+      if (!err.retryable || Date.now() >= deadline) throw err;
       const detail = await api("GET", `/v1/threads/${thread}`);
       if (detail.thread.status === "archived" || detail.thread.status === "deleted") throw err;
       waiting(err, detail);
