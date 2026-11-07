@@ -15,7 +15,7 @@ import { migrations } from "./schema.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { PullRequest } from "./github.ts";
 import type { PylonRecord } from "./tick.ts";
-import { trackActivity } from "../harness/activity.ts";
+import { trackActivity } from "./harness/activity.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
 import type { JobId, LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";

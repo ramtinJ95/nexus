@@ -19,7 +19,7 @@ import { shellQuote } from "../shell.ts";
 import { isImageId, type TailnetNodeId } from "../ids.ts";
 import { tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { probePort } from "../protocol/routes.ts";
-import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
+import { scriptedModel, scriptedModels } from "./harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { parseServeStatus, tailscaleCli } from "../probe/serve.ts";
 import { localApiWhois } from "../tailscale.ts";

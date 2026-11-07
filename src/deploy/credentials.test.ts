@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
-import { harnessModels, openCredentials, requireModel } from "../harness/credentials.ts";
+import { harnessModels, openCredentials, requireModel } from "../control/harness/credentials.ts";
 import { harnessSignedIn, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
 import { snapshot } from "../test-kit.ts";
 

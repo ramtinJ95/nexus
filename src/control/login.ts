@@ -6,7 +6,7 @@
  * (`ssh -L 1455:127.0.0.1:1455 <host>`), or paste the address the browser ends on when that page fails to load.
  */
 import { createInterface } from "node:readline/promises";
-import { harnessModels, loginChatGpt, openCredentials } from "../harness/credentials.ts";
+import { harnessModels, loginChatGpt, openCredentials } from "./harness/credentials.ts";
 import { readConfig } from "./main.ts";
 
 const configPath = process.argv[2];

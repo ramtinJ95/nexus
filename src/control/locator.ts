@@ -5,7 +5,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { PylonId } from "../ids.ts";
 import { probePort } from "../protocol/routes.ts";
-import type { PylonLocator } from "../harness/pylon-env.ts";
+import type { PylonLocator } from "./harness/pylon-env.ts";
 import { listsRunning } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 

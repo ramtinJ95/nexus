@@ -1,5 +1,5 @@
 /**
- * Test support for src/harness/slice.test.ts. A scripted model that needs no network: a user message
+ * Test support for src/control/harness/slice.test.ts. A scripted model that needs no network: a user message
  * `bash: <command>` becomes one bash tool call, and a tool result becomes a short final answer. A user message
  * `stream: <n>` is answered `word0 word1 ...` up to n words, written one word every 20 ms, as a model streams. A user
  * message that asks for a `nexus-judgment` block is answered with one that echoes its token, with the answer that a
@@ -7,7 +7,7 @@
  * block of broken JSON, and `judge: silent` or no marker gets no block. Every answer reports `scriptedUsage`.
  *
  * Run as a program, it is the harness process the test kills mid-tool:
- *   node src/harness/test-fixture.ts <ChildArgs JSON>
+ *   node src/control/harness/test-fixture.ts <ChildArgs JSON>
  * It opens the host, sends one message to the thread, prints `SENT`, and runs until killed.
  */
 import { createModels, type Models } from "@earendil-works/pi-ai/models";

@@ -3,7 +3,7 @@
  *   node src/control/thread-on-node.ts [probe.json] [imageId] [holdSeconds]
  *
  * It starts a control plane in this process (registry, loop, harness and API, as src/control/main.ts wires
- * them) over a temporary directory. Its harness uses the scripted model from src/harness/test-fixture.ts, so
+ * them) over a temporary directory. Its harness uses the scripted model from src/control/harness/test-fixture.ts, so
  * no model login is needed. It drives the node's running probe only through the control plane's HTTP API:
  * add the thread's project with the real CLI's `nexus project add`, start a thread, run a tool in its pylon, follow a streamed answer with the real CLI's `nexus watch --json` and keep that
  * watch open past the CLI's idle timeout, have the agent declare a service with a preview, fetch the preview's
@@ -27,7 +27,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { PylonId } from "../ids.ts";
-import { scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
+import { scriptedModels, streamedAnswer, streamedWordMs } from "./harness/test-fixture.ts";
 import { callText } from "../test-kit.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import { defaultPreviewPorts, startControlPlane } from "./main.ts";

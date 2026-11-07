@@ -8,7 +8,7 @@
  * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois names 127.0.0.1:7480 as the probe and
  *   every other address as the person's laptop, which the API allows as a person, as for the CLI on a Mac. The probe's own whois names
  *   every caller as the control plane.
- * - the model is the scripted one from src/harness/test-fixture.ts: `bash: <command>` runs one bash tool call, and
+ * - the model is the scripted one from src/control/harness/test-fixture.ts: `bash: <command>` runs one bash tool call, and
  *   `stream: <n>` streams an answer of n words.
  * - `tailscale serve` is src/probe/fake-tailscale.ts, so the Mac's work tailnet is never touched.
  *
@@ -23,7 +23,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../../../../src/backends/docker-backend.ts";
-import { scriptedModel, scriptedModels } from "../../../../src/harness/test-fixture.ts";
+import { scriptedModel, scriptedModels } from "../../../../src/control/harness/test-fixture.ts";
 import { checkoutDir } from "../../../../src/session-harness.ts";
 import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";

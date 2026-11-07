@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { fullCommit } from "../deploy/model.ts";
-import type { HarnessHost } from "../harness/host.ts";
+import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";

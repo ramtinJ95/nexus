@@ -20,11 +20,11 @@ import type { ConversationId, DocumentReader, EntryRecord } from "@earendil-work
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createEnvConformance } from "@earendil-works/pi-durable/testing";
 import { packagedDaemon } from "@earendil-works/pi-env";
-import { createDockerBackend } from "../backends/docker-backend.ts";
-import { nodeSecrets } from "../probe/config.ts";
-import { startProbe, type Probe } from "../probe/server.ts";
-import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import { checkoutDir } from "../session-harness.ts";
+import { createDockerBackend } from "../../backends/docker-backend.ts";
+import { nodeSecrets } from "../../probe/config.ts";
+import { startProbe, type Probe } from "../../probe/server.ts";
+import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
+import { checkoutDir } from "../../session-harness.ts";
 import { openHarnessHost, type HarnessHost } from "./host.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { scriptedModel, scriptedModels, type ChildArgs } from "./test-fixture.ts";

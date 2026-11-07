@@ -12,7 +12,7 @@ import { tokenCount, usageFilter, utc } from "./usage.ts";
 import type { AgentCall, Tokens } from "./agent-usage.ts";
 import { checkCaller, reviewerCaller, roleOf, verifyCaller } from "./agent-protocol.ts";
 import { processStream } from "../process-stream.ts";
-import type { ConversationId } from "../harness/host.ts";
+import type { ConversationId } from "./harness/host.ts";
 import type { ImageId, LiveHash, NodeName, ProjectId, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningPylon, tempDir } from "../test-kit.ts";

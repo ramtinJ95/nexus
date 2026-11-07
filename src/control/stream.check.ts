@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createRegistry, Harness, type ConversationId } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "../harness/test-fixture.ts";
+import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "./harness/test-fixture.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
 import { testImage } from "../test-kit.ts";
 import { startApi } from "./api.ts";

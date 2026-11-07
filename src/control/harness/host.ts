@@ -16,18 +16,18 @@ import { createRegistry, Harness, LiveDoc, type ConversationId, type Conversatio
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
-import { checkoutReader } from "../checkout-files.ts";
-import { checkoutDir } from "../session-harness.ts";
-import { localApiWhois } from "../tailscale.ts";
-import type { PylonId } from "../ids.ts";
-import { jobDeadlineMs } from "../protocol/jobs.ts";
-import { connectProbe } from "../protocol/client.ts";
+import { checkoutReader } from "../../checkout-files.ts";
+import { checkoutDir } from "../../session-harness.ts";
+import { localApiWhois } from "../../tailscale.ts";
+import type { PylonId } from "../../ids.ts";
+import { jobDeadlineMs } from "../../protocol/jobs.ts";
+import { connectProbe } from "../../protocol/client.ts";
 import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
-import type { AgentCall } from "../control/agent-usage.ts";
-import { senderNames, type Sender } from "../control/agent-protocol.ts";
+import type { AgentCall } from "../agent-usage.ts";
+import { senderNames, type Sender } from "../agent-protocol.ts";
 
 export type { ConversationId };
 

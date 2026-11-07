@@ -9,13 +9,13 @@ import { GenerationTask, Harness, createRegistry, hook } from "@earendil-works/p
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { checkoutReader, CheckoutRefused } from "../checkout-files.ts";
-import { processStream } from "../process-stream.ts";
-import type { PylonId } from "../ids.ts";
+import { checkoutReader, CheckoutRefused } from "../../checkout-files.ts";
+import { processStream } from "../../process-stream.ts";
+import type { PylonId } from "../../ids.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { scriptedModel, scriptedModels } from "./test-fixture.ts";
 import { writeThread } from "./thread-doc.ts";
-import { tempDir } from "../test-kit.ts";
+import { tempDir } from "../../test-kit.ts";
 
 for (const fails of [false, true]) {
   test(`a whole reply keeps one snapshot across generation tasks${fails ? ", even after capture fails" : " and reopen"}`, async (t) => {
