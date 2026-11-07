@@ -23,10 +23,9 @@ import { exit } from "../../exec.ts";
 import { unusedGuest } from "../../backends/fake-guest.ts";
 import type { SessionFact } from "../../protocol/observations.ts";
 import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
-import { herdrSession } from "../../guest-contract.ts";
+import { claudeProjects as projects, herdrSession, home as cwd } from "../../guest-contract.ts";
 
-const cwd = "/home/user";
-const shellCwd = "/home/user/check-shell-cwd";
+const shellCwd = `${cwd}/check-shell-cwd`;
 const guest: Guest = {
   async exec(argv, opts) {
     const { code, stdout, stderr } = await exit(argv[0]!, argv.slice(1), { cwd: opts.cwd, timeout: opts.timeoutMs });
@@ -129,7 +128,6 @@ const unprompted = { claude: "check-claude-unprompted", pi: "check-pi-unprompted
 const unpromptedTitles: readonly string[] = Object.values(unprompted);
 const findings: string[] = [];
 const others = (outcomes: readonly RelaunchOutcome[]) => outcomes.filter((o) => !unpromptedTitles.includes(o.record.title));
-const projects = "/home/user/.claude/projects";
 
 /** The files on disk that hold a harness session: Claude Code's transcript, or pi's session file itself. */
 const sessionFiles = (harness: SessionRecord["harness"], id: string): string[] => harness === "pi"
