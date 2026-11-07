@@ -5,11 +5,12 @@ import { DatabaseSync } from "node:sqlite";
 import { reviewPrefix } from "../agent-protocol.ts";
 import { tempDir } from "../test-kit.ts";
 import { personOnly, reservedNames, type HoldCode, type ReservedCase } from "./holds.ts";
-import { upgradeReview } from "./record-upgrade.ts";
+import { upgradeAttempts, upgradeReview } from "./record-upgrade.ts";
 import { findingSchema, maxRounds, secondReads, type Review, type SecondReviewer } from "./review-model.ts";
 import type { ThreadId } from "../ids.ts";
 import { addThread, seedRegistry, testRegistry, testReview } from "./test-kit.ts";
 import { openRegistry } from "./registry.ts";
+import { noAttempts, type Attempts, type FailedAttempt } from "../reconcile.ts";
 
 /** storedReview and legacyHoldCode as main had them at c22d002, before the upgrade replaced them, kept as the proof's baseline. */
 function storedReview(record: Review): Review {
@@ -125,4 +126,56 @@ test("a registry opened over an older record rewrites it upgraded once, with no 
   const stored = (id: string) => JSON.parse((db.prepare("SELECT record FROM reviews WHERE builder = ?").get(id) as { record: string }).record);
   assert.deepEqual(stored(older.id), upgradeReview(structuredClone(legacy) as never), "the upgraded record is what the registry holds");
   assert.deepEqual(stored(current.id), kept);
+});
+
+/** upgradeAttempts as tick.ts had it at 9f7b5a5, run on every tick before the startup upgrade replaced it, kept as the proof's baseline. */
+function tickUpgradeAttempts(attempts: Attempts): Attempts {
+  const last: (FailedAttempt & { reading?: true }) | null = attempts.last;
+  if (last?.reading !== true) return attempts;
+  const { reading: _, ...readFailure } = last;
+  return { ...noAttempts, readFailure };
+}
+
+const failure: FailedAttempt = { at: 1, code: "setup-failed", message: "the disk is full" };
+const readFailure: FailedAttempt = { at: 2, code: "backend", message: "an earlier wake for reading" };
+/** Every shape stored attempts take: each as this code saves them, and a failed wake for reading kept in `last`. */
+const attemptFixtures: [string, Attempts][] = [
+  ["no attempts", { count: 0, last: null }],
+  ["a failed job", { count: 2, last: failure }],
+  ["a failed wake for reading kept apart", { count: 0, last: null, readFailure }],
+  ["a failed job and a failed wake for reading kept apart", { count: 1, last: failure, readFailure }],
+  ["a failed wake for reading kept in last", { count: 1, last: { ...failure, reading: true } as FailedAttempt }],
+  ["a failed wake for reading kept in last after failed jobs", { count: 3, last: { ...failure, reading: true } as FailedAttempt }],
+];
+
+test("the upgrade gives every stored-attempts fixture what tick's upgradeAttempts gave it, which an older tick and the upgrade leave as it is", () => {
+  for (const [name, attempts] of attemptFixtures) {
+    const upgraded = upgradeAttempts(structuredClone(attempts));
+    assert.deepEqual(upgraded, tickUpgradeAttempts(structuredClone(attempts)), name);
+    assert.deepEqual(tickUpgradeAttempts(structuredClone(upgraded)), upgraded, `${name}: an older control plane reads it unchanged`);
+    assert.deepEqual(upgradeAttempts(structuredClone(upgraded)), upgraded, `${name}: it upgrades no further`);
+  }
+});
+
+test("a registry opened over a pylon's older attempts rewrites them upgraded once, with no event, and leaves current ones as they were", async (t) => {
+  const path = join(await tempDir("record-upgrade", t), "registry.db");
+  const first = seedRegistry(openRegistry(path));
+  const older = addThread(first);
+  const current = addThread(first);
+  const legacy = attemptFixtures.at(-1)![1];
+  const kept = attemptFixtures[3]![1];
+  first.savePylon({ ...first.pylon(older.pylonId)!, attempts: legacy });
+  first.savePylon({ ...first.pylon(current.pylonId)!, attempts: kept });
+  const events = first.events("0", {}).length;
+  first.close();
+
+  const registry = testRegistry(t, path);
+  assert.deepEqual(registry.pylon(older.pylonId)!.attempts, tickUpgradeAttempts(structuredClone(legacy)));
+  assert.deepEqual(registry.pylon(current.pylonId)!.attempts, kept);
+  assert.equal(registry.events("0", {}).length, events, "the upgrade tells the event log nothing");
+  const db = new DatabaseSync(path);
+  t.after(() => db.close());
+  const stored = (id: string) => JSON.parse((db.prepare("SELECT attempts FROM pylons WHERE id = ?").get(id) as { attempts: string }).attempts);
+  assert.deepEqual(stored(older.pylonId), tickUpgradeAttempts(structuredClone(legacy)), "the upgraded attempts are what the registry holds");
+  assert.deepEqual(stored(current.pylonId), kept);
 });

@@ -1,10 +1,11 @@
 /**
- * Review records saved by an older control plane, brought to the shape this code reads. The review store rewrites
- * each one once, when the registry opens.
+ * Review and pylon records saved by an older control plane, brought to the shape this code reads. The review and
+ * thread stores rewrite each one once, when the registry opens.
  * The upgrade fills in what the older record lacks, caps its rounds and gives its findings priorities, as the read
  * before it did, so a control plane rolled back to an older release reads the upgraded record unchanged.
  */
 import { reviewPrefix } from "../agent-protocol.ts";
+import { noAttempts, type Attempts, type FailedAttempt } from "../reconcile.ts";
 import { personOnly, reservedCases, reservedNames, type HoldCode } from "./holds.ts";
 import { findingSchema, maxRounds, secondReads, type Change, type Review } from "./review-model.ts";
 
@@ -59,4 +60,15 @@ function codeOfText(text: string): HoldCode {
     ["stale-head", (t) => /^The pull request's head moved to \S+ after this review was held/.test(t)],
   ];
   return rules.find(([, matches]) => matches(text))?.[0] ?? "loop";
+}
+
+/**
+ * A pylon record saved before `readFailure` kept a failed wake for reading in `last`, marked `reading: true`, and the
+ * planner read it as no attempts unless desired was `reading`.
+ */
+export function upgradeAttempts(attempts: Attempts): Attempts {
+  const last: (FailedAttempt & { reading?: true }) | null = attempts.last;
+  if (last?.reading !== true) return attempts;
+  const { reading: _, ...readFailure } = last;
+  return { ...noAttempts, readFailure };
 }

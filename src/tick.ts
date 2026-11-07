@@ -58,11 +58,6 @@ export interface TickContext {
 }
 
 export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanStep> {
-  const attempts = upgradeAttempts(pylon.attempts);
-  if (attempts !== pylon.attempts) {
-    pylon.attempts = attempts;
-    ctx.save(pylon);
-  }
   const failed = failedStep(pylon);
   if (failed !== null) return failed;
 
@@ -204,17 +199,6 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
 function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): Attempts {
   const failure = { at: Date.now(), code, message };
   return reading ? { ...pylon.attempts, readFailure: failure } : { ...pylon.attempts, count: pylon.attempts.count + 1, last: failure };
-}
-
-/**
- * A record saved before `readFailure` kept a failed wake for reading in `last`, marked `reading: true`, and the planner
- * read it as no attempts unless desired was `reading`.
- */
-function upgradeAttempts(attempts: Attempts): Attempts {
-  const last: (FailedAttempt & { reading?: true }) | null = attempts.last;
-  if (last?.reading !== true) return attempts;
-  const { reading: _, ...readFailure } = last;
-  return { ...noAttempts, readFailure };
 }
 
 /** One snapshot from a new observe stream, whose first event is always a snapshot. Null when the probe is unreachable. */
