@@ -1221,6 +1221,8 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(holds("src/pylon-vm/network.ts", "+export const x = 1;"), ["reserved-path:egress"]);
   assert.deepEqual(holds("src/pylon-vm/host-bridge.ts", "+export const x = 1;"), ["reserved-path:egress"]);
   assert.deepEqual(holds("src/pylon-vm/daemon.ts", "+\tawait chmod(socket, 0o600);"), ["reserved-path:auth"], "who on the node may call the controller");
+  assert.deepEqual(holds("src/backends/pylon-vm/pylon-vm-backend.ts", "+  allowedHosts: [],"), ["reserved-path:egress"], "the fork's adapter holds as the fork does");
+  assert.deepEqual(holds("src/backends/pylon-vm/pylon-guest.ts", "+\tawait chmod(dir, 0o700);"), ["reserved-path:auth"]);
   assert.deepEqual(holds("src/control/api/dashboard-routes.ts", `+    ["GET", /^\\/cards$/, { person: "read the cards" }, () => ok(cards())],`), ["reserved-path:auth"], "a new route's guard");
   assert.deepEqual(holds("src/control/api/review-routes.ts", `+    ["POST", /^\\/land$/, { open: "anyone" }, () => ok(land())],`), ["reserved-path:auth"]);
   assert.deepEqual(holds("src/control/releases.ts", "-  return options !== undefined && options.deployers.has(caller) && isPerson(registry, options, caller);"), ["reserved-path:auth"]);
