@@ -4,8 +4,11 @@
  * keyed by the same names.
  */
 import { z } from "zod";
+import { chatgptTokenGrant, type SecretGrant } from "./secret-grants.ts";
 
 export const defaultClaudeModel = "claude-opus-5-5";
+/** The host a Claude token or Anthropic API key is sent to. */
+export const anthropicApiHost = "api.anthropic.com";
 
 /** A Claude Code session ID as Nexus takes one: it names the session's transcript file and its launch directory. */
 export const claudeSessionId = /^[A-Za-z0-9-]{1,200}$/;
@@ -17,13 +20,22 @@ interface AgentKind {
   activity: "herdr" | "hooks";
   /** The open-session fields it takes. A shell is the pane's own login shell, so it starts nothing and resumes nothing. */
   takes: { readonly resume: boolean; readonly prompt: boolean; readonly model: boolean };
+  /**
+   * The secret grants that sign its agent in, any one of which serves. The control plane holds the value of a `held`
+   * one and hands it to every probe, so no node's secret file sets it.
+   */
+  signIn: { readonly grants: readonly SecretGrant[]; readonly held: boolean } | null;
 }
 
 export const agentKinds = {
   // Herdr can retain a dead Claude's working status; only its expiring hook lease keeps it awake.
-  "claude-code": { label: "Claude Code", activity: "hooks", takes: { resume: true, prompt: true, model: true } },
-  pi: { label: "pi", activity: "herdr", takes: { resume: true, prompt: false, model: false } },
-  shell: { label: "Shell", activity: "herdr", takes: { resume: false, prompt: false, model: false } },
+  // deploy/credentials.ts's claudeNames, which the deployer reads without zod, names the same two grants.
+  "claude-code": {
+    label: "Claude Code", activity: "hooks", takes: { resume: true, prompt: true, model: true },
+    signIn: { grants: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: [anthropicApiHost] }, { name: "ANTHROPIC_API_KEY", hosts: [anthropicApiHost] }], held: false },
+  },
+  pi: { label: "pi", activity: "herdr", takes: { resume: true, prompt: false, model: false }, signIn: { grants: [chatgptTokenGrant], held: true } },
+  shell: { label: "Shell", activity: "herdr", takes: { resume: false, prompt: false, model: false }, signIn: null },
 } as const satisfies Record<string, AgentKind>;
 
 export type SessionHarness = keyof typeof agentKinds;

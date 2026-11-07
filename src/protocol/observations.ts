@@ -6,8 +6,7 @@
  */
 import { z } from "zod";
 import { pylonEventSchema, type ReportedEvent } from "../events.ts";
-import { chatgptTokenGrant } from "./secret-grants.ts";
-import type { SessionHarness } from "./agent-kinds.ts";
+import { agentKinds, type SessionHarness } from "./agent-kinds.ts";
 import { asSent, parse, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import { pylonIdField, pylonIdSchema } from "./fields.ts";
@@ -157,7 +156,7 @@ export type ProbeEvent =
   | { type: "preview-hit"; pylonId: PylonId; service: string; at: string; login: string | null };
 
 /** The secrets whose values the control plane holds and hands to every probe, which no node's secret file may set. */
-export const heldSecrets: readonly string[] = [chatgptTokenGrant.name];
+export const heldSecrets: readonly string[] = Object.values(agentKinds).flatMap((kind) => kind.signIn?.held ? kind.signIn.grants.map((grant) => grant.name) : []);
 
 /**
  * The probe-to-control contract this probe speaks, sent with every snapshot. The control plane refuses a snapshot below

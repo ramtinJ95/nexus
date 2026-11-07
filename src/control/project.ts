@@ -2,6 +2,7 @@
 import { z } from "zod";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { chatgptTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
+import { anthropicApiHost } from "../protocol/agent-kinds.ts";
 import type { GitIdentity, PylonResources } from "../protocol/spawn.ts";
 
 export interface Project {
@@ -74,8 +75,6 @@ export function bootSecrets(project: Project): readonly SecretGrant[] {
 }
 export type LoginKind = "claude" | "chatgpt";
 
-/** The host a Claude token or Anthropic API key is sent to. */
-export const anthropicApiHost = "api.anthropic.com";
 /**
  * One table of the hosts each interactive login needs. Evidence: S2 and S5, and for Claude Code the required hosts
  * that code.claude.com/docs/en/network-config lists for a claude.ai login. platform.claude.com takes the OAuth
