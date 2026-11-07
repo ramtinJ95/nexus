@@ -13,7 +13,7 @@ import { notAnswering, parseStreamRequest } from "./protocol/streams.ts";
 import { probeErrorCodes, ProbeHttpError, type ProbeError } from "./protocol/http.ts";
 import { parseArtifactManifest } from "./protocol/artifacts.ts";
 import { connectProbe } from "./protocol/client.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "./test-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "./test-support/kit.ts";
 
 const node = "test-node";
 const pylonId = "pylon-th-1";

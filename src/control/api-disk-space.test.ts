@@ -3,8 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { NodeName } from "../ids.ts";
 import type { DiskFact } from "../protocol/observations.ts";
-import { testCapacity } from "../test-kit.ts";
-import { node, observeNode, withImage } from "./api-test-kit.ts";
+import { testCapacity } from "../test-support/kit.ts";
+import { node, observeNode, withImage } from "../test-support/api-kit.ts";
 
 const pylonsAt = (totalGiB: number, freeGiB: number): DiskFact => ({ paths: ["/var/lib/nexus/pylons", "/var/lib/nexus/artifacts"], totalGiB, freeGiB, pylons: true });
 

@@ -4,9 +4,9 @@ import type { Thread } from "./thread-store.ts";
 import type { Review, Round } from "./review-model.ts";
 import type { ImageId, NodeName, TailnetNodeId } from "../ids.ts";
 import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
-import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../test-kit.ts";
-import { testReview } from "./test-kit.ts";
-import { testApi } from "./api-test-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
+import { testReview } from "../test-support/registry-kit.ts";
+import { testApi } from "../test-support/api-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;

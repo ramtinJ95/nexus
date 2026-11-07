@@ -8,8 +8,8 @@ import { foldPylons, maxPoints, maxPylons, minSampleGapMs, recordingHealth, samp
 import { drainNodeMetrics, regroupedRangeSql, wholeRangeSql } from "./node-metrics-store.ts";
 import { migrations } from "./schema.ts";
 import { openRegistry } from "./registry.ts";
-import { tempDir } from "../test-kit.ts";
-import { testRegistry } from "./test-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
+import { testRegistry } from "../test-support/registry-kit.ts";
 
 const minute = 60_000;
 const hour = 60 * minute;

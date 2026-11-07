@@ -15,7 +15,7 @@ import type { PylonId } from "../../ids.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { scriptedModel, scriptedModels } from "./test-fixture.ts";
 import { writeThread } from "./thread-doc.ts";
-import { tempDir } from "../../test-kit.ts";
+import { tempDir } from "../../test-support/kit.ts";
 
 for (const fails of [false, true]) {
   test(`a whole reply keeps one snapshot across generation tasks${fails ? ", even after capture fails" : " and reopen"}`, async (t) => {

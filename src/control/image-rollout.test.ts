@@ -9,7 +9,7 @@ import { imageIdOf, type ImageManifest, type ImageRecipe } from "../images.ts";
 import type { ImageId, JobId, NodeName, TailnetNodeId } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { tempDir, testCapacity, testImage, testObservation, watch } from "../test-kit.ts";
+import { tempDir, testCapacity, testImage, testObservation, watch } from "../test-support/kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const testbench = "infra-testbench" as NodeName;

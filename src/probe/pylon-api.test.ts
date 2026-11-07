@@ -8,7 +8,7 @@ import type { ServiceDecl } from "../services-file.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 import { createPylonApi, pylonInfoFile, type PylonApiDeps } from "./pylon-api.ts";
-import { until } from "../test-kit.ts";
+import { until } from "../test-support/kit.ts";
 
 const pylonId = "pylon-t1" as PylonId;
 const overlay: PylonOverlay = {

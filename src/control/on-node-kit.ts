@@ -23,7 +23,7 @@ import { scriptedModel, scriptedModels } from "./harness/test-fixture.ts";
 import { parseSelfDnsName, readProbeConfig } from "../probe/config.ts";
 import { parseServeStatus, tailscaleCli } from "../probe/serve.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { callText } from "../test-kit.ts";
+import { callText } from "../test-support/kit.ts";
 import type { ThreadDetail } from "./wire.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";

@@ -5,7 +5,7 @@ import type { PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { NodeMetrics } from "./node-metrics.ts";
 import { sampleOf } from "./node-metrics.ts";
-import { node, phone, testApi, withThread, deployment } from "./api-test-kit.ts";
+import { node, phone, testApi, withThread, deployment } from "../test-support/api-kit.ts";
 
 const hour = 3_600_000;
 const day = 24 * hour;

@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { NodeName, ProjectId } from "../ids.ts";
-import { tempDir } from "../test-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
 import { backup, check, failedRun, nameOf, restore, runBackup, verify } from "./backup.ts";
 import { backedUpAt, readBackupStatus } from "./backup-status.ts";
 import { parseConfig } from "./main.ts";

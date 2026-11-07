@@ -11,7 +11,7 @@ import type { ImageId, JobId, NodeName, ProjectId } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { tempDir, testObservation } from "../test-kit.ts";
+import { tempDir, testObservation } from "../test-support/kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";

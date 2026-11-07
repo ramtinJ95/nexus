@@ -1,10 +1,10 @@
 /**
- * Test support: registry files at an older schema version, made from the migration list, so a migration test names
+ * Registry files at an older schema version, made from the migration list, so a migration test names
  * the migration it predates and never rewinds a registry by hand.
  */
 import { renameSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { migrations } from "./schema.ts";
+import { migrations } from "../control/schema.ts";
 
 type Column = { name: string; notnull: number; dflt_value: string | null };
 

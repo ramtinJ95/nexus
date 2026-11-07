@@ -10,9 +10,9 @@ import type { Judgment } from "./judgment-store.ts";
 import type { Thread } from "./thread-store.ts";
 import { liveHashOf } from "../spawn.ts";
 import { processStream } from "../process-stream.ts";
-import { runningPylon, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
-import { node, laptop, project, image, dotfiles, withThread, withImage, localCheckout } from "./api-test-kit.ts";
+import { node, laptop, project, image, dotfiles, withThread, withImage, localCheckout } from "../test-support/api-kit.ts";
 
 test("starting a thread creates its pylon, boots fresh from the current image, and wakes its node", async (t) => {
   const s = await withThread(t);

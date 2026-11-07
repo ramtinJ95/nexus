@@ -1,18 +1,18 @@
 /**
- * Test support: the registry's fixtures. A node, the "acme" project, and threads whose pylon clones
- * git@example.com:acme.git. What needs no registry is in src/test-kit.ts.
+ * The registry's fixtures. A node, the "acme" project, and threads whose pylon clones
+ * git@example.com:acme.git. What needs no registry is in kit.ts.
  */
 import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
-import { testObservation } from "../test-kit.ts";
-import { newPylonRecord, type PylonRecord } from "./tick.ts";
+import { testObservation } from "./kit.ts";
+import { newPylonRecord, type PylonRecord } from "../control/tick.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
-import type { RemoteProject } from "./project.ts";
+import type { RemoteProject } from "../control/project.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
-import type { PullRequest } from "./github.ts";
-import { openRegistry, type Registry } from "./registry.ts";
-import type { StoredPylon, Thread } from "./thread-store.ts";
-import type { Review } from "./review-model.ts";
+import type { PullRequest } from "../control/github.ts";
+import { openRegistry, type Registry } from "../control/registry.ts";
+import type { StoredPylon, Thread } from "../control/thread-store.ts";
+import type { Review } from "../control/review-model.ts";
 
 export const testNode = "rj-firebat" as NodeName;
 /** The tailnet IDs tests assert for their nodes. Another node gets `n<name>`. */

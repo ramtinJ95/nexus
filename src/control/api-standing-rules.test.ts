@@ -8,7 +8,7 @@ import type { QueuedThread } from "./queue.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import type { ImageId, ProjectId, ThreadId } from "../ids.ts";
-import { node, project, image, observeNode, testApi, withImage, withQueue } from "./api-test-kit.ts";
+import { node, project, image, observeNode, testApi, withImage, withQueue } from "../test-support/api-kit.ts";
 
 const rules = "- Run npm test before you push.\n- Keep commits small.";
 const section = (text: string) => `\n\n## Standing rules for this project\n\n${text}`;

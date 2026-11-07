@@ -12,7 +12,7 @@ import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { headHolds } from "./control/policy.ts";
-import { testReview } from "./control/test-kit.ts";
+import { testReview } from "./test-support/registry-kit.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).trim().split("\n");

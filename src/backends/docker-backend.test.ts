@@ -8,7 +8,7 @@ import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { dockerServices } from "./docker-services.ts";
 import type { PylonId } from "../ids.ts";
 import { checkoutDir } from "../session-harness.ts";
-import { freePort } from "../test-kit.ts";
+import { freePort } from "../test-support/kit.ts";
 
 type Reply = { stdout?: string; stderr?: string; code?: number };
 

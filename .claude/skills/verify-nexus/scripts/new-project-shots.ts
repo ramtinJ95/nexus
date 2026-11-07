@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { startApi } from "../../../../src/control/api/server.ts";
-import { fakeHarness } from "../../../../src/control/fake-harness.ts";
+import { fakeHarness } from "../../../../src/test-support/fake-harness.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import type { NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
 

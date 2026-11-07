@@ -41,7 +41,7 @@ import { herdrSession, sessionFacts, sessionsFile } from "./probe/guest/sessions
 import { checkoutDir, harnesses as harnessTable, type SessionHarness } from "./session-harness.ts";
 import { loginHosts } from "./control/project.ts";
 import type { BootInputs, LiveSpec, OverlayFile } from "./spawn.ts";
-import { freePort } from "./test-kit.ts";
+import { freePort } from "./test-support/kit.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
 if (assets === undefined || stateRoot === undefined) throw new Error("usage: node src/pylon-guest.check.ts <image dir in an artifact store> <state root>");

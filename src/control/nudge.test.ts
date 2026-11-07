@@ -5,9 +5,9 @@ import { cpSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { testPr, testPylon, testRegistry, testThread } from "./test-kit.ts";
+import { testPr, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { agentInbox, type Inbox } from "./inbox.ts";
-import { fakeHarness } from "./fake-harness.ts";
+import { fakeHarness } from "../test-support/fake-harness.ts";
 import { builderNudger } from "./nudge.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { prWatcher } from "./pr-watch.ts";
@@ -21,7 +21,7 @@ import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } 
 import type { AutoReview } from "./project.ts";
 import { gitPollMs, type PylonObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";

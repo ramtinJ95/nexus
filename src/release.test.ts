@@ -6,7 +6,7 @@ import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import { loadImageRecipe } from "./image-build.ts";
 import { imageIdOf } from "./images.ts";
-import { tempDir } from "./test-kit.ts";
+import { tempDir } from "./test-support/kit.ts";
 
 const root = resolve(import.meta.dirname, "..");
 

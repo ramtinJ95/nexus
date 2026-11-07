@@ -4,10 +4,10 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { NodeName } from "../ids.ts";
-import { tempDir } from "../test-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
 import { openRegistry } from "./registry.ts";
-import { rewindTo, versionBefore } from "./schema-kit.ts";
-import { testRegistry } from "./test-kit.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
+import { testRegistry } from "../test-support/registry-kit.ts";
 import type { NewHealthChange } from "./report-store.ts";
 import type { Status } from "./doctor-model.ts";
 

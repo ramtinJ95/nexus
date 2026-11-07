@@ -4,7 +4,7 @@ import type { NodeName, TailnetNodeId } from "../ids.ts";
 import { ProbeHttpError } from "../protocol/http.ts";
 import { peerHandoff } from "./peers.ts";
 import type { Registry } from "./registry.ts";
-import { seedRegistry, testRegistry } from "./test-kit.ts";
+import { seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
 
 const names = ["rj-firebat", "infra-testbench", "rj-spare"] as NodeName[];
 

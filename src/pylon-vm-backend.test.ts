@@ -7,7 +7,7 @@ import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { once } from "node:events";
-import { until } from "./test-kit.ts";
+import { gnuTar, until } from "./test-support/kit.ts";
 import { spawn, spawnSync } from "node:child_process";
 import fs, { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
@@ -50,7 +50,6 @@ async function backendWith(extra: Partial<PylonVmBackendOptions> = {}) {
   return { backend, stateRoot, instances: join(stateRoot, "instances") };
 }
 
-const gnuTar = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout?.includes("GNU tar") === true;
 const key = { project: "proj" as ProjectId, image, setupHash: "h".repeat(64) };
 const buildInputs: TemplateBuildInputs = {
   key,

@@ -11,9 +11,9 @@ import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
 import { briefOf, judgmentPass, type JudgmentPass } from "./judgment.ts";
 import type { Judgment } from "./judgment-store.ts";
 import { openRegistry, type Registry } from "./registry.ts";
-import { observeNode, testPylon, testThread } from "./test-kit.ts";
-import { tempDir } from "../test-kit.ts";
-import { rewindTo, versionBefore } from "./schema-kit.ts";
+import { observeNode, testPylon, testThread } from "../test-support/registry-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 
 const nodeA = "node-a" as NodeName;
 const nodeB = "node-b" as NodeName;

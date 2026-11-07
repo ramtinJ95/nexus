@@ -1,16 +1,20 @@
 /**
- * Test support any test may import: it loads nothing from src/control, so deploy, CLI and probe tests use it without
- * the registry. The registry's fixtures are in src/control/test-kit.ts.
+ * Helpers any test may import: it loads nothing from src/control, so deploy, CLI and probe tests use it without
+ * the registry. The registry's fixtures are in registry-kit.ts.
  */
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, type TestContext } from "node:test";
-import type { ImageManifest } from "./images.ts";
-import type { ImageId, NodeName, PylonId } from "./ids.ts";
-import type { NodeCapacity, NodeObservation, PylonObservation } from "./protocol/observations.ts";
+import type { ImageManifest } from "../images.ts";
+import type { ImageId, NodeName, PylonId } from "../ids.ts";
+import type { NodeCapacity, NodeObservation, PylonObservation } from "../protocol/observations.ts";
+
+/** Whether `tar` is GNU tar, which artifact archives need for byte-stable output. */
+export const gnuTar = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout?.includes("GNU tar") === true;
 
 /** Waits for the check. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
 export async function until(what: string, check: () => boolean | Promise<boolean>, timeoutMs = 60_000): Promise<void> {

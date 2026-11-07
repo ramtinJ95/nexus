@@ -5,7 +5,7 @@ import type { Thread } from "./thread-store.ts";
 import { githubTokenGrant } from "../secret-grants.ts";
 import type { ImageId, ProjectId } from "../ids.ts";
 import type { TailnetNodeId } from "../ids.ts";
-import { project, image, testApi, withThread } from "./api-test-kit.ts";
+import { project, image, testApi, withThread } from "../test-support/api-kit.ts";
 
 test("projects are created, listed, and checked", async (t) => {
   const s = await testApi(t);

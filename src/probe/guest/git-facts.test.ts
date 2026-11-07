@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { fakeGuest } from "../../backends/fake-guest.ts";
 import { gitFacts } from "./git-facts.ts";
 import { checkoutDir } from "../../session-harness.ts";
-import { tempDir } from "../../test-kit.ts";
+import { tempDir } from "../../test-support/kit.ts";
 
 const exec = promisify(execFile);
 const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };

@@ -5,10 +5,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Thread } from "./thread-store.ts";
 import type { ImageId, ProjectId } from "../ids.ts";
 import type { TemplateRecord } from "./templates.ts";
-import { stoppedPylon } from "../test-kit.ts";
+import { stoppedPylon } from "../test-support/kit.ts";
 import type { NodeName } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
-import { node, project, image, observeNode, testApi, withImage } from "./api-test-kit.ts";
+import { node, project, image, observeNode, testApi, withImage } from "../test-support/api-kit.ts";
 import { refusedRetryMs } from "./queue.ts";
 
 test("--node auto boots the pylon on the node with the most memory left after it, and the thread records why", async (t) => {

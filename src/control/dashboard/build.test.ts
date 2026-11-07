@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { buildDashboard } from "./build.ts";
-import { tempDir } from "../../test-kit.ts";
+import { tempDir } from "../../test-support/kit.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
 const out = await tempDir("nexus-dashboard-build-");

@@ -3,10 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadDetail } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
-import { stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
+import { stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { node, laptop, phone, image, testApi, withThread, observeNode, withImage, deployment } from "./api-test-kit.ts";
+import { node, laptop, phone, image, testApi, withThread, observeNode, withImage, deployment } from "../test-support/api-kit.ts";
 
 test("nodes are listed with their state and capacity, without the observation", async (t) => {
   const s = await testApi(t);

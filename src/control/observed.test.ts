@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { NodeName } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import { observedPylon, runningProbe } from "./observed.ts";
-import { addThread, seedRegistry, testRegistry } from "./test-kit.ts";
+import { addThread, seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
+import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
 import { usageCounter } from "./usage-counter.ts";
 import { tokenCount, usageFilter, utc } from "./usage.ts";
 import type { AgentCall, Tokens } from "./agent-usage.ts";
@@ -15,7 +15,7 @@ import { processStream } from "../process-stream.ts";
 import type { ConversationId } from "./harness/host.ts";
 import type { ImageId, LiveHash, NodeName, ProjectId, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { runningPylon, tempDir } from "../test-kit.ts";
+import { runningPylon, tempDir } from "../test-support/kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image: ImageId = "img-000000000000";

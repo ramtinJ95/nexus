@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import type { NexusEvent } from "../events.ts";
 import { followEvents } from "./follow-events.ts";
 import { openRegistry, type Registry } from "./registry.ts";
-import { testRegistry } from "./test-kit.ts";
-import { until } from "../test-kit.ts";
+import { testRegistry } from "../test-support/registry-kit.ts";
+import { until } from "../test-support/kit.ts";
 
 function following(t: { after(fn: () => void): void }) {
   const registry = openRegistry(":memory:");

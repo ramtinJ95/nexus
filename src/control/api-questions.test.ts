@@ -5,7 +5,7 @@ import type { ThreadDetail } from "./wire.ts";
 import type { Question } from "./questions.ts";
 import type { ReviewLoop } from "./review.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";
-import { node, laptop, phone, project, image, claudeSession, testApi, withThread, deployment, withClaude } from "./api-test-kit.ts";
+import { node, laptop, phone, project, image, claudeSession, testApi, withThread, deployment, withClaude } from "../test-support/api-kit.ts";
 
 test("a person answers a question, a deployer question needs a deployer, and no node or pylon answers one", async (t) => {
   const s = await withThread(t, { deployment });

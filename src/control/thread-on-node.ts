@@ -28,7 +28,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { PylonId } from "../ids.ts";
 import { scriptedModels, streamedAnswer, streamedWordMs } from "./harness/test-fixture.ts";
-import { callText } from "../test-kit.ts";
+import { callText } from "../test-support/kit.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import { defaultPreviewPorts, startControlPlane } from "./main.ts";
 import { apiClient, fetchUntil, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
