@@ -8,10 +8,10 @@
 import { request } from "node:http";
 import type { Readable } from "node:stream";
 import { z } from "zod";
-import type { ArtifactManifest, ImageManifest, ImageRecipe, TemplateManifest } from "./images.ts";
+import { pinsSchema, type ArtifactManifest, type ImageManifest, type TemplateManifest } from "./images.ts";
 import { asSent, named, nonEmpty, parse } from "../parse.ts";
 import { isImageId, isTemplateId, type NodeName, type PortableArtifactId, type ProjectId, type TailnetNodeId } from "../ids.ts";
-import { imageId, objectAs, sha256, templateId } from "./fields.ts";
+import { imageId, sha256, templateId } from "./fields.ts";
 import { probeError, ProbeHttpError, text, verifyPeer, type Whois } from "./http.ts";
 
 const manifestHeader = "x-nexus-manifest";
@@ -59,7 +59,7 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
 }
 
 const imageManifestSchema = z.looseObject({
-  id: imageId, gondolinBuildId: nonEmpty, pins: objectAs<ImageRecipe["pins"]>(), builtOn: named<NodeName>(), builtAt: nonEmpty, sha256,
+  id: imageId, gondolinBuildId: nonEmpty, pins: pinsSchema, builtOn: named<NodeName>(), builtAt: nonEmpty, sha256,
 }) satisfies z.ZodType<ImageManifest>;
 const templateManifestSchema = z.looseObject({
   id: templateId, key: z.looseObject({ project: named<ProjectId>(), image: imageId, setupHash: nonEmpty }), commit: nonEmpty, builtAt: nonEmpty, sha256,

@@ -10,7 +10,7 @@ import { artifactArchive, artifactDirectory, fileCodec, sha256Of, tarCodec, type
 import { JobFailure } from "../protocol/jobs.ts";
 import type { ImageManifest, TemplateManifest } from "../protocol/images.ts";
 import type { ImageId, TemplateId } from "../ids.ts";
-import { gnuTar, tempDir } from "../test-support/kit.ts";
+import { gnuTar, tempDir, testImage } from "../test-support/kit.ts";
 
 const template: TemplateId = "tpl-0123456789ab";
 const image: ImageId = "img-0123456789ab";
@@ -199,7 +199,7 @@ test("a tar copy of a sparse image keeps its holes and archives again to the man
   await truncate(join(dir, "rootfs.ext4"), 1 << 30);
   const manifest: ImageManifest = {
     id: image, gondolinBuildId: "b", builtOn: "n" as ImageManifest["builtOn"], builtAt: "2027-01-01T00:00:00.000Z",
-    pins: {} as ImageManifest["pins"], sha256: await sha256Of(artifactArchive(dir, "image.json")),
+    pins: testImage().pins, sha256: await sha256Of(artifactArchive(dir, "image.json")),
   };
   await writeFile(join(dir, "image.json"), JSON.stringify(manifest));
   const peer = artifactDirectory(join(root, "b"), tarCodec);

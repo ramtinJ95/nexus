@@ -78,7 +78,7 @@ export interface ImageRecipe {
   };
 }
 
-/** ImageRecipe.pins wherever pins arrive: pins.json, a build-image job's recipe, and POST /v1/images. */
+/** ImageRecipe.pins wherever pins arrive: pins.json, a build-image job's recipe, POST /v1/images, and an image's manifest. */
 export const pinsSchema = z.strictObject({
   debianDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   node: z.string().regex(/^\d+\.\d+\.\d+$/),
