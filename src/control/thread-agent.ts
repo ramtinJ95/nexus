@@ -44,7 +44,6 @@ export interface Agent<V> {
   /** The frames of one client of the CLI's stream of this kind. */
   frames(): Frames<V>;
   send(t: Thread, message: AgentMessage): Promise<Sent>;
-  /** Stops the turn that runs. */
   abort(t: Thread): Promise<void>;
   /** The snapshot ID of the latest turn, which the Changes view's turn base diffs against, or null before any. */
   latestTurn(t: Thread): Promise<string | null>;

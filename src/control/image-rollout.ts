@@ -49,7 +49,6 @@ export interface ImageRollout {
 
 export interface ImageRolloutOptions {
   registry: ImageRolloutRegistry;
-  /** One client per registry node. */
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "submit" | "job" | "manifest">>;
   buildNode: NodeName;
   /** The recipe of the release the control plane runs. */

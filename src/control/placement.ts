@@ -215,7 +215,6 @@ export function uncounted(p: StoredPylon, seen: PylonObservation | undefined): R
 
 export const gib = (n: number) => Number(n.toFixed(1));
 
-/** A node's committed memory exceeds its memory. */
 export function overcommitted(c: NodeRecord["capacity"]): boolean {
   return c !== null && c.committedMemoryGiB > c.memoryGiB;
 }
