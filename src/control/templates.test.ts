@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chooseTemplate, garbage, setupHashOf, templateIdOf, templateMaxAgeMs, type SetupInputs, type TemplateRecord } from "./templates.ts";
-import type { TemplateBuildInputs, TemplateKey } from "../images.ts";
+import type { TemplateBuildInputs, TemplateKey } from "../image/images.ts";
 import type { RemoteProject } from "./project.ts";
 import type { ArtifactId, CheckpointId, ImageId, NodeName, ProjectId } from "../ids.ts";
 

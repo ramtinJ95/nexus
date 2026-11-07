@@ -9,7 +9,7 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, type TestContext } from "node:test";
-import type { ImageManifest } from "../images.ts";
+import type { ImageManifest } from "../image/images.ts";
 import type { ImageId, NodeName, PylonId } from "../ids.ts";
 import type { NodeCapacity, NodeObservation, PylonObservation } from "../protocol/observations.ts";
 

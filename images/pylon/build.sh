@@ -34,4 +34,4 @@ trap cleanup EXIT
 
 cd "$repo"
 TIMEFORMAT='BUILD_SECONDS=%3R'
-time node src/image-build.ts "${1:-infra-testbench}" "$artifacts"
+time node src/image/build.ts "${1:-infra-testbench}" "$artifacts"

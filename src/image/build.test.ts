@@ -5,15 +5,16 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { artifactDirectory, tarCodec } from "./artifacts.ts";
-import { JobFailure } from "./protocol/jobs.ts";
+import { JobFailure } from "../protocol/jobs.ts";
 import {
-  buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, loadImageRecipe, modeMismatches,
-  parseDebugfsModes, parseModeListing, pylonRecipeDir, smokeChecks, smokeFailure,
-} from "./image-build.ts";
+  buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, modeMismatches,
+  parseDebugfsModes, parseModeListing, smokeChecks, smokeFailure,
+} from "./build.ts";
+import { loadImageRecipe, pylonRecipeDir } from "./recipe.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
-import { agentSetupManifest, installedLayout, parseAgentSetup } from "../images/pylon/agent-setup/manifest.ts";
-import type { NodeName } from "./ids.ts";
-import { tempDir } from "./test-support/kit.ts";
+import { agentSetupManifest, installedLayout, parseAgentSetup } from "../../images/pylon/agent-setup/manifest.ts";
+import type { NodeName } from "../ids.ts";
+import { tempDir } from "../test-support/kit.ts";
 
 const pins: ImageRecipe["pins"] = {
   debianDigest: `sha256:${"a".repeat(64)}`,
@@ -64,7 +65,7 @@ test("each helper the Dockerfile installs in /usr/local/bin finds every module i
   assert.doesNotMatch(await readFile(join(pylonRecipeDir, "nexus-contract.ts"), "utf8"), /^(import\b|export [^;]* from )/m);
 });
 
-test("a recipe is every file under its directory and the shared checkout helper, nested ones by posix path, sorted", async (t) => {
+test("a recipe is its declared files under its directory and the shared checkout helper, nested ones by posix path, sorted", async (t) => {
   const dir = await recipeDir(t, {
     "pins.json": JSON.stringify(pins),
     "build.sh": "echo runner",
@@ -73,10 +74,10 @@ test("a recipe is every file under its directory and the shared checkout helper,
     "Dockerfile": "FROM scratch\n",
   });
   await chmod(join(dir, "nexus"), 0o700);
-  assert.deepEqual(await loadImageRecipe(dir), {
+  assert.deepEqual(await loadImageRecipe(dir, ["nexus", "dotfiles-common/pi/AGENTS.md", "Dockerfile"]), {
     files: [
       { path: "Dockerfile", mode: 0o644, content: "FROM scratch\n" },
-      { path: "checkout-files.py", mode: 0o644, content: await readFile(new URL("./checkout-files.py", import.meta.url), "utf8") },
+      { path: "checkout-files.py", mode: 0o644, content: await readFile(new URL("../checkout-files.py", import.meta.url), "utf8") },
       { path: "dotfiles-common/pi/AGENTS.md", mode: 0o644, content: "pi rules" },
       { path: "nexus", mode: 0o755, content: "#!/bin/sh\n" },
     ],
@@ -87,11 +88,11 @@ test("a recipe is every file under its directory and the shared checkout helper,
 test("loading refuses pins with a missing or unknown field, a bad digest, and a symlink in the recipe", async (t) => {
   const { herdr: _, ...missing } = pins;
   for (const bad of [missing, { ...pins, extra: "1" }, { ...pins, debianDigest: "bookworm-slim" }]) {
-    await assert.rejects(loadImageRecipe(await recipeDir(t, { "pins.json": JSON.stringify(bad) })));
+    await assert.rejects(loadImageRecipe(await recipeDir(t, { "pins.json": JSON.stringify(bad) }), []));
   }
   const dir = await recipeDir(t, { "pins.json": JSON.stringify(pins), "Dockerfile": "" });
   await symlink("Dockerfile", join(dir, "Containerfile"));
-  await assert.rejects(loadImageRecipe(dir), /Containerfile .* is not a regular file/);
+  await assert.rejects(loadImageRecipe(dir, ["Dockerfile", "Containerfile"]), /Containerfile .* is not a regular file/);
 });
 
 test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus script or agent setup manifest are unsafe, before it writes anything", async (t) => {

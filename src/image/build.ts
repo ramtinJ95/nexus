@@ -1,7 +1,7 @@
 /**
- * The base pylon image build. The control plane reads images/pylon/ with loadImageRecipe and sends the recipe
- * inline in a build-image job. buildImage runs that job on the image build node: Docker builds the root
- * filesystem, Gondolin turns it into guest assets, and a smoke boot gates publishing.
+ * The base pylon image build. buildImage runs a build-image job, whose recipe loadImageRecipe (recipe.ts) read, on
+ * the image build node: Docker builds the root filesystem, Gondolin turns it into guest assets, and a smoke boot
+ * gates publishing.
  *
  * An image artifact directory is a Gondolin asset directory (Gondolin's own manifest.json, kernel, initramfs,
  * rootfs.ext4), so the pylon VM backend boots it as is, plus image.json, the ImageManifest.
@@ -12,47 +12,21 @@ import { createReadStream, readFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
-import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../images/pylon/agent-setup/manifest.ts";
+import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../../images/pylon/agent-setup/manifest.ts";
 import { artifactDirectory, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
-import { JobFailure } from "./protocol/jobs.ts";
-import { reapGroup, signalGroup } from "./process-group.ts";
+import { JobFailure } from "../protocol/jobs.ts";
+import { reapGroup, signalGroup } from "../process-group.ts";
 import { compare, imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "./images.ts";
-import { shellQuote } from "./shell.ts";
-import type { ImageId, NodeName } from "./ids.ts";
+import { loadImageRecipe } from "./recipe.ts";
+import { shellQuote } from "../shell.ts";
+import type { ImageId, NodeName } from "../ids.ts";
 
-export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));
-
-/** build.sh only runs a build. pins.json becomes ImageRecipe.pins. */
-const notRecipeFiles = new Set(["build.sh", "pins.json"]);
-
-/** Image inputs kept beside the control plane, which runs them too. The Claude hook snapshots turns with the checkout helper. */
-const sharedFiles = ["checkout-files.py"];
-
-/**
- * Every file under `dir` except build.sh, and the shared files, sorted by path, each executable when its owner may
- * execute it, as git checks it out, and pins.json parsed.
- */
-export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<ImageRecipe> {
-  const files: ImageRecipe["files"][number][] = [];
-  const load = async (path: string, from: string | URL) => {
-    files.push({ path, mode: ((await stat(from)).mode & 0o100) === 0 ? 0o644 : 0o755, content: await readFile(from, "utf8") });
-  };
-  for (const path of sharedFiles) await load(path, new URL(`./${path}`, import.meta.url));
-  for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
-    if (entry.isDirectory()) continue;
-    const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/");
-    if (!entry.isFile()) throw new Error(`${path} in ${dir} is not a regular file`);
-    if (!notRecipeFiles.has(path)) await load(path, join(dir, path));
-  }
-  files.sort((a, b) => compare(a.path, b.path));
-  return { files, pins: pinsSchema.parse(JSON.parse(await readFile(join(dir, "pins.json"), "utf8"))) };
-}
 
 /**
  * The recipe arrives in a job, so its paths, modes, pins and agent setup manifest are checked again before
@@ -632,7 +606,7 @@ async function run(command: string, args: readonly string[], signal: AbortSignal
 if (import.meta.main) {
   const [node, artifacts] = process.argv.slice(2);
   if (node === undefined || artifacts === undefined) {
-    console.error("usage: node src/image-build.ts <node name> <artifacts directory>");
+    console.error("usage: node src/image/build.ts <node name> <artifacts directory>");
     process.exit(64);
   }
   const recipe = await loadImageRecipe();

@@ -26,7 +26,7 @@ import { commandPolicies, type CommandPolicy } from "./run.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
-import type { ArtifactManifest, ImageManifest, TemplateManifest } from "../images.ts";
+import type { ArtifactManifest, ImageManifest, TemplateManifest } from "../image/images.ts";
 import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../backends/fake-guest.ts";
 import { outputsDir } from "./guest/outputs.ts";
 import { sessionsFile } from "./guest/sessions.ts";

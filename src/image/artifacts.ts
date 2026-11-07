@@ -17,11 +17,11 @@ import { join } from "node:path";
 import { PassThrough, Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { JobFailure } from "./protocol/jobs.ts";
+import { JobFailure } from "../protocol/jobs.ts";
 import type { ArtifactManifest, ImageManifest, TemplateManifest } from "./images.ts";
-import { readJson } from "./json-file.ts";
-import { type ImageId, isImageId, isPortableArtifactId, type PortableArtifactId } from "./ids.ts";
-import { parseArtifactManifest } from "./protocol/artifacts.ts";
+import { readJson } from "../json-file.ts";
+import { type ImageId, isImageId, isPortableArtifactId, type PortableArtifactId } from "../ids.ts";
+import { parseArtifactManifest } from "../protocol/artifacts.ts";
 
 const execFileAsync = promisify(execFile);
 

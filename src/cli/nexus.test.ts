@@ -31,7 +31,7 @@ import type { Judgment } from "../control/judgment-store.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
 import { testApi } from "../test-support/api-kit.ts";
-import type { ImageManifest } from "../images.ts";
+import type { ImageManifest } from "../image/images.ts";
 import type { TemplateRecord } from "../control/templates.ts";
 import { defaultProjectResources, type Project } from "../control/project.ts";
 import { titleOf } from "../thread-title.ts";

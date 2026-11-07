@@ -32,7 +32,7 @@ import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-
 import { startProbe } from "../../../../src/probe/server.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
-import type { ImageManifest } from "../../../../src/images.ts";
+import type { ImageManifest } from "../../../../src/image/images.ts";
 import type { Project } from "../../../../src/control/project.ts";
 
 const exec = promisify(execFile);

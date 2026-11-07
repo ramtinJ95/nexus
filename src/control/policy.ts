@@ -62,7 +62,7 @@ const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch:
     || ((["src/control/main.ts", "src/control/releases.ts"].includes(p) || shipsFrom(p, "src/control/api/", "src/probe/", "src/deploy/")) && changes(patch, authWords))
     || (shipsFrom(p, "src/pylon-vm/", "src/backends/pylon-vm/") && changes(patch, modeWords)) },
   { case: "tailnet", matches: (p) => names(p, /tailnet|tailscale/i) },
-  { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/agent-setup.ts" },
+  { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/image/agent-setup.ts" },
   { case: "irreversible", matches: (p, patch) => p === "src/control/schema.ts" && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },
   { case: "irreversible", matches: (p, patch) => p === "package.json" && (patch === "" || /^[+-].*@earendil-works\/pi-durable/m.test(patch)) },
 ];

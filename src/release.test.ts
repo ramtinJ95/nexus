@@ -4,8 +4,8 @@ import { chmod, mkdir, readdir, readFile, symlink, writeFile } from "node:fs/pro
 import { dirname, join, relative, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
-import { loadImageRecipe } from "./image-build.ts";
-import { imageIdOf } from "./images.ts";
+import { loadImageRecipe } from "./image/recipe.ts";
+import { imageIdOf } from "./image/images.ts";
 import { tempDir } from "./test-support/kit.ts";
 
 const root = resolve(import.meta.dirname, "..");
@@ -67,7 +67,7 @@ test("a release carries the image recipe the control plane builds, the same reci
   const run = await installRelease(t, null);
   assert.equal(run.code, 0, run.stderr);
   await symlink(join(root, "node_modules"), join(run.release, "node_modules"));
-  const released = (await import(pathToFileURL(join(run.release, "src/image-build.ts")).href)) as typeof import("./image-build.ts");
+  const released = (await import(pathToFileURL(join(run.release, "src/image/recipe.ts")).href)) as typeof import("./image/recipe.ts");
   const recipe = await released.loadImageRecipe();
   const checkout = await loadImageRecipe();
   assert.deepEqual(recipe.files.map((f) => f.path), checkout.files.map((f) => f.path));

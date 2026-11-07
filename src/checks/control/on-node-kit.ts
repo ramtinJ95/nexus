@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { artifactDirectory, tarCodec } from "../../artifacts.ts";
+import { artifactDirectory, tarCodec } from "../../image/artifacts.ts";
 import { readControlPlane } from "../../deploy/control-plane.ts";
 import { exit, type Exit } from "../../exec.ts";
 import { shellQuote } from "../../shell.ts";

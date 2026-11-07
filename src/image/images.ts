@@ -6,8 +6,8 @@
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
 import { z } from "zod";
-import { canonicalSha256, type PylonResources } from "./spawn.ts";
-import type { ImageId, NodeName, ProjectId, TemplateId } from "./ids.ts";
+import { canonicalSha256, type PylonResources } from "../spawn.ts";
+import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
 
 // The base image.
 
@@ -51,8 +51,8 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "./ids.ts";
  * - nexus-kvm: run as root by the pylon-vm controller on every boot of a pylon whose boot spec asks for
  *   nestedVirtualization (src/pylon-vm/runtime.ts). It loads kvm_intel or kvm_amd for the guest's CPU, with kvm and
  *   irqbypass, and overlay, and opens /dev/kvm to user, or fails the boot with the reason. An ordinary pylon never runs it.
- * - pins.json: ImageRecipe.pins. Every other file except build.sh is in ImageRecipe.files, with the mode git gives
- *   it, 0755 when executable and 0644 otherwise, because Docker's COPY keeps a file's mode.
+ * - pins.json: ImageRecipe.pins. The files recipePaths in recipe.ts names are ImageRecipe.files, each with the mode
+ *   git gives it, 0755 when executable and 0644 otherwise, because Docker's COPY keeps a file's mode.
  * Logins and secrets are never in the image.
  */
 export interface ImageRecipe {
@@ -112,7 +112,7 @@ export interface ImageManifest {
   sha256: string; // of the sparse archive peers fetch, artifactArchive in artifacts.ts
 }
 
-// buildImage, which runs on the image build node, lives in image-build.ts.
+// buildImage, which runs on the image build node, lives in build.ts.
 
 // Project templates.
 

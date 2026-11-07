@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { artifactDirectory, fileCodec, type ArtifactDirectory } from "../artifacts.ts";
+import { artifactDirectory, fileCodec, type ArtifactDirectory } from "../image/artifacts.ts";
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type VmBackend } from "./backend.ts";
 import { JobFailure } from "../protocol/jobs.ts";
 import { dockerBridgeRunArgs, dockerHostBridge } from "./docker-host-bridge.ts";

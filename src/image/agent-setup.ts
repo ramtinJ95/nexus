@@ -2,7 +2,7 @@
  * The Mac side of the pylon's agent setup: reads this Mac's Claude Code plugins, skills, pi packages, pi
  * extensions and pi-shepherdr profiles and captures them into images/pylon/agent-setup/manifest.json, which the
  * image build installs.
- *   node src/agent-setup.ts [--dry-run] [--leave-out <kind>:<name>]...
+ *   node src/image/agent-setup.ts [--dry-run] [--leave-out <kind>:<name>]...
  * It reads ~/.claude, ~/.pi, ~/.agents and the dotfiles repo they link into, asks the remotes what they hold, and
  * writes nothing but the manifest. A thin reader (readMacSetup) collects plain facts and a pure planner
  * (planAgentSetup) holds every policy.
@@ -18,11 +18,11 @@ import { z } from "zod";
 import {
   agentSetupManifest, asCommit, asDotfilesPath, asHttpsUrl, formatAgentSetup, herdrPiExtension, parseAgentSetup,
   type AgentSetup, type Commit, type DotfilesPath, type Harness, type HttpsUrl, type PiPackage, type PluginId,
-} from "../images/pylon/agent-setup/manifest.ts";
-import { output as execOutput } from "./exec.ts";
-import { loadImageRecipe, pylonRecipeDir } from "./image-build.ts";
+} from "../../images/pylon/agent-setup/manifest.ts";
+import { output as execOutput } from "../exec.ts";
+import { loadImageRecipe, pylonRecipeDir } from "./recipe.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
-import { parseJson } from "./parse.ts";
+import { parseJson } from "../parse.ts";
 
 /** Git blob IDs by POSIX path inside a plugin's directory, as `git ls-tree` prints them. */
 export type PluginFiles = ReadonlyMap<string, string>;
@@ -624,7 +624,7 @@ if (import.meta.main) {
     ({ values } = parseArgs({ options: { "dry-run": { type: "boolean" }, "leave-out": { type: "string", multiple: true } }, strict: true }));
     extra = (values["leave-out"] ?? []).map(parseLeaveOut);
   } catch (err) {
-    console.error(`${(err as Error).message}\nusage: node src/agent-setup.ts [--dry-run] [--leave-out <kind>:<name>]...`);
+    console.error(`${(err as Error).message}\nusage: node src/image/agent-setup.ts [--dry-run] [--leave-out <kind>:<name>]...`);
     process.exit(64);
   }
   const mac = await readMacSetup(homedir());

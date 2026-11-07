@@ -1,7 +1,7 @@
 /**
  * The agent setup baked into the pylon image: this Mac's Claude Code plugins, skills, pi packages, pi extensions
- * and pi-shepherdr profiles, as pinned refs and never as file contents. src/agent-setup.ts captures it on the Mac
- * into manifest.json, install.ts installs it during docker build, and src/image-build.ts refuses a recipe whose
+ * and pi-shepherdr profiles, as pinned refs and never as file contents. src/image/agent-setup.ts captures it on the Mac
+ * into manifest.json, install.ts installs it during docker build, and src/image/build.ts refuses a recipe whose
  * manifest does not parse and derives the agent smoke check from it. The module imports nothing, so the
  * image's Node runs it as it is.
  */

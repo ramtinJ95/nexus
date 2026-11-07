@@ -9,7 +9,7 @@ import { request } from "node:http";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 import { PeerRefused, verifyPeer, type Whois } from "../tailscale.ts";
-import type { ArtifactManifest, ImageManifest, ImageRecipe, TemplateManifest } from "../images.ts";
+import type { ArtifactManifest, ImageManifest, ImageRecipe, TemplateManifest } from "../image/images.ts";
 import { asSent, named, nonEmpty, parse } from "../parse.ts";
 import { isImageId, isTemplateId, type NodeName, type PortableArtifactId, type ProjectId, type TailnetNodeId } from "../ids.ts";
 import { imageId, objectAs, sha256, templateId } from "./fields.ts";

@@ -13,7 +13,7 @@
  */
 import { z } from "zod";
 import type { BootInputs, LiveSpec } from "../spawn.ts";
-import type { ImageRecipe, TemplateBuildInputs } from "../images.ts";
+import type { ImageRecipe, TemplateBuildInputs } from "../image/images.ts";
 import { asSent, named, nonEmpty, parseJson, unchecked } from "../parse.ts";
 import {
   isPortableArtifactId, type ArtifactId, type CheckpointId, type ImageId, type JobId, type LiveHash, type NodeName,
