@@ -9,6 +9,7 @@ import { attachPath, encodeMessage, type ServerMessage } from "../contract/attac
 import { parseServerMessage, termOf } from "../contract/attach-parse.ts";
 import { terminalSize, type TerminalSize } from "../guest-terminal.ts";
 import { CliError } from "./transport.ts";
+import { reconnectMs } from "./kit.ts";
 
 /** The terminal attach runs in. processTty() is this process's. Tests pass a fake. */
 export interface Tty {
@@ -54,8 +55,8 @@ export interface Retry {
   readonly steadyMs: number;
 }
 
-/** As the dashboard does: 1 s, doubling, at most 30 s, 8 times, about two minutes. */
-const retry: Retry = { tries: 8, delayMs: (n) => Math.min(30_000, 1000 * 2 ** n), steadyMs: 10_000 };
+/** 8 times, about two minutes. */
+const retry: Retry = { tries: 8, delayMs: reconnectMs, steadyMs: 10_000 };
 
 /** How one WebSocket link to the attach route ended: with the attach, or lost, so attach links again. */
 type LinkEnd = { kind: "over"; message: Extract<ServerMessage, { type: "exit" | "error" }> } | { kind: "lost"; why: string };
