@@ -4246,6 +4246,27 @@ test("a project switched from yolo to land answers no more holds questions, and 
   assert.equal(f.registry.question(first!.id)?.answer?.option, "Land");
 });
 
+test("a landing a yolo setting answered at approval holds again once the project stops landing on its own", async (t) => {
+  const f = fixture(t, { autoReview: yolo });
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
+  f.check = { kind: "running" };
+  await loop.poll();
+  assert.equal(f.review().waiver?.yolo, "nexus", "answered once the reviewer named the case");
+  assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", fromProject: true }, "still the project's landing");
+  f.registry.editProject("nexus" as ProjectId, (p) => ({ ...p, autoReview: { mode: "review", enabledBy: "nLAPTOP" } }));
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
+    "Project nexus no longer lands its builders' pull requests on its own, so this one is the person's to land.",
+    `${personOnly}${reservedNames["cli-breaking"]}, by the reviewer's reading (it renames a flag).`,
+  ] });
+});
+
 test("a yolo setting turned on by someone who is not a deployer answers nothing", async (t) => {
   const f = fixture(t, { autoReview: { mode: "yolo", enabledBy: "nPHONE" } });
   f.files = dockerfile;

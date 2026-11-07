@@ -1290,7 +1290,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     // recorded them, so the waiver is the question's, and the landing reads the head's holds again before it merges.
     const waiver = { ...waiverOf(r, by, holds.holds.map((h) => h.text), holds.holds.map((h) => h.code)), ...yolo !== undefined && { yolo } };
     let next: Review;
-    if (landable(r)) next = pressWith(landableAt(question.thread, holds.head), by, waiver);
+    // A landing the setting answered stays the project's, so switching the setting off holds it again.
+    if (landable(r)) next = { ...pressWith(landableAt(question.thread, holds.head), by, waiver), ...yolo !== undefined && { land: r.land } };
     else {
       const builder = registry.thread(r.builder)!;
       if (builder.status !== "active") throw new HttpError(409, `thread ${r.builder} is ${builder.status}`);
