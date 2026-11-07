@@ -3,7 +3,7 @@ import { isPortableArtifactId, type NodeName, type PortableArtifactId, type Pylo
 import { JobFailure, type Job } from "../protocol/jobs.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ArtifactCopy } from "../protocol/artifacts.ts";
-import type { PreviewAssignment } from "../spawn.ts";
+import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { ServiceName } from "../services-file.ts";
 import { checkoutDir } from "../session-harness.ts";
 import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "./guest/sessions.ts";

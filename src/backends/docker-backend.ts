@@ -23,7 +23,7 @@ import { docker, dockerExec, label, labelFilters } from "./docker-cli.ts";
 import { dockerServices, publishedPorts } from "./docker-services.ts";
 import { processStream } from "../process-stream.ts";
 import { installFileCommand, shellQuote as q } from "../shell.ts";
-import type { OverlayFile } from "../spawn.ts";
+import type { OverlayFile } from "../protocol/spawn.ts";
 import { type CheckpointId, type ImageId, isImageId, isTemplateId, type PortableArtifactId, type PylonId, type TemplateId } from "../ids.ts";
 import type { PausedSession } from "../protocol/observations.ts";
 import { publicUrls } from "../public-urls.ts";

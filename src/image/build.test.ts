@@ -11,7 +11,7 @@ import {
   parseDebugfsModes, parseModeListing, smokeChecks, smokeFailure,
 } from "./build.ts";
 import { loadImageRecipe, pylonRecipeDir } from "./recipe.ts";
-import { imageIdOf, type ImageRecipe } from "./images.ts";
+import { imageIdOf, type ImageRecipe } from "../protocol/images.ts";
 import { agentSetupManifest, installedLayout, parseAgentSetup } from "../../images/pylon/agent-setup/manifest.ts";
 import type { NodeName } from "../ids.ts";
 import { tempDir } from "../test-support/kit.ts";

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bootSecrets, effectiveAllowedHosts, type Project } from "./project.ts";
 import { renderOverlay, type PylonOverlay } from "./overlay.ts";
-import { chatgptTokenGrant, githubTokenGrant, secretHostPattern, secretNamePattern } from "../secret-grants.ts";
+import { chatgptTokenGrant, githubTokenGrant, secretHostPattern, secretNamePattern } from "../protocol/secret-grants.ts";
 import { installFileCommand } from "../shell.ts";
 import type { NodeName, ProjectId, PylonId } from "../ids.ts";
 
@@ -208,7 +208,7 @@ test("code that runs on nodes never imports project.ts, the control plane's Proj
   const nodeFiles = [
     ...["probe", "protocol", "pylon-vm", "backends/pylon-vm"].flatMap((dir) => readdirSync(new URL(dir, src), { recursive: true, encoding: "utf8" })
       .filter((file) => /\.[jt]s$/.test(file) && !/\.(test|check)\.[jt]s$/.test(file)).map((file) => `${dir}/${file}`)),
-    "backends/backend.ts", "backends/docker-backend.ts", "backends/docker-services.ts", "image/images.ts",
+    "backends/backend.ts", "backends/docker-backend.ts", "backends/docker-services.ts",
   ];
   const importers = nodeFiles.filter((file) => /\b(?:from|import)\s*\(?\s*["'][^"']*\/project\.ts["']/.test(readFileSync(new URL(file, src), "utf8")));
   assert.deepEqual(importers, []);

@@ -10,7 +10,7 @@ import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { connectProbe, type ProbeClient } from "../protocol/client.ts";
 import { canDeploy, wakesDeployers } from "./releases.ts";
-import { gitIdentitySchema } from "../spawn.ts";
+import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../tailscale.ts";

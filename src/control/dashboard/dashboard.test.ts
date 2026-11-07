@@ -18,7 +18,7 @@ import type { ServiceFact } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { recordingHealth, sampleOf } from "../node-metrics.ts";
 import { defaultProjectResources } from "../project.ts";
-import { githubTokenGrant } from "../../secret-grants.ts";
+import { githubTokenGrant } from "../../protocol/secret-grants.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../../test-support/kit.ts";

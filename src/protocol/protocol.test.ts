@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { once } from "node:events";
+import { connect, createServer as createNetServer, type AddressInfo } from "node:net";
 import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import { encodeSubmitReply, parseJobEnvelope, parseSubmitReply } from "./jobs.ts";
 import { brokenCauses, parseProbeEvent, probeContract, type BrokenCause } from "./observations.ts";
@@ -10,10 +12,10 @@ import {
   type PylonCommand, type SendClaudeOutcome,
 } from "./commands.ts";
 import { notAnswering, parseStreamRequest } from "./streams.ts";
-import { probeErrorCodes, ProbeHttpError, type ProbeError } from "./http.ts";
+import { probeErrorCodes, ProbeHttpError, verifyPeer, type ProbeError } from "./http.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { connectProbe } from "./client.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 
 const node = "test-node";
 const pylonId = "pylon-th-1";
@@ -250,7 +252,7 @@ test("the control plane refuses a probe event that fails any check of its fields
   assert.ok(parseProbeEvent(JSON.stringify(snapshot({ jobs: [{ ...running, code: "gremlins" }] }))).type === "snapshot", "only a failed job's code is checked");
 });
 
-const imageManifest = { id: image, gondolinBuildId: "b1", builtOn: "rj-firebat", builtAt: "2027-01-01T00:00:00Z", sha256: hex, pins: {} };
+const imageManifest = { id: image, gondolinBuildId: "b1", builtOn: "rj-firebat", builtAt: "2027-01-01T00:00:00Z", sha256: hex, pins: testImage().pins };
 const templateManifest = { id: template, key: { project: "p", image, setupHash: "h" }, commit: "c0ffee", builtAt: "2027-01-01T00:00:00Z", sha256: hex };
 
 test("an artifact manifest is read as it was written, with the fields it does not know", () => {
@@ -259,7 +261,8 @@ test("an artifact manifest is read as it was written, with the fields it does no
   }
   const bad: unknown[] = [
     null, [], { ...imageManifest, id: "ckpt-1" }, { ...imageManifest, sha256: hex.toUpperCase() }, { ...imageManifest, builtAt: "" }, { ...imageManifest, gondolinBuildId: undefined },
-    { ...imageManifest, builtOn: 1 }, { ...imageManifest, pins: [] }, { ...templateManifest, key: null }, { ...templateManifest, key: { ...templateManifest.key, image: template } },
+    { ...imageManifest, builtOn: 1 }, { ...imageManifest, pins: [] }, { ...imageManifest, pins: {} }, { ...imageManifest, pins: { ...imageManifest.pins, node: "24" } },
+    { ...imageManifest, pins: { ...imageManifest.pins, ...unknown } }, { ...templateManifest, key: null }, { ...templateManifest, key: { ...templateManifest.key, image: template } },
     { ...templateManifest, key: { ...templateManifest.key, setupHash: "" } }, { ...templateManifest, commit: undefined },
   ];
   for (const value of bad) assert.throws(() => parseArtifactManifest(value), Error, JSON.stringify(value));
@@ -430,4 +433,20 @@ test("the probe never loads the control plane's probe client", () => {
     ];
     for (const specifier of specifiers) assert.notEqual(new URL(specifier, file).href, client, `${file.pathname} loads client.ts`);
   }
+});
+
+test("a transport's peer check names who answered as a ProbeError, and passes on whois's own error", async (t) => {
+  const server = createNetServer((socket) => socket.end()).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const { port } = server.address() as AddressInfo;
+  const check = (whois: () => Promise<TailnetNodeId | null>, socket = connect(port, "127.0.0.1")) =>
+    verifyPeer(socket, whois, (id) => id === "nPeer", "the connection closed before whois", (id, at) => `${at} is ${id ?? "unknown"}`).finally(() => socket.destroy());
+
+  await check(async () => "nPeer" as TailnetNodeId);
+  await assert.rejects(check(async () => "nOther" as TailnetNodeId), { code: "forbidden", message: `127.0.0.1:${port} is nOther` });
+  await assert.rejects(check(async () => null), { code: "forbidden", message: `127.0.0.1:${port} is unknown` });
+  await assert.rejects(check(async () => { throw new Error("tailscaled is down"); }), (err: Error) => err.message === "tailscaled is down" && !("code" in err));
+  const free = await new Promise<number>((resolve) => { const probe = createNetServer().listen(0, "127.0.0.1", () => { const at = (probe.address() as AddressInfo).port; probe.close(() => resolve(at)); }); });
+  await assert.rejects(check(async () => "nPeer" as TailnetNodeId, connect(free, "127.0.0.1").on("error", () => undefined)), { code: "unreachable", message: "the connection closed before whois" });
 });

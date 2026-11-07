@@ -6,7 +6,7 @@
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
 import { z } from "zod";
-import type { PylonResources } from "../spawn.ts";
+import type { PylonResources } from "./spawn.ts";
 import { canonicalSha256 } from "../util/canonical-sha256.ts";
 import { compare } from "../util/compare.ts";
 import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
@@ -53,7 +53,7 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
  * - nexus-kvm: run as root by the pylon-vm controller on every boot of a pylon whose boot spec asks for
  *   nestedVirtualization (src/pylon-vm/runtime.ts). It loads kvm_intel or kvm_amd for the guest's CPU, with kvm and
  *   irqbypass, and overlay, and opens /dev/kvm to user, or fails the boot with the reason. An ordinary pylon never runs it.
- * - pins.json: ImageRecipe.pins. The files recipePaths in recipe.ts names are ImageRecipe.files, each with the mode
+ * - pins.json: ImageRecipe.pins. The files recipePaths in src/image/recipe.ts names are ImageRecipe.files, each with the mode
  *   git gives it, 0755 when executable and 0644 otherwise, because Docker's COPY keeps a file's mode.
  * Logins and secrets are never in the image.
  */
@@ -78,7 +78,7 @@ export interface ImageRecipe {
   };
 }
 
-/** ImageRecipe.pins wherever pins arrive: pins.json, a build-image job's recipe, and POST /v1/images. */
+/** ImageRecipe.pins wherever pins arrive: pins.json, a build-image job's recipe, POST /v1/images, and an image's manifest. */
 export const pinsSchema = z.strictObject({
   debianDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   node: z.string().regex(/^\d+\.\d+\.\d+$/),
@@ -111,10 +111,10 @@ export interface ImageManifest {
   pins: ImageRecipe["pins"];
   builtOn: NodeName;
   builtAt: string;
-  sha256: string; // of the sparse archive peers fetch, artifactArchive in artifacts.ts
+  sha256: string; // of the sparse archive peers fetch, artifactArchive in src/image/artifacts.ts
 }
 
-// buildImage, which runs on the image build node, lives in build.ts.
+// buildImage, which runs on the image build node, lives in src/image/build.ts.
 
 // Project templates.
 
@@ -148,7 +148,7 @@ export interface TemplateManifest {
   key: TemplateKey;
   commit: string; // the checkout setup ran on. A pylon booted from the template checks out its own commit
   builtAt: string;
-  sha256: string; // of the archive peers fetch, artifactArchive in artifacts.ts
+  sha256: string; // of the archive peers fetch, artifactArchive in src/image/artifacts.ts
 }
 /** What a peer sends ahead of an artifact's archive. A checkpoint has none, because it never leaves its node. */
 export type ArtifactManifest = ImageManifest | TemplateManifest;

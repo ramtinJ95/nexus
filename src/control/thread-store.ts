@@ -22,7 +22,7 @@ import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type 
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import type { HerdrStatus, NodeObservation } from "../protocol/observations.ts";
-import type { BootInputs } from "../spawn.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SessionHarness } from "../session-harness.ts";
 import type { ThreadSetup } from "./templates.ts";

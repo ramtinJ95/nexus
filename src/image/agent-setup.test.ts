@@ -9,7 +9,7 @@ import {
 import { claudeHooks, installedPackage, installMismatches, pylonProfile } from "../../images/pylon/agent-setup/install.ts";
 import { captureSummary, httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
 import { pylonRecipeDir } from "./recipe.ts";
-import type { ImageRecipe } from "./images.ts";
+import type { ImageRecipe } from "../protocol/images.ts";
 import { tempDir } from "../test-support/kit.ts";
 
 const checkedIn = await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8");

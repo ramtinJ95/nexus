@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { imageIdOf } from "./images.ts";
+import { imageIdOf } from "../protocol/images.ts";
 import { loadImageRecipe, pylonRecipeDir, recipePaths } from "./recipe.ts";
 
 const repo = join(import.meta.dirname, "../..");

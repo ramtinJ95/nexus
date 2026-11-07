@@ -4,7 +4,7 @@
  */
 import { json, jsonOrNull, type Db, type Row } from "./db.ts";
 import type { ImageId, JobId, NodeName, ProjectId, TailnetNodeId, TemplateId } from "../ids.ts";
-import type { ImageManifest } from "../image/images.ts";
+import type { ImageManifest } from "../protocol/images.ts";
 import type { BuildingTemplate, TemplateRecord } from "./templates.ts";
 
 /**

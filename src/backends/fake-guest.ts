@@ -6,7 +6,7 @@
 import type { Guest } from "./backend.ts";
 import type { OpenPipe } from "../pipe.ts";
 import { processStream } from "../process-stream.ts";
-import type { OverlayFile } from "../spawn.ts";
+import type { OverlayFile } from "../protocol/spawn.ts";
 import type { SessionRecord } from "../probe/guest/sessions.ts";
 
 export type ExecReply = { exitCode: number | null; output: string; truncated?: boolean };

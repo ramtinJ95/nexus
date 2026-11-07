@@ -4,7 +4,7 @@ import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
-import { liveHashOf, type BootInputs, type RepoInit } from "../spawn.ts";
+import { liveHashOf, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
 import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId, type ThreadId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import { HttpError } from "./http-error.ts";

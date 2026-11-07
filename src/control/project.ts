@@ -1,8 +1,8 @@
 /** Nexus owns where and with what access: the Project record. Secret values live only on nodes. */
 import { z } from "zod";
 import type { NodeName, ProjectId } from "../ids.ts";
-import { chatgptTokenGrant, type SecretGrant } from "../secret-grants.ts";
-import type { GitIdentity, PylonResources } from "../spawn.ts";
+import { chatgptTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
+import type { GitIdentity, PylonResources } from "../protocol/spawn.ts";
 
 export interface Project {
   gitIdentity?: GitIdentity | null | undefined;

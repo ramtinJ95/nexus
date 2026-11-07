@@ -5,8 +5,8 @@
 import type { NodeName, ProjectId, PylonId } from "../ids.ts";
 import type { ServiceName } from "../services-file.ts";
 import { shellQuote } from "../shell.ts";
-import { chatgptTokenGrant, githubTokenGrant, type SecretGrant } from "../secret-grants.ts";
-import type { GitIdentity, OverlayFile, RepoInit } from "../spawn.ts";
+import { chatgptTokenGrant, githubTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
+import type { GitIdentity, OverlayFile, RepoInit } from "../protocol/spawn.ts";
 import type { LoginKind } from "./project.ts";
 
 export interface PylonOverlay {

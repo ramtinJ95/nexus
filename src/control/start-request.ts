@@ -1,6 +1,6 @@
 /** What a start asks for, and the key it is stored under, which the thread starter, the queue and the pipeline share. */
 import type { NodeName } from "../ids.ts";
-import type { BootInputs } from "../spawn.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 
 /**
  * What starts a thread. `claude` makes it a Claude worker with that first prompt, which gets `/poteto-mode` in front

@@ -26,7 +26,7 @@ import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropReq
 import { peersSchema, probePort, routeAuth, type GitReadReply, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
 import { onePerClaudeSession } from "./guest/session-wake.ts";
-import type { Whois } from "../tailscale.ts";
+import type { Whois } from "../protocol/http.ts";
 import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";

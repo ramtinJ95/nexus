@@ -40,7 +40,7 @@ import { snapshot } from "../../control/tick.ts";
 import { herdrSession, sessionFacts, sessionsFile } from "../../probe/guest/sessions.ts";
 import { checkoutDir, harnesses as harnessTable, type SessionHarness } from "../../session-harness.ts";
 import { loginHosts } from "../../control/project.ts";
-import type { BootInputs, LiveSpec, OverlayFile } from "../../spawn.ts";
+import type { BootInputs, LiveSpec, OverlayFile } from "../../protocol/spawn.ts";
 import { freePort } from "../../test-support/kit.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);

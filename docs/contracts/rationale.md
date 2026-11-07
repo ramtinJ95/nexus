@@ -15,13 +15,13 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | [`src/control/reconcile.ts`](../../src/control/reconcile.ts) | The desired phase, the planner, the derived actual state, and record writes from observations | Control plane, pure |
 | [`src/probe/run.ts`](../../src/probe/run.ts) | `runJob`, `runCommand` and `commandPolicies` | Probe |
 | [`src/backends/backend.ts`](../../src/backends/backend.ts) | `VmBackend`, `Guest`, `ArtifactStore`, and the pi-sandbox fork's mapping and changes | Probe |
-| [`src/services-file.ts`](../../src/services-file.ts) | The `.nexus/services.yaml` schema and parser, the port rules, and `withPublicUrls` | Both. The pylon-vm controller loads it with type stripping |
-| [`src/spawn.ts`](../../src/spawn.ts) | What a spawn carries: `BootInputs`, `LiveSpec` and its hash, `RepoInit`, `GitIdentity` and `PylonResources` | Both |
-| [`src/secret-grants.ts`](../../src/secret-grants.ts) | `SecretGrant`, its name and host patterns, and the GitHub and ChatGPT grants | Both |
+| [`src/services-file.ts`](../../src/services-file.ts) | The `.nexus/services.yaml` schema and parser, the port rules, and `withPublicUrls`. Nexus's own ports are in [`src/protocol/ports.ts`](../../src/protocol/ports.ts) | Both. The pylon-vm controller loads it with type stripping |
+| [`src/protocol/spawn.ts`](../../src/protocol/spawn.ts) | What a spawn carries: `BootInputs`, `LiveSpec` and its hash, `RepoInit`, `GitIdentity` and `PylonResources` | Both |
+| [`src/protocol/secret-grants.ts`](../../src/protocol/secret-grants.ts) | `SecretGrant`, its name and host patterns, and the GitHub and ChatGPT grants | Both |
 | [`src/shell.ts`](../../src/shell.ts) | `shellQuote` and `installFileCommand` | Both |
 | [`src/control/project.ts`](../../src/control/project.ts) | `Project` and its effective allowlist | Control plane. No node code imports it |
 | [`src/control/overlay.ts`](../../src/control/overlay.ts) | The pylon overlay with its PYLON.md guide | Control plane. No node code imports it |
-| [`src/image/images.ts`](../../src/image/images.ts) | The image recipe and ID, template keys and build inputs, and the artifact manifests | Both |
+| [`src/protocol/images.ts`](../../src/protocol/images.ts) | The image recipe and ID, template keys and build inputs, and the artifact manifests | Both |
 | [`src/control/templates.ts`](../../src/control/templates.ts) | Template records, template choice, setup hashes, and garbage | Control plane |
 
 A reconcile tick traces through three files. `src/control/reconcile.ts` plans, `src/protocol/` carries, and `src/probe/run.ts` executes against `src/backends/backend.ts`'s `VmBackend`.

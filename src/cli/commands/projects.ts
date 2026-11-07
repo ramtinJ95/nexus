@@ -1,7 +1,7 @@
 /** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
 import { defaultProjectResources, defaultSecondReview, upgradeProject, type Project, type SecondReview } from "../../control/project.ts";
-import { secretHostPattern, secretNamePattern, type SecretGrant } from "../../secret-grants.ts";
+import { secretHostPattern, secretNamePattern, type SecretGrant } from "../../protocol/secret-grants.ts";
 import { CliError } from "../transport.ts";
 import { type Command, str, strs, int, resourcesOf, placementOptions, table } from "../kit.ts";
 

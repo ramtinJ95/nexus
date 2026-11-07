@@ -1,4 +1,4 @@
-import type { BootInputs } from "../spawn.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { diskRefusal } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";

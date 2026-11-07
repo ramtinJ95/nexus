@@ -8,12 +8,11 @@
 import { request } from "node:http";
 import type { Readable } from "node:stream";
 import { z } from "zod";
-import { PeerRefused, verifyPeer, type Whois } from "../tailscale.ts";
-import type { ArtifactManifest, ImageManifest, ImageRecipe, TemplateManifest } from "../image/images.ts";
+import { pinsSchema, type ArtifactManifest, type ImageManifest, type TemplateManifest } from "./images.ts";
 import { asSent, named, nonEmpty, parse } from "../parse.ts";
 import { isImageId, isTemplateId, type NodeName, type PortableArtifactId, type ProjectId, type TailnetNodeId } from "../ids.ts";
-import { imageId, objectAs, sha256, templateId } from "./fields.ts";
-import { probeError, ProbeHttpError, text } from "./http.ts";
+import { imageId, sha256, templateId } from "./fields.ts";
+import { probeError, ProbeHttpError, text, verifyPeer, type Whois } from "./http.ts";
 
 const manifestHeader = "x-nexus-manifest";
 /** A copy that sends nothing for this long has broken off. tar can be slow to start on a large sparse file. */
@@ -37,7 +36,7 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
   const where = `${peer.host}:${peer.port}`;
   return new Promise((resolve, reject) => {
     const req = request({ host: peer.host, port: peer.port, method: "GET", path, agent: false, timeout: artifactIdleMs, signal }, (res) => {
-      verifyPeer(res.socket, check.whois, (id) => check.peers.includes(id)).then(() => {
+      verifyPeer(res.socket, check.whois, (id) => check.peers.includes(id), `${where}: the connection closed before whois`, (id) => `${where} is tailnet node ${id ?? "unknown"}, which is not a configured peer`).then(() => {
         if (res.statusCode === 409) return text(res).then((refused) => resolve({ refused }), reject);
         if (res.statusCode !== 200) return text(res).then((body) => reject(new ProbeHttpError(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`, res.statusCode ?? 0)), reject);
         let manifest: ArtifactManifest;
@@ -50,8 +49,7 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
         resolve({ manifest, stream: res });
       }, (err: Error) => {
         res.destroy();
-        if (!(err instanceof PeerRefused)) return reject(err);
-        reject(err.peer === null ? probeError("unreachable", `${where}: the connection closed before whois`) : probeError("forbidden", `${where} is tailnet node ${err.peer.id ?? "unknown"}, which is not a configured peer`));
+        reject(err);
       });
     });
     req.on("timeout", () => req.destroy(new Error(`${where} sent nothing for ${artifactIdleMs} ms`)));
@@ -61,7 +59,7 @@ export function fetchArtifact(peer: { host: string; port: number }, artifact: Po
 }
 
 const imageManifestSchema = z.looseObject({
-  id: imageId, gondolinBuildId: nonEmpty, pins: objectAs<ImageRecipe["pins"]>(), builtOn: named<NodeName>(), builtAt: nonEmpty, sha256,
+  id: imageId, gondolinBuildId: nonEmpty, pins: pinsSchema, builtOn: named<NodeName>(), builtAt: nonEmpty, sha256,
 }) satisfies z.ZodType<ImageManifest>;
 const templateManifestSchema = z.looseObject({
   id: templateId, key: z.looseObject({ project: named<ProjectId>(), image: imageId, setupHash: nonEmpty }), commit: nonEmpty, builtAt: nonEmpty, sha256,

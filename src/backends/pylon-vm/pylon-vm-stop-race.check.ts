@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { BootInputs } from "../../spawn.ts";
+import type { BootInputs } from "../../protocol/spawn.ts";
 import { checkpointId, pylonIdOf, threadOfPylon, type ThreadId } from "../../ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 import { unstamped } from "../../pylon-vm/controller-log.ts";

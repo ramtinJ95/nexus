@@ -24,15 +24,15 @@ import { processStream } from "../process-stream.ts";
 import { type BackendPylon, type Guest, type VmBackend } from "../backends/backend.ts";
 import { commandPolicies, type CommandPolicy } from "./run.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
-import type { BootInputs } from "../spawn.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
-import type { ArtifactManifest, ImageManifest, TemplateManifest } from "../image/images.ts";
+import type { ArtifactManifest, ImageManifest, TemplateManifest } from "../protocol/images.ts";
 import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../backends/fake-guest.ts";
 import { outputsDir } from "./guest/outputs.ts";
 import { sessionsFile } from "./guest/sessions.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
-import { tempDir, until } from "../test-support/kit.ts";
+import { tempDir, testImage, until } from "../test-support/kit.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;
@@ -328,7 +328,7 @@ test("the control plane reads the manifest of an artifact the node holds, and a 
   const { client, fake, base, callAs } = await setup(t);
   const built: ImageManifest = {
     id: "img-0123456789ab", gondolinBuildId: "b1", builtOn: node, builtAt: "2027-01-01T00:00:00.000Z", sha256: "a".repeat(64),
-    pins: { debianDigest: "d", node: "24.22.1", nodeSha256: "n", claudeCode: "c", pi: "p", herdr: "h", piEnv: "e", piEnvSha256: "s", gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "g", neovim: "0.12.6", neovimSha256: "v" },
+    pins: testImage().pins,
   };
   fake.offer(built, "image bytes");
   fake.offer(templateManifest("b".repeat(64)), "template bytes");

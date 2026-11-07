@@ -18,8 +18,8 @@ import type {
 } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { chatgptTokenGrant } from "../secret-grants.ts";
-import { liveHashOf, type LiveSpec } from "../spawn.ts";
+import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
+import { liveHashOf, type LiveSpec } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ReportedEvent } from "../events.ts";
 import { transcriptStart } from "./claude-transcript.ts";

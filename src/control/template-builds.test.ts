@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tickTemplateBuild } from "./template-builds.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { chooseTemplate, type BuildingTemplate, type TemplateRecord } from "./templates.ts";
-import type { TemplateKey } from "../image/images.ts";
+import type { TemplateKey } from "../protocol/images.ts";
 import type { RemoteProject } from "./project.ts";
 import type { ImageId, JobId, NodeName, ProjectId } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";

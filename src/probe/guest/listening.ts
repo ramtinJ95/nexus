@@ -7,7 +7,7 @@
  * is left out, and so are Nexus's own listeners, the relay's among them.
  */
 import type { Guest } from "../../backends/backend.ts";
-import { reservedPorts } from "../../services-file.ts";
+import { reservedPorts } from "../../protocol/ports.ts";
 import type { ListeningFact } from "../../protocol/observations.ts";
 
 /** The kernel's TCP_LISTEN state, as /proc/net/tcp prints it. */

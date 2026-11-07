@@ -15,7 +15,7 @@ import type { HostBridgeAnswer } from "../host-bridge.ts";
 import type { PortLinks } from "./run.ts";
 import { addOutput, listOutputs, OutputRefused } from "./guest/outputs.ts";
 import { serviceDecl, serviceName, type ServiceDecl, type ServiceName } from "../services-file.ts";
-import type { PreviewAssignment } from "../spawn.ts";
+import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
 import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
 import { parseJson } from "../parse.ts";

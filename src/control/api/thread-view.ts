@@ -11,7 +11,7 @@ import { bootNetwork } from "../threads.ts";
 import { herdrSession } from "../../probe/guest/sessions.ts";
 import { judgmentView } from "../judgment.ts";
 import { linkedName } from "../../services-file.ts";
-import type { BootInputs } from "../../spawn.ts";
+import type { BootInputs } from "../../protocol/spawn.ts";
 import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";

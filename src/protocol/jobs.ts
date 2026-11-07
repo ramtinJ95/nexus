@@ -12,8 +12,8 @@
  *   reads through `parseSubmitReply`, and the probe through `parseJobEnvelope` and `encodeSubmitReply`.
  */
 import { z } from "zod";
-import type { BootInputs, LiveSpec } from "../spawn.ts";
-import type { ImageRecipe, TemplateBuildInputs } from "../image/images.ts";
+import type { BootInputs, LiveSpec } from "./spawn.ts";
+import type { ImageRecipe, TemplateBuildInputs } from "./images.ts";
 import { asSent, named, nonEmpty, parseJson, unchecked } from "../parse.ts";
 import {
   isArtifactId, isCheckpointId, isPortableArtifactId, type ArtifactId, type CheckpointId, type ImageId, type JobId, type LiveHash, type NodeName,

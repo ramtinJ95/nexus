@@ -16,9 +16,9 @@ import type { Readable } from "node:stream";
 import type { CheckpointId, ImageId, NodeName, PortableArtifactId, PylonId, TemplateId } from "../ids.ts";
 import type { BrokenCause, GuestNotAnswering, PausedSession, ServiceFact } from "../protocol/observations.ts";
 import type { ByteStream } from "../protocol/streams.ts";
-import type { BootInputs, LiveSpec, OverlayFile } from "../spawn.ts";
+import type { BootInputs, LiveSpec, OverlayFile } from "../protocol/spawn.ts";
 import type { ServiceDecl, ServiceName } from "../services-file.ts";
-import type { ArtifactManifest, ImageRecipe, TemplateBuildInputs } from "../image/images.ts";
+import type { ArtifactManifest, ImageRecipe, TemplateBuildInputs } from "../protocol/images.ts";
 import type { HostBridge } from "../host-bridge.ts";
 
 export interface VmBackend {

@@ -1,7 +1,8 @@
 import { join, posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
-import { linkedName, parseServicesFile, relayPorts, reservedPortMessage, reservedPorts, serviceReference, wantsPreview, withPublicUrls } from "../services-file.ts";
+import { linkedName, parseServicesFile, serviceReference, wantsPreview, withPublicUrls } from "../services-file.ts";
+import { relayPorts, reservedPortMessage, reservedPorts } from "../protocol/ports.ts";
 import { shellQuote as q } from "../shell.ts";
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, direct, readGuestFile, serviceRunning, startService, stopService } from "./guest.ts";

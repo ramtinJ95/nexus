@@ -8,13 +8,12 @@ import { request } from "node:http";
 import { isIPv6, type Socket } from "node:net";
 import { BodyTooLarge, readBody } from "./request-body.ts";
 import type { TailnetNodeId } from "./ids.ts";
+import type { Whois } from "./protocol/http.ts";
 
-/** Resolves to null when tailscaled knows no tailnet node at that address. Rejects when tailscaled cannot answer. */
-export type Whois = (address: string, port: number) => Promise<TailnetNodeId | null>;
 /** Whois with the node's MagicDNS name, such as infra-testbench.example.ts.net, which tailscaled reports as Node.Name. */
 export type WhoisNode = (address: string, port: number) => Promise<{ id: TailnetNodeId; host: string } | null>;
 
-/** Tailscale's stable node ID. The bootstrap deployer checks it without protocol/fields.ts, whose zod it does not have. */
+/** Tailscale's stable node ID, for the bootstrap deployer, which has neither zod nor tailnetNodeIdSchema in protocol/fields.ts. */
 export const tailnetNodeIdPattern = /^n[A-Za-z0-9]+$/;
 
 export const linuxTailscaledSocket = "/var/run/tailscale/tailscaled.sock";
@@ -88,7 +87,8 @@ export class PeerRefused extends Error {
 
 /**
  * Resolves once whois names the socket's peer as a node `accepts`, waiting first for a socket still connecting.
- * Rejects with PeerRefused, or with whois's own error when tailscaled cannot answer.
+ * Rejects with PeerRefused, or with whois's own error when tailscaled cannot answer. The bootstrap deployer checks the
+ * control plane with it. The probe transports use protocol/http.ts's, which the bootstrap does not have.
  */
 export async function verifyPeer(socket: Socket, whois: Whois, accepts: (id: TailnetNodeId) => boolean): Promise<void> {
   if (socket.connecting) await new Promise((settled) => socket.once("connect", settled).once("close", settled));

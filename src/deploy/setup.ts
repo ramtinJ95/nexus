@@ -17,7 +17,8 @@ import { digestPattern, tokenDigest, tsNet } from "./model.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { isImageId } from "../ids.ts";
-import { localApiWhois, type Whois } from "../tailscale.ts";
+import { localApiWhois } from "../tailscale.ts";
+import type { Whois } from "../protocol/http.ts";
 
 const exec = promisify(execFile);
 
