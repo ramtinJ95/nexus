@@ -7,7 +7,7 @@ import type { ActualState, DesiredPhase } from "./reconcile.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { GuestNotAnswering } from "../protocol/observations.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { SessionHarness } from "../session-harness.ts";
+import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import type { ClaudeResume, ClaudeSent, Output, Preview, Session, Thread } from "./thread-store.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { PullRequest } from "./github.ts";

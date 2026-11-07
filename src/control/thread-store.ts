@@ -24,7 +24,7 @@ import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import type { HerdrStatus, NodeObservation } from "../protocol/observations.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
-import type { SessionHarness } from "../session-harness.ts";
+import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "./tick.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";

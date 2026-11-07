@@ -18,6 +18,8 @@ export type PylonSource =
   | { kind: "resume"; checkpoint: CheckpointId } // the pylon's own disk on this node
   | { kind: "fresh"; preSetup: string | null }; // image only: clone or init, preSetup and .nexus/setup inline. Used when no template exists
 
+/** Where the repository is checked out in every pylon. */
+export const checkoutDir = "/home/user/workspace/repo";
 export interface Checkout { branch: string; commit: string }
 /**
  * What a fresh or template boot puts at /home/user/workspace/repo, decided once when the thread starts. An empty

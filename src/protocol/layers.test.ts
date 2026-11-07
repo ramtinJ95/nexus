@@ -13,6 +13,6 @@ test("src/protocol imports only Node, zod, the ID and parse foundations, src/uti
     .filter((target) => !target.startsWith("node:") && target !== "zod")
     .map((target) => relative(src, resolve(import.meta.dirname, target)))
     .filter((target) => dirname(target) !== "protocol" && dirname(target) !== "util")));
-  // events.ts and session-harness.ts are left for the change that moves the event and harness schemas.
-  assert.deepEqual([...outside].sort(), ["events.ts", "ids.ts", "parse.ts", "session-harness.ts"]);
+  // events.ts is left for the change that moves the event schemas.
+  assert.deepEqual([...outside].sort(), ["events.ts", "ids.ts", "parse.ts"]);
 });

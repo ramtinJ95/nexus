@@ -38,9 +38,10 @@ import { unstamped } from "../../pylon-vm/controller-log.ts";
 import { envelope } from "../../control/reconcile.ts";
 import { snapshot } from "../../control/tick.ts";
 import { herdrSession, sessionFacts, sessionsFile } from "../../probe/guest/sessions.ts";
-import { checkoutDir, harnesses as harnessTable, type SessionHarness } from "../../session-harness.ts";
+import type { SessionHarness } from "../../protocol/agent-kinds.ts";
+import { launchers } from "../../probe/guest/launchers.ts";
 import { loginHosts } from "../../control/project.ts";
-import type { BootInputs, LiveSpec, OverlayFile } from "../../protocol/spawn.ts";
+import { type BootInputs, checkoutDir, type LiveSpec, type OverlayFile } from "../../protocol/spawn.ts";
 import { freePort } from "../../test-support/kit.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
@@ -209,7 +210,7 @@ try {
   step("FACTS_AFTER_WAKE", facts);
   assert.deepEqual(facts.map((f) => f.harness).sort(), [...harnesses].sort());
   for (const record of file.sessions as { herdrPane: string; harness: SessionHarness }[]) {
-    const { agent } = harnessTable[record.harness];
+    const agent = launchers[record.harness];
     if (agent === null) continue;
     assert.ok(await agentRuns(record.herdrPane, agent.kind), `${record.harness}'s pane ${record.herdrPane} runs its agent`);
   }

@@ -17,7 +17,7 @@ import type { NodeName, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { checkoutDir } from "../session-harness.ts";
+import { checkoutDir } from "../protocol/spawn.ts";
 import { runningProbe } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";

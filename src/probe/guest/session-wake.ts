@@ -9,7 +9,7 @@ import type { Guest } from "../../backends/backend.ts";
 import type { PylonId } from "../../ids.ts";
 import type { PausedSession } from "../../protocol/observations.ts";
 import { recordSessions, relaunchSessions, toPaused, type RelaunchOutcome } from "./sessions.ts";
-import { harnesses } from "../../session-harness.ts";
+import { agentKinds } from "../../protocol/agent-kinds.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
 export type PylonLog = (line: string) => Promise<void>;
@@ -95,6 +95,6 @@ function outcomeLine(o: RelaunchOutcome): string {
     case "present": return `sessions: ${session} was already running in ${o.herdrPane}`;
     case "relaunched": return `sessions: relaunched ${session} in ${o.herdrPane}`;
     case "failed": return `sessions: ${session} did not come back${o.herdrPane === null ? "" : `, and its pane ${o.herdrPane} stays open`}: ${o.message}`;
-    case "dropped": return `sessions: dropped ${session}, a second record of ${harnesses[o.record.harness].label} session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its pane ${o.herdrPane}`}`;
+    case "dropped": return `sessions: dropped ${session}, a second record of ${agentKinds[o.record.harness].label} session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its pane ${o.herdrPane}`}`;
   }
 }

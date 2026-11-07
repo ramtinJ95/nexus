@@ -19,7 +19,7 @@ import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
-import { requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
+import { checkoutDir, requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
@@ -28,7 +28,7 @@ import { imageIdOf, type TemplateManifest } from "../../protocol/images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
-import { checkoutDir, sessionHarnessSchema } from "../../session-harness.ts";
+import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
 import { controlSocket, run, socketPathLimit, stopForRetry } from "../../pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../../pylon-vm/host-bridge.ts";

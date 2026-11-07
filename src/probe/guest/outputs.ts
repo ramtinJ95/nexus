@@ -12,7 +12,7 @@ import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
 import { parseJson } from "../../parse.ts";
 import type { DeclaredOutput } from "../../protocol/observations.ts";
-import { checkoutDir } from "../../session-harness.ts";
+import { checkoutDir } from "../../protocol/spawn.ts";
 
 export const outputsDir = "/home/user/.nexus/outputs";
 
