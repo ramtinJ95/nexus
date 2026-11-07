@@ -1,6 +1,6 @@
 /**
  * The probe entrypoint: `node src/probe/main.ts [config]`, run by deploy/nexus-probe.service. The config
- * path defaults to /etc/nexus/probe.json.
+ * path defaults to the node's probe.json.
  *
  * SIGTERM or SIGINT closes the server and aborts running jobs, which the next job converges from. It never
  * stops a pylon: each VM runs under a detached controller in its own session (launch in
@@ -10,6 +10,7 @@
  * pauses each running pylon first, and the next boot's probe marks them for a wake (shutdown.ts).
  * A second signal during the close kills the probe at once.
  */
+import { join } from "node:path";
 import { createDockerBackend } from "../backends/docker-backend.ts";
 import { createPylonVmBackend } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import { sweepScratch } from "../pylon-vm/client.ts";
@@ -19,8 +20,9 @@ import { nodeSecrets, parseSelfDnsName, probeAuth, readProbeConfig, readSecretsF
 import { tailscaleCli } from "./serve.ts";
 import { startProbe } from "./server.ts";
 import { closeProbe } from "./shutdown.ts";
+import { configFiles, prefix, releasesDir, stateDirs } from "../node-layout.ts";
 
-const config = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
+const config = await readProbeConfig(process.argv[2] ?? configFiles.probe);
 const control = await readControlPlane();
 // One source, so the probe's pre-boot check, the VMs and the control plane's handoffs see the same values.
 const secrets = nodeSecrets(await readSecretsFile(config.secretsFile));
@@ -54,8 +56,8 @@ const probe = await startProbe({
   shutdownFile: config.shutdownFile,
   deployerWakeFile: config.deployerWakeFile,
   ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
-  // /var/lib/nexus, the probe user's home, holds the Docker and Gondolin caches of image builds.
-  watched: [...config.backend.artifacts === undefined ? [] : [config.backend.artifacts], "/var/lib/nexus", "/var/lib/nexus-control", "/opt/nexus/releases"],
+  // The probe user's home holds the Docker and Gondolin caches of image builds.
+  watched: [...config.backend.artifacts === undefined ? [] : [config.backend.artifacts], stateDirs.probe, stateDirs.control, join(prefix, releasesDir)],
 });
 console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend, trusting control plane ${control.tailnetNodeId}`);
 

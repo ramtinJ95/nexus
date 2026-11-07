@@ -12,11 +12,11 @@ import { basename, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
 import { tailnetNodeIdPattern } from "../tailscale.ts";
+import { configFiles, unitNames } from "../node-layout.ts";
 
 export interface ControlPlane { tailnetNodeId: string; url: string }
 
-export const controlPlanePath = "/etc/nexus/control-plane.json";
-const fileName = basename(controlPlanePath);
+const fileName = basename(configFiles.controlPlane);
 
 export function parseControlPlane(value: unknown): ControlPlane {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("must be a JSON object with tailnetNodeId and url");
@@ -43,7 +43,7 @@ async function readAt(path: string): Promise<ControlPlane | undefined> {
   }
 }
 
-export async function readControlPlane(path = controlPlanePath): Promise<ControlPlane> {
+export async function readControlPlane(path = configFiles.controlPlane): Promise<ControlPlane> {
   const control = await readAt(path);
   if (control === undefined) throw new Error(`${path} is missing. deploy/install.sh writes it, and so does deploy/set-control-plane.sh`);
   return control;
@@ -69,7 +69,7 @@ export function legacyControlPlane(probe: unknown, deployer: unknown): ControlPl
  * Whoever can write the file picks whom the root deployer trusts, so it must belong to the user that reads it, root on a
  * node, and be writable by that user alone. The deployer refuses it otherwise, and so does the install that adopts it.
  */
-export async function checkControlPlaneFile(path = controlPlanePath): Promise<void> {
+export async function checkControlPlaneFile(path = configFiles.controlPlane): Promise<void> {
   const { uid, mode } = await stat(path);
   if (uid !== process.getuid?.() || (mode & 0o022) !== 0) throw new Error(`${path} must belong to root and be writable by root alone. Run sudo chown root:root ${path} && sudo chmod 0644 ${path}`);
 }
@@ -168,13 +168,13 @@ async function restartProbe(): Promise<void> {
   const systemctl = async (args: string[]) => (await promisify(execFile)("systemctl", args)).stdout.trim();
   let loaded: string;
   try {
-    loaded = await systemctl(["show", "nexus-probe.service", "--property=LoadState", "--value"]);
+    loaded = await systemctl(["show", unitNames.probe, "--property=LoadState", "--value"]);
   } catch (err) {
     throw new Error(`could not tell whether this machine has a probe, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}`);
   }
   if (loaded === "not-found") return;
   try {
-    await systemctl(["restart", "nexus-probe.service"]);
+    await systemctl(["restart", unitNames.probe]);
   } catch (err) {
     throw new Error(`the probe did not restart, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}. Fix the restart and run this again, which restarts the probe whether it runs or not`);
   }

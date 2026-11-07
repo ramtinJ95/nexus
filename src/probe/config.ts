@@ -5,7 +5,7 @@
  */
 import { open, readFile } from "node:fs/promises";
 import { BlockList, isIPv6 } from "node:net";
-import { basename, dirname, isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backends/backend.ts";
 import { parseJson } from "../parse.ts";
@@ -14,6 +14,7 @@ import { type ImageId, isImageId, type TailnetNodeId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { heldSecrets } from "../protocol/observations.ts";
 import { probePort, type ProbeAuthConfig } from "../protocol/routes.ts";
+import { deployerWakeFile, stateDirs } from "../node-layout.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 /** Tailscale's address ranges. BlockList compares parsed addresses, so every spelling of an address matches. */
@@ -60,15 +61,14 @@ const configSchema = z.strictObject({
   ])),
   secretsFile: absolutePath,
   /** In the probe's state directory, so the next boot's probe reads what the node's shutdown paused. */
-  shutdownFile: absolutePath.default("/var/lib/nexus/shutdown.json"),
-  /** In the probe's state directory, which deploy/nexus-deployer.path watches to start the node's deployer. */
-  deployerWakeFile: absolutePath.default("/var/lib/nexus/deployer-wake"),
+  shutdownFile: absolutePath.default(join(stateDirs.probe, "shutdown.json")),
+  deployerWakeFile: absolutePath.default(deployerWakeFile),
   /** Omitted: the probe publishes no previews, and a spawn that assigns one fails. */
   previews: z.strictObject({
     /** The gateway's loopback port. Keep it fixed: the serve entries that proxy to it are how the probe knows its own. */
     gatewayPort: z.int().min(1).max(65535),
     /** In the probe's state directory, so paused pylons keep their routes across restarts. */
-    routesFile: absolutePath.default("/var/lib/nexus/preview-routes.json"),
+    routesFile: absolutePath.default(join(stateDirs.probe, "preview-routes.json")),
   }).optional(),
 });
 

@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
@@ -160,6 +160,25 @@ test("health.ts reads the release-commit file release.sh writes at the release's
     writeFileSync(join(dir, "release-commit"), `${commit}\n`);
     const script = `const { runningCommit } = await import(${JSON.stringify(join(dir, "src/deploy/health.ts"))}); process.stdout.write(String(runningCommit));`;
     assert.equal(execFileSync(process.execPath, ["--input-type=module", "-e", script], { cwd: dir, encoding: "utf8" }), commit);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("health.ts runs as no commit, and says why only when release-commit is there but cannot be read", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-release-commit-"));
+  try {
+    for (const file of closure("src/deploy/health.ts").files) {
+      mkdirSync(join(dir, dirname(file)), { recursive: true });
+      cpSync(join(root, file), join(dir, file));
+    }
+    writeFileSync(join(dir, "package.json"), '{"type":"module"}\n');
+    const script = `const { runningCommit } = await import(${JSON.stringify(join(dir, "src/deploy/health.ts"))}); process.stdout.write(String(runningCommit));`;
+    const run = () => spawnSync(process.execPath, ["--input-type=module", "-e", script], { cwd: dir, encoding: "utf8" });
+    const missing = run();
+    assert.deepEqual([missing.stdout, missing.stderr], ["null", ""], "a checkout without release-commit says nothing");
+    mkdirSync(join(dir, "release-commit"));
+    const unreadable = run();
+    assert.equal(unreadable.stdout, "null");
+    assert.match(unreadable.stderr, /^the running release's commit could not be read, so \/v1\/health reports none: Error: EISDIR/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

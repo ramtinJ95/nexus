@@ -2,7 +2,7 @@ import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, type Command, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
+import { command, checkoutMerged, type Command, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { planDeploy, quarantined, schemaStep, type Attempt, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
@@ -10,6 +10,7 @@ import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois } from "../tailscale.ts";
+import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-layout.ts";
 
 export interface WorkerConfig {
   controlUrl: string;
@@ -27,21 +28,18 @@ export function parseWorkerConfig(deployer: unknown, control: ControlPlane): Wor
   return { controlUrl: control.url, controlNodeId: control.tailnetNodeId, token: v.token, drainTimeoutMs: v.drainTimeoutMs, healthTimeoutMs: v.healthTimeoutMs };
 }
 
-const prefix = "/opt/nexus";
-const configPath = "/etc/nexus/deployer.json";
-
 export async function runWorker(check = false): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("deployer must run as root");
-  const mode = await stat(configPath);
+  const mode = await stat(configFiles.deployer);
   if (mode.uid !== 0 || (mode.mode & 0o077) !== 0) throw new Error("deployer.json must be root-owned mode 0600");
   await checkControlPlaneFile();
-  const config = parseWorkerConfig(await readJson(configPath, null), await readControlPlane());
+  const config = parseWorkerConfig(await readJson(configFiles.deployer, null), await readControlPlane());
   const peer = { id: config.controlNodeId, whois: localApiWhois() };
   const api = (path: string, body?: unknown) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer);
   if (check) { await api("release"); return; }
   const roles: Role[] = [];
   for (const role of ["control", "probe"] as const) {
-    try { await stat(join(prefix, "deployer", "roles", role)); roles.push(role); }
+    try { await stat(join(prefix, deployerFiles.roles, role)); roles.push(role); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
   await reconcileRoles(roles, config, api);
@@ -88,6 +86,8 @@ export interface RegistryPaths {
 
 /** A backup slower than this fails the install, so a migrating deploy fits inside the supervisor's 900 s with its build. */
 export const backupBudgetMs = 240_000;
+/** The longest a control install waits for idle in one poll, so it yields below the supervisor's 900 s. */
+export const drainYieldMs = 60_000;
 
 export function nodeRegistry(paths: RegistryPaths, run: Command = command, budgetMs = backupBudgetMs): RegistrySchema {
   return {
@@ -108,7 +108,7 @@ export function nodeRegistry(paths: RegistryPaths, run: Command = command, budge
       const started = Date.now();
       // A start that joins a daily run already going returns when that run ends, so the second start runs one of its own.
       for (let tries = 0; tries < 2 && Date.now() - started < budgetMs; tries++) {
-        await run("systemctl", ["start", "nexus-backup.service"], paths.prefix, Math.max(1, budgetMs - (Date.now() - started)));
+        await run("systemctl", ["start", unitNames.backup], paths.prefix, Math.max(1, budgetMs - (Date.now() - started)));
         const status = await readJson(paths.status, null) as { ranAt: string; succeeded: boolean; newest: { name: string } | null } | null;
         if (status?.succeeded === true && status.newest !== null && Date.parse(status.ranAt) >= started) return status.newest.name;
       }
@@ -117,7 +117,7 @@ export function nodeRegistry(paths: RegistryPaths, run: Command = command, budge
   };
 }
 
-const nodeBoundary = { prefix, etc: "/etc/nexus", units: "/etc/systemd/system", run: command, checkout: checkoutMerged, registry: nodeRegistry({ config: "/etc/nexus/control.json", home: "/var/lib/nexus-control", prefix, status: "/var/lib/nexus-backup/status.json" }) };
+const nodeBoundary = { prefix, etc, units: unitDir, run: command, checkout: checkoutMerged, registry: nodeRegistry({ config: configFiles.control, home: stateDirs.control, prefix, status: backupStatusFile }) };
 type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema };
 
 const restoreSteps = `deploy/README.md's "A failed deploy past a registry migration"`;
@@ -151,15 +151,15 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const registry = role === "control" ? boundary.registry : undefined;
   const schemaAt = async (dir: string): Promise<SchemaVersions> => ({ registry: await registry!.version(), release: await registry!.known(dir) });
   const link = releaseLink(prefix, role);
-  const service = `nexus-${role}.service`;
+  const service = unitNames[role];
   const unit = join(units, service);
   const savedUnit = join(prefix, `${role}-deploy.unit`);
   const reportPath = join(prefix, `${role}-deploy-report.json`);
-  const repo = join(prefix, "deployer", "repo");
+  const repo = join(prefix, deployerFiles.repo);
   const local = await readJson(join(etc, `${role}.json`), null) as { listen: { host: string; port: number } };
   const healthUrl = new URL(`http://${urlHost(local.listen.host)}:${local.listen.port}/v1/health`);
   const healthy = async () => {
-    const expected = await commitAt(link);
+    const expected = await readReleaseCommit(link);
     const until = Date.now() + config.healthTimeoutMs;
     do {
       try {
@@ -171,7 +171,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     return false;
   };
   const report = async (state: ReleaseReport["state"], target: string | null, reason: string | null = null) => {
-    const wire: ReportBody = { role, commit: await commitAt(link), target, state, reason };
+    const wire: ReportBody = { role, commit: await readReleaseCommit(link), target, state, reason };
     const saved = await readJson(reportPath, null).catch(() => null) as ReleaseReport | null;
     if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
       await saveJson(reportPath, { ...wire, observedAt: Date.now() });
@@ -192,7 +192,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       await checkout(repo, commit);
       await copyFile(unit, savedUnit);
       await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
-      return `releases/${commit}`;
+      return `${releasesDir}/${commit}`;
     },
     async beforeSwitch() {
       if (role === "probe") {
@@ -269,7 +269,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     if (role === "control") await api("drain", { commit: desired!, release: true } satisfies DrainBody).catch(() => {});
     return;
   }
-  const current = { commit: await commitAt(link), healthy: await healthy() };
+  const current = { commit: await readReleaseCommit(link), healthy: await healthy() };
   const observedControl = controlHealth(view);
   const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false });
   if (step.kind === "idle" || step.kind === "healthy") {
@@ -287,8 +287,8 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
         if (next.kind === "install") break;
         if (next.kind === "stop") throw new Error(next.reason);
         await report("waiting-for-idle", desired, `Waiting for idle ${Math.floor((Date.now() - view.desired!.requestedAt) / 1000)}s since release request; threads: ${status.threads?.join(", ") || "unknown"}${status.entering ? "; submissions entering" : ""}`);
-        // Yield below the fixed supervisor's deadline, retaining the lease for the next 15-second poll.
-        if (Date.now() - start >= Math.min(config.drainTimeoutMs, 60_000)) { keepDrain = true; return; }
+        // Retains the lease for the next 15-second poll.
+        if (Date.now() - start >= Math.min(config.drainTimeoutMs, drainYieldMs)) { keepDrain = true; return; }
         await sleep(1000);
       }
       renewal = setInterval(() => { void drain().catch(() => { drainLost = true; }); }, 20_000);
@@ -306,12 +306,12 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
 }
 
 async function promoteWorker(commit: string, repo: string, prefix: string, run: typeof command): Promise<void> {
-  const target = `releases/${commit}`;
-  const rejected = await readFile(join(prefix, "deployer", "rejected"), "utf8").catch(() => "");
-  if (rejected.trim() === target) return;
+  const target = `${releasesDir}/${commit}`;
+  const rejected = join(prefix, deployerFiles.rejected);
+  if ((await readFile(rejected, "utf8").catch(() => "")).trim() === target) return;
   try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
-  catch { await writeFile(join(prefix, "deployer", "rejected"), target); return; }
-  await pointLink(join(prefix, "deployer-current"), target);
+  catch { await writeFile(rejected, target); return; }
+  await pointLink(join(prefix, deployerLink), target);
 }
 
 if (import.meta.main) runWorker(process.argv.includes("--check")).catch((error: unknown) => { console.error(error); process.exitCode = 1; });

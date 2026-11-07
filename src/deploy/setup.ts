@@ -10,27 +10,28 @@ import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
-import { claudeNames, gitKnownHosts, harnessSignedIn, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
-import { controlPlanePath, readControlPlane } from "./control-plane.ts";
+import { claudeNames, harnessSignedIn, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
+import { readControlPlane } from "./control-plane.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { isImageId } from "../ids.ts";
 import { localApiWhois } from "../tailscale.ts";
+import { configFiles, rootPath, servicePath, stateDirs, users } from "../node-layout.ts";
 import type { Whois } from "../protocol/http.ts";
 
 const exec = promisify(execFile);
 
 export const paths = {
-  control: "/etc/nexus/control.json",
-  controlPlane: controlPlanePath,
-  probe: "/etc/nexus/probe.json",
-  deployer: "/etc/nexus/deployer.json",
+  control: configFiles.control,
+  controlPlane: configFiles.controlPlane,
+  probe: configFiles.probe,
+  deployer: configFiles.deployer,
   secrets: stores.claude.file,
   gitKey: stores.gitKey.file,
-  gitKnownHosts,
-  artifacts: "/var/lib/nexus/artifacts",
+  gitKnownHosts: configFiles.gitKnownHosts,
+  artifacts: `${stateDirs.probe}/artifacts`,
 } as const;
 
 export const controlPort = 7470;
@@ -240,7 +241,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     const nodeEntry = (d: Device) => ({ name: d.name, tailnetHost: d.host, tailnetNodeId: d.id });
     const generated: JsonObject = {
       ...tsNet.test(self.host) ? { https: { hostname: self.host } } : {},
-      db: "/var/lib/nexus-control/registry.db",
+      db: `${stateDirs.control}/registry.db`,
       listen: { host: self.ip, port: controlPort, hostnames: [self.name, self.host, self.ip] },
       self: { tailnetNodeId: self.id },
       nodes: [nodeEntry(self), ...addNodes.map((a) => nodeEntry(a.node))],
@@ -252,7 +253,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: "main" } },
       ...flags.githubWatch ? { github: { tokenFile: stores.githubWatch.file } } : {},
       harness: {
-        storage: "/var/lib/nexus-control/harness.sqlite",
+        storage: `${stateDirs.control}/harness.sqlite`,
         credentials: stores.harness.file,
         model: { provider: "openai", modelId: "gpt-6-astra" },
       },
@@ -274,7 +275,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     auth: { peers: [...control === undefined ? [] : [control.id], ...addNodes.map((a) => a.node.id), ...peers.map((d) => d.id)] },
     backend: {
       kind: "pylon-vm",
-      stateRoot: "/var/lib/nexus/pylons",
+      stateRoot: `${stateDirs.probe}/pylons`,
       // A probe.json from before the artifact store names its store through `images`, which the probe refuses beside `artifacts`.
       ...isObject(existingBackend) && "images" in existingBackend ? {} : { artifacts: paths.artifacts },
       ...existing.gitKey ? { gitSsh: { privateKeyFile: paths.gitKey, knownHostsFile: paths.gitKnownHosts } } : {},
@@ -378,8 +379,8 @@ export function left(facts: Facts): Item[] {
   }
   if (facts.role === "control" && !facts.dockerGroup) items.push({
     stage: "setup",
-    say: "Image builds run here and need Docker. Membership of the docker group is root-equivalent, so adding nexus to it is your call.",
-    run: ["sudo usermod --append --groups docker nexus && sudo systemctl restart nexus-probe"],
+    say: `Image builds run here and need Docker. Membership of the docker group is root-equivalent, so adding ${users.probe} to it is your call.`,
+    run: [`sudo usermod --append --groups docker ${users.probe} && sudo systemctl restart nexus-probe`],
   });
   if (facts.role === "control" && !facts.image) items.push({
     stage: "image",
@@ -439,7 +440,7 @@ async function write(flags: Flags): Promise<number> {
 
 /** The package manager, and whether Docker's own docker-ce-cli package is installed or the distribution's Docker is. */
 async function dockerSource(): Promise<Docker> {
-  const env = { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" };
+  const env = { PATH: rootPath };
   const succeeds = (program: string, args: string[]) => exec(program, args, { env }).then(() => true, () => false);
   const from = (installed: boolean) => installed ? "docker" as const : "distribution" as const;
   if (await succeeds("sh", ["-c", "command -v apt-get"])) return { kind: "no-buildx", manager: "apt", from: from(await exec("dpkg-query", ["-W", "-f=${db:Status-Status}", "docker-ce-cli"], { env }).then(({ stdout }) => stdout === "installed", () => false)) };
@@ -463,8 +464,8 @@ async function gather(flags: Flags): Promise<Facts> {
   }
   const { callers } = await readJson(paths.control) as { callers: string[] };
   const credentials = await system.read(at.harness).catch(() => undefined);
-  const groups = await exec("id", ["-nG", "nexus"]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
-  const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: "/usr/local/bin:/usr/bin" } }).then(() => true, () => false);
+  const groups = await exec("id", ["-nG", users.probe]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
+  const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: servicePath } }).then(() => true, () => false);
   const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource();
   const image = await holdsImage(paths.artifacts);
   return {
