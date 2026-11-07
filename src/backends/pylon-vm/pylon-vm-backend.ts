@@ -18,7 +18,6 @@ import { artifactDirectory, manifestFiles, tarCodec } from "../../image/artifact
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
-import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import { checkoutDir, requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
@@ -28,7 +27,8 @@ import { imageIdOf, type TemplateManifest } from "../../protocol/images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
-import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
+import { agentKinds, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
+import { launchers } from "../../probe/guest/launchers.ts";
 import { controlSocket, run, socketPathLimit, stopForRetry } from "../../pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../../pylon-vm/host-bridge.ts";
@@ -164,46 +164,15 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
   ].join("\n"), "/home/user");
 }
 
-/**
- * Sets pi's `openai` entry in ~/.pi/agent/auth.json, keeping every other provider's, to a ChatGPT sign-in whose access
- * token is the chatgpt login's placeholder, which the host swaps for the real token toward api.openai.com only. With no
- * refresh token and an expiry in 2100, pi never tries a refresh. Tests run it to write the file as a pylon does.
- */
-export function piChatgptLoginCommand(): string {
-  return `node -e ${q(piChatgptLogin)}`;
-}
-const piChatgptLogin = `
-const fs = require("node:fs");
-const path = require("node:path");
-const dir = path.join(process.env.HOME, ".pi", "agent");
-const file = path.join(dir, "auth.json");
-const access = process.env.${chatgptTokenGrant.name};
-if (!access) {
-  console.log("pi: ${chatgptTokenGrant.name} is not set, so ~/.pi/agent/auth.json is left as it is");
-  process.exit(1);
-}
-let auth = {};
-try {
-  auth = JSON.parse(fs.readFileSync(file, "utf8"));
-} catch (error) {
-  if (error.code !== "ENOENT") auth = null;
-}
-if (auth === null || typeof auth !== "object" || Array.isArray(auth)) {
-  console.log("pi: ~/.pi/agent/auth.json is not a readable JSON object, so it is left as it is");
-  process.exit(1);
-}
-auth.openai = { type: "oauth", access, refresh: "", expires: 4102444800000 };
-fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-fs.writeFileSync(file + ".nexus-tmp", JSON.stringify(auth, null, 2) + "\\n", { mode: 0o600 });
-fs.renameSync(file + ".nexus-tmp", file);
-console.log("pi: signed in to ChatGPT as its openai provider");
-`;
-
-/** Every boot's hooks, in order. pi's sign-in follows the dotfiles pull, whose install may replace ~/.pi/agent files. */
+/** Every boot's hooks, in order. The agents' logins follow the dotfiles pull, whose install may replace their files. */
 export function bootHooks(boot: Pick<BootInputs, "dotfiles" | "gitIdentity" | "network">): string[] {
+  const granted = (harness: SessionHarness) => agentKinds[harness].signIn?.grants.some((grant) => boot.network.secrets.some((s) => s.name === grant.name)) ?? false;
   return [
     dotfilesPull(boot.dotfiles),
-    ...boot.network.secrets.some((grant) => grant.name === chatgptTokenGrant.name) ? [asUser(piChatgptLoginCommand(), "/home/user")] : [],
+    ...sessionHarnessSchema.options.flatMap((harness) => {
+      const login = launchers[harness]?.login;
+      return login !== undefined && granted(harness) ? [asUser(login, "/home/user")] : [];
+    }),
     ...boot.gitIdentity === undefined ? [] : [asUser(`git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, "/home/user")],
   ];
 }

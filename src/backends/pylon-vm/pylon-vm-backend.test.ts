@@ -15,7 +15,8 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import type { BackendPylon } from "../backend.ts";
-import { bootHooks, createPylonVmBackend, hostNestsKvm, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { bootHooks, createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { launchers } from "../../probe/guest/launchers.ts";
 import { settled, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
 import { asUser, imageEnv, pylonGuest } from "./pylon-guest.ts";
@@ -212,7 +213,7 @@ test("a secret grant whose value this node lacks fails as secret-missing", async
 test("a boot granted the ChatGPT token signs pi in after the dotfiles pull, as user, and only such a boot", () => {
   const gitIdentity = { name: "Example Person", email: "person@example.com" };
   const granted = bootHooks(bootOf("pylon-pi", { gitIdentity, network: { allowedHosts: ["api.openai.com"], secrets: [chatgptTokenGrant] } }));
-  const signIn = asUser(piChatgptLoginCommand(), "/home/user");
+  const signIn = asUser(launchers.pi!.login!, "/home/user");
   assert.equal(granted.length, 3);
   assert.match(granted[0]!, /dotfiles: pulled/);
   assert.equal(granted[1], signIn, "after the pull, whose install may replace ~/.pi/agent files");
@@ -223,7 +224,7 @@ test("a boot granted the ChatGPT token signs pi in after the dotfiles pull, as u
 test("pi's ChatGPT sign-in merges the placeholder into auth.json, keeping every other provider, and leaves a file it cannot read alone", async () => {
   const home = await mkdtemp(join(scratch, "home-"));
   const file = join(home, ".pi", "agent", "auth.json");
-  const signIn = (env: Record<string, string>) => spawnSync("sh", ["-c", piChatgptLoginCommand()], { env: { PATH: process.env.PATH!, HOME: home, ...env }, encoding: "utf8" });
+  const signIn = (env: Record<string, string>) => spawnSync("sh", ["-c", launchers.pi!.login!], { env: { PATH: process.env.PATH!, HOME: home, ...env }, encoding: "utf8" });
   const openai = { type: "oauth", access: "GONDOLIN_SECRET_placeholder", refresh: "", expires: 4102444800000 };
 
   let run = signIn({ NEXUS_CHATGPT_TOKEN: "GONDOLIN_SECRET_placeholder" });
