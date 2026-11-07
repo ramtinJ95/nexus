@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { registryLocator } from "./locator.ts";
-import { readableProbe, runningProbe } from "./observed.ts";
+import { registryLocator, runningProbe } from "./locator.ts";
 import { addThread, observeNode, seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
+import type { Registry } from "./registry.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { probePort } from "../protocol/routes.ts";
 import { runningPylon, tempDir, testCapacity } from "../test-support/kit.ts";
@@ -21,28 +21,40 @@ function seeded(t: import("node:test").TestContext) {
   return registry;
 }
 
+/** A locator over the registry, with `wake` standing in for the loop's wakes. */
+function locator(registry: Registry, waitMs = 60_000) {
+  const wakes = new Set<() => void>();
+  const woken = () => new Promise<void>((resolve) => wakes.add(resolve));
+  const wake = () => { for (const resolve of wakes) resolve(); wakes.clear(); };
+  return { locator: registryLocator({ registry, probes: new Map([[node, "probe"]]), woken, waitMs }), wake };
+}
+
 const capacity = testCapacity({ memoryGiB: 32 });
 const running = runningPylon(pylonId);
 
 test("a pylon is located at its node's probe once the node reports it running", async (t) => {
   const registry = seeded(t);
   observeNode(registry, { node, capacity, pylons: [{ pylonId, phase: "booting" }] });
-  const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 60_000);
+  const { locator: l, wake } = locator(registry);
+  const located = l.awaitRunning(pylonId);
   observeNode(registry, { node, capacity, pylons: [running] });
-  assert.deepEqual(await located, { node, host: "infra-testbench.tail.ts.net", port: probePort, nodeId: "nTESTBENCH" });
+  wake();
+  assert.deepEqual(await located, { address: { node, host: "infra-testbench.tail.ts.net", port: probePort, nodeId: "nTESTBENCH" }, client: "probe" });
 });
 
 test("a running pylon on an offline node is not reachable, and the wait ends at the deadline", async (t) => {
   const registry = seeded(t);
   observeNode(registry, { node, capacity, pylons: [running] });
   registry.markOffline(node);
-  await assert.rejects(registryLocator(registry).awaitRunning(pylonId, Date.now() + 300), /was not running by/);
+  await assert.rejects(locator(registry, 300).locator.awaitRunning(pylonId), /was not running by/);
 });
 
 test("the wait for a deleted thread's pylon ends at once", async (t) => {
   const registry = seeded(t);
-  const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 60_000);
+  const { locator: l, wake } = locator(registry);
+  const located = l.awaitRunning(pylonId);
   registry.setThreadStatus(threadId, "deleted");
+  wake();
   await assert.rejects(located, /is deleted/);
 });
 
@@ -52,13 +64,16 @@ test("a boot a settle sealed is neither located nor handed out for work until it
   observeNode(registry, { node, capacity, pylons: [running] });
   registry.sealBoot(pylonId, running.bootedAt);
   registry.setThreadStatus(threadId, "active");
-  const located = registryLocator(registry).awaitRunning(pylonId, Date.now() + 60_000);
+  const { locator: l, wake } = locator(registry);
+  const located = l.awaitRunning(pylonId);
   let found = false;
   void located.then(() => { found = true; });
+  wake();
   await new Promise((resolve) => setTimeout(resolve, 600));
-  assert.deepEqual([found, runningProbe(registry, probes, { pylonId }), readableProbe(registry, probes, { pylonId })], [false, null, "probe"],
+  assert.deepEqual([found, runningProbe(registry, probes, { pylonId }, "work"), runningProbe(registry, probes, { pylonId }, "usage")], [false, null, "probe"],
     "no tool, message or launch reaches the sealed boot, and the settle's read still does");
   observeNode(registry, { node, capacity, pylons: [runningPylon(pylonId, { bootedAt: "2027-01-01T00:05:00Z" })] });
-  assert.deepEqual(await located, { node, host: "infra-testbench.tail.ts.net", port: probePort, nodeId: "nTESTBENCH" });
-  assert.equal(runningProbe(registry, probes, { pylonId }), "probe");
+  wake();
+  assert.deepEqual(await located, { address: { node, host: "infra-testbench.tail.ts.net", port: probePort, nodeId: "nTESTBENCH" }, client: "probe" });
+  assert.equal(runningProbe(registry, probes, { pylonId }, "work"), "probe");
 });

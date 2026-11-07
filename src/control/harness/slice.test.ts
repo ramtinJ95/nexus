@@ -23,6 +23,8 @@ import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../../backends/docker-backend.ts";
 import { nodeSecrets } from "../../probe/config.ts";
 import { startProbe, type Probe } from "../../probe/server.ts";
+import { connectProbe } from "../../protocol/client.ts";
+import { localApiWhois } from "../../tailscale.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
 import { checkoutDir } from "../../protocol/spawn.ts";
 import { openHarnessHost, type HarnessHost } from "./host.ts";
@@ -77,7 +79,9 @@ before(async () => {
     secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
     log,
   });
-  locator = { awaitRunning: async () => ({ node, host: "127.0.0.1", port: probe.port, nodeId: probeId }) };
+  const address = { node, host: "127.0.0.1", port: probe.port, nodeId: probeId };
+  const client = connectProbe(node, address.host, probeId, { port: address.port, whois: localApiWhois(tailscaled) });
+  locator = { awaitRunning: async () => ({ address, client }) };
   await backend.ensureRunning({
     pylonId, image, source: { kind: "fresh", preSetup: null },
     resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
@@ -162,7 +166,7 @@ test("a thread runs bash in its pylon, and a harness killed mid-tool reports the
 
   const args: ChildArgs = {
     storagePath, tailscaled, threadId, conversationId,
-    probe: await locator.awaitRunning(pylonId, Date.now()),
+    probe: (await locator.awaitRunning(pylonId)).address,
     command: "echo $$ > /tmp/killed-mid-tool.pid; exec sleep 600",
   };
   const child = spawn(process.execPath, [join(import.meta.dirname, "test-fixture.ts"), JSON.stringify(args)], { stdio: ["ignore", "pipe", "pipe"] });

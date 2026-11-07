@@ -18,7 +18,7 @@ import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { checkoutDir } from "../protocol/spawn.ts";
-import { runningProbe } from "./observed.ts";
+import { runningProbe } from "./locator.ts";
 import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
@@ -201,7 +201,7 @@ export function checkRuns(options: {
       wake(t);
       if (run.kind === "running") return { kind: "running" };
       if (!opens) return { kind: "waiting" };
-      const probe = runningProbe(registry, probes, t);
+      const probe = runningProbe(registry, probes, t, "work");
       if (probe !== null) open(t, head, probe);
       return { kind: runs.get(id)!.kind === "running" ? "running" : "waiting" };
     },

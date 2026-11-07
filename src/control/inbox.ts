@@ -11,7 +11,7 @@ import type { NodeName, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { runningProbe } from "./observed.ts";
+import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";
 import type { ClaudeSent, Thread } from "./thread-store.ts";
 
@@ -132,7 +132,7 @@ export function agentInbox(options: { registry: InboxRegistry; harness: Pick<Har
     wake(t);
     if (agent.kind === "harness") return "delivered";
     const { worker } = agent;
-    const probe = runningProbe(registry, probes, t);
+    const probe = runningProbe(registry, probes, t, "work");
     if (worker.session === null || probe === null) return "later";
     let typed: ClaudeTyped;
     try {

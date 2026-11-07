@@ -7,24 +7,23 @@
  * plane restart, names the same session and the probe finishes that one instead of submitting the task twice.
  */
 import { randomUUID } from "node:crypto";
-import { setTimeout as delay } from "node:timers/promises";
 import type { PylonId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { defaultClaudeModel } from "../protocol/agent-kinds.ts";
-import { listsRunning } from "./observed.ts";
+import { listsRunning } from "./locator.ts";
 import type { Registry } from "./registry.ts";
 import type { ClaudeWorker, Thread } from "./thread-store.ts";
 
 type ClaudeLaunchRegistry = Pick<Registry, "appendEvent" | "claudeWorker" | "sealedBoot" | "setClaudeWorker">;
 
-/** What the launch reads of the node's observe link, live: loop.ts's `Link` satisfies it. */
+/** The node's probe and its observe link. */
 export interface LaunchLink {
   readonly probe: Pick<ProbeClient, "command">;
-  readonly up: boolean;
-  readonly snapshots: number;
+  /** Settles true at the link's next snapshot, and false after `waitMs` without one or at shutdown. */
+  snapshot(waitMs: number): Promise<boolean>;
 }
 
 export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (message: string) => void; retryMs: number; shutdown: AbortSignal }): {
@@ -38,7 +37,7 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
 
   function step(thread: Thread, pylonId: PylonId, nodeObservation: NodeObservation | null, link: LaunchLink): "tick" | Promise<"tick" | "skip"> {
     const worker = registry.claudeWorker(thread.id);
-    const running = listsRunning(nodeObservation, pylonId, registry.sealedBoot(pylonId));
+    const running = listsRunning(registry, nodeObservation, pylonId, "work");
     // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
     // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
     if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
@@ -86,11 +85,7 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
         return await link.probe.command(pylonId, command) as Extract<CommandResult, { kind: "open-session" }>;
       } catch (err) {
         if ((err as Partial<ProbeError>).code !== "unreachable") throw err;
-        const seen = link.snapshots;
-        while (!link.up || link.snapshots === seen) {
-          if (Date.now() >= until) throw new Error(`${(err as Error).message}, and the probe did not come back within ${claudeLaunchRetryMs / 1000} seconds`);
-          await delay(250, undefined, { signal: shutdown });
-        }
+        if (!await link.snapshot(until - Date.now())) throw new Error(`${(err as Error).message}, and the probe did not come back within ${claudeLaunchRetryMs / 1000} seconds`);
         log(`${pylonId}: the Claude launch lost its probe (${(err as Error).message}). Sending it again`);
       }
     }

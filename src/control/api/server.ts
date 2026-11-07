@@ -32,7 +32,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
 import { probeError, type ProbeError } from "../../protocol/http.ts";
-import { runsSealed } from "../observed.ts";
+import { runsSealed } from "../locator.ts";
 import type { NodeHealth, ProbeClient } from "../../protocol/client.ts";
 import type { WhoisNode } from "../../tailscale.ts";
 import type { Whois } from "../../protocol/http.ts";

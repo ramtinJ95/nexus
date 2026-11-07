@@ -19,6 +19,7 @@ import { chatgptToken, harnessModels, loginState, openCredentials, requireModel 
 import { openHarnessHost, type ConversationId } from "./harness/host.ts";
 import { startApi } from "./api/server.ts";
 import { registryLocator } from "./locator.ts";
+import { jobDeadlineMs } from "../protocol/jobs.ts";
 import { startLoop } from "./loop.ts";
 import { openRegistry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
@@ -180,7 +181,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     storagePath: config.harness.storage,
     models,
     model: config.harness.model,
-    locator: registryLocator(registry),
+    locator: registryLocator({ registry, probes: probeMap, woken: loop.woken, waitMs: jobDeadlineMs.spawn }),
     tailscaled,
     threads: conversations.filter(({ thread }) => thread.status !== "deleted").map(({ thread, id }) => ({ threadId: thread.id, conversationId: id, agentTurnRunning: thread.agentTurnRunning })),
     deleted: conversations.filter(({ thread }) => thread.status === "deleted").map(({ id }) => id),

@@ -8,15 +8,15 @@ import { join } from "node:path";
 import type { HarnessOptions } from "@earendil-works/pi-durable";
 import { Connection, RemoteExecutionEnv } from "@earendil-works/pi-env";
 import type { PylonId } from "../../ids.ts";
-import { jobDeadlineMs } from "../../protocol/jobs.ts";
+import type { ProbeClient } from "../../protocol/client.ts";
 import type { BridgeTarget } from "./bridge.ts";
 import { readThread } from "./thread-doc.ts";
 
 export type ProbeAddress = Omit<BridgeTarget, "tailscaled">;
 
-export interface PylonLocator {
-  /** Resolves once the probe reports the pylon running. Rejects at the deadline. */
-  awaitRunning(pylonId: PylonId, deadline: number): Promise<ProbeAddress>;
+export interface PylonLocator<P = Pick<ProbeClient, "stream">> {
+  /** Resolves once the pylon runs, with its probe's address and the control plane's client for it. Rejects at the locator's deadline. */
+  awaitRunning(pylonId: PylonId): Promise<{ address: ProbeAddress; client: P }>;
 }
 
 export interface PylonEnvs {
@@ -35,10 +35,10 @@ export function pylonEnvs(locator: PylonLocator, options: { tailscaled: string; 
     let c = connections.get(pylonId);
     if (c !== undefined) return c;
     c = new Connection({
-      // A wake can take as long as a spawn job. pi-env's own 60 s start timeout only begins once this resolves.
+      // pi-env's own 60 s start timeout only begins once this resolves.
       command: async () => {
-        const probe = await locator.awaitRunning(pylonId, Date.now() + jobDeadlineMs.spawn);
-        const target: BridgeTarget = { ...probe, tailscaled: options.tailscaled };
+        const { address } = await locator.awaitRunning(pylonId);
+        const target: BridgeTarget = { ...address, tailscaled: options.tailscaled };
         return [process.execPath, bridge, JSON.stringify(target), pylonId];
       },
       onLog: (text) => options.log(`${pylonId} pi-env: ${text.trimEnd()}`),

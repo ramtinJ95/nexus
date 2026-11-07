@@ -18,10 +18,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { checkoutReader } from "../../checkout-files.ts";
 import { checkoutDir } from "../../protocol/spawn.ts";
-import { localApiWhois } from "../../tailscale.ts";
 import type { PylonId } from "../../ids.ts";
-import { jobDeadlineMs } from "../../protocol/jobs.ts";
-import { connectProbe } from "../../protocol/client.ts";
 import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
@@ -105,8 +102,7 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
   const registry = createRegistry();
   registry.install(CodingTools);
   registry.install(turnSnapshots(() => harness, async (pylon, turn) => {
-    const target = await options.locator.awaitRunning(pylon, Date.now() + jobDeadlineMs.spawn);
-    const client = connectProbe(target.node, target.host, target.nodeId, { port: target.port, whois: localApiWhois(options.tailscaled) });
+    const { client } = await options.locator.awaitRunning(pylon);
     await checkoutReader((argv) => client.stream(pylon, argv), checkoutDir).snapshot(turn);
   }, log));
   const harness = await Harness.open(await openNodeSqliteStorage(options.storagePath), {
