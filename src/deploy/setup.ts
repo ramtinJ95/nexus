@@ -13,7 +13,7 @@ import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, gitKnownHosts, harnessSignedIn, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
 import { controlPlanePath, readControlPlane } from "./control-plane.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
-import { digestPattern, tokenDigest, tsNet } from "./model.ts";
+import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { isImageId } from "../ids.ts";

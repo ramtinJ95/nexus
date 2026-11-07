@@ -1,4 +1,4 @@
-import { busyDrainReason, type DesiredRelease, type ReleaseReport, type Role } from "./model.ts";
+import { busyDrainReason, type DesiredRelease, type ReleaseReport, type Role } from "../protocol/deploy.ts";
 
 export interface ReleaseHealth { commit: string | null; healthy: boolean }
 /** An outcome the worker recorded at a commit: its journal's transaction, or the target of its last report. */

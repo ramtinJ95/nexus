@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { turnGate } from "./drain.ts";
 import type { Thread } from "./thread-store.ts";
 import { usageBackfill } from "./usage-backfill.ts";
-import { releaseOutcome, reportStates, type ReleaseReport } from "../deploy/model.ts";
+import { releaseOutcome, reportStates, type ReleaseReport } from "../protocol/deploy.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";
 import { node, laptop, project, image, testApi, withThread, deployCommit, deployment, reporterHeaders } from "../test-support/api-kit.ts";
 

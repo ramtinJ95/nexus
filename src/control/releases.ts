@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { NexusEvent } from "../events.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { Registry } from "./registry.ts";
-import { busyDrainReason, fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../deploy/model.ts";
+import { busyDrainReason, fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { command, repository } from "../deploy/install.ts";
 import { releaseName, type ReleaseInventory } from "../deploy/release-cleanup.ts";
 import { deleteOutcomeSchema } from "../protocol/cleanup.ts";

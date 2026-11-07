@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { command, ReleaseInstaller } from "./install.ts";
 import { parseWorkerConfig } from "./worker.ts";
-import { releaseOutcome } from "./model.ts";
+import { releaseOutcome } from "../protocol/deploy.ts";
 
 const commit = "a".repeat(40);
 const supervisorLacks = ["flock", "timeout", "node"].filter((tool) => !["/usr/local/bin", "/usr/bin", "/bin"].some((dir) => existsSync(join(dir, tool))));

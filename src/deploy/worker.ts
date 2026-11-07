@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, type Command, commitAt, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { planDeploy, quarantined, schemaStep, type Attempt, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
-import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "./model.ts";
+import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
