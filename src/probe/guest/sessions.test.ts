@@ -7,7 +7,7 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { attachedTerminals, attachScript, focusScript, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, sessionsFile, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { claudeTextProblem } from "../../session-harness.ts";
-import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type FakeGuest, type HerdrArgs } from "../../fake-guest.ts";
+import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type FakeGuest, type HerdrArgs } from "../../backends/fake-guest.ts";
 
 const created = (workspace: string, pane: string) => herdrOk({ type: "workspace_created", workspace: { workspace_id: workspace, label: "x" }, tab: { tab_id: `${workspace}:t1` }, root_pane: { pane_id: pane } });
 const agentStarted = herdrOk({ type: "agent_started", agent: {}, argv: [] });

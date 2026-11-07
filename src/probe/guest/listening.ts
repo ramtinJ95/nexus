@@ -6,7 +6,7 @@
  * preview on to 127.0.0.1 or `::1`. One bound to another loopback address such as 127.0.0.2, or to any other address,
  * is left out, and so are Nexus's own listeners, the relay's among them.
  */
-import type { Guest } from "../../backend.ts";
+import type { Guest } from "../../backends/backend.ts";
 import { reservedPorts } from "../../services-file.ts";
 import type { ListeningFact } from "../../protocol/observations.ts";
 

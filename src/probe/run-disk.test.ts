@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BackendPylon, VmBackend } from "../backend.ts";
+import type { BackendPylon, VmBackend } from "../backends/backend.ts";
 import type { ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
 import type { BootInputs } from "../spawn.ts";

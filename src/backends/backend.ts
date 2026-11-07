@@ -13,13 +13,13 @@
  * The backend speaks its own types. Wire types from src/protocol/ stop at probe/run.ts's runJob and runCommand.
  */
 import type { Readable } from "node:stream";
-import type { CheckpointId, ImageId, NodeName, PortableArtifactId, PylonId, TemplateId } from "./ids.ts";
-import type { BrokenCause, GuestNotAnswering, PausedSession, ServiceFact } from "./protocol/observations.ts";
-import type { ByteStream } from "./protocol/streams.ts";
-import type { BootInputs, LiveSpec, OverlayFile } from "./spawn.ts";
-import type { ServiceDecl, ServiceName } from "./services-file.ts";
-import type { ArtifactManifest, ImageRecipe, TemplateBuildInputs } from "./images.ts";
-import type { HostBridge } from "./host-bridge.ts";
+import type { CheckpointId, ImageId, NodeName, PortableArtifactId, PylonId, TemplateId } from "../ids.ts";
+import type { BrokenCause, GuestNotAnswering, PausedSession, ServiceFact } from "../protocol/observations.ts";
+import type { ByteStream } from "../protocol/streams.ts";
+import type { BootInputs, LiveSpec, OverlayFile } from "../spawn.ts";
+import type { ServiceDecl, ServiceName } from "../services-file.ts";
+import type { ArtifactManifest, ImageRecipe, TemplateBuildInputs } from "../images.ts";
+import type { HostBridge } from "../host-bridge.ts";
 
 export interface VmBackend {
   /**
@@ -121,7 +121,7 @@ export type PreviewOrigin = `http://127.0.0.1:${number}`;
 /**
  * Immutable directories under /var/lib/nexus/artifacts/<id>/ with a manifest, at the same path on every
  * node, because checkpoints and templates are qcow2 overlays whose backing file is the image's rootfs.
- * Only images and templates move between nodes (artifacts.ts). A checkpoint holds the pylon's Claude and pi
+ * Only images and templates move between nodes (src/artifacts.ts). A checkpoint holds the pylon's Claude and pi
  * logins and stays in its pylon's instance on its own node.
  */
 export interface ArtifactStore {
@@ -144,7 +144,7 @@ export interface ArtifactStore {
 /** `names` lists the secrets the node holds, which its probe reports. Values never leave the node. */
 export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
 
-// The pylon VM backend, createPylonVmBackend, lives in pylon-vm-backend.ts.
+// The pylon VM backend, createPylonVmBackend, lives in src/pylon-vm-backend.ts.
 
 /**
  * It drives src/pylon-vm/, a hard fork of pi-sandbox (MIT) that Nexus owns and does not track upstream.
@@ -158,9 +158,9 @@ export interface SecretSource { value(name: string): string | undefined; names()
  * Network policy, secrets and resources are inputs to every start, and only the image and the disk size are
  * fixed at create (change 2). Git over SSH is terminated on the host. Every boot writes the overlay and pulls
  * the dotfiles, every boot after the first runs `.nexus/resume`, and every spawn rewrites the overlay.
- * A template is the fork's prepare published into the artifact store (pylon-vm-templates.ts). A pylon booted
+ * A template is the fork's prepare published into the artifact store (src/pylon-vm-templates.ts). A pylon booted
  * from one copies its disk in, and its first boot checks out the pylon's own commit and runs `.nexus/resume`.
- * Images and templates move between nodes as verified ArtifactStore archives (artifacts.ts).
+ * Images and templates move between nodes as verified ArtifactStore archives (src/artifacts.ts).
  * Requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached (change 4).
  * Still to change in the fork:
  * 3. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.

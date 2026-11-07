@@ -1,6 +1,6 @@
 /** How the Docker test double runs the docker CLI, and the labels it puts on what it creates. */
 import { spawn } from "node:child_process";
-import { exit, output } from "./exec.ts";
+import { exit, output } from "../exec.ts";
 
 /** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
 export const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;

@@ -8,7 +8,7 @@ import { appendFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Guest, PreviewOrigin } from "../backend.ts";
+import type { Guest, PreviewOrigin } from "../backends/backend.ts";
 import { processStream } from "../process-stream.ts";
 import type { PylonId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";

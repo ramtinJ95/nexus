@@ -11,7 +11,7 @@ import { imageTypes } from "./image-types.ts";
 import { checkoutReader, CheckoutRefused, contentType, maxFileBytes, maxOpenPipes, pathsFit } from "./checkout-files.ts";
 import type { OpenPipe } from "./pipe.ts";
 import { processStream } from "./process-stream.ts";
-import { localPipes } from "./fake-guest.ts";
+import { localPipes } from "./backends/fake-guest.ts";
 import { claudeTurn } from "../images/pylon/nexus-contract.ts";
 import { snapshotTurn } from "../images/pylon/nexus-turn.ts";
 import type { ByteStream, StreamEnd } from "./protocol/streams.ts";

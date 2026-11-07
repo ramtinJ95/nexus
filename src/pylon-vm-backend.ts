@@ -15,7 +15,7 @@ import { chmod, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { artifactDirectory, manifestFiles, tarCodec } from "./artifacts.ts";
-import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "./backend.ts";
+import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "./backends/backend.ts";
 import { JobFailure } from "./protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
 import { chatgptTokenGrant } from "./secret-grants.ts";

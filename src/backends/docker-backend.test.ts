@@ -6,9 +6,9 @@ import { join } from "node:path";
 import { createDockerBackend } from "./docker-backend.ts";
 import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { dockerServices } from "./docker-services.ts";
-import type { PylonId } from "./ids.ts";
-import { checkoutDir } from "./session-harness.ts";
-import { freePort } from "./test-kit.ts";
+import type { PylonId } from "../ids.ts";
+import { checkoutDir } from "../session-harness.ts";
+import { freePort } from "../test-kit.ts";
 
 type Reply = { stdout?: string; stderr?: string; code?: number };
 

@@ -18,9 +18,9 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { Guest } from "../../backend.ts";
+import type { Guest } from "../../backends/backend.ts";
 import { exit } from "../../exec.ts";
-import { unusedGuest } from "../../fake-guest.ts";
+import { unusedGuest } from "../../backends/fake-guest.ts";
 import type { SessionFact } from "../../protocol/observations.ts";
 import { closeSession, herdrSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 

@@ -20,7 +20,7 @@ import type { ConversationId, DocumentReader, EntryRecord } from "@earendil-work
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createEnvConformance } from "@earendil-works/pi-durable/testing";
 import { packagedDaemon } from "@earendil-works/pi-env";
-import { createDockerBackend } from "../docker-backend.ts";
+import { createDockerBackend } from "../backends/docker-backend.ts";
 import { nodeSecrets } from "../probe/config.ts";
 import { startProbe, type Probe } from "../probe/server.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../ids.ts";

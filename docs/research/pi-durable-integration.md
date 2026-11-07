@@ -126,9 +126,9 @@ A baked daemon cannot change under a running pylon, needs no write into the gues
 
 ### Two ways to reach the daemon inside Gondolin
 
-The probe implements `Guest.stream` (`src/backend.ts:46-48`), which the pylon-vm backend does not have yet (`src/pylon-vm-backend.ts:281-303`). Two Gondolin routes exist:
+The probe implements `Guest.stream` (`src/backends/backend.ts:46-48`), which the pylon-vm backend does not have yet (`src/pylon-vm-backend.ts:281-303`). Two Gondolin routes exist:
 
-- **SSH through the controller's `shell` action.** The fork's controller already runs `vm.enableSsh` for `user` and returns a ready `ssh -p <port> -i <key> user@127.0.0.1` command (`src/pylon-vm/runtime.ts:254-283`). The probe spawns that command with the daemon as its remote command. stderr arrives on its own pipe by construction. The image already needs `openssh-server` and `sandboxssh` for terminals (`src/backend.ts:156`).
+- **SSH through the controller's `shell` action.** The fork's controller already runs `vm.enableSsh` for `user` and returns a ready `ssh -p <port> -i <key> user@127.0.0.1` command (`src/pylon-vm/runtime.ts:254-283`). The probe spawns that command with the daemon as its remote command. stderr arrives on its own pipe by construction. The image already needs `openssh-server` and `sandboxssh` for terminals (`src/backends/backend.ts:156`).
 - **`vm.exec` with `stdin: true` and `stdout: "pipe"`.** Gondolin's `ExecProcess` has `write`, `end` and a `stdout` stream with a backpressure window (`node_modules/@earendil-works/gondolin/dist/src/exec.d.ts:40-63`, `:146-164`). It needs no sshd, but the VM object lives in the detached controller, so the controller's `control.sock` would need a new streaming endpoint.
 
 Prefer SSH. It reuses an action that exists, and only the probe changes. S13 runs both so the choice rests on conformance and latency on the node, not on this argument.

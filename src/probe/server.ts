@@ -12,7 +12,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { type BackendPylon, type VmBackend } from "../backend.ts";
+import { type BackendPylon, type VmBackend } from "../backends/backend.ts";
 import { commandPolicies, runCommand, runJob, type CommandPolicy, type ProbeDeps } from "./run.ts";
 import { isPortableArtifactId, type JobId, type PortableArtifactId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
 import {

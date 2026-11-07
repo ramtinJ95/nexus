@@ -5,9 +5,9 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { Guest } from "../../backend.ts";
+import type { Guest } from "../../backends/backend.ts";
 import type { DeclaredOutput } from "../../protocol/observations.ts";
-import { fakeGuest } from "../../fake-guest.ts";
+import { fakeGuest } from "../../backends/fake-guest.ts";
 import { addOutput, listOutputs, OutputRefused, outputsDir } from "./outputs.ts";
 import { tempDir } from "../../test-kit.ts";
 

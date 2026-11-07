@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { maxRecordBytes, parseRecord, readTranscript, readTranscriptImage, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
-import { localPipes } from "./fake-guest.ts";
+import { localPipes } from "./backends/fake-guest.ts";
 import type { ByteStream } from "./protocol/streams.ts";
 import { tempDir } from "./test-kit.ts";
 
