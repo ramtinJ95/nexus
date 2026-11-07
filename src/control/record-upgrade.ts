@@ -5,7 +5,7 @@
  * before it did, so a control plane rolled back to an older release reads the upgraded record unchanged.
  */
 import { reviewPrefix } from "../agent-protocol.ts";
-import { noAttempts, type Attempts, type FailedAttempt } from "../reconcile.ts";
+import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
 import { personOnly, reservedCases, reservedNames, type HoldCode } from "./holds.ts";
 import { findingSchema, maxRounds, secondReads, type Change, type Review } from "./review-model.ts";
 

@@ -4,7 +4,7 @@
  */
 import type { Context } from "@earendil-works/chord";
 import { LiveDoc, type ConversationId, type DocumentObserver, type DocumentWatch, type LiveState, type TaskId } from "@earendil-works/pi-durable";
-import type { ActivityFacts } from "../reconcile.ts";
+import type { ActivityFacts } from "../control/reconcile.ts";
 
 export type AgentFacts = Pick<ActivityFacts, "agentTurnRunning" | "lastAgentActivityAt">;
 

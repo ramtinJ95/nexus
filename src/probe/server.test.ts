@@ -19,7 +19,7 @@ import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
 import { connectProbe } from "../protocol/client.ts";
-import { envelope, ingest } from "../reconcile.ts";
+import { envelope, ingest } from "../control/reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { type BackendPylon, type Guest, type VmBackend } from "../backend.ts";
 import { commandPolicies, type CommandPolicy } from "./run.ts";

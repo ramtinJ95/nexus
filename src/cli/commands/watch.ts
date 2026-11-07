@@ -8,7 +8,7 @@ import type { ListeningPort, ThreadDetail } from "../../control/wire.ts";
 import type { Thread } from "../../control/thread-store.ts";
 import { maxEntries, type ClaudeConversation, type ClaudeEntry } from "../../claude-transcript.ts";
 import { agentView, claudeFrames, queuedOf, type ClaudeFrame, type ViewFrame } from "../../control/conversation-view.ts";
-import type { ActualState } from "../../reconcile.ts";
+import type { ActualState } from "../../control/reconcile.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Follow, type Command, str, thread, int, clip, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";

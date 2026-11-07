@@ -14,7 +14,7 @@ import { rewindTo, versionBefore } from "./schema-kit.ts";
 import { migrations } from "./schema.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { PullRequest } from "./github.ts";
-import type { PylonRecord } from "../tick.ts";
+import type { PylonRecord } from "./tick.ts";
 import { trackActivity } from "../harness/activity.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earendil-works/pi-durable";
@@ -591,7 +591,7 @@ test("desired release, reports and drain survive reopening the registry", () => 
 });
 
 test("Claude turn events keep a pylon awake until it ends, independently of harness activity and seen", async (t) => {
-  const { desiredPhase } = await import("../reconcile.ts");
+  const { desiredPhase } = await import("./reconcile.ts");
   const registry = seeded(t, tempDb());
   const event = (sequence: number, kind: "session.turn-started" | "session.turn-ended" | "session.waiting", session = "c1") => registry.reportSession(node, { sequence, pylon: pylonId, time: Date.now(), event: { kind, session } });
   event(1, "session.turn-started");
@@ -614,7 +614,7 @@ test("Claude turn events keep a pylon awake until it ends, independently of harn
 });
 
 test("a lost turn end expires while heartbeats keep a long turn awake", async (t) => {
-  const { desiredPhase } = await import("../reconcile.ts");
+  const { desiredPhase } = await import("./reconcile.ts");
   const { sessionActivityTtlMs } = await import("../events.ts");
   let now = 10_000_000;
   const registry = seeded(t, tempDb(), () => now);
@@ -672,7 +672,7 @@ test("session state is capped at sixteen, removed at end and pruned with event r
 });
 
 test("waiting survives a day without activity, and clears on end, archive or delete", async (t) => {
-  const { desiredPhase } = await import("../reconcile.ts");
+  const { desiredPhase } = await import("./reconcile.ts");
   let now = 10_000_000;
   const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
@@ -782,7 +782,7 @@ test("distinct reports at the same stamp all apply, with or without IDs", () => 
 });
 
 test("a newer heartbeat resumes waiting with a fresh lease, while older or equal stamps do not", async (t) => {
-  const { desiredPhase } = await import("../reconcile.ts");
+  const { desiredPhase } = await import("./reconcile.ts");
   const { sessionActivityTtlMs } = await import("../events.ts");
   let now = 10_000_000;
   const registry = seeded(t, tempDb(), () => now);
@@ -1014,7 +1014,7 @@ const backgroundSubagent = { id: "ac4719df54252d254", type: "subagent", status: 
 const backgroundShell = { id: "b6fh14jr7", type: "shell", status: "running", command: "npm test" };
 
 test("a main turn that ends while a background subagent runs stays working until the turn its finish starts ends", async (t) => {
-  const { desiredPhase } = await import("../reconcile.ts");
+  const { desiredPhase } = await import("./reconcile.ts");
   const clock = { now: 10_000_000 };
   const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);
@@ -1041,7 +1041,7 @@ test("a main turn that ends while a background subagent runs stays working until
 });
 
 test("a background subagent that never reports its finish expires with the session's lease, without a reply", async (t) => {
-  const { desiredPhase } = await import("../reconcile.ts");
+  const { desiredPhase } = await import("./reconcile.ts");
   const { sessionActivityTtlMs } = await import("../events.ts");
   const clock = { now: 10_000_000 };
   const registry = seeded(t, tempDb(), () => clock.now);
@@ -1076,7 +1076,7 @@ test("a late background subagent report after its session ended changes nothing"
 });
 
 test("a main turn that ends while a background command runs stays working until the turn its finish starts ends", async (t) => {
-  const { desiredPhase } = await import("../reconcile.ts");
+  const { desiredPhase } = await import("./reconcile.ts");
   const clock = { now: 10_000_000 };
   const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);

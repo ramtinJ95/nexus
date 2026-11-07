@@ -5,7 +5,7 @@
  */
 import { json, type Db } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
-import type { ThreadStatus } from "../reconcile.ts";
+import type { ThreadStatus } from "./reconcile.ts";
 import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "../agent-protocol.ts";
 import { builderAwaited, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";

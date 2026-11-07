@@ -10,7 +10,7 @@ import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
-import { archivedDiskMs, envelope, ingest as realIngest } from "../reconcile.ts";
+import { archivedDiskMs, envelope, ingest as realIngest } from "./reconcile.ts";
 import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type {

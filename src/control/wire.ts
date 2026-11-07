@@ -3,7 +3,7 @@
  */
 import type { Submission } from "@earendil-works/pi-durable";
 import type { Attention } from "./attention.ts";
-import type { ActualState, DesiredPhase } from "../reconcile.ts";
+import type { ActualState, DesiredPhase } from "./reconcile.ts";
 import type { BootInputs } from "../spawn.ts";
 import type { GuestNotAnswering } from "../protocol/observations.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";

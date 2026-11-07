@@ -10,7 +10,7 @@
  * pylon is up at a time across the run and the settles, and a settle goes first.
  */
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
-import { desiredPhase } from "../reconcile.ts";
+import { desiredPhase } from "./reconcile.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { observedPylon } from "./observed.ts";

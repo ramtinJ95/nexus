@@ -5,7 +5,7 @@ import type { Registry } from "../registry.ts";
 import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadAgents } from "../thread-agent.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
-import { actualState, desiredPhase, retryRefusal } from "../../reconcile.ts";
+import { actualState, desiredPhase, retryRefusal } from "../reconcile.ts";
 import { agentView, type AgentView } from "../conversation-view.ts";
 import { bootNetwork } from "../threads.ts";
 import { herdrSession } from "../../probe/guest/sessions.ts";

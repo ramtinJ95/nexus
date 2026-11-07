@@ -13,7 +13,7 @@ import { agentReader } from "./agent-conversation.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { pushedBranches } from "./pr-watch-model.ts";
 import type { GitHub, PullRequest } from "./github.ts";
-import { ingest } from "../reconcile.ts";
+import { ingest } from "./reconcile.ts";
 import { checkCaller, nudgePrefix, reviewerCaller } from "../agent-protocol.ts";
 import { turnGate } from "./drain.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";

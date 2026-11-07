@@ -19,7 +19,7 @@ import { encodeMessage, parseClientMessage, type AttachErrorKind, type AttachReq
 import type { Terminal, TerminalSize } from "../guest-terminal.ts";
 import type { StreamEnd } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";
-import type { ActualState } from "../reconcile.ts";
+import type { ActualState } from "./reconcile.ts";
 
 export interface AttachError { kind: AttachErrorKind; message: string }
 

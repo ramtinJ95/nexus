@@ -9,7 +9,7 @@ import type { Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { observedPylon } from "../observed.ts";
 import { queuedView, type QueuedThread, type ThreadQueue } from "../queue.ts";
-import { retryRefusal } from "../../reconcile.ts";
+import { retryRefusal } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
 import { sendWithStandingRules } from "../standing-rules.ts";
 import { ok, created, noContent, parse, type RouteEntry, type ApiKit } from "./kit.ts";

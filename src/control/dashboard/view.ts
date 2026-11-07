@@ -1,6 +1,6 @@
 /** The view kit every dashboard page renders with: safe markup and the page's headers, icons, tones and badges. */
 import { createHash } from "node:crypto";
-import type { ActualState, DesiredPhase } from "../../reconcile.ts";
+import type { ActualState, DesiredPhase } from "../reconcile.ts";
 import type { HerdrStatus } from "../../protocol/observations.ts";
 import type { ThreadRow } from "../wire.ts";
 import { attentions, needsPerson } from "../attention.ts";

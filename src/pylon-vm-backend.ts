@@ -27,7 +27,7 @@ import type { PausedSession } from "./protocol/observations.ts";
 import { imageIdOf, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
-import { requiredArtifacts } from "./reconcile.ts";
+import { requiredArtifacts } from "./control/reconcile.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "./probe/guest/session-wake.ts";
 import { checkoutDir, sessionHarnessSchema } from "./session-harness.ts";
 import { controlSocket, run, socketPathLimit, stopForRetry } from "./pylon-vm/client.ts";

@@ -22,7 +22,7 @@ import { liveHashOf } from "../spawn.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
-import { retryRefusal } from "../reconcile.ts";
+import { retryRefusal } from "./reconcile.ts";
 import { singleFlight } from "../single-flight.ts";
 import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";

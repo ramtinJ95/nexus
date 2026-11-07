@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { defaultTerm, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach-route.ts";
 import { terminalSize } from "./guest-terminal.ts";
-import type { ActualState } from "./reconcile.ts";
+import type { ActualState } from "./control/reconcile.ts";
 
 export { attachPath, defaultTerm, encodeMessage, type AttachErrorKind, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach-route.ts";
 
