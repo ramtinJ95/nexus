@@ -20,7 +20,7 @@ import {
   type AgentSetup, type Commit, type DotfilesPath, type Harness, type HttpsUrl, type PiPackage, type PluginId,
 } from "../../images/pylon/agent-setup/manifest.ts";
 import { output as execOutput } from "../exec.ts";
-import { loadImageRecipe, pylonRecipeDir } from "./build.ts";
+import { loadImageRecipe, pylonRecipeDir } from "./recipe.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
 import { parseJson } from "../parse.ts";
 

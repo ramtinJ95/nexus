@@ -7,9 +7,10 @@ import { join, relative } from "node:path";
 import { artifactDirectory, tarCodec } from "./artifacts.ts";
 import { JobFailure } from "../protocol/jobs.ts";
 import {
-  buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, loadImageRecipe, modeMismatches,
-  parseDebugfsModes, parseModeListing, pylonRecipeDir, smokeChecks, smokeFailure,
+  buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, modeMismatches,
+  parseDebugfsModes, parseModeListing, smokeChecks, smokeFailure,
 } from "./build.ts";
+import { loadImageRecipe, pylonRecipeDir } from "./recipe.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
 import { agentSetupManifest, installedLayout, parseAgentSetup } from "../../images/pylon/agent-setup/manifest.ts";
 import type { NodeName } from "../ids.ts";
