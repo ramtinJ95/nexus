@@ -1,10 +1,10 @@
 /** The control plane's template policy: which template a thread boots from, and which artifacts are garbage. */
-import type { Checkout } from "../spawn.ts";
+import type { Checkout } from "../protocol/spawn.ts";
 import { canonicalSha256 } from "../util/canonical-sha256.ts";
 import { effectiveAllowedHosts, type Project, type RemoteProject } from "./project.ts";
 import type { JobEnvelope } from "../protocol/jobs.ts";
 import { isImageId, isTemplateId, type ArtifactId, type ImageId, type NodeName, type PortableArtifactId, type ProjectId, type TemplateId } from "../ids.ts";
-import type { TemplateBuildInputs, TemplateKey } from "../image/images.ts";
+import type { TemplateBuildInputs, TemplateKey } from "../protocol/images.ts";
 
 /**
  * Where and when. Built only when a human runs `nexus image build`, on the node named by the control

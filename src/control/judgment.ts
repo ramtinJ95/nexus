@@ -18,7 +18,7 @@ import { z } from "zod";
 import { judgmentPrefix, latest, mint, roleOf } from "./agent-protocol.ts";
 import type { ConversationId, HarnessHost } from "./harness/host.ts";
 import type { ThreadSetup } from "./templates.ts";
-import { liveHashOf } from "../spawn.ts";
+import { liveHashOf } from "../protocol/spawn.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";

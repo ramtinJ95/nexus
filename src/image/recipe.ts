@@ -6,7 +6,7 @@ import { lstat, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compare } from "../util/compare.ts";
-import { pinsSchema, type ImageRecipe } from "./images.ts";
+import { pinsSchema, type ImageRecipe } from "../protocol/images.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../../images/pylon/", import.meta.url));
 

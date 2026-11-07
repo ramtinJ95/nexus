@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { startImageRollout } from "./image-rollout.ts";
-import { imageIdOf, type ImageRecipe } from "../image/images.ts";
+import { imageIdOf, type ImageRecipe } from "../protocol/images.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { testCapacity, testObservation } from "../test-support/kit.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";

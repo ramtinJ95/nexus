@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { artifactArchive, artifactDirectory, fileCodec, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "../protocol/jobs.ts";
-import type { ImageManifest, TemplateManifest } from "./images.ts";
+import type { ImageManifest, TemplateManifest } from "../protocol/images.ts";
 import type { ImageId, TemplateId } from "../ids.ts";
 import { gnuTar, tempDir } from "../test-support/kit.ts";
 

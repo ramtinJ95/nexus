@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { BackendPylon, VmBackend } from "../backends/backend.ts";
 import type { ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
-import type { BootInputs } from "../spawn.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 import { runJob, type ProbeDeps } from "./run.ts";
 
 const image = "img-000000000000" as ImageId;

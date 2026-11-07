@@ -34,8 +34,8 @@ import type { Job, JobStatus } from "../../protocol/jobs.ts";
 import { connectProbe, type ProbeClient } from "../../protocol/client.ts";
 import { envelope } from "../../control/reconcile.ts";
 import { templateIdOf } from "../../control/templates.ts";
-import type { TemplateBuildInputs, TemplateManifest } from "../../image/images.ts";
-import type { BootInputs, Checkout } from "../../spawn.ts";
+import type { TemplateBuildInputs, TemplateManifest } from "../../protocol/images.ts";
+import type { BootInputs, Checkout } from "../../protocol/spawn.ts";
 import type { ProjectId } from "../../ids.ts";
 import type { Guest, VmBackend } from "../../backends/backend.ts";
 

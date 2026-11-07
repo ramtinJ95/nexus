@@ -63,11 +63,11 @@
     "src/probe/redact.ts: reserved-path:secrets",
     "src/probe/server.ts: reserved-path:auth",
     "src/protocol/routes.ts: reserved-path:auth",
+    "src/protocol/secret-grants.ts: reserved-path:secrets",
     "src/pylon-vm/host-bridge.ts: reserved-path:egress",
     "src/pylon-vm/network.test.ts: reserved-path:egress",
     "src/pylon-vm/network.ts: reserved-path:egress",
     "src/pylon-vm/runtime.ts: reserved-path:egress",
-    "src/secret-grants.ts: reserved-path:secrets",
     "src/tailscale.test.ts: reserved-path:tailnet",
     "src/tailscale.ts: reserved-path:tailnet"
   ],

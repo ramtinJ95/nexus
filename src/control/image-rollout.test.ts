@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { startImageRollout, type ImageRollout } from "./image-rollout.ts";
 import type { ImageOperation } from "./image-store.ts";
 import { openRegistry, type Registry } from "./registry.ts";
-import { imageIdOf, type ImageManifest, type ImageRecipe } from "../image/images.ts";
+import { imageIdOf, type ImageManifest, type ImageRecipe } from "../protocol/images.ts";
 import type { ImageId, JobId, NodeName, TailnetNodeId } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
 import type { ProbeClient } from "../protocol/client.ts";

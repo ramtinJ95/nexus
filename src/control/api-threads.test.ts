@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import type { Judgment } from "./judgment-store.ts";
 import type { Thread } from "./thread-store.ts";
-import { liveHashOf } from "../spawn.ts";
+import { liveHashOf } from "../protocol/spawn.ts";
 import { processStream } from "../process-stream.ts";
 import { runningPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";

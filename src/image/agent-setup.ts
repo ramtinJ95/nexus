@@ -21,7 +21,7 @@ import {
 } from "../../images/pylon/agent-setup/manifest.ts";
 import { output as execOutput } from "../exec.ts";
 import { loadImageRecipe, pylonRecipeDir } from "./recipe.ts";
-import { imageIdOf, type ImageRecipe } from "./images.ts";
+import { imageIdOf, type ImageRecipe } from "../protocol/images.ts";
 import { parseJson } from "../parse.ts";
 
 /** Git blob IDs by POSIX path inside a plugin's directory, as `git ls-tree` prints them. */

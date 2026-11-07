@@ -12,7 +12,7 @@ import { z } from "zod";
 import { refuseShortDisk } from "../../disk-space.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import type { ArtifactDirectory } from "../../image/artifacts.ts";
-import type { TemplateManifest } from "../../image/images.ts";
+import type { TemplateManifest } from "../../protocol/images.ts";
 import type { ImageId, TemplateId } from "../../ids.ts";
 import { run } from "../../pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";

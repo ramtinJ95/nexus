@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { NodeName, ProjectId, PylonId } from "../ids.ts";
-import { githubTokenGrant } from "../secret-grants.ts";
+import { githubTokenGrant } from "../protocol/secret-grants.ts";
 import { renderOverlay, type PylonOverlay } from "./overlay.ts";
 
 const overlay: PylonOverlay = {

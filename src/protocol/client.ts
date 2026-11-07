@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { localApiWhois, PeerRefused, verifyPeer, type Whois } from "../tailscale.ts";
 import { asSent, named, parseJson, unchecked } from "../parse.ts";
-import type { ArtifactManifest } from "../image/images.ts";
+import type { ArtifactManifest } from "./images.ts";
 import type { JobId, NodeName, PortableArtifactId, PylonId, TailnetNodeId } from "../ids.ts";
 import { jobStatusSchema, parseSubmitReply, type JobEnvelope, type JobStatus, type SubmitReply } from "./jobs.ts";
 import { parseProbeEvent, type DiskFact, type ProbeEvent } from "./observations.ts";

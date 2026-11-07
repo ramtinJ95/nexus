@@ -20,15 +20,15 @@ import { settled, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
 import { asUser, imageEnv, pylonGuest } from "./pylon-guest.ts";
 import { saveJson } from "../../json-file.ts";
-import { chatgptTokenGrant } from "../../secret-grants.ts";
-import type { BootInputs } from "../../spawn.ts";
+import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
+import type { BootInputs } from "../../protocol/spawn.ts";
 import type { ImageId, NodeName, ProjectId, PylonId, TailnetNodeId, TemplateId } from "../../ids.ts";
 import type { BrokenCause, ProbeEvent } from "../../protocol/observations.ts";
 import { connectProbe } from "../../protocol/client.ts";
 import { startProbe } from "../../probe/server.ts";
 import { nodeSecrets } from "../../probe/config.ts";
 import { herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
-import type { TemplateBuildInputs, TemplateManifest } from "../../image/images.ts";
+import type { TemplateBuildInputs, TemplateManifest } from "../../protocol/images.ts";
 
 // Under /tmp, not os.tmpdir(): macOS's per-user temp dir is too long for the controllers' Unix sockets.
 const scratch = await mkdtemp("/tmp/nexus-pvb-");

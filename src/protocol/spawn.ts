@@ -1,9 +1,9 @@
 /** What a spawn carries, split by when it applies. */
 import { z } from "zod";
-import { canonicalSha256 } from "./util/canonical-sha256.ts";
-import type { CheckpointId, ImageId, LiveHash, PortableArtifactId, PylonId, TemplateId } from "./ids.ts";
+import { canonicalSha256 } from "../util/canonical-sha256.ts";
+import type { CheckpointId, ImageId, LiveHash, PortableArtifactId, PylonId, TemplateId } from "../ids.ts";
 import type { SecretGrant } from "./secret-grants.ts";
-import type { ServiceName } from "./services-file.ts";
+import type { ServiceName } from "../services-file.ts";
 
 export const gitIdentitySchema = z.strictObject({
   name: z.string().trim().min(1).refine((s) => !/[\x00-\x1f\x7f]/.test(s), "must be a single line"),

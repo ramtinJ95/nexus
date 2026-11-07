@@ -4,7 +4,7 @@
  */
 import { json, type Db } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
-import type { BootInputs } from "../spawn.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 
 /** What the queue keeps of a thread until it starts. `request` is frozen when queued, its resources filled field by field from the project's. A request that names no node starts on the project's default when it starts, as any start does. */

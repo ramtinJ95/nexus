@@ -7,7 +7,7 @@ import { canDeploy, type DeploymentOptions } from "../releases.ts";
 import { imagesView, type ImageRollout } from "../image-rollout.ts";
 import type { ImageOperation } from "../image-store.ts";
 import { type ImageId, isImageId, type NodeName, type TailnetNodeId } from "../../ids.ts";
-import { pinsSchema, type ImageManifest } from "../../image/images.ts";
+import { pinsSchema, type ImageManifest } from "../../protocol/images.ts";
 import { ok, created, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
 
 const imageSchema = z.strictObject({

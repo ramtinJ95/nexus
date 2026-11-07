@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Thread } from "./thread-store.ts";
-import { githubTokenGrant } from "../secret-grants.ts";
+import { githubTokenGrant } from "../protocol/secret-grants.ts";
 import type { ImageId, ProjectId } from "../ids.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import { project, image, testApi, withThread } from "../test-support/api-kit.ts";

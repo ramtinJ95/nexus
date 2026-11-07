@@ -8,7 +8,7 @@ import type { Thread } from "./thread-store.ts";
 import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { AutoReview, SecondReview } from "./project.ts";
 import type { ProjectId } from "../ids.ts";
-import type { SecretGrant } from "../secret-grants.ts";
+import type { SecretGrant } from "../protocol/secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
 import { holdRule, personOnly, reservedNames, type Hold, type HoldCode } from "./holds.ts";
