@@ -4,7 +4,7 @@
  */
 import { defaultProjectResources } from "../project.ts";
 import { githubTokenGrant } from "../../protocol/secret-grants.ts";
-import { defaultClaudeModel } from "../../claude-state.ts";
+import { defaultClaudeModel } from "../../protocol/agent-kinds.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";

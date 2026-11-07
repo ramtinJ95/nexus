@@ -1,12 +1,14 @@
 /**
- * How the probe starts the agent of each session kind in its pane, keyed by protocol/agent-kinds.ts's names. A kind
- * whose sessions take a prompt or a model has the launch arguments for them here, and one that takes neither has none.
+ * How the probe starts the agent of each session kind in its pane, and how a pylon signs it in at boot, keyed by
+ * protocol/agent-kinds.ts's names. A kind whose sessions take a prompt or a model has the launch arguments for them
+ * here, and one that takes neither has none.
  */
 import { randomUUID } from "node:crypto";
 import type { Guest } from "../../backends/backend.ts";
-import { seedClaudeState } from "../../claude-state.ts";
-import type { agentKinds, SessionHarness } from "../../protocol/agent-kinds.ts";
+import { defaultClaudeModel, type agentKinds, type SessionHarness } from "../../protocol/agent-kinds.ts";
+import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import { checkoutDir } from "../../protocol/spawn.ts";
+import { shellQuote as q } from "../../shell.ts";
 
 export const home = "/home/user";
 export const callTimeoutMs = 10_000;
@@ -28,6 +30,8 @@ export interface Launcher {
   promptReceipt?(command: string): readonly string[];
   /** Runs before a start. It is idempotent, so one run serves every start after it. */
   seed?(guest: Guest): Promise<void>;
+  /** A shell command that runs as user on every boot of a pylon granted one of its kind's sign-in grants, after the dotfiles pull. */
+  login?: string;
   /**
    * A session runs in one pane only. A relaunch brings it back in one and holds it from sends and launches meanwhile,
    * and a start Herdr reports failed is kept while its pane runs the agent, so the session is never started twice.
@@ -40,6 +44,38 @@ type Takes<H extends SessionHarness> = (typeof agentKinds)[H]["takes"];
 type LauncherOf<H extends SessionHarness> = Takes<H>["resume"] extends false ? null : Launcher
   & (Takes<H>["prompt"] extends true ? Required<Pick<Launcher, "promptReceipt">> : { promptReceipt?: never })
   & (Takes<H>["model"] extends true ? Required<Pick<Launcher, "modelFlag">> : { modelFlag?: never });
+
+/**
+ * Sets pi's `openai` entry in ~/.pi/agent/auth.json, keeping every other provider's, to a ChatGPT sign-in whose access
+ * token is the chatgpt login's placeholder, which the host swaps for the real token toward api.openai.com only. With no
+ * refresh token and an expiry in 2100, pi never tries a refresh.
+ */
+const piChatgptLogin = `
+const fs = require("node:fs");
+const path = require("node:path");
+const dir = path.join(process.env.HOME, ".pi", "agent");
+const file = path.join(dir, "auth.json");
+const access = process.env.${chatgptTokenGrant.name};
+if (!access) {
+  console.log("pi: ${chatgptTokenGrant.name} is not set, so ~/.pi/agent/auth.json is left as it is");
+  process.exit(1);
+}
+let auth = {};
+try {
+  auth = JSON.parse(fs.readFileSync(file, "utf8"));
+} catch (error) {
+  if (error.code !== "ENOENT") auth = null;
+}
+if (auth === null || typeof auth !== "object" || Array.isArray(auth)) {
+  console.log("pi: ~/.pi/agent/auth.json is not a readable JSON object, so it is left as it is");
+  process.exit(1);
+}
+auth.openai = { type: "oauth", access, refresh: "", expires: 4102444800000 };
+fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+fs.writeFileSync(file + ".nexus-tmp", JSON.stringify(auth, null, 2) + "\\n", { mode: 0o600 });
+fs.renameSync(file + ".nexus-tmp", file);
+console.log("pi: signed in to ChatGPT as its openai provider");
+`;
 
 const table = {
   "claude-code": {
@@ -59,7 +95,14 @@ const table = {
   // pi 1.4.0 opens a missing --session path as a new session that it first writes there on its first
   // message, so unlike a Claude Code ID the path needs no check, and its history is not looked for. pi reports its
   // session file at once.
-  pi: { kind: "pi", resume: async (_guest, sessionFile) => ({ args: ["--session", sessionFile], hasHistory: true }), fresh: () => [], flags: [], onePane: false },
+  pi: {
+    kind: "pi",
+    resume: async (_guest, sessionFile) => ({ args: ["--session", sessionFile], hasHistory: true }),
+    fresh: () => [],
+    flags: [],
+    login: `node -e ${q(piChatgptLogin)}`,
+    onePane: false,
+  },
   shell: null,
 } satisfies { [H in SessionHarness]: LauncherOf<H> };
 
@@ -82,3 +125,52 @@ async function seedClaude(guest: Guest): Promise<void> {
   const seeded = await guest.exec(["node", "-e", seedClaudeState, checkoutDir], { cwd: home, timeoutMs: callTimeoutMs });
   if (seeded.exitCode !== 0) throw new Error(`seeding Claude state failed: ${seeded.output}`);
 }
+
+/** Runs in the guest before Claude starts, preserving credentials and unrelated user state. */
+export const seedClaudeState = `
+const fs = require('node:fs');
+const path = require('node:path');
+const home = process.env.HOME;
+const cwd = fs.realpathSync(process.argv[1]);
+if (cwd === path.parse(cwd).root || cwd === fs.realpathSync(home)) {
+  throw new Error('refusing to grant Claude trust to root or HOME');
+}
+function snapshot(file) {
+  try { return { text: fs.readFileSync(file, 'utf8'), mode: fs.statSync(file).mode & 0o7777 }; }
+  catch (err) { if (err.code !== 'ENOENT') throw err; return { text: null, mode: 0o600 }; }
+}
+function merge(file, update) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const before = snapshot(file);
+    const state = before.text === null ? {} : JSON.parse(before.text);
+    const original = JSON.stringify(state);
+    update(state);
+    if (JSON.stringify(state) === original) return;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + '.' + process.pid + '.tmp';
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\\n', { mode: before.mode });
+      fs.chmodSync(tmp, before.mode);
+      const current = snapshot(file);
+      if (current.text !== before.text || current.mode !== before.mode) continue;
+      fs.renameSync(tmp, file);
+      return;
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+  }
+  throw new Error('Claude state kept changing while seeding ' + file);
+}
+merge(path.join(home, '.claude.json'), state => {
+  state.hasCompletedOnboarding = true;
+  state.projects ??= {};
+  state.projects[cwd] ??= {};
+  state.projects[cwd].hasTrustDialogAccepted = true;
+});
+merge(path.join(home, '.claude/settings.json'), state => {
+  state.theme ??= 'dark';
+  state.model = '${defaultClaudeModel}';
+  state.attribution = { ...state.attribution, commit: '', pr: '' };
+  state.skipDangerousModePermissionPrompt = true;
+});
+`;

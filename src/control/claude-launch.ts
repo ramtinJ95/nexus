@@ -13,7 +13,7 @@ import type { NodeObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { defaultClaudeModel } from "../claude-state.ts";
+import { defaultClaudeModel } from "../protocol/agent-kinds.ts";
 import { listsRunning } from "./observed.ts";
 import type { Registry } from "./registry.ts";
 import type { ClaudeWorker, Thread } from "./thread-store.ts";

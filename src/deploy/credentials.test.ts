@@ -7,7 +7,8 @@ import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
 import { harnessModels, openCredentials, requireModel } from "../control/harness/credentials.ts";
-import { harnessSignedIn, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
+import { claudeNames, harnessSignedIn, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
+import { agentKinds } from "../protocol/agent-kinds.ts";
 import { snapshot } from "../test-support/kit.ts";
 
 const exec = promisify(execFile);
@@ -305,4 +306,8 @@ test("the harness is signed in when its credentials file holds a login, and a fi
     assert.equal(harnessSignedIn(JSON.stringify(file)), signedIn, JSON.stringify(file));
   }
   assert.throws(() => harnessSignedIn("{ not json"), SyntaxError);
+});
+
+test("claudeNames names the grants that sign Claude Code in, which the deployer reads without the protocol's zod", () => {
+  assert.deepEqual(agentKinds["claude-code"].signIn.grants.map((grant) => grant.name), [...claudeNames]);
 });
