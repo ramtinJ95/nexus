@@ -221,7 +221,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   /**
    * A dropped stream is opened again as reconnectMs says, at most the poll interval apart, and counts from the start
    * again once a frame arrives. A thread without a conversation, or a deleted one, refuses the stream, and never
-   * streams again. A retryable refusal opens it again on the same schedule.
+   * streams again.
    */
   async function stream() {
     const claude = (await firstDetail.promise).claudeWorker !== undefined;
@@ -237,12 +237,12 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
           print();
         }, stop.signal);
       } catch (err) {
-        if (err instanceof CliError && err.kind === "conflict" && !err.retryable) {
+        if (err instanceof CliError && err.kind === "conflict") {
           // A deleted thread's transcript is gone, and its poll still prints its state.
           if (claude) transcript = "none";
           return;
         }
-        if (!(err instanceof CliError && err.retryable)) failed("stream", err);
+        failed("stream", err);
       }
       await sleep(reconnectMs(attempt, intervalMs), undefined, { signal: stop.signal }).catch(() => {});
     }
