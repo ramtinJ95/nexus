@@ -143,6 +143,14 @@ test("a logged-out tailscale is one miss, and the tailnet's settings are checked
   }
 });
 
+test("a tailscale status that fails is not running, whatever it printed", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)}
+tailscale_status() { echo '${JSON.stringify(running)}'; return 1; }
+check_prerequisites node '' 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[@]}"`);
+  assert.equal(run.code, 0, run.stderr);
+  assert.deepEqual(run.stdout.split("\0").filter((entry) => entry !== "").map((entry) => entry.split("\n")[0]), ["- Tailscale is not running and logged in."]);
+});
+
 test("MagicDNS and HTTPS certificates turned off are both reported", async () => {
   const status = { ...running, CurrentTailnet: { ...running.CurrentTailnet, MagicDNSEnabled: false }, CertDomains: null };
   assert.deepEqual(await misses({ ...complete, status }, "node"), [
@@ -150,6 +158,13 @@ test("MagicDNS and HTTPS certificates turned off are both reported", async () =>
     "- HTTPS certificates are off. Previews and the dashboard are served over HTTPS.\n    Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns",
   ]);
   assert.equal((await misses({ ...complete, status: { ...running, CertDomains: [] } }, "node")).length, 1);
+});
+
+test("without Node 26 the tailscale settings are checked on the rerun, since src/deploy/setup.ts reads them", async () => {
+  const status = { ...running, BackendState: "NeedsLogin" };
+  for (const node of ["none", "22"]) {
+    assert.deepEqual((await misses({ ...complete, node, status }, "node")).map((entry) => entry.split("\n")[0]), [`- Node 26 or newer must be in /usr/local/bin:/usr/bin, found ${node}.`]);
+  }
 });
 
 test("the installer stops before changing anything when a prerequisite is missing", async () => {
@@ -163,10 +178,13 @@ main --admit macbook`);
   assert.doesNotMatch(run.stderr, /^(node|bash) /m);
 });
 
-/** Stand-ins for what main runs, each saying on stderr what it ran. `setup.ts credentials` prints `next`, the installer's next steps. */
+/**
+ * Stand-ins for what main runs, each saying on stderr what it ran. `setup.ts credentials` prints `next`, the installer's
+ * next steps. `setup.ts check` is the prerequisites' own, so it runs.
+ */
 function steps(next: readonly string[] = []): string {
   return `
-node() { echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || printf '%s\\n' ${next.join(" ")}; }
+node() { [ "$2" != check ] || { command node "$@"; return; }; echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || printf '%s\\n' ${next.join(" ")}; }
 bash() { echo "bash \${*//$repo/.}" >&2; }
 systemctl() { echo "systemctl $*" >&2; }
 install() { :; }
