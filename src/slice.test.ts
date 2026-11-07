@@ -420,6 +420,8 @@ async function tickOnce(): Promise<PlanStep> {
     holders: () => [],
     artifactSha256: (id) => { throw new Error(`no node holds ${id}, so it has no recorded sha256`); },
     save() {},
+    desired: () => pylon.desired,
+    sealedBoot: () => undefined,
   });
 }
 

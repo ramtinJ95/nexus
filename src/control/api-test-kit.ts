@@ -60,6 +60,7 @@ export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "images" |
   deployment?: DeploymentOptions | null;
   images?(registry: Registry): ImageRollout;
   usageBackfill?(registry: Registry): UsageBackfillJob;
+  /** Each turns on the queue, which brings the pipeline with it, as in production. */
   queue?: boolean;
   pipeline?: boolean;
   /** Defaults to `pipeline`. */
@@ -107,7 +108,7 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
   const mirror: ProjectMirror = { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } };
   const services = threadServices({
     registry, harness, mirror, dotfiles: dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
-    queue: queued === true || piped === true, pipeline: piped === true, planning: planned === true ? { replies: agentReader(registry, harness).replies } : null,
+    queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness).replies } : null,
   });
   const { startThread, queue, planning: plans } = services.api;
   /** The options of an API on `port`, so a restart serves the same registry and services. */

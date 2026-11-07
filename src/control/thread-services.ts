@@ -18,8 +18,6 @@ export function threadServices(options: Parameters<typeof threadStarter>[0] & {
   log?: (message: string) => void;
   /** Needs the control plane's GitHub token, which tells it when a predecessor's pull request merged. */
   queue: boolean;
-  /** Needs the queue, which starts its items' threads. */
-  pipeline: boolean;
   /** Reads a planning thread's replies. Null: no planning pass. */
   planning: { replies(t: Thread): Promise<string[]> } | null;
 }) {
@@ -30,7 +28,7 @@ export function threadServices(options: Parameters<typeof threadStarter>[0] & {
     registry, startThread, gate, log,
     send: (id, text, requestId) => harness.send(id, text, requestId, "followUp"),
   });
-  const items = queue === null || !options.pipeline ? null : pipeline({ registry, queue, log });
+  const items = queue === null ? null : pipeline({ registry, queue, log });
   const plans = options.planning === null ? null : planning({ registry, pipeline: items, replies: options.planning.replies, log });
   return {
     api: { startThread, queue, pipeline: items, planning: plans },

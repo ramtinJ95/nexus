@@ -30,7 +30,7 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
     registry.setCurrentImage(image.id);
   }
   const fake = fakeHarness();
-  const services = threadServices({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {}, gate: turnGate(() => false), queue: true, pipeline: true, planning: null });
+  const services = threadServices({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {}, gate: turnGate(() => false), queue: true, planning: null });
   const queue = services.api.queue!;
   const items = services.api.pipeline!;
   t.after(() => services.close());
