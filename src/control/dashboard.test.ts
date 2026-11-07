@@ -1822,7 +1822,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( data-scratch)?( checked)?><span class="seg-name">[^<]*<\/span><span class="seg-repo">([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[4]]),
     [["acme", false, "git@example.com:acme.git"], ["beta", false, "git@example.com:beta.git"], ["sketch", true, "scratch"]]);
   assert.match(dialog, /name="project" required value="sketch" data-node="rj-firebat" data-branch="main"[^>]* data-scratch[ >]/, "client.js says the thread starts an empty repository from these");
-  assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote New thread/);
+  assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote Auto review Off Review Land Yolo New thread/);
 });
 
 test("every page has somewhere to say a refresh failed", async (t) => {
