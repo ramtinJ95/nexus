@@ -190,7 +190,7 @@ Each step ends in a check that runs without a node, except the last.
 
 1. Edit the three protocol comments and the `attachedClients` rule. Tests in `src/reconcile.test.ts` stay green.
 2. Implement the probe's stream route and `Guest.stream` for the Docker backend with `docker exec -i`. Bake the arm64 or x64 daemon into the test image. The check is a probe test that runs `printf` through a raw pipe and gets stdout with no stderr bytes.
-3. Implement `bridge.ts` and `pylon-env.ts`. Extend `src/slice.test.ts` to run Durable's env conformance suite against `RemoteExecutionEnv` through the probe and the Docker backend.
+3. Implement `bridge.ts` and `pylon-env.ts`. Extend `src/checks/slice/slice.test.ts` to run Durable's env conformance suite against `RemoteExecutionEnv` through the probe and the Docker backend.
 4. Implement `host.ts`, `thread-doc.ts` and `activity.ts`. Add a slice test with a scripted model, following S3's `Object.assign(createModels(), overrides)` fixture: submit, run `bash` in the container, assert the tool result entry, then kill and reopen the harness mid-tool and assert the `interrupted` result.
 5. Implement `credentials.ts` and the dashboard login flow. Check it by hand once on `rj-firebat`, because it needs a real ChatGPT account.
 6. Implement `Guest.stream` for pylon-vm over the `shell` action's SSH, the route S13 confirmed. Bake the daemon into the pylon image.

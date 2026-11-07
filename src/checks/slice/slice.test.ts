@@ -27,26 +27,26 @@ import { request } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
-import { createDockerBackend } from "./backends/docker-backend.ts";
-import { createPylonVmBackend } from "./backends/pylon-vm/pylon-vm-backend.ts";
-import { run as pylonVm } from "./pylon-vm/client.ts";
-import { nodeSecrets, type NodeSecrets } from "./probe/config.ts";
-import { startProbe, type Probe } from "./probe/server.ts";
-import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
-import { pylonInfoFile } from "./probe/pylon-api.ts";
-import type { CheckpointId, ImageId, LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
-import type { DeclaredOutput, ServiceFact } from "./protocol/observations.ts";
-import { connectProbe, type ProbeClient } from "./protocol/client.ts";
-import { envelope, type PlanStep } from "./control/reconcile.ts";
-import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "./control/tick.ts";
-import type { BackendPylon, Guest, VmBackend } from "./backends/backend.ts";
-import { loginHosts } from "./control/project.ts";
-import { renderOverlay } from "./control/overlay.ts";
-import type { BootInputs, CloneRepo, OverlayFile, PreviewAssignment } from "./spawn.ts";
-import type { ProjectId } from "./ids.ts";
-import { sessionFacts, sessionsFile } from "./probe/guest/sessions.ts";
-import { checkoutDir, type SessionHarness } from "./session-harness.ts";
-import { freePort } from "./test-support/kit.ts";
+import { createDockerBackend } from "../../backends/docker-backend.ts";
+import { createPylonVmBackend } from "../../backends/pylon-vm/pylon-vm-backend.ts";
+import { run as pylonVm } from "../../pylon-vm/client.ts";
+import { nodeSecrets, type NodeSecrets } from "../../probe/config.ts";
+import { startProbe, type Probe } from "../../probe/server.ts";
+import { fakeTailscale, nodeHost, viaGateway } from "../../probe/fake-tailscale.ts";
+import { pylonInfoFile } from "../../probe/pylon-api.ts";
+import type { CheckpointId, ImageId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
+import type { DeclaredOutput, ServiceFact } from "../../protocol/observations.ts";
+import { connectProbe, type ProbeClient } from "../../protocol/client.ts";
+import { envelope, type PlanStep } from "../../control/reconcile.ts";
+import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from "../../control/tick.ts";
+import type { BackendPylon, Guest, VmBackend } from "../../backends/backend.ts";
+import { loginHosts } from "../../control/project.ts";
+import { renderOverlay } from "../../control/overlay.ts";
+import type { BootInputs, CloneRepo, OverlayFile, PreviewAssignment } from "../../spawn.ts";
+import type { ProjectId } from "../../ids.ts";
+import { sessionFacts, sessionsFile } from "../../probe/guest/sessions.ts";
+import { checkoutDir, type SessionHarness } from "../../session-harness.ts";
+import { freePort } from "../../test-support/kit.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -56,7 +56,7 @@ const controlPlaneId = "nSLICECONTROL" as TailnetNodeId;
 const probeId = "nSLICEPROBE" as TailnetNodeId;
 const thread = `slice-${run}`;
 const pylonId = `pylon-${thread}` as PylonId;
-const cli = new URL("../images/pylon/nexus", import.meta.url).pathname;
+const cli = new URL("../../../images/pylon/nexus", import.meta.url).pathname;
 
 interface SliceFixture {
   backend: VmBackend;
@@ -145,7 +145,7 @@ function dockerFixture(): SliceFixture {
     },
     // Docker execs run as root, so Herdr's config is root's. The pylon image turns off Herdr's agent resume the same way.
     async setUp() {
-      const { herdr } = JSON.parse(await readFile(new URL("../images/pylon/pins.json", import.meta.url), "utf8")) as { herdr: string };
+      const { herdr } = JSON.parse(await readFile(new URL("../../../images/pylon/pins.json", import.meta.url), "utf8")) as { herdr: string };
       const dir = await mkdtemp(join(tmpdir(), "nexus-slice-image-"));
       try {
         await writeFile(join(dir, "Dockerfile"), [

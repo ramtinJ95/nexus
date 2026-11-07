@@ -4,11 +4,11 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bootSecrets, effectiveAllowedHosts, type Project } from "./control/project.ts";
-import { renderOverlay, type PylonOverlay } from "./control/overlay.ts";
-import { chatgptTokenGrant, githubTokenGrant, secretHostPattern, secretNamePattern } from "./secret-grants.ts";
-import { installFileCommand } from "./shell.ts";
-import type { NodeName, ProjectId, PylonId } from "./ids.ts";
+import { bootSecrets, effectiveAllowedHosts, type Project } from "./project.ts";
+import { renderOverlay, type PylonOverlay } from "./overlay.ts";
+import { chatgptTokenGrant, githubTokenGrant, secretHostPattern, secretNamePattern } from "../secret-grants.ts";
+import { installFileCommand } from "../shell.ts";
+import type { NodeName, ProjectId, PylonId } from "../ids.ts";
 
 const project: Project = {
   id: "acme-web" as ProjectId,
@@ -204,7 +204,7 @@ test("installFileCommand makes the parent as a user owner, as root for root, and
 });
 
 test("code that runs on nodes never imports project.ts, the control plane's Project record and overlay", () => {
-  const src = new URL("./", import.meta.url);
+  const src = new URL("../", import.meta.url);
   const nodeFiles = [
     ...["probe", "protocol", "pylon-vm", "backends/pylon-vm"].flatMap((dir) => readdirSync(new URL(dir, src), { recursive: true, encoding: "utf8" })
       .filter((file) => /\.[jt]s$/.test(file) && !/\.(test|check)\.[jt]s$/.test(file)).map((file) => `${dir}/${file}`)),
