@@ -2,7 +2,6 @@
  * The registry's fixtures. A node, the "acme" project, and threads whose pylon clones
  * git@example.com:acme.git. What needs no registry is in kit.ts.
  */
-import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import { testObservation } from "./kit.ts";
 import { newPylonRecord, type PylonRecord } from "../control/tick.ts";
