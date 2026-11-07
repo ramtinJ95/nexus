@@ -30,7 +30,7 @@ import { pylonEnvs } from "../../control/harness/pylon-env.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../probe/fake-tailscale.ts";
 import { nodeSecrets } from "../../probe/config.ts";
 import { startProbe } from "../../probe/server.ts";
-import type { JobId, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
+import { checkpointId, threadOfPylon, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../../ids.ts";
 import type { Job } from "../../protocol/jobs.ts";
 import { connectProbe } from "../../protocol/client.ts";
 import { checkBackend, checkBoot } from "./pylon-vm-check-kit.ts";
@@ -190,10 +190,10 @@ try {
   await sleep(5_000); // the agents report their session IDs through Herdr's hooks
   step("FACTS_BEFORE_PAUSE", await sessionFacts(backend.guest(pylonId)));
 
-  await job({ kind: "pause", pylonId, checkpoint: `ckpt-check-${run}-1` as never });
+  await job({ kind: "pause", pylonId, checkpoint: checkpointId(threadOfPylon(pylonId), 1) });
   step("PAUSED");
   assert.equal((await visit(web.httpsPort)).status, 503, "a paused pylon's preview shows the waking page");
-  await spawn({ kind: "resume", checkpoint: `ckpt-check-${run}-1` as never }, { previews: [web], overlay: [] });
+  await spawn({ kind: "resume", checkpoint: checkpointId(threadOfPylon(pylonId), 1) }, { previews: [web], overlay: [] });
   step("WOKEN");
 
   const log = await readFile(join(stateRoot, "instances", pylonId, "controller.log"), "utf8");

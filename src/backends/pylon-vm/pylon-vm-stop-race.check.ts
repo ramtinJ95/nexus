@@ -18,7 +18,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { BootInputs } from "../../spawn.ts";
-import type { CheckpointId, PylonId } from "../../ids.ts";
+import { checkpointId, threadOfPylon, type PylonId } from "../../ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 import { unstamped } from "../../pylon-vm/controller-log.ts";
 
@@ -93,7 +93,7 @@ try {
     await delay(500 + Math.random() * 1_000);
     const [beganBefore, closedBefore] = [(await logged(began)).length, (await logged(closedUnder)).length];
     const pauseAt = Date.now();
-    await backend.ensurePaused(pylonId, `ckpt-${pylonId}-${round}` as CheckpointId, signal());
+    await backend.ensurePaused(pylonId, checkpointId(threadOfPylon(pylonId), round), signal());
     const pausedAt = Date.now();
     paused = true;
     // Before the controller stops, the pause records the guest's sessions through the same guest calls the readers
@@ -112,7 +112,7 @@ try {
     step(`ROUND_${round}`, `pinned in ${seconds(pinMs)} s, pause ${seconds(pausedAt - pauseAt)} s (${phases}), ${reads.length} reads, pinned execs settled ${held.map((r) => `${seconds(late(r))} s into the stop (${r.outcome})`).join(" and ")}, latest ${seconds(late(slowest))} s after its start or the stop's (${slowest.outcome}), ${closed.length === 0 ? "all settled before the close" : closed.join("; ")}`);
     assert.equal(crossed.length, held.length, `round ${round}: a pinned exec did not cross the stop, so the round proved nothing`);
     assert.ok(late(slowest) < settleLimitMs, `round ${round}: a request in flight through the stop settled ${seconds(late(slowest))} s late (${slowest.outcome})`);
-    await backend.ensureRunning(boot({ kind: "resume", checkpoint: `ckpt-${pylonId}-${round}` as CheckpointId }), emptyLive, signal());
+    await backend.ensureRunning(boot({ kind: "resume", checkpoint: checkpointId(threadOfPylon(pylonId), round) }), emptyLive, signal());
   }
   step("ROUNDS_RACED", `${raced} of ${rounds}`);
 } catch (err) {

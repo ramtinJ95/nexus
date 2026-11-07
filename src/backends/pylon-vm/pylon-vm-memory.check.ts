@@ -15,7 +15,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { output } from "../../exec.ts";
 import type { BootInputs } from "../../spawn.ts";
-import type { CheckpointId, PylonId } from "../../ids.ts";
+import { checkpointId, threadOfPylon, type PylonId } from "../../ids.ts";
 import { parseMeminfo } from "../../probe/host.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 
@@ -126,7 +126,7 @@ print('released', flush=True)
   assert.ok(grown >= diskGiB * 2 ** 30 * 0.9, "the write reached the running disk");
   assert.notEqual(await fsType(overlay), "tmpfs", "the running disk's writes do not land in host RAM");
 
-  const checkpoint = `ckpt-${pylonId}-1` as CheckpointId;
+  const checkpoint = checkpointId(threadOfPylon(pylonId), 1);
   const paused = performance.now();
   await backend.ensurePaused(pylonId, checkpoint, signal());
   step("PAUSE_SECONDS", ((performance.now() - paused) / 1000).toFixed(1));

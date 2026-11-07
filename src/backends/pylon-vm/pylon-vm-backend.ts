@@ -21,7 +21,7 @@ import { buildImage as buildPylonImage } from "../../image/build.ts";
 import { chatgptTokenGrant } from "../../secret-grants.ts";
 import { requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
-import { type CheckpointId, type ImageId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
+import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
 import type { PausedSession } from "../../protocol/observations.ts";
 import { imageIdOf, type TemplateManifest } from "../../image/images.ts";
@@ -84,7 +84,7 @@ export function hostNestsKvm(read: (path: string) => string | null = (path) => {
   return ["kvm_amd", "kvm_intel"].some((module) => /^[Y1]$/.test(read(`/sys/module/${module}/parameters/nested`)?.trim() ?? ""));
 }
 
-const checkpointId = z.custom<CheckpointId>((v) => typeof v === "string" && v.startsWith("ckpt-"));
+const checkpointId = z.custom<CheckpointId>(isCheckpointId);
 const pausedSessionSchema = z.strictObject({
   id: z.string(), herdrPane: z.string().nullable(), harness: sessionHarnessSchema, harnessSessionId: z.string().nullable(), title: z.string(),
 });

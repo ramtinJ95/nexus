@@ -16,6 +16,7 @@ import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { digestPattern, tokenDigest, tsNet } from "./model.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
 import { readJson, saveJson } from "../json-file.ts";
+import { isImageId } from "../ids.ts";
 import { localApiWhois, type Whois } from "../tailscale.ts";
 
 const exec = promisify(execFile);
@@ -461,7 +462,7 @@ async function gather(flags: Flags): Promise<Facts> {
   const groups = await exec("id", ["-nG", "nexus"]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
   const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: "/usr/local/bin:/usr/bin" } }).then(() => true, () => false);
   const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource();
-  const image = await readdir(paths.artifacts).then((entries) => entries.some((e) => e.startsWith("img-")), () => false);
+  const image = await readdir(paths.artifacts).then((entries) => entries.some(isImageId), () => false);
   return {
     ...common, role: "control", signedIn: credentials !== undefined && harnessSignedIn(credentials),
     admitted: callers.length > 0, docker, dockerGroup: groups.includes("docker"), image,

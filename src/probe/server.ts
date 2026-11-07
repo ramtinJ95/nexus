@@ -14,7 +14,7 @@ import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { type BackendPylon, type VmBackend } from "../backends/backend.ts";
 import { commandPolicies, runCommand, runJob, type CommandPolicy, type ProbeDeps } from "./run.ts";
-import { isPortableArtifactId, type JobId, type PortableArtifactId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
+import { isPortableArtifactId, shutdownCheckpointId, type JobId, type PortableArtifactId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
 import {
   encodeSubmitReply, jobDeadlineMs, JobFailure, jobSubject, parseJobEnvelope, type Job, type JobEnvelope, type JobStatus, type Subject,
 } from "../protocol/jobs.ts";
@@ -476,7 +476,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // that does not stop at the abort, as pylon-vm's stop does not.
       const status = busy.has(pylonId) ? null : await Promise.race([start({
         jobId: randomUUID() as JobId, node, issuedAt: new Date(pausing).toISOString(), notAfter: new Date(pausing).toISOString(),
-        job: { kind: "pause", pylonId, checkpoint: `ckpt-${pylonId.replace(/^pylon-/, "")}-shutdown-${startedAt}` },
+        job: { kind: "pause", pylonId, checkpoint: shutdownCheckpointId(pylonId, startedAt) },
       }, pylonId, budget).ended, delay(budget, null, { ref: false })]);
       if (status?.state === "succeeded") return { pylonId, pausedInMs: Date.now() - pausing };
       const failed = status?.state === "failed" && status.code !== "deadline" ? status.message : outOfTime;
