@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fullCommit } from "./model.ts";
+import { fullCommit } from "../protocol/deploy.ts";
 
 /** The commit a release's `release-commit` file names, or null when it holds no full commit. */
 export function parseCommit(text: string): string | null {

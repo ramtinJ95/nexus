@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
-import type { ReleaseReport } from "../deploy/model.ts";
+import type { ReleaseReport } from "../protocol/deploy.ts";
 import type { DiskFact } from "../protocol/observations.ts";
 import { testCapacity } from "../test-support/kit.ts";
 import { doctorReport, type DoctorFacts } from "./doctor.ts";

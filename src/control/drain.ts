@@ -1,4 +1,4 @@
-import type { Drain } from "../deploy/model.ts";
+import type { Drain } from "../protocol/deploy.ts";
 
 export class DeployDraining extends Error {
   constructor() { super("control plane is draining for deployment; retry after the release completes"); }

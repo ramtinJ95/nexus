@@ -8,7 +8,7 @@ import { lstat, readdir, readFile, readlink, rename, rm, stat } from "node:fs/pr
 import { join } from "node:path";
 import { readJson, saveJson } from "../json-file.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
-import { fullCommit, type Role } from "./model.ts";
+import { fullCommit, type Role } from "../protocol/deploy.ts";
 
 /** Named by its content hash, or by the full commit the deployer installed. */
 export const releaseName = /^(?:[0-9a-f]{12}|[0-9a-f]{40})$/;

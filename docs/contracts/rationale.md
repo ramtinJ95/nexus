@@ -22,6 +22,7 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | [`src/control/project.ts`](../../src/control/project.ts) | `Project` and its effective allowlist | Control plane. No node code imports it |
 | [`src/control/overlay.ts`](../../src/control/overlay.ts) | The pylon overlay with its PYLON.md guide | Control plane. No node code imports it |
 | [`src/protocol/images.ts`](../../src/protocol/images.ts) | The image recipe and ID, template keys and build inputs, and the artifact manifests | Both |
+| [`src/protocol/deploy.ts`](../../src/protocol/deploy.ts) | The deployer-to-control wire contract: `ReleaseReport`, `ReleaseView`, `DrainBody`, `DrainReply` and the patterns both sides check | Both. It imports builtins only, since the bootstrap deployer runs it from the copy `deploy/install-deployer.sh` makes |
 | [`src/control/templates.ts`](../../src/control/templates.ts) | Template records, template choice, setup hashes, and garbage | Control plane |
 
 A reconcile tick traces through three files. `src/control/reconcile.ts` plans, `src/protocol/` carries, and `src/probe/run.ts` executes against `src/backends/backend.ts`'s `VmBackend`.

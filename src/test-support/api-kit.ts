@@ -27,7 +27,7 @@ import type { UsageBackfillJob } from "../control/usage-backfill.ts";
 import type { ProjectMirror } from "../control/templates.ts";
 import { processStream } from "../process-stream.ts";
 import { checkoutDir } from "../protocol/spawn.ts";
-import { tokenDigest } from "../deploy/model.ts";
+import { tokenDigest } from "../protocol/deploy.ts";
 import { call as callJson, runningPylon, tempDir, testCapacity, testImage, testObservation } from "./kit.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";

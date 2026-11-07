@@ -1,6 +1,6 @@
 /**
- * The wire contract between the deploy worker and the control plane. The bootstrap deployer copies src/deploy/*.ts and
- * runs without node_modules, so this module imports only builtins.
+ * The wire contract between the deploy worker and the control plane. The bootstrap deployer runs this file without
+ * node_modules, from the copy deploy/install-deployer.sh makes, so it imports only builtins.
  */
 import { createHash } from "node:crypto";
 

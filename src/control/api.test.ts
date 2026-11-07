@@ -10,7 +10,7 @@ import type { QueuedThread } from "./queue.ts";
 import type { ReviewLoop } from "./review.ts";
 import { joinTokenTtlMs, mintJoinToken } from "./join.ts";
 import type { ProjectId } from "../ids.ts";
-import { tokenDigest } from "../deploy/model.ts";
+import { tokenDigest } from "../protocol/deploy.ts";
 import { until } from "../test-support/kit.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import { node, laptop, phone, project, dir, testApi, withThread, attachTo, attached, attachPathOf, deployCommit, deployment, reporterHeaders, withQueue } from "../test-support/api-kit.ts";

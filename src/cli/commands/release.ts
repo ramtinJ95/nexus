@@ -1,7 +1,7 @@
 /** Landing and releasing: `release`, `review`, `land`, `deploy` and the image commands. */
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { fullCommit, releaseOutcome, type ReleaseView } from "../../deploy/model.ts";
+import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
 import type { ImagesCurrent, ThreadDetail } from "../../control/wire.ts";
 import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
 import type { ImageOperation } from "../../control/image-store.ts";

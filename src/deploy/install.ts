@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
 import { parseCommit } from "./health.ts";
-import { fullCommit, type Role } from "./model.ts";
+import { fullCommit, type Role } from "../protocol/deploy.ts";
 
 const exec = promisify(execFile);
 export const repository = "https://github.com/ramtinJ95/nexus.git";

@@ -113,7 +113,7 @@
     "src/deploy/credentials.ts: reserved-path:auth",
     "src/deploy/health.ts: reserved-path:auth",
     "src/deploy/install.ts: reserved-path:auth",
-    "src/deploy/model.ts: reserved-path:auth",
+    "src/protocol/deploy.ts: reserved-path:auth",
     "src/deploy/plan.ts: reserved-path:auth",
     "src/deploy/release-cleanup.ts: reserved-path:auth",
     "src/deploy/setup.ts: reserved-path:auth",

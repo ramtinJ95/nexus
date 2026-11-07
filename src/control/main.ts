@@ -31,7 +31,7 @@ import { threadServices } from "./thread-services.ts";
 import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
-import { digestPattern, tsNet } from "../deploy/model.ts";
+import { digestPattern, tsNet } from "../protocol/deploy.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { prWatchMs } from "./pr-watch-model.ts";
 import { builderNudger } from "./nudge.ts";
