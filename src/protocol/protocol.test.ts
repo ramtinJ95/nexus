@@ -2,18 +2,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "./ids.ts";
-import { encodeSubmitReply, parseJobEnvelope, parseSubmitReply } from "./protocol/jobs.ts";
-import { brokenCauses, parseProbeEvent, probeContract, type BrokenCause } from "./protocol/observations.ts";
+import type { LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import { encodeSubmitReply, parseJobEnvelope, parseSubmitReply } from "./jobs.ts";
+import { brokenCauses, parseProbeEvent, probeContract, type BrokenCause } from "./observations.ts";
 import {
   closeSessionOutcomes, interruptClaudeOutcomes, parsePylonCommand, sendClaudeOutcomes, type CloseSessionOutcome, type InterruptClaudeOutcome,
   type PylonCommand, type SendClaudeOutcome,
-} from "./protocol/commands.ts";
-import { notAnswering, parseStreamRequest } from "./protocol/streams.ts";
-import { probeErrorCodes, ProbeHttpError, type ProbeError } from "./protocol/http.ts";
-import { parseArtifactManifest } from "./protocol/artifacts.ts";
-import { connectProbe } from "./protocol/client.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "./test-support/kit.ts";
+} from "./commands.ts";
+import { notAnswering, parseStreamRequest } from "./streams.ts";
+import { probeErrorCodes, ProbeHttpError, type ProbeError } from "./http.ts";
+import { parseArtifactManifest } from "./artifacts.ts";
+import { connectProbe } from "./client.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 
 const node = "test-node";
 const pylonId = "pylon-th-1";
@@ -409,16 +409,16 @@ test("each union's list holds exactly its type's members, and the parser that re
 });
 
 test("ids.ts imports nothing, so every module can take its IDs from it without a cycle", () => {
-  const source = readFileSync(new URL("./ids.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../ids.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /^\s*import\b|\bimport\s*\(/m);
   assert.doesNotMatch(source, /^\s*export\b[^;]*\bfrom\s*["']/m);
 });
 
 test("the probe never loads the control plane's probe client", () => {
-  const client = new URL("./protocol/client.ts", import.meta.url).href;
+  const client = new URL("./client.ts", import.meta.url).href;
   const loaders = (dir: string) => readdirSync(new URL(dir, import.meta.url), { recursive: true, encoding: "utf8" })
     .filter((f) => f.endsWith(".ts") && !/\.(test|check)\.ts$/.test(f)).map((f) => new URL(`${dir}${f}`, import.meta.url));
-  const files = [...loaders("./protocol/"), ...loaders("./probe/")].filter((f) => f.href !== client);
+  const files = [...loaders("./"), ...loaders("../probe/")].filter((f) => f.href !== client);
   assert.ok(files.length > 15, "it reads the contract's files and the probe's");
   for (const file of files) {
     const source = readFileSync(file, "utf8");
