@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { checkCaller, verifyCaller } from "./agent-protocol.ts";
 import { checkRuns, imageEnv, verifyGate, type CheckRuns, type CheckState } from "./gate.ts";
+import { Refusal } from "./refusal.ts";
 import type { Thread } from "./thread-store.ts";
 import { testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { processStream } from "../process-stream.ts";
@@ -69,14 +70,15 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
   }
   const builder = add("person");
   const started: StartRequest[] = [];
+  let refuse: Error | null = null;
   const local = (argv: readonly string[]) => argv.map((a) => a.replaceAll(checkoutDir, repo).replace(imageEnv, `cat ${image}`));
   let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, local(argv).slice(1), () => {});
   const runs = (gate?: typeof verifyGate, ended?: (thread: ThreadId) => void): CheckRuns => checkRuns({
     registry, wake: () => {}, ...gate === undefined ? {} : { gate }, ...ended === undefined ? {} : { ended },
     probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
-    async startThread(request, caller) { started.push(request); return add(caller); },
+    async startThread(request, caller) { started.push(request); if (refuse !== null) throw refuse; return add(caller); },
   });
-  return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; } };
+  return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; }, set refuse(err: Error | null) { refuse = err; } };
 }
 
 /** Polls until the check ends. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
@@ -100,6 +102,19 @@ test("a check runs in a fresh bare check thread of 4 CPUs at the commit, and its
   assert.deepEqual(await settle(() => runs.poll(id, f.head)), { kind: "done", passed: true, output: "typecheck ok\ntests ok" });
   runs.discard(id);
   assert.equal(f.registry.thread(id)!.status, "deleted");
+});
+
+test("a start the control plane refuses says why, with or without room asked for, and any other failure is thrown", async (t) => {
+  const f = await fixture(t, "echo tests ok");
+  const runs = f.runs();
+  f.refuse = new Refusal("conflict", "no node has room for this pylon: node is overcommitted");
+  assert.deepEqual(await runs.start(f.builder, "feature", f.head, true), { refused: "no node has room for this pylon: node is overcommitted" });
+  f.refuse = new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
+  assert.deepEqual(await runs.start(f.builder, "feature", f.head), { refused: "no image is current yet, so a pylon has nothing to boot" });
+  f.refuse = new Error("the registry is closed");
+  await assert.rejects(runs.start(f.builder, "feature", f.head), { message: "the registry is closed" });
+  f.refuse = null;
+  assert.equal(f.registry.thread(await started(runs.start(f.builder, "feature", f.head)))!.startedBy, checkCaller);
 });
 
 test("a check pylon keeps the CPUs of a project sized over 4", async (t) => {

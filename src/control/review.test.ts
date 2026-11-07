@@ -86,6 +86,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   /** Check threads whose runs a restart lost, which the gate then reports as giving no verdict. */
   const forgotten = new Set<ThreadId>();
   let checkStartFails = false;
+  /** Why every check start is refused, or null while none is. */
+  let checkRefused: string | null = null;
   /** Whether a node has room for a check that asks for it, and whether each check start and poll asked for room or opened a run. */
   let checkRoom = true;
   const checkIfRoom: boolean[] = [];
@@ -137,6 +139,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     checks: {
       async start(_, __, head, ifRoom) {
         if (checkStartFails) throw new Error("no node took the check pylon");
+        if (checkRefused !== null) return { refused: checkRefused };
         if (ifRoom && !checkRoom) return { refused: "no node has room for this pylon: node is overcommitted" };
         checkIfRoom.push(ifRoom === true);
         const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return { thread: id };
@@ -202,6 +205,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     /** A restart: the gate holds no run for any check thread started so far. */
     forgetChecks() { for (const id of checkThreads) forgotten.add(id); },
     set checkStartFails(fails: boolean) { checkStartFails = fails; },
+    set checkRefused(why: string | null) { checkRefused = why; },
     set checkRoom(room: boolean) { checkRoom = room; },
     checkIfRoom, pollOpens,
     /** Whether the PR's head has a .nexus/verify, the live check's state, and why no node takes a verify pylon. */
@@ -1729,6 +1733,23 @@ test("a check that cannot start beside the reviewer leaves the reviewer's remind
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" });
   assert.deepEqual(f.checkHeads, [head1]);
+});
+
+test("a check start refused once the reviewer approves leaves the review checking, and the next pass starts it and approves", async (t) => {
+  const f = fixture(t);
+  f.checkRefused = "no image is current yet, so a pylon has nothing to boot";
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "checking");
+  assert.equal((f.review().phase as { thread: ThreadId | null }).thread, null, "no check thread started");
+  assert.deepEqual(f.checkThreads, []);
+  f.checkRefused = null;
+  await loop.poll();
+  assert.deepEqual(f.checkHeads, [head1]);
+  assert.deepEqual(f.review().phase, { kind: "approved" }, "the check that started passed");
 });
 
 test("a check that finished as the reviewer asked for changes keeps its result for a round at the same head", async (t) => {
