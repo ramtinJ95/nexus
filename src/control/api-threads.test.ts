@@ -324,7 +324,7 @@ test("attention takes the first matching state in every combination", () => {
   for (const failed of [false, true]) for (const parked of [false, true]) for (const decision of [false, true]) for (const limited of [false, true]) {
     for (const reply of [null, 10]) for (const seen of [null, 9, 10, 11]) for (const working of [false, true]) {
       const expected = failed ? "failed" : decision ? "decision" : parked ? "parked" : limited ? "limited" : reply !== null && (seen === null || reply > seen) ? "reply" : working ? "working" : null;
-      assert.equal(attentionOf(failed, parked, reply, seen, working, false, decision, limited), expected);
+      assert.equal(attentionOf({ failed, parked, lastReplyAt: reply, seenAt: seen, working, waiting: false, needs: decision ? [{ kind: "nudge", since: 0 }] : [], limited }), expected);
     }
   }
 });

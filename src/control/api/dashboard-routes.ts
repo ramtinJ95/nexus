@@ -26,10 +26,11 @@ import { canDeploy, type DeploymentOptions } from "../releases.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { Review } from "../review-model.ts";
 import { ok } from "../dashboard/view.ts";
-import type { Context, Need } from "../dashboard/context.ts";
+import type { Context } from "../dashboard/context.ts";
+import { needsOf, type InboxNeed } from "../work.ts";
 import { assets } from "../dashboard/assets.ts";
 import { notFound } from "../dashboard/shell.ts";
-import { home, needsOf } from "../dashboard/home.ts";
+import { home } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
 import { clusterPage } from "../dashboard/cluster-page.ts";
 import { itemView } from "../pipeline.ts";
@@ -58,7 +59,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     // The sidebar and the home table show the same threads.
     const rows = new Map<ThreadId, ThreadRow>();
     const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, kit.row(t)).get(t.id)!;
-    let needs: readonly Need[] | undefined;
+    let needs: readonly InboxNeed[] | undefined;
     let threads: readonly Thread[] | undefined;
     let reviews: readonly Review[] | undefined;
     // registry.threads() is in the order registry.threads(project) is, so each project's keeps its order.

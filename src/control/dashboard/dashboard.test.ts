@@ -669,9 +669,9 @@ test("a thread in Needs you has its call to action once, in its card, with where
   assert.doesNotMatch(needsOf((await s.call("GET", `/?peek=${asked.id}`)).text).cards.find((c) => c.thread === held.id)!.html, /Latest reply/, "a card the person did not pick reads no conversation");
 
   const waiting = (await s.call("GET", `/?peek=${approved.id}`)).text;
-  assert.doesNotMatch(waiting.split('id="peek"')[1]!.split('id="in-flight"')[0]!, /class="peek"/, "work its phase holds for the person previews in its card too");
-  const heldCard = waiting.split(`id="need-${approved.id}"`)[1]!.split("</article>")[0]!;
-  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Held acme \/ Name the TTL now Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread [^]*$/, "with where its work is, as a card for a thread's own need has");
+  assert.doesNotMatch(waiting.split('id="peek"')[1]!.split('id="in-flight"')[0]!, /class="peek"/, "an approved review that cannot land previews in its card too");
+  const heldCard = waiting.split(`id="need-${approved.id}-review"`)[1]!.split("</article>")[0]!;
+  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Review needs you acme \/ Name the TTL just now Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread It cannot land, as pull request #8 is closed on GitHub outside this review, so there is nothing to land\.$/, "with where its work is and why it cannot land");
   assert.equal([...heldCard.matchAll(/Open thread/g)].length, 1);
 
   const page = (await s.call("GET", `/?peek=${quiet.id}`)).text;

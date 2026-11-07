@@ -1,3 +1,5 @@
+import type { ThreadQuestion } from "./questions.ts";
+
 export type Attention = "failed" | "decision" | "parked" | "limited" | "reply" | "working" | "waiting" | null;
 
 /**
@@ -14,19 +16,33 @@ export const attentions = {
   waiting: { label: "waiting for input", tone: "idle", needsPerson: true },
 } as const satisfies Record<NonNullable<Attention>, { label: string; tone: string; needsPerson: boolean }>;
 
+/**
+ * A thing of a thread's that waits on the person: its review, held for them or stopped at an approval only they land,
+ * a question no one has answered, a builder that stopped short of a pull request after two nudges, or a Claude worker
+ * whose turns kept dying. `since` is when it began to wait, so far as the records say.
+ */
+export type Need =
+  | { kind: "review"; review: string; since: number }
+  | { kind: "question"; question: ThreadQuestion; since: number }
+  | { kind: "nudge"; since: number }
+  | { kind: "resume"; why: string; since: number };
+
 export const needsPerson = (attention: Attention) => attention !== null && attentions[attention].needsPerson;
 
+/** What a thread's attention is read from. `waiting` is a dialog its session waits on, and `limited` its Claude session stopped on its usage limit. */
+export interface AttentionFacts {
+  failed: boolean; parked: boolean; lastReplyAt: number | null; seenAt: number | null; working: boolean; waiting: boolean; needs: readonly Need[]; limited: boolean;
+}
+
 /**
- * `decision` is a review that ended for the person, such as rounds that ran out or a landing the merge policy holds,
- * a question of the thread's that no one has answered, or a builder that stopped short of a pull request after two
- * nudges. `limited` is a Claude session stopped on its usage limit, which outranks `reply` because the turn end that
- * recorded the reply is the stop itself.
+ * The first that holds: `decision` is anything that waits on the person, as its needs say. `limited` outranks `reply`
+ * because the turn end that recorded the reply is the stop itself.
  */
-export function attentionOf(failed: boolean, parked: boolean, lastReplyAt: number | null, seenAt: number | null, working: boolean, waiting = false, decision = false, limited = false): Attention {
-  if (failed) return "failed";
-  if (decision) return "decision";
-  if (parked) return "parked";
-  if (limited) return "limited";
-  if (lastReplyAt !== null && (seenAt === null || lastReplyAt > seenAt)) return "reply";
-  return working ? "working" : waiting ? "waiting" : null;
+export function attentionOf(f: AttentionFacts): Attention {
+  if (f.failed) return "failed";
+  if (f.needs.length > 0) return "decision";
+  if (f.parked) return "parked";
+  if (f.limited) return "limited";
+  if (f.lastReplyAt !== null && (f.seenAt === null || f.lastReplyAt > f.seenAt)) return "reply";
+  return f.working ? "working" : f.waiting ? "waiting" : null;
 }

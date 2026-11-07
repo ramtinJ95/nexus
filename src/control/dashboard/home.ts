@@ -1,20 +1,17 @@
 /** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
-import { archivedDiskMs, desiredPhase, keptPastDay, settleStuck } from "../reconcile.ts";
+import { desiredPhase, keptPastDay } from "../reconcile.ts";
 import type { ThreadId } from "../../ids.ts";
-import { threadPhase } from "../pipeline.ts";
-import { needsPerson } from "../attention.ts";
 import type { ThreadDetail } from "../wire.ts";
-import { isOpen } from "../questions.ts";
-import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import type { Project } from "../project.ts";
 import { cannotLand, roundsSpent, settled, type Review } from "../review-model.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
-import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
+import type { Context } from "./context.ts";
+import type { HeldWork, InboxNeed, ThreadNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
-import { lifeOfThread, needWhy, pipelineItems, roleLine, threadRole, type Life } from "./lifecycle.ts";
+import { lifeOfThread, needWhy, roleLine, threadRole, type Life } from "./lifecycle.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
 import type { Item } from "./items.ts";
@@ -106,60 +103,12 @@ ${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summ
 })}`;
 }
 
-/**
- * What waits on the person in the open threads and on the nodes, oldest first, so each card keeps its place while the
- * person works down the list and the one that has waited longest is first. Each source of a thread's `decision` gets
- * its card, and any other attention that needs the person one for the thread. A new reply does not wait on the person,
- * so it has none, but it outranks a dialog in the terminal, which the session's own state says waits. Each node's open
- * cleanup question gets its card too, and each archive whose disk is kept for usage that will not be read without the
- * person. After the cards, oldest first too, comes the work its pipeline phase holds for the person that no card acts on.
- */
-export function needsOf(c: Pick<Context, "registry" | "row" | "threads" | "queuedIn">, detail: (thread: Thread) => ThreadDetail): Need[] {
-  const cleanups = c.registry.openNodeQuestions().map((question): Need => ({ kind: "cleanup", question, since: question.askedAt }));
-  const cards = [...cleanups, ...c.threads().filter((t) => t.status === "active" || t.status === "idle").flatMap((t): ThreadNeed[] => {
-    const { attention } = c.row(t);
-    if (t.sessionWaiting !== true && (attention === "reply" || !needsPerson(attention))) return [];
-    const d = detail(t);
-    const nudged = c.registry.nudge(t.id);
-    // A review that asks about its holds has its question's card, which shows the review too.
-    const asking = d.questions.some((q) => isOpen(q) && q.holds?.review === d.review?.id);
-    const needs: ThreadNeed[] = [
-      ...!asking && (d.review?.phase.kind === "needs-person" || (d.review?.phase.kind === "approved" && cannotLand(d.review, d.thread, prOf(d)) === null)) ? [{ kind: "review" as const, d, since: heldSince(c.registry, d.review!) }] : [],
-      ...d.questions.filter(isOpen).map((question) => ({ kind: "question" as const, d, question, since: question.askedAt })),
-      ...nudged?.state === "person" ? [{ kind: "nudge" as const, d, since: nudged.turn }] : [],
-      ...d.resume?.state === "person" ? [{ kind: "resume" as const, d, why: d.resume.why, since: d.resume.turn }] : [],
-    ];
-    const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
-    if (stuck !== null) needs.push({ kind: "thread", d, attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
-    return needs;
-  }), ...c.threads().filter((t) => t.status === "archived" && settleStuck(t, Date.now())).map((t): ThreadNeed => ({ kind: "disk", d: detail(t), since: t.archivedAt! + archivedDiskMs }))]
-    .sort((a, b) => a.since - b.since);
-  const carded = new Set(cards.flatMap((n) => n.kind === "cleanup" || n.kind === "held" ? [] : [n.d.thread.id]));
-  const holds = (id: ThreadId) => threadPhase(c.registry, id).kind === "held";
-  const held = [
-    ...pipelineItems(c).filter((item) => item.thread === null && item.phase.kind === "held").map((item): Need => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
-    ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): Need => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
-    ...c.threads().filter((t) => (t.status === "active" || t.status === "idle") && !carded.has(t.id) && holds(t.id)).map((thread): Need => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
-  ].sort((a, b) => a.since - b.since);
-  return [...cards, ...held];
-}
-
-/**
- * When the review entered the phase it is in, from the oldest of the `review.changed` events in a row that record it
- * there, as a label change records one again. The review's own `since` stands in once those events are gone.
- */
-function heldSince(registry: Registry, r: Review): number {
-  const changes = registry.events("0", { thread: r.builder, kinds: ["review.changed"] });
-  const at = changes.findLastIndex((e) => e.payload.review !== r.id || (e.payload.phase as Review["phase"] | undefined)?.kind !== r.phase.kind);
-  return changes[at + 1]?.time ?? r.since;
-}
-
 /** The key of the work a card is for, as the work in flight and the preview name it. A node's cleanup is no work's. */
-const keyOf = (n: Need) => n.kind === "cleanup" ? null : n.kind === "held" ? heldKey(n.work) : n.d.thread.id;
+const keyOf = (n: InboxNeed) => n.kind === "cleanup" ? null : n.kind === "held" ? heldKey(n.work) : n.d.thread.id;
 
 const needCards = (c: Context) => new Set(c.needs().map(keyOf).filter((key) => key !== null));
 
-const needId = (n: Need) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}`
+const needId = (n: InboxNeed) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}`
   : n.kind === "held" ? `need-${heldKey(n.work)}`
   : `need-${n.d.thread.id}-${n.kind === "question" ? n.question.id : n.kind}`;
 const heldKey = (w: HeldWork) => w.kind === "item" ? w.item.id : w.kind === "queued" ? w.q.id : w.thread.id;
@@ -174,7 +123,7 @@ function needsList(c: Context, picked: { key: string; card: string | null; items
   // A thread with several cards says where its work is, and is picked, on the card the person picked, or else its first.
   const lead = (key: string | null) => needs.find((n) => keyOf(n) === key && key === picked?.key && needId(n) === picked.card) ?? needs.find((n) => keyOf(n) === key);
   const leads = new Set(needs.filter((n) => lead(keyOf(n)) === n));
-  const mark = (n: Need) => leads.has(n) && keyOf(n) === picked?.key && " picked";
+  const mark = (n: InboxNeed) => leads.has(n) && keyOf(n) === picked?.key && " picked";
   const itemsOf = (key: string) => key === picked?.key ? picked.items : null;
   // The picked card opens, so a link to it shows it on a fresh load. A reader's own close survives each poll's swap.
   const fold = (id: string, head: Html, body: Html, why: string, open: Part = false) => html`<details class="need-fold" id="fold-${id}"${open && " open"}><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
@@ -236,7 +185,8 @@ function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
     case "review": {
       const card = landing(c, d, (name) => `${name}-${t.id}`, true);
       const pr = prOf(d);
-      if (cannotLand(d.review!, t, pr) !== null) return ["Review needs you", html`${card}`];
+      const refused = cannotLand(d.review!, t, pr);
+      if (refused !== null) return ["Review needs you", card ?? html`<p class="land-note">It cannot land, as ${refused}.</p>`];
       const summary = pr?.summary;
       const quote = d.review!.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
       return [d.review!.phase.kind === "needs-person" ? "Held review" : "Approved review", html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}

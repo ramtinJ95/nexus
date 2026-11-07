@@ -9,7 +9,7 @@
  * `disk_cleanups`. The
  * features with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
  */
-import { attentionOf, type Attention } from "./attention.ts";
+import { attentionOf, type Attention, type Need } from "./attention.ts";
 import { pylonEventSchema } from "../events.ts";
 import type { ReportedEvent } from "../events.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
@@ -196,8 +196,8 @@ function pylonRow(r: Row): StoredPylon {
 
 /** A feature with per-thread state the core consults or keeps in step, registered before start(). */
 export interface ThreadParticipant {
-  /** Whether the feature waits on the person for the thread, which makes its attention a decision. */
-  needsPerson?(thread: ThreadId): boolean;
+  /** What of the feature's waits on the person for the thread, which makes its attention a decision. */
+  needs?(thread: ThreadId): Need[];
   /**
    * When the feature began to expect a message to each of `threads` it waits to message, and until when, so their
    * pylons stay up for it. Only a pylon that was up when the wait began is held.
@@ -403,10 +403,11 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = pylon(t.pylonId);
     const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
-    const decision = participants.some((p) => p.needsPerson?.(id)) || claudeResume(id)?.state === "person";
     // An archived thread's pylon stays paused, so its failure waits for no one until an unarchive.
     const failed = t.status !== "archived" && (p?.failed != null || workerFailed);
-    const attention = attentionOf(failed, old?.parked === 1, t.lastReplyAt, t.seenAt, t.working, t.sessionWaiting, decision, t.usageLimit !== undefined);
+    const attention = attentionOf({
+      failed, parked: old?.parked === 1, lastReplyAt: t.lastReplyAt, seenAt: t.seenAt, working: t.working, waiting: t.sessionWaiting === true, needs: needs(id), limited: t.usageLimit !== undefined,
+    });
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
     appendEvent("attention.changed", id, { attention });
@@ -481,6 +482,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     };
   }
 
+  /** What waits on the person for the thread. A review that asks about its holds has its question's need, which shows the review too. */
+  function needs(thread: ThreadId): Need[] {
+    const resume = claudeResume(thread);
+    const all = [...participants.flatMap((p) => p.needs?.(thread) ?? []), ...resume?.state === "person" ? [{ kind: "resume" as const, why: resume.why, since: resume.turn }] : []];
+    return all.filter((n) => n.kind !== "review" || !all.some((q) => q.kind === "question" && q.question.holds?.review === n.review));
+  }
+
   function claudeResume(thread: ThreadId): ClaudeResume | null {
     return jsonOrNull<ClaudeResume>(sql("SELECT resume FROM claude_workers WHERE thread = ?").get(thread)?.resume ?? null);
   }
@@ -520,6 +528,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     },
     claudeWorker,
     claudeResume,
+    needs,
     /** Replaces the worker's resume record, or with null deletes it. */
     saveClaudeResume(thread: ThreadId, resume: ClaudeResume | null) {
       transaction(() => {
