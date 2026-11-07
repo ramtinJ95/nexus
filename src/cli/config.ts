@@ -6,6 +6,7 @@ import { readJson } from "../json-file.ts";
 import { parse } from "../parse.ts";
 import { call, CliError, type Endpoint, type HostPort } from "./transport.ts";
 import { type Values, str } from "./kit.ts";
+import { ports } from "../node-layout.ts";
 
 /**
  * The oldest control plane this CLI reads, raised when the CLI starts relying on something newer. 0.53.0 is the first
@@ -17,7 +18,7 @@ class OutdatedControl extends CliError {}
 /** What a watch or a follow reports and retries through: a control plane unreachable or failing, though not one too old. */
 export const transient = (err: CliError): err is CliError & { kind: "unreachable" | "failed" } => (err.kind === "unreachable" || err.kind === "failed") && !(err instanceof OutdatedControl);
 /** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
-export const controlPorts = ["https://{host}:7443", "http://{host}:7470"];
+export const controlPorts = [`https://{host}:${ports.dashboard}`, `http://{host}:${ports.control}`];
 export const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
 const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });

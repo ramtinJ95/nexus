@@ -7,7 +7,6 @@
  *   sudo node src/control/join-token.ts <config.json>
  */
 import { lstatSync } from "node:fs";
-import { resolve } from "node:path";
 import { mintJoinToken } from "./join.ts";
 import { readConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";
@@ -23,8 +22,7 @@ async function host(args: string[]) {
     process.exit(77);
   }
   const config = await readConfig(configPath);
-  // As nexus-control.service resolves a relative path, from its WorkingDirectory.
-  const db = resolve("/var/lib/nexus-control", config.db);
+  const { db } = config;
   // The control plane's user could leave a link to a file of root's here, so only its own plain file is opened, as that user.
   const owner = lstatSync(db);
   if (!owner.isFile() || owner.uid === 0) {
