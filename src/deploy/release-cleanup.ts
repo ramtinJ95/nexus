@@ -8,17 +8,10 @@ import { lstat, readdir, readFile, readlink, rename, rm, stat } from "node:fs/pr
 import { join } from "node:path";
 import { readJson, saveJson } from "../json-file.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
-import { fullCommit, type Role } from "../protocol/deploy.ts";
-
-/** Named by its content hash, or by the full commit the deployer installed. */
-export const releaseName = /^(?:[0-9a-f]{12}|[0-9a-f]{40})$/;
+import type { Role } from "../protocol/deploy.ts";
+import { deployerFiles, deployJournal, links, prefix as nodePrefix, readReleaseCommit, releaseName, roleLinks, type LinkName } from "../node-layout.ts";
 
 export interface ReleaseFact { name: string; commit: string | null; bytes: number; installedAt: number }
-
-/** The node's links, and who runs the release each names. */
-const links = { current: "the probe", "control-current": "the control plane", "deployer-current": "the deployer's worker" } as const;
-type LinkName = keyof typeof links;
-const roleLinks: Record<Role, LinkName> = { probe: "current", control: "control-current" };
 
 export interface ReleaseInventory {
   releases: readonly ReleaseFact[];
@@ -43,7 +36,7 @@ const nameOf = (target: string | null): string | null => {
 export function releaseKeeps(inventory: ReleaseInventory): Map<string, string> {
   const keeps = new Map<string, string>();
   const keep = (name: string | null, why: string) => { if (name !== null && !keeps.has(name)) keeps.set(name, why); };
-  for (const [link, name] of Object.entries(inventory.links) as [LinkName, string | null][]) keep(name, `${links[link]} runs it, through /opt/nexus/${link}`);
+  for (const [link, name] of Object.entries(inventory.links) as [LinkName, string | null][]) keep(name, `${links[link]} runs it, through ${nodePrefix}/${link}`);
   for (const [name, pid] of Object.entries(inventory.running)) keep(name, `process ${pid} runs from it, as a pylon's controller does from the release it started from`);
   for (const role of ["probe", "control"] as const) {
     const current = inventory.releases.find((r) => r.name === inventory.links[roleLinks[role]]);
@@ -86,7 +79,7 @@ async function runningFrom(dir: string, proc: string): Promise<Record<string, nu
 
 export async function readReleases(prefix: string, proc = "/proc"): Promise<ReleaseInventory> {
   const dir = join(prefix, "releases");
-  const sizesFile = join(prefix, "deployer", "release-bytes.json");
+  const sizesFile = join(prefix, deployerFiles.releaseBytes);
   const known = await readJson(sizesFile, {}).catch(() => ({})) as Record<string, number>;
   const names = (await readdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; })).filter((name) => releaseName.test(name)).sort();
   const releases: ReleaseFact[] = [];
@@ -94,14 +87,13 @@ export async function readReleases(prefix: string, proc = "/proc"): Promise<Rele
     const path = join(dir, name);
     const info = await stat(path).catch(() => null);
     if (info === null || !info.isDirectory()) continue;
-    const commit = (await readFile(join(path, "release-commit"), "utf8").catch(() => "")).trim();
-    releases.push({ name, commit: fullCommit.test(commit) ? commit : null, bytes: known[name] ?? await diskBytes(path), installedAt: info.mtimeMs });
+    releases.push({ name, commit: await readReleaseCommit(path), bytes: known[name] ?? await diskBytes(path), installedAt: info.mtimeMs });
   }
   const sizes = Object.fromEntries(releases.map((r) => [r.name, r.bytes]));
   if (JSON.stringify(sizes) !== JSON.stringify(Object.fromEntries(Object.entries(known).filter(([name]) => name in sizes)))) await saveJson(sizesFile, sizes, { mkdir: true });
   const linked = async (link: LinkName) => nameOf(await readlink(join(prefix, link)).catch(() => null));
   const replaced = async (role: Role) => {
-    const journal = await readJson(join(prefix, `${role}-deploy.json`), null).catch(() => null) as { previous?: string; target?: string } | null;
+    const journal = await readJson(join(prefix, deployJournal(role)), null).catch(() => null) as { previous?: string; target?: string } | null;
     return journal !== null && nameOf(journal.target ?? null) !== null && nameOf(journal.target ?? null) === await linked(roleLinks[role]) ? nameOf(journal.previous ?? null) : null;
   };
   return {

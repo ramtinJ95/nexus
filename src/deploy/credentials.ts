@@ -8,7 +8,9 @@ import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, appendFile, open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
+import { configFiles, prefix, roleLinks, servicePath, stateDirs, users } from "../node-layout.ts";
 
 const exec = promisify(execFile);
 
@@ -27,17 +29,14 @@ export interface Store {
  * A file here is the default a new install gets. Where an existing config names its own, `locations` reads that.
  */
 export const stores = {
-  harness: { machines: "control", file: "/var/lib/nexus-control/harness-credentials.json", owner: "nexus-control:nexus-control", mode: 0o600 },
-  claude: { machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
-  githubWatch: { machines: "control", file: "/etc/nexus/github-token", owner: "root:nexus-control", mode: 0o640 },
-  gitKey: { machines: "every", file: "/etc/nexus/git_ed25519", owner: "nexus:nexus", mode: 0o400 },
+  harness: { machines: "control", file: join(stateDirs.control, "harness-credentials.json"), owner: `${users.control}:${users.control}`, mode: 0o600 },
+  claude: { machines: "every", file: configFiles.secrets, owner: `root:${users.probe}`, mode: 0o640 },
+  githubWatch: { machines: "control", file: configFiles.githubToken, owner: `root:${users.control}`, mode: 0o640 },
+  gitKey: { machines: "every", file: configFiles.gitKey, owner: `${users.probe}:${users.probe}`, mode: 0o400 },
 } as const satisfies Record<string, Store>;
 
 export const claudeNames = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
-export const gitKnownHosts = "/etc/nexus/git_known_hosts";
-const controlConfig = "/etc/nexus/control.json";
-const probeConfig = "/etc/nexus/probe.json";
-const login = "/opt/nexus/control-current/src/control/login.ts";
+const login = join(prefix, roleLinks.control, "src/control/login.ts");
 
 /** GitHub's published SSH host key fingerprints, https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints */
 const githubFingerprints: ReadonlySet<string> = new Set([
@@ -237,8 +236,8 @@ export interface Locations { harness: string; secrets: string; gitKey: string; g
 
 /** Where this machine's credentials are: what control.json and probe.json name, or else the stores' files. */
 export async function locations(host: Pick<Host, "read">): Promise<Locations> {
-  const control = JSON.parse(await host.read(controlConfig) ?? "{}") as { harness?: { credentials?: string }; github?: { tokenFile?: string } };
-  const probe = JSON.parse(await host.read(probeConfig) ?? "{}") as { node?: string; secretsFile?: string; backend?: { gitSsh?: { privateKeyFile?: string } } };
+  const control = JSON.parse(await host.read(configFiles.control) ?? "{}") as { harness?: { credentials?: string }; github?: { tokenFile?: string } };
+  const probe = JSON.parse(await host.read(configFiles.probe) ?? "{}") as { node?: string; secretsFile?: string; backend?: { gitSsh?: { privateKeyFile?: string } } };
   return {
     harness: control.harness?.credentials ?? stores.harness.file,
     secrets: probe.secretsFile ?? stores.claude.file,
@@ -275,7 +274,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
         say("The browser's last step goes to port 1455 on this machine, so when that page fails to load, paste the address it ended on.");
         const [user] = stores.harness.owner.split(":");
         try {
-          await host.run("runuser", ["-u", user!, "--", "env", "PATH=/usr/local/bin:/usr/bin", "node", login, controlConfig], { interactive: true });
+          await host.run("runuser", ["-u", user!, "--", "env", `PATH=${servicePath}`, "node", login, configFiles.control], { interactive: true });
           next.add("control");
           break;
         } catch (err) {
@@ -330,13 +329,13 @@ export async function provision(role: "control" | "node", host: Host, answers: A
 
   if (here(stores.githubWatch)) {
     const { file } = stores.githubWatch;
-    if (at.githubWatch !== undefined) say(`Left github.tokenFile ${at.githubWatch} in ${controlConfig} alone.`);
+    if (at.githubWatch !== undefined) say(`Left github.tokenFile ${at.githubWatch} in ${configFiles.control} alone.`);
     else if (github !== undefined && githubToken(github) === undefined) {
       const kept = await host.exists(file);
       const watch = await answers.choose({
         key: "NEXUS_GITHUB_WATCH",
         say: kept
-          ? `${file} exists, and ${controlConfig} names no github.tokenFile. Name it, for the pull request watch and the review loop?`
+          ? `${file} exists, and ${configFiles.control} names no github.tokenFile. Name it, for the pull request watch and the review loop?`
           : "Give the control plane the same GitHub token, for the pull request watch and the review loop? They also read pull requests, checks and commit statuses, and a landing merges, so the token needs those permissions too.",
         choices: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }],
         // Without a terminal, a run turns the watch on only for a token it was given, never on an install that had one.
@@ -345,7 +344,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
       if (watch === "yes") {
         if (kept) say(`Left ${file} alone.`);
         else await host.write(file, `${github}\n`, stores.githubWatch);
-        say(`The installer names ${file} as github.tokenFile in ${controlConfig} next.`);
+        say(`The installer names ${file} as github.tokenFile in ${configFiles.control} next.`);
         next.add("watch");
         next.add("control");
       }
@@ -367,8 +366,8 @@ export async function provision(role: "control" | "node", host: Host, answers: A
       say(`Made no git SSH key, because github.com's host keys could not be checked: ${(err as Error).message.trim()}. Rerun the installer to try again.`);
     }
     if (known !== undefined) {
-      if (await host.exists(gitKnownHosts)) say(`Left ${gitKnownHosts} alone.`);
-      else await host.write(gitKnownHosts, known, { mode: 0o644, owner: "root:root" });
+      if (await host.exists(configFiles.gitKnownHosts)) say(`Left ${configFiles.gitKnownHosts} alone.`);
+      else await host.write(configFiles.gitKnownHosts, known, { mode: 0o644, owner: "root:root" });
       await host.run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `nexus@${at.node ?? "node"}`, "-f", key]);
       await host.own(key, stores.gitKey);
       say(`Made the git SSH key ${key}. Add its public key to the GitHub account the pylons push as, at https://github.com/settings/ssh/new:`);

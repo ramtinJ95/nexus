@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readlink, rename, symlink, unlink } from "node:fs/promises";
+import { mkdir, readlink, rename, symlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
-import { parseCommit } from "./health.ts";
+import { deployJournal, readReleaseCommit, roleLinks, rootPath } from "../node-layout.ts";
 import { fullCommit, type Role } from "../protocol/deploy.ts";
 
 const exec = promisify(execFile);
@@ -13,7 +13,7 @@ export const repository = "https://github.com/ramtinJ95/nexus.git";
 export async function command(program: string, args: readonly string[], cwd: string, timeoutMs = 300_000): Promise<string> {
   const { stdout } = await exec(program, [...args], {
     cwd, timeout: timeoutMs, maxBuffer: 1024 * 1024,
-    env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", HOME: "/nonexistent", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
+    env: { PATH: rootPath, HOME: "/nonexistent", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
   });
   return stdout.trim();
 }
@@ -37,12 +37,7 @@ export async function checkoutMerged(directory: string, commit: string, run: Com
 }
 
 export function releaseLink(prefix: string, role: Role): string {
-  return join(prefix, role === "control" ? "control-current" : "current");
-}
-
-export async function commitAt(dir: string): Promise<string | null> {
-  try { return parseCommit(await readFile(join(dir, "release-commit"), "utf8")); }
-  catch { return null; }
+  return join(prefix, roleLinks[role]);
 }
 
 /** Points `link` at `target` with one rename, so a reader sees the old target or the new one. */
@@ -92,7 +87,7 @@ export class ReleaseInstaller {
   constructor(prefix: string, role: Role, boundary: InstallBoundary) {
     this.boundary = boundary;
     this.link = releaseLink(prefix, role);
-    this.journal = join(prefix, `${role}-deploy.json`);
+    this.journal = join(prefix, deployJournal(role));
   }
 
   async observed(): Promise<Transaction | null> {
