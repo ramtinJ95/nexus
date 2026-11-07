@@ -12,7 +12,7 @@ import { basename, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { readJson, saveJson } from "../json-file.ts";
 import { tailnetNodeIdPattern } from "../tailscale.ts";
-import { configFiles } from "../node-layout.ts";
+import { configFiles, unitNames } from "../node-layout.ts";
 
 export interface ControlPlane { tailnetNodeId: string; url: string }
 
@@ -168,13 +168,13 @@ async function restartProbe(): Promise<void> {
   const systemctl = async (args: string[]) => (await promisify(execFile)("systemctl", args)).stdout.trim();
   let loaded: string;
   try {
-    loaded = await systemctl(["show", "nexus-probe.service", "--property=LoadState", "--value"]);
+    loaded = await systemctl(["show", unitNames.probe, "--property=LoadState", "--value"]);
   } catch (err) {
     throw new Error(`could not tell whether this machine has a probe, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}`);
   }
   if (loaded === "not-found") return;
   try {
-    await systemctl(["restart", "nexus-probe.service"]);
+    await systemctl(["restart", unitNames.probe]);
   } catch (err) {
     throw new Error(`the probe did not restart, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}. Fix the restart and run this again, which restarts the probe whether it runs or not`);
   }
