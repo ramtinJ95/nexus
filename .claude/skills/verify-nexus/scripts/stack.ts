@@ -2,7 +2,7 @@
  * Verification scaffolding, not part of Nexus. One local Nexus stack on a Mac, run by `verify-nexus up`:
  *   node stack.ts <runDir>
  *
- * It composes the real parts the way src/control/thread-on-node.ts does: the control plane from
+ * It composes the real parts the way src/checks/control/thread-on-node.ts does: the control plane from
  * startControlPlane (registry, loop, pi-durable harness, API and dashboard) and a probe from startProbe with
  * the Docker backend. Only the production boundaries are doubles:
  * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois names 127.0.0.1:7480 as the probe and

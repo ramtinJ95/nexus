@@ -1,6 +1,6 @@
 /**
  * Node validation for one thread end to end, run by hand on a home-lab node as the probe's user:
- *   node src/control/thread-on-node.ts [probe.json] [imageId] [holdSeconds]
+ *   node src/checks/control/thread-on-node.ts [probe.json] [imageId] [holdSeconds]
  *
  * It starts a control plane in this process (registry, loop, harness and API, as src/control/main.ts wires
  * them) over a temporary directory. Its harness uses the scripted model from src/control/harness/test-fixture.ts, so
@@ -26,13 +26,13 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import type { PylonId } from "../ids.ts";
-import { scriptedModels, streamedAnswer, streamedWordMs } from "./harness/test-fixture.ts";
-import { callText } from "../test-support/kit.ts";
-import type { ThreadDetail, ThreadRow } from "./wire.ts";
-import { defaultPreviewPorts, startControlPlane } from "./main.ts";
+import type { PylonId } from "../../ids.ts";
+import { scriptedModels, streamedAnswer, streamedWordMs } from "../../control/harness/test-fixture.ts";
+import { callText } from "../../test-support/kit.ts";
+import type { ThreadDetail, ThreadRow } from "../../control/wire.ts";
+import { defaultPreviewPorts, startControlPlane } from "../../control/main.ts";
 import { apiClient, fetchUntil, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
-import { openRegistry } from "./registry.ts";
+import { openRegistry } from "../../control/registry.ts";
 
 const { probeConfig, stateRoot, image, dnsName, host, serveStatus, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "a preview", resolvesToProbe: true });
 const holdMs = Number(process.argv[4] ?? 0) * 1000;
@@ -70,7 +70,7 @@ function conversationSection(html: string): string {
  * pi extension do, and asks for an answer that streams for `seconds`. It must reach the watch as several live events
  * a second. The watch then stays open, quiet, past the CLI's 30 s idle timeout, which the API's ping must hold off.
  */
-const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
+const cli = fileURLToPath(new URL("../../cli/nexus.ts", import.meta.url));
 
 /** Runs the real CLI against this check's control plane, directly on the tailnet. */
 const nexus = (...args: string[]) => api.runCli(args);

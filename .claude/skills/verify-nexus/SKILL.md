@@ -11,7 +11,7 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
 
 ## The local stack
 
-`scripts/verify-nexus up` starts one process, `scripts/stack.ts`. It uses the same wiring as `src/control/thread-on-node.ts`:
+`scripts/verify-nexus up` starts one process, `scripts/stack.ts`. It uses the same wiring as `src/checks/control/thread-on-node.ts`:
 
 - The real control plane comes from `startControlPlane`: the registry, the reconcile loop, the pi-durable harness, the API and the dashboard. It listens on `http://127.0.0.1:7470`.
 - A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/backends/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr, the pi-env daemon, the in-pylon CLI and a one-commit checkout. The checkout carries `refs/nexus/base` at that commit, which a pylon-vm records on its first boot and the Docker backend never does.
