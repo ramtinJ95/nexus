@@ -15,7 +15,7 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | [`src/control/reconcile.ts`](../../src/control/reconcile.ts) | The desired phase, the planner, the derived actual state, and record writes from observations | Control plane, pure |
 | [`src/probe/run.ts`](../../src/probe/run.ts) | `runJob`, `runCommand` and `commandPolicies` | Probe |
 | [`src/backends/backend.ts`](../../src/backends/backend.ts) | `VmBackend`, `Guest`, `ArtifactStore`, and the pi-sandbox fork's mapping and changes | Probe |
-| [`src/services-file.ts`](../../src/services-file.ts) | The `.nexus/services.yaml` schema and parser, the port rules, and `withPublicUrls` | Both. The pylon-vm controller loads it with type stripping |
+| [`src/services-file.ts`](../../src/services-file.ts) | The `.nexus/services.yaml` schema and parser, the port rules, and `withPublicUrls`. Nexus's own ports are in [`src/protocol/ports.ts`](../../src/protocol/ports.ts) | Both. The pylon-vm controller loads it with type stripping |
 | [`src/protocol/spawn.ts`](../../src/protocol/spawn.ts) | What a spawn carries: `BootInputs`, `LiveSpec` and its hash, `RepoInit`, `GitIdentity` and `PylonResources` | Both |
 | [`src/protocol/secret-grants.ts`](../../src/protocol/secret-grants.ts) | `SecretGrant`, its name and host patterns, and the GitHub and ChatGPT grants | Both |
 | [`src/shell.ts`](../../src/shell.ts) | `shellQuote` and `installFileCommand` | Both |
