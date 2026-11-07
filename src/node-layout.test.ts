@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as layout from "./node-layout.ts";
-import { backupStatusFile, configFiles, deployerFiles, deployerLink, deployerWakeFile, etc, prefix, roleLinks, servicePath, stateDirs, unitNames, users } from "./node-layout.ts";
+import { backupStatusFile, configFiles, deployerFiles, deployerLink, deployerWakeFile, etc, prefix, releasesDir, roleLinks, servicePath, stateDirs, unitNames, users } from "./node-layout.ts";
 import { stores } from "./deploy/credentials.ts";
 import { backupBudgetMs, drainYieldMs } from "./deploy/worker.ts";
 import { shutdownPauseMs } from "./probe/shutdown.ts";
@@ -37,6 +37,7 @@ test("each layout constant is the literal it replaced", () => {
     links: { current: "the probe", "control-current": "the control plane", "deployer-current": "the deployer's worker" },
     roleLinks: { probe: "current", control: "control-current" },
     deployerLink: "deployer-current",
+    releasesDir: "releases",
     deployerFiles: { lock: "deployer/lock", roles: "deployer/roles", repo: "deployer/repo", rejected: "deployer/rejected", releaseBytes: "deployer/release-bytes.json" },
     deployerWakeFile: "/var/lib/nexus/deployer-wake",
     backupStatusFile: "/var/lib/nexus-backup/status.json",
@@ -52,15 +53,18 @@ test("each layout constant is the literal it replaced", () => {
   });
 });
 
-test("release.sh and the role installers name the layout's prefix, state, users, links and lock", () => {
+test("release.sh and the role installers name the layout's prefix, releases, release names, state, users, links and lock", () => {
   const release = read("deploy/release.sh");
   for (const line of [
     `prefix=${prefix}`, `etc=${etc}`, `service_path=${servicePath}`,
     `make_state ${users.control} ${stateDirs.control}`, `make_state ${users.probe} ${stateDirs.probe} pylons artifacts`,
     `exec 9>"$prefix/${deployerFiles.lock}"`, `flock -x "$prefix/${deployerFiles.lock}" "$@"`,
+    `install -d -o root -g root -m 0755 "$prefix" "$prefix/${releasesDir}"`, `mv "$staging" "$prefix/${releasesDir}/$release"`,
+    "| sha256sum | cut -c1-12)", '[[ "$NEXUS_COMMIT" =~ ^[0-9a-f]{40}$ ]]',
     `install -o root -g ${stores.claude.owner.split(":")[1]} -m 0${stores.claude.mode.toString(8)} "$1/deploy/secrets.example.env" "$etc/secrets.env"`,
   ]) assert.ok(release.includes(line), line);
   assert.ok(stores.claude.file === `${etc}/secrets.env` && stores.claude.owner.startsWith("root:"));
+  assert.ok(layout.releaseName.test("a".repeat(12)) && layout.releaseName.test("a".repeat(40)) && !layout.releaseName.test("a".repeat(13)), "release.sh's two name shapes");
   assert.match(read("deploy/install-probe.sh"), new RegExp(`^link_release "\\$prefix/${roleLinks.probe}"$`, "m"));
   assert.match(read("deploy/install-control.sh"), new RegExp(`^link_release "\\$prefix/${roleLinks.control}"$`, "m"));
   const installDeployer = read("deploy/install-deployer.sh");

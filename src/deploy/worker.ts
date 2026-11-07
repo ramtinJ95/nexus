@@ -10,7 +10,7 @@ import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, stateDirs, unitDir, unitNames } from "../node-layout.ts";
+import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-layout.ts";
 
 export interface WorkerConfig {
   controlUrl: string;
@@ -192,7 +192,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       await checkout(repo, commit);
       await copyFile(unit, savedUnit);
       await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
-      return `releases/${commit}`;
+      return `${releasesDir}/${commit}`;
     },
     async beforeSwitch() {
       if (role === "probe") {
@@ -306,7 +306,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
 }
 
 async function promoteWorker(commit: string, repo: string, prefix: string, run: typeof command): Promise<void> {
-  const target = `releases/${commit}`;
+  const target = `${releasesDir}/${commit}`;
   const rejected = join(prefix, deployerFiles.rejected);
   if ((await readFile(rejected, "utf8").catch(() => "")).trim() === target) return;
   try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }

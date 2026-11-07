@@ -40,6 +40,9 @@ export type LinkName = keyof typeof links;
 export const roleLinks = { probe: "current", control: "control-current" } as const satisfies Record<string, LinkName>;
 export const deployerLink: LinkName = "deployer-current";
 
+/** Where release.sh installs each release, relative to the prefix. */
+export const releasesDir = "releases";
+
 /** The deployer's files, relative to the prefix. */
 export const deployerFiles = {
   lock: "deployer/lock",

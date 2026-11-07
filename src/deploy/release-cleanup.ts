@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { readJson, saveJson } from "../json-file.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Role } from "../protocol/deploy.ts";
-import { deployerFiles, deployJournal, links, prefix as nodePrefix, readReleaseCommit, releaseName, roleLinks, type LinkName } from "../node-layout.ts";
+import { deployerFiles, deployJournal, links, prefix as nodePrefix, readReleaseCommit, releaseName, releasesDir, roleLinks, type LinkName } from "../node-layout.ts";
 
 export interface ReleaseFact { name: string; commit: string | null; bytes: number; installedAt: number }
 
@@ -78,7 +78,7 @@ async function runningFrom(dir: string, proc: string): Promise<Record<string, nu
 }
 
 export async function readReleases(prefix: string, proc = "/proc"): Promise<ReleaseInventory> {
-  const dir = join(prefix, "releases");
+  const dir = join(prefix, releasesDir);
   const sizesFile = join(prefix, deployerFiles.releaseBytes);
   const known = await readJson(sizesFile, {}).catch(() => ({})) as Record<string, number>;
   const names = (await readdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; })).filter((name) => releaseName.test(name)).sort();
@@ -111,7 +111,7 @@ export async function readReleases(prefix: string, proc = "/proc"): Promise<Rele
  * running the same delete again changes nothing.
  */
 export async function deleteReleases(prefix: string, names: readonly string[], proc = "/proc"): Promise<Record<string, DeleteOutcome>> {
-  const dir = join(prefix, "releases");
+  const dir = join(prefix, releasesDir);
   for (const left of (await readdir(dir).catch(() => [])).filter((entry) => entry.startsWith(".deleting."))) await rm(join(dir, left), { recursive: true, force: true });
   const outcomes: Record<string, DeleteOutcome> = {};
   for (const name of names) {

@@ -20,7 +20,7 @@ import { nodeSecrets, parseSelfDnsName, probeAuth, readProbeConfig, readSecretsF
 import { tailscaleCli } from "./serve.ts";
 import { startProbe } from "./server.ts";
 import { closeProbe } from "./shutdown.ts";
-import { configFiles, prefix, stateDirs } from "../node-layout.ts";
+import { configFiles, prefix, releasesDir, stateDirs } from "../node-layout.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? configFiles.probe);
 const control = await readControlPlane();
@@ -57,7 +57,7 @@ const probe = await startProbe({
   deployerWakeFile: config.deployerWakeFile,
   ...(config.previews === undefined ? {} : { previews: { ...config.previews, tailscale } }),
   // The probe user's home holds the Docker and Gondolin caches of image builds.
-  watched: [...config.backend.artifacts === undefined ? [] : [config.backend.artifacts], stateDirs.probe, stateDirs.control, join(prefix, "releases")],
+  watched: [...config.backend.artifacts === undefined ? [] : [config.backend.artifacts], stateDirs.probe, stateDirs.control, join(prefix, releasesDir)],
 });
 console.log(`probe ${config.node} listening on ${config.listen.host}:${probe.port} as boot ${probe.bootId}, ${config.backend.kind} backend, trusting control plane ${control.tailnetNodeId}`);
 
