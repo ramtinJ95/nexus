@@ -6,24 +6,19 @@
  * running container that carries the token.
  */
 import { randomBytes } from "node:crypto";
-import { docker, label } from "./docker-cli.ts";
+import { docker, label, labelFilters } from "./docker-cli.ts";
 import { listenHostBridge, type HostBridge } from "../host-bridge.ts";
 import type { PylonId } from "../ids.ts";
-
-const tokenLabel = "nexus.bridge-token";
 
 /** `docker run` arguments for a new container: its token, its NEXUS_API, and the host name NEXUS_API uses. */
 export function dockerBridgeRunArgs(port: number): string[] {
   const token = randomBytes(16).toString("hex");
   return [
-    "--label", `${tokenLabel}=${token}`,
+    "--label", `${label.bridgeToken}=${token}`,
     "--env", `NEXUS_API=http://host.docker.internal:${port}/${token}`,
     "--add-host", "host.docker.internal:host-gateway",
   ];
 }
-
-/** `docker` filter arguments that select only what carries every label. */
-export const labelFilters = (labels: Readonly<Record<string, string>>): string[] => Object.entries(labels).flatMap(([k, v]) => ["--filter", `label=${k}=${v}`]);
 
 /**
  * Listens on `port` for the containers created with dockerBridgeRunArgs(port). Docker Desktop reaches the Mac's
@@ -36,7 +31,7 @@ export function dockerHostBridge(port: number, labels: Readonly<Record<string, s
   return listenHostBridge({ host: process.platform === "darwin" ? "127.0.0.1" : "0.0.0.0", port }, async (req) => {
     const token = /^\/([0-9a-f]{32})\/v1\/request$/.exec(req.url ?? "")?.[1];
     if (token === undefined) return null;
-    const stdout = await docker(["ps", "--filter", `label=${tokenLabel}=${token}`, ...scope, "--format", `{{.Label "${label.pylon}"}}`]);
+    const stdout = await docker(["ps", "--filter", `label=${label.bridgeToken}=${token}`, ...scope, "--format", `{{.Label "${label.pylon}"}}`]);
     const pylons = stdout.split("\n").filter((line) => line !== "");
     return pylons.length === 1 ? pylons[0] as PylonId : null;
   });
