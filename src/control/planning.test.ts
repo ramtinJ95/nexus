@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
-import { fakeHarness } from "./fake-harness.ts";
+import { fakeHarness } from "../test-support/fake-harness.ts";
 import { planBlocks, planning, proposalItem } from "./planning.ts";
 import { planningPrefix } from "./agent-protocol.ts";
 import { openRegistry } from "./registry.ts";
@@ -10,7 +10,7 @@ import type { Thread } from "./thread-store.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { threadServices } from "./thread-services.ts";
 import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
-import { tempDir, testImage } from "../test-kit.ts";
+import { tempDir, testImage } from "../test-support/kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });

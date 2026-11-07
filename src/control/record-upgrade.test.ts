@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { reviewPrefix } from "./agent-protocol.ts";
-import { tempDir } from "../test-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
 import { personOnly, reservedNames, type HoldCode, type ReservedCase } from "./holds.ts";
 import { upgradeAttempts, upgradeReview } from "./record-upgrade.ts";
 import { findingSchema, maxRounds, secondReads, type Review, type SecondReviewer } from "./review-model.ts";
 import type { ThreadId } from "../ids.ts";
-import { addThread, seedRegistry, testRegistry, testReview } from "./test-kit.ts";
+import { addThread, seedRegistry, testRegistry, testReview } from "../test-support/registry-kit.ts";
 import { openRegistry } from "./registry.ts";
 import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
 

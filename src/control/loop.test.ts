@@ -8,7 +8,7 @@ import { nodePylons } from "./placement.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
-import { addThread, seedRegistry } from "./test-kit.ts";
+import { addThread, seedRegistry } from "../test-support/registry-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { archivedDiskMs, envelope, ingest as realIngest } from "./reconcile.ts";
 import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
@@ -23,7 +23,7 @@ import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ReportedEvent } from "../events.ts";
 import { transcriptStart } from "./claude-transcript.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-support/kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;

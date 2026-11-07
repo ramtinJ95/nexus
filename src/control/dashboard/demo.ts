@@ -6,7 +6,7 @@
  */
 import type { TailnetNodeId } from "../../ids.ts";
 import type { DoctorReport } from "../doctor-model.ts";
-import { laptop, testApi } from "../api-test-kit.ts";
+import { laptop, testApi } from "../../test-support/api-kit.ts";
 import { demoCheckout, demoProbes, demoReviews, seedDemo } from "./demo-fixtures.ts";
 
 const port = Number(process.env.PORT ?? 8080);

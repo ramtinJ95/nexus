@@ -7,13 +7,13 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { checkCaller, verifyCaller } from "./agent-protocol.ts";
 import { checkRuns, imageEnv, verifyGate, type CheckRuns, type CheckState } from "./gate.ts";
 import type { Thread } from "./thread-store.ts";
-import { testPylon, testRegistry, testThread } from "./test-kit.ts";
+import { testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { processStream } from "../process-stream.ts";
 import { checkoutDir } from "../session-harness.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { StartRequest } from "./start-request.ts";
-import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-support/kit.ts";
 
 const node = "node" as NodeName;
 

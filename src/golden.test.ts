@@ -25,9 +25,9 @@ process.env.TZ = "UTC";
 // The demo checkout's commits, and so their hashes, are the same on each run.
 process.env.GIT_AUTHOR_DATE = process.env.GIT_COMMITTER_DATE = now;
 await import("./golden/frozen.ts");
-const { deployToken, laptop, phone, reporterHeaders, testApi } = await import("./control/api-test-kit.ts");
+const { deployToken, laptop, phone, reporterHeaders, testApi } = await import("./test-support/api-kit.ts");
 const { tokenDigest } = await import("./deploy/model.ts");
-const { tempDir } = await import("./test-kit.ts");
+const { tempDir } = await import("./test-support/kit.ts");
 const { demoCheckout, demoProbes, demoReviews, seedDemo } = await import("./control/dashboard/demo-fixtures.ts");
 const { seedReviews } = await import("./golden/reviews.ts");
 const { utc } = await import("./control/usage.ts");

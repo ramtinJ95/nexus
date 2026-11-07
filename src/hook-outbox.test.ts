@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as wait } from "node:timers/promises";
 import { drain, enqueue, maxAgeMs, maxEntries, settleMs, type OutboxEvent, type Outcome } from "../images/pylon/nexus-outbox.ts";
-import { until } from "./test-kit.ts";
+import { until } from "./test-support/kit.ts";
 
 const sender = fileURLToPath(new URL("../images/pylon/nexus-outbox.ts", import.meta.url));
 const lockless = process.platform !== "linux" && "the sender's lock is a Linux abstract socket";

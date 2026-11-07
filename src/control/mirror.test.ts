@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { projectMirror } from "./mirror.ts";
 import type { RemoteProject } from "./project.ts";
 import type { NodeName, ProjectId } from "../ids.ts";
-import { tempDir } from "../test-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
 
 const dir = await tempDir("nexus-mirror-test-");
 

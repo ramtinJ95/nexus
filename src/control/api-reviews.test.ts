@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ReviewLoop } from "./review.ts";
 import type { ProjectId, TailnetNodeId } from "../ids.ts";
-import { laptop, phone, project, testApi, withThread, deployment } from "./api-test-kit.ts";
+import { laptop, phone, project, testApi, withThread, deployment } from "../test-support/api-kit.ts";
 
 test("a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer", async (t) => {
   const off = await withThread(t);

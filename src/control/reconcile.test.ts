@@ -12,7 +12,7 @@ import {
 } from "../protocol/observations.ts";
 import { chatgptTokenGrant } from "../secret-grants.ts";
 import { requiredArtifacts, type BootInputs, type PylonSource } from "../spawn.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 
 const now = 1_800_000_000_000;
 const pylonId = "pylon-t1" as PylonId;

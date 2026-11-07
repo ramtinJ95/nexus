@@ -3,9 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cleanupPass, type CleanupPass } from "./cleanup.ts";
 import { cleanupQuestion } from "./cleanup-model.ts";
-import { observeNode } from "./test-kit.ts";
-import { testImage } from "../test-kit.ts";
-import { deployment, laptop, node, reporterHeaders, testApi } from "./api-test-kit.ts";
+import { observeNode } from "../test-support/registry-kit.ts";
+import { testImage } from "../test-support/kit.ts";
+import { deployment, laptop, node, reporterHeaders, testApi } from "../test-support/api-kit.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { ImageId, NodeName, PortableArtifactId, TailnetNodeId } from "../ids.ts";
 

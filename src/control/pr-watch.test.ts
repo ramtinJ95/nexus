@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { openRegistry } from "./registry.ts";
-import { testPr, testPylon, testRegistry, testThread } from "./test-kit.ts";
+import { testPr, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { desiredPhase, ingest } from "./reconcile.ts";
 import { fakeGuest } from "../backends/fake-guest.ts";
 import { gitFacts } from "../probe/guest/git-facts.ts";
@@ -18,7 +18,7 @@ import { prWatchPrefix } from "./agent-protocol.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "./harness/host.ts";
-import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 
 function fixture(path = ":memory:") {
   const registry = openRegistry(path);

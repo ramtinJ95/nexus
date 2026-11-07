@@ -7,7 +7,7 @@ import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { once } from "node:events";
-import { until } from "./test-kit.ts";
+import { until } from "./test-support/kit.ts";
 import { spawn, spawnSync } from "node:child_process";
 import fs, { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";

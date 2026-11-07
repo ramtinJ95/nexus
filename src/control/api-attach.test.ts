@@ -10,10 +10,10 @@ import { processStream } from "../process-stream.ts";
 import { attachScript } from "../probe/guest/sessions.ts";
 import { encodeMessage } from "../contract/attach.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import { runningPylon, testObservation, until } from "../test-kit.ts";
+import { runningPylon, testObservation, until } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
-import { node, laptop, claudeSession, withThread, observeRunning, attachTo, attachPathOf } from "./api-test-kit.ts";
+import { node, laptop, claudeSession, withThread, observeRunning, attachTo, attachPathOf } from "../test-support/api-kit.ts";
 
 const fastAttach: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 20, hangUpMs: 5_000 };
 

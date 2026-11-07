@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, readdir, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tempDir } from "../test-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
 import { deleteReleases, readReleases, releaseKeeps } from "./release-cleanup.ts";
 import { cleanReleases } from "./worker.ts";
 

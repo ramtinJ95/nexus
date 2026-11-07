@@ -1,5 +1,5 @@
 /**
- * Test support: a ThreadHarness that records each call the API makes, for API tests that run without
+ * A ThreadHarness that records each call the API makes, for API tests that run without
  * pi-durable. Conversation IDs count from 1. Each thread's transcript is a list of pi-ai messages that a sent
  * message joins and a test appends to, served in pi-durable's view shape with one message per entry.
  *
@@ -9,8 +9,8 @@
 import assert from "node:assert/strict";
 import type { Message } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, JsonObject, WatchEnd } from "@earendil-works/pi-durable";
-import type { ConversationId } from "./harness/host.ts";
-import type { ThreadHarness } from "./thread-agent.ts";
+import type { ConversationId } from "../control/harness/host.ts";
+import type { ThreadHarness } from "../control/thread-agent.ts";
 
 export interface FakeTranscript {
   messages: Message[];

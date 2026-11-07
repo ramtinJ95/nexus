@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { request } from "node:http";
 import type { Thread } from "./thread-store.ts";
 import type { ImageId, NodeName, TailnetNodeId } from "../ids.ts";
-import { runningPylon, testCapacity, testImage, testObservation } from "../test-kit.ts";
-import { testApi } from "./api-test-kit.ts";
+import { runningPylon, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
+import { testApi } from "../test-support/api-kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;

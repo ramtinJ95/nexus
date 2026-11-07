@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { openHarnessHost, type ConversationId } from "./host.ts";
 import { scriptedModel, scriptedModels, scriptedUsage, type ScriptedRequest } from "./test-fixture.ts";
 import type { PylonId } from "../../ids.ts";
-import { tempDir } from "../../test-kit.ts";
+import { tempDir } from "../../test-support/kit.ts";
 
 test("the usage of a conversation's answers reads on from the last entry read, and stays readable after its thread is deleted", async (t) => {
   const scratch = await tempDir("nexus-host-usage-", t);

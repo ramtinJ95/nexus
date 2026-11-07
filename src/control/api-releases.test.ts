@@ -7,7 +7,7 @@ import type { Thread } from "./thread-store.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { releaseOutcome, reportStates, type ReleaseReport } from "../deploy/model.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";
-import { node, laptop, project, image, testApi, withThread, deployCommit, deployment, reporterHeaders } from "./api-test-kit.ts";
+import { node, laptop, project, image, testApi, withThread, deployCommit, deployment, reporterHeaders } from "../test-support/api-kit.ts";
 
 test("deploy defaults off, main resolves, and release records the authenticated caller", async (t) => {
   const off = await testApi(t);

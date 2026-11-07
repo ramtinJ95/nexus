@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testPylon, testRegistry, testThread } from "./test-kit.ts";
+import { testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageLimitPrefix } from "./agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import { runningPylon, testCapacity, testObservation, watch } from "../test-kit.ts";
+import { runningPylon, testCapacity, testObservation, watch } from "../test-support/kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";

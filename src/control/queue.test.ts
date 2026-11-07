@@ -2,18 +2,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
-import { fakeHarness } from "./fake-harness.ts";
+import { fakeHarness } from "../test-support/fake-harness.ts";
 import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
 import type { PullRequest } from "./github.ts";
 import { openRegistry, type Registry } from "./registry.ts";
-import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
+import { testPr, testPylon, testReview, testThread } from "../test-support/registry-kit.ts";
 import { queuedView, threadQueue, waitOf } from "./queue.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { threadStarter } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
 import type { NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
-import { tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
+import { tempDir, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 
 const node = "rj-firebat" as NodeName;
 const project = {

@@ -5,10 +5,10 @@ import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { HealthSample } from "./node-metrics.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { Room, StoredPylon, Thread } from "./thread-store.ts";
-import { testCapacity, testObservation } from "../test-kit.ts";
+import { testCapacity, testObservation } from "../test-support/kit.ts";
 import { HttpError } from "./http-error.ts";
 import { freeHeldRoom, placeAuto, placeNear, weighNodes } from "./placement.ts";
-import { observeNode, withImage } from "./api-test-kit.ts";
+import { observeNode, withImage } from "../test-support/api-kit.ts";
 
 const image = "img-0123456789ab";
 const need = (memoryGiB = 4) => ({

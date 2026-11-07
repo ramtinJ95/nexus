@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
 import type { DoctorReport } from "./doctor-model.ts";
-import { laptop, testApi } from "./api-test-kit.ts";
+import { laptop, testApi } from "../test-support/api-kit.ts";
 
 const latest: DoctorReport = {
   at: "2026-11-02T00:30:00.000Z", status: "fail", checks: [

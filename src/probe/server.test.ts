@@ -32,7 +32,7 @@ import { outputsDir } from "./guest/outputs.ts";
 import { sessionsFile } from "./guest/sessions.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
-import { tempDir, until } from "../test-kit.ts";
+import { tempDir, until } from "../test-support/kit.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;

@@ -5,7 +5,7 @@ import { access, copyFile, mkdir, readdir, readFile, rename, rm, symlink, writeF
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { tempDir } from "./test-kit.ts";
+import { tempDir } from "./test-support/kit.ts";
 
 const repo = new URL("..", import.meta.url).pathname;
 const which = (name: string) => execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();

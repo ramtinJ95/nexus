@@ -11,12 +11,12 @@ import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import { tokenDigest } from "../deploy/model.ts";
 import { joinControlPlane } from "../deploy/setup.ts";
-import { call as callJson, tempDir, testObservation, until } from "../test-kit.ts";
+import { call as callJson, tempDir, testObservation, until } from "../test-support/kit.ts";
 import { mintJoinToken } from "./join.ts";
 import { parseConfig, startControlPlane } from "./main.ts";
 import { openRegistry } from "./registry.ts";
-import { rewindTo, versionBefore } from "./schema-kit.ts";
-import { addThread, seedRegistry, testRegistry } from "./test-kit.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
+import { addThread, seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
 import type { Thread } from "./thread-store.ts";
 
 const example = await readFile(new URL("../../deploy/control.example.json", import.meta.url), "utf8");

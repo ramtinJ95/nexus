@@ -9,8 +9,8 @@ import { openRegistry, type Registry } from "./registry.ts";
 import type { StoredPylon } from "./thread-store.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { reviewPrefix } from "./agent-protocol.ts";
-import { seedRegistry, testPylon, testProject, testRegistry, testReview, testThread } from "./test-kit.ts";
-import { rewindTo, versionBefore } from "./schema-kit.ts";
+import { seedRegistry, testPylon, testProject, testRegistry, testReview, testThread } from "../test-support/registry-kit.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 import { migrations } from "./schema.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { PullRequest } from "./github.ts";
@@ -22,7 +22,7 @@ import type { JobId, LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, Thre
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { TemplateRecord } from "./templates.ts";
 import { maxEntries, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 import type { WaitingAsk } from "./questions.ts";
 
 const node = "rj-firebat" as NodeName;

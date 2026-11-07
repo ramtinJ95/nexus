@@ -4,7 +4,7 @@
  * second reviewer and each failing model shows in the API, `nexus show` and the thread page.
  */
 import { createHash } from "node:crypto";
-import type { testApi } from "../control/api-test-kit.ts";
+import type { testApi } from "../test-support/api-kit.ts";
 import type { PullRequest } from "../control/github.ts";
 import { caseOf, personOnly, reservedNames, waivedName, type Hold } from "../control/holds.ts";
 import { holdOptions, type HeldQuestion } from "../control/questions.ts";

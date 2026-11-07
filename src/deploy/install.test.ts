@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { checkoutMerged, command, ReleaseInstaller, type InstallBoundary } from "./install.ts";
-import { snapshot } from "../test-kit.ts";
+import { snapshot } from "../test-support/kit.ts";
 
 const commit = "a".repeat(40);
 async function directory(t: TestContext): Promise<string> {

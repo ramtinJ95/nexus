@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
 import { harnessModels, openCredentials, requireModel } from "../control/harness/credentials.ts";
 import { harnessSignedIn, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
-import { snapshot } from "../test-kit.ts";
+import { snapshot } from "../test-support/kit.ts";
 
 const exec = promisify(execFile);
 const repo = resolve(import.meta.dirname, "../..");

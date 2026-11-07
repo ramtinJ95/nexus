@@ -11,9 +11,9 @@ import type { ReviewLoop } from "./review.ts";
 import { joinTokenTtlMs, mintJoinToken } from "./join.ts";
 import type { ProjectId } from "../ids.ts";
 import { tokenDigest } from "../deploy/model.ts";
-import { until } from "../test-kit.ts";
+import { until } from "../test-support/kit.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
-import { node, laptop, phone, project, dir, testApi, withThread, attachTo, attached, attachPathOf, deployCommit, deployment, reporterHeaders, withQueue } from "./api-test-kit.ts";
+import { node, laptop, phone, project, dir, testApi, withThread, attachTo, attached, attachPathOf, deployCommit, deployment, reporterHeaders, withQueue } from "../test-support/api-kit.ts";
 
 test("callers off the allowlist, or unknown to tailscaled, are refused", async (t) => {
   const s = await testApi(t);

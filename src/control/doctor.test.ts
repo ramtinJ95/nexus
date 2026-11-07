@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ReleaseReport } from "../deploy/model.ts";
 import type { DiskFact } from "../protocol/observations.ts";
-import { testCapacity } from "../test-kit.ts";
+import { testCapacity } from "../test-support/kit.ts";
 import { doctorReport, type DoctorFacts } from "./doctor.ts";
 import type { Check, Status } from "./doctor-model.ts";
 import type { NodeSummary } from "./wire.ts";

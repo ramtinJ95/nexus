@@ -3,10 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { testCapacity } from "../test-kit.ts";
+import { testCapacity } from "../test-support/kit.ts";
 import { healthSampling } from "./health-sampling.ts";
 import { recordingHealth, sampleOf } from "./node-metrics.ts";
-import { testRegistry } from "./test-kit.ts";
+import { testRegistry } from "../test-support/registry-kit.ts";
 
 const healthOf = (node: NodeName): NodeHealth => ({
   node, readAt: "2026-11-01T12:00:00.000Z", cpus: 8, load: { one: 1, five: 1, fifteen: 1 }, memory: null,

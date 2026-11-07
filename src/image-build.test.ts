@@ -13,7 +13,7 @@ import {
 import { imageIdOf, type ImageRecipe } from "./images.ts";
 import { agentSetupManifest, installedLayout, parseAgentSetup } from "../images/pylon/agent-setup/manifest.ts";
 import type { NodeName } from "./ids.ts";
-import { tempDir } from "./test-kit.ts";
+import { tempDir } from "./test-support/kit.ts";
 
 const pins: ImageRecipe["pins"] = {
   debianDigest: `sha256:${"a".repeat(64)}`,

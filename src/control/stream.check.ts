@@ -21,11 +21,11 @@ import { createRegistry, Harness, type ConversationId } from "@earendil-works/pi
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "./harness/test-fixture.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
-import { testImage } from "../test-kit.ts";
+import { testImage } from "../test-support/kit.ts";
 import { startApi } from "./api/server.ts";
 import type { ThreadHarness } from "./thread-agent.ts";
 import { threadStarter } from "./threads.ts";
-import { readEvents } from "./event-reader.ts";
+import { readEvents } from "../test-support/event-reader.ts";
 import { openRegistry } from "./registry.ts";
 
 const seconds = Number(process.argv[2] ?? 4);

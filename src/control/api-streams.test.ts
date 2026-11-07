@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { request } from "node:http";
 import { maxStreams } from "./api/sse.ts";
-import { until } from "../test-kit.ts";
+import { until } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
-import { laptop, testApi, withThread, deployCommit, deployment, reporterHeaders } from "./api-test-kit.ts";
+import { laptop, testApi, withThread, deployCommit, deployment, reporterHeaders } from "../test-support/api-kit.ts";
 
 test("a follow from the latest event gets a reply's events and none from before it", async (t) => {
   const s = await withThread(t);

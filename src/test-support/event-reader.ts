@@ -1,5 +1,5 @@
 /**
- * Test support: one client of a control-plane event stream, over plain HTTP to loopback. Each event's data is
+ * One client of a control-plane event stream, over plain HTTP to loopback. Each event's data is
  * parsed as JSON and queued, so a test takes the events in order as they arrive.
  */
 import assert from "node:assert/strict";

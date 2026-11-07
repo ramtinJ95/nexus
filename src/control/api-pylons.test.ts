@@ -10,10 +10,10 @@ import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { focusScript } from "../probe/guest/sessions.ts";
 import { checkoutDir } from "../session-harness.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { PausedSession, ServiceFact } from "../protocol/observations.ts";
-import { node, laptop, withThread, observeRunning, git, localCheckout, pngBytes } from "./api-test-kit.ts";
+import { node, laptop, withThread, observeRunning, git, localCheckout, pngBytes } from "../test-support/api-kit.ts";
 
 test("thread detail lists the pylon's listening ports with the service and preview of each", async (t) => {
   const s = await withThread(t);

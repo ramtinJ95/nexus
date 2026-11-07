@@ -5,9 +5,9 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry } from "./registry.ts";
-import { rewindTo, versionBefore } from "./schema-kit.ts";
-import { seedRegistry, testPylon, testRegistry, testThread } from "./test-kit.ts";
-import { tempDir } from "../test-kit.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
+import { seedRegistry, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
+import { tempDir } from "../test-support/kit.ts";
 import { cleanupQuestion } from "./cleanup-model.ts";
 import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
 

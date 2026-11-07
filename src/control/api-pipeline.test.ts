@@ -8,7 +8,7 @@ import { planningPrefix } from "./agent-protocol.ts";
 import type { QueuedThread } from "./queue.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ImageId, PylonId, TailnetNodeId } from "../ids.ts";
-import { node, laptop, phone, project, image, testApi, withImage, deployment, withQueue } from "./api-test-kit.ts";
+import { node, laptop, phone, project, image, testApi, withImage, deployment, withQueue } from "../test-support/api-kit.ts";
 
 test("an item is added to a project the pipeline runs for, becomes a queued thread behind the items it is after, and only a person adds, approves or cancels one", async (t) => {
   const s = await testApi(t, { pipeline: true, deployment });

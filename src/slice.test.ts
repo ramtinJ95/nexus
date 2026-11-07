@@ -46,7 +46,7 @@ import type { BootInputs, CloneRepo, OverlayFile, PreviewAssignment } from "./sp
 import type { ProjectId } from "./ids.ts";
 import { sessionFacts, sessionsFile } from "./probe/guest/sessions.ts";
 import { checkoutDir, type SessionHarness } from "./session-harness.ts";
-import { freePort } from "./test-kit.ts";
+import { freePort } from "./test-support/kit.ts";
 
 const execFileAsync = promisify(execFile);
 

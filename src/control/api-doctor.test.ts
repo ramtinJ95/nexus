@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { DoctorReport } from "./doctor-model.ts";
-import { testApi } from "./api-test-kit.ts";
+import { testApi } from "../test-support/api-kit.ts";
 
 const ok: DoctorReport = { at: "2026-11-01T00:30:00.000Z", status: "ok", checks: [{ node: null, name: "backup", status: "ok", text: "the newest backup is 3 h old and verified" }] };
 const failing: DoctorReport = {

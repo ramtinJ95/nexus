@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "../images/pylon/nexus-ask.ts";
 import { answerExits, type AskAnswer } from "../images/pylon/nexus-contract.ts";
-import { tempDir } from "./test-kit.ts";
+import { tempDir } from "./test-support/kit.ts";
 
 const hook = new URL("../images/pylon/nexus-claude-hook", import.meta.url).pathname;
 

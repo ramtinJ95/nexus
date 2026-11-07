@@ -15,7 +15,7 @@ import { localPipes } from "./backends/fake-guest.ts";
 import { claudeTurn } from "../images/pylon/nexus-contract.ts";
 import { snapshotTurn } from "../images/pylon/nexus-turn.ts";
 import type { ByteStream, StreamEnd } from "./protocol/streams.ts";
-import { tempDir } from "./test-kit.ts";
+import { tempDir } from "./test-support/kit.ts";
 
 const run = promisify(execFile);
 

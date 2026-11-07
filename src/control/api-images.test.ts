@@ -5,9 +5,9 @@ import { readFile } from "node:fs/promises";
 import { startImageRollout } from "./image-rollout.ts";
 import { imageIdOf, type ImageRecipe } from "../images.ts";
 import { parseProbeConfig } from "../probe/config.ts";
-import { testCapacity, testObservation } from "../test-kit.ts";
+import { testCapacity, testObservation } from "../test-support/kit.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";
-import { node, laptop, project, image, testApi, deployment } from "./api-test-kit.ts";
+import { node, laptop, project, image, testApi, deployment } from "../test-support/api-kit.ts";
 
 test("a thread cannot start before an image is current", async (t) => {
   const s = await testApi(t);

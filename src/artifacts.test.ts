@@ -10,7 +10,7 @@ import { artifactArchive, artifactDirectory, fileCodec, sha256Of, tarCodec, type
 import { JobFailure } from "./protocol/jobs.ts";
 import type { ImageManifest, TemplateManifest } from "./images.ts";
 import type { ImageId, TemplateId } from "./ids.ts";
-import { tempDir } from "./test-kit.ts";
+import { tempDir } from "./test-support/kit.ts";
 
 const gnuTar = spawnSync("tar", ["--version"], { encoding: "utf8" }).stdout?.includes("GNU tar") === true;
 const template: TemplateId = "tpl-0123456789ab";

@@ -48,7 +48,7 @@ test("every registry table has one owning file, and only its owner writes it or 
   const known = new Set(tables);
   const dir = import.meta.dirname;
   const files = readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .filter((path) => path.endsWith(".ts") && !/\.(test|check)\.ts$/.test(path) && !["schema.ts", "schema-kit.ts"].includes(path));
+    .filter((path) => path.endsWith(".ts") && !/\.(test|check)\.ts$/.test(path) && path !== "schema.ts");
   const named = new Map<string, Set<string>>();
   for (const file of files) {
     const source = readFileSync(join(dir, file), "utf8");
