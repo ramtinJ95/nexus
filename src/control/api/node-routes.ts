@@ -3,19 +3,11 @@
  */
 import type { NodeHealth } from "../../protocol/client.ts";
 import type { NodeName, TailnetNodeId } from "../../ids.ts";
-import type { NodeRecord } from "../node-store.ts";
-import type { NodeSummary } from "../wire.ts";
 import { HttpError } from "../http-error.ts";
 import { foldPylons, seriesLabel, type MetricSeries, type NodeMetrics, type Series } from "../node-metrics.ts";
-import { nodePylons, overcommitted } from "../placement.ts";
+import { nodeSummary } from "../placement.ts";
 import { canDeploy, type DeploymentOptions } from "../releases.ts";
 import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
-
-/** The node as `GET /v1/nodes` and `nexus doctor` read it: its record without the observation, and what its pylons hold. */
-export function nodeSummary(registry: Parameters<typeof nodePylons>[0], record: NodeRecord): NodeSummary {
-  const { observation, ...n } = record;
-  return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
-}
 
 const maxSpanMs = 31 * 24 * 60 * 60 * 1000;
 
