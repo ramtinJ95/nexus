@@ -40,8 +40,8 @@ import type { Thread } from "./thread-store.ts";
 import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
 import { holdOptions, isOpen, type HeldQuestion, type Question, type ThreadQuestion } from "./questions.ts";
 import {
-  answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
-  landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, settledKinds, verdictSchema,
+  answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, heldForGate, humanLabel,
+  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, verdictSchema,
   type Answer, type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
@@ -298,7 +298,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (check !== null) return { thread: check, runs: checks };
     return phase.kind === "verifying" && phase.thread !== null ? { thread: phase.thread, runs: live } : null;
   };
-  const end = (r: Review, phase: Extract<Phase, { kind: typeof endedKinds[number] }>): Review => {
+  const end = (r: Review, phase: Extract<Phase, { kind: EndedKind }>): Review => {
     const gate = gateThread(r.phase);
     if (gate !== null) gate.runs.discard(gate.thread);
     return { ...r, phase, outbox: null, ...r.second?.kind === "claude" && { second: { ...r.second, outbox: null } } };
@@ -517,7 +517,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const askFor = (question: Omit<ThreadQuestion, "answer"> | null) => {
       if (registry.isCurrentReview(r)) ask(r.builder, question);
     };
-    const askable = r.merged === null && (ended.has(r.phase.kind) ? landable(r) : landingVerb(r) === null);
+    const askable = r.merged === null && (ended(r) ? landable(r) : landingVerb(r) === null);
     if (!askable) {
       early.delete(r.id);
       askFor(null);
@@ -644,7 +644,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   }
 
 
-  const steps: { [K in Exclude<PhaseKind, typeof endedKinds[number]>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
+  const steps: { [K in Exclude<PhaseKind, EndedKind>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
     async reviewing(r, phase, builder, reviewer) {
       const reading = r.rounds.at(-1)!;
       // Each reviewer's verdict is recorded as it comes, and the round goes on once both are in.
@@ -977,12 +977,12 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return { ...r, phase: { ...r.phase, label: { state: "failed", why: result.message }, ...personPhase(r.phase.cause, ...r.phase.holds,
         `Nexus could not add the label "${humanLabel}" to pull request #${r.pr.number} (${result.message}). Labelling needs a token that may write issues or pull requests, which only the person can grant.`) } };
     }
-    if (ended.has(r.phase.kind) && r.outbox === null) return r;
+    if (ended(r) && r.outbox === null) return r;
     const builder = registry.thread(r.builder);
     const reviewer = registry.thread(r.reviewer);
     // Once merging, the landing must see its deploy through, rollback included, whatever happens to the threads.
-    const landing = r.phase.kind === "merging" || r.phase.kind === "deploying" || r.phase.kind === "rolling-back";
-    const live = !landing && !ended.has(r.phase.kind);
+    const landing = inLanding(r);
+    const live = !landing && !ended(r);
     if (live) {
       const gone = outside(r, watchedPr(r)?.state);
       if (gone !== null) return gone;
@@ -1022,9 +1022,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return { ...r, second: { ...second, outbox: null, since: outbox.attempted } };
     }
     const phase = r.phase;
-    if (ended.has(phase.kind)) return r;
+    if (ended(r)) return r;
     const next = await (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread, v: Thread) => Promise<Review>)(r, phase, builder!, reviewer!);
-    return live && ended.has(next.phase.kind) ? await endedOnGitHub(next) ?? next : next;
+    return live && ended(next) ? await endedOnGitHub(next) ?? next : next;
   }
 
   /**
@@ -1039,7 +1039,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * Whether `r` may still use its reviewer: while it runs, or while it waits at approval or for the person, unmerged, in
    * a way a land or a new head takes back to its rounds. Every step from there needs the reviewer open.
    */
-  const usesReviewer = (r: Review) => !ended.has(r.phase.kind) || (r.merged === null && (landable(r) || heldForGate(r)));
+  const usesReviewer = (r: Review) => !ended(r) || (r.merged === null && (landable(r) || heldForGate(r)));
   const reviewersOf = (r: Review): ThreadId[] => [r.reviewer, ...r.second?.kind === "claude" ? [r.second.thread] : []];
   /** Reviewers begin() has started and not yet saved a review for. */
   let beginning = 0;
@@ -1047,7 +1047,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** A pass over the reviews whose builder, reviewer or gate thread `only` names, or over every review and the sweeps. */
   async function pass(only: ReadonlySet<ThreadId> | null) {
     reads = new Map();
-    const reviews = registry.reviewsToStep(settledKinds);
+    const reviews = registry.reviewsToStep();
     if (only !== null) return await stepEach(reviews.filter((r) => [r.builder, ...reviewersOf(r), gateThread(r.phase)?.thread].some((id) => id !== undefined && only.has(id))));
     // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
     // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.
@@ -1059,7 +1059,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     // person has been to since it started is theirs.
     if (beginning === 0) {
       // A second reviewer is never asked to quote, so a review that waits at an approval does not use it.
-      const using = new Set(reviews.filter(usesReviewer).flatMap((r) => ended.has(r.phase.kind) ? [r.reviewer] : reviewersOf(r)));
+      const using = new Set(reviews.filter(usesReviewer).flatMap((r) => ended(r) ? [r.reviewer] : reviewersOf(r)));
       const left = registry.storedThreads({ status: ["active", "idle"], startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
       for (const t of finished(...left.map((t) => t.id))) {
         registry.setThreadStatus(t.id, "archived");
@@ -1110,7 +1110,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** Refuses a review of the builder's while one that has not ended runs. */
   function refuseIfRunning(builder: ThreadId): void {
     const existing = registry.review(builder);
-    if (existing !== null && !ended.has(existing.phase.kind)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
+    if (existing !== null && !ended(existing)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
   }
 
   /** Starts a review of `pr`, a PR of the builder's: the reviewer thread, its first request, and the record. */
@@ -1267,7 +1267,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     cancel(builderId: ThreadId, by: string): Review {
       const r = registry.review(builderId);
       if (r === null) throw new Refusal("conflict", `thread ${builderId} has no review`);
-      if (ended.has(r.phase.kind) && !needsPerson(r)) throw new Refusal("conflict", `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
+      if (ended(r) && r.phase.kind !== "needs-person") throw new Refusal("conflict", `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
       if (!cancellable(r)) throw new Refusal("conflict", `review ${r.id} of ${builderId} is ${r.phase.kind}, and a merge or deploy that has begun is seen through, so it cannot be cancelled. It ends landed or with the person`);
       const next = end(r, { kind: "cancelled", who: "person", by });
       const archive = finished(...reviewersOf(r));
@@ -1297,7 +1297,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     else {
       const builder = registry.thread(r.builder)!;
       if (builder.status !== "active") throw new Refusal("conflict", `thread ${r.builder} is ${builder.status}`);
-      if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new Refusal("conflict", cannotLand(r, builder, watchedPr(r))!);
+      if (ended(r) || landingVerb(r) !== null) throw new Refusal("conflict", cannotLand(r, builder, watchedPr(r))!);
       pressOn(r);
       next = { ...r, land: r.land ?? { requestedBy: by, head: holds.head, base: holds.base }, waiver };
     }

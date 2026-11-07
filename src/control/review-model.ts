@@ -236,34 +236,61 @@ export interface Review {
   startedAt: number;
 }
 
-export const endedKinds = ["approved", "landed", "needs-person", "merged", "closed", "cancelled"] as const;
-/** The ended phases a step does nothing more for once the review has no message left to send, which a pass skips. */
-export const settledKinds = ["landed", "merged", "closed", "cancelled"] as const satisfies readonly PhaseKind[];
-/** Phases a pass never moves on from. A new review or a land request starts the thread over. */
-export const ended: ReadonlySet<PhaseKind> = new Set(endedKinds);
-export const needsPerson = (r: Review | null) => r?.phase.kind === "needs-person";
+/**
+ * What a phase is to the loop and the person. `ended`: the loop runs no step for it, though an approved review moves on
+ * at the person's Land or a new head, and one held for the person at a new head, a land or a new review. `settled`:
+ * ended with nothing more for a step to do once no message is left to send, so a pass skips it. `waitsOnPerson`: held
+ * for them, or stopped at an approval that only their Land merges. `cancellable`: the person may cancel it, unless a
+ * landing began its merge. `landing`: a landing's phase, which sees its deploy through whatever happens to the threads,
+ * and what it does once it can no longer be stopped, or null before. `awaitsBuilder`: whether the phase keeps the
+ * builder's pylon up, while its reviewer reads a round, which may end in findings for the builder, and until those
+ * findings are delivered, but never while the reviewer's model fails.
+ */
+interface PhaseRow<P extends Phase> {
+  ended: boolean; settled: boolean; waitsOnPerson: boolean; cancellable: boolean;
+  landing?: (phase: P) => "deploys" | "rolls back" | "merges" | null;
+  awaitsBuilder?: (phase: P, r: Review) => boolean;
+}
+const phases = {
+  reviewing: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, awaitsBuilder: (phase) => phase.failing === undefined },
+  fixing: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, awaitsBuilder: (_, r) => r.outbox?.to === "builder" },
+  checking: { ended: false, settled: false, waitsOnPerson: false, cancellable: true },
+  verifying: { ended: false, settled: false, waitsOnPerson: false, cancellable: true },
+  quoting: { ended: false, settled: false, waitsOnPerson: false, cancellable: true },
+  approved: { ended: true, settled: false, waitsOnPerson: true, cancellable: false },
+  merging: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, landing: (phase) => phase.authorized === null ? null : "merges" },
+  deploying: { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "deploys" },
+  "rolling-back": { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "rolls back" },
+  landed: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
+  "needs-person": { ended: true, settled: false, waitsOnPerson: true, cancellable: true },
+  merged: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
+  closed: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
+  cancelled: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
+} as const satisfies { [K in PhaseKind]: PhaseRow<Extract<Phase, { kind: K }>> };
+export type EndedKind = { [K in PhaseKind]: typeof phases[K]["ended"] extends true ? K : never }[PhaseKind];
+// Each row's functions take its own phase, which `phase.kind` picks, so the row of any phase reads it.
+const rowAt = (kind: PhaseKind) => phases[kind] as unknown as PhaseRow<Phase>;
+const rowOf = (phase: Phase) => rowAt(phase.kind);
+/** The phase kinds whose row passes `has`, which the store's SQL filters read. */
+export const kindsWhere = (has: (row: PhaseRow<Phase>) => boolean) => (Object.keys(phases) as PhaseKind[]).filter((kind) => has(rowAt(kind)));
+export const ended = (r: Pick<Review, "phase">) => rowOf(r.phase).ended;
+export const settled = (r: Pick<Review, "phase">) => rowOf(r.phase).settled;
+export const waitsOnPerson = (r: Review | null) => r !== null && rowOf(r.phase).waitsOnPerson;
+export const inLanding = (r: Pick<Review, "phase">) => rowOf(r.phase).landing !== undefined;
+export const landingVerb = (r: Pick<Review, "phase">) => rowOf(r.phase).landing?.(r.phase) ?? null;
+/**
+ * A landing under way is seen through, so the person cannot cancel it. A review that ended for the person can be, so
+ * it stops waiting on them, as nothing else ends it once its pull request merged outside it.
+ */
+export const cancellable = (r: Pick<Review, "phase">) => rowOf(r.phase).cancellable && landingVerb(r) === null;
 /**
  * How long after its request reached the reviewer a round keeps the builder's pylon up, so findings find it awake rather
  * than paused for 25 seconds of waking, and a reviewer that never answers holds no memory for the hours until the person.
  */
 const builderAwaitedMs = 30 * 60_000;
-/**
- * Until when `r` keeps its builder's pylon up: while its reviewer reads a round, which may end in findings for the
- * builder, and until those findings are delivered, which counts as the builder's activity from then. Never while its
- * reviewer's model fails, it waits on the person or it ended.
- */
+/** Until when `r` keeps its builder's pylon up, counted from the builder's last activity, which a delivery is. */
 export const builderAwaited = (r: Review): { from: number; until: number } | null =>
-  (r.phase.kind === "reviewing" && r.phase.failing === undefined) || (r.phase.kind === "fixing" && r.outbox?.to === "builder") ? { from: r.since, until: r.since + builderAwaitedMs } : null;
-/** Whether the review waits on the person: held for them, or stopped at an approval that only their Land merges. */
-export const waitsOnPerson = (r: Review | null) => needsPerson(r) || r?.phase.kind === "approved";
-/** What a landing that authorized its merge, or is deploying or rolling back, does now, or null for any other review. */
-export const landingVerb = (r: Review): "deploys" | "rolls back" | "merges" | null =>
-  r.phase.kind === "deploying" ? "deploys" : r.phase.kind === "rolling-back" ? "rolls back" : r.phase.kind === "merging" && r.phase.authorized !== null ? "merges" : null;
-/**
- * A landing under way is seen through, so the person cannot cancel it. A review that ended for the person can be, so
- * it stops waiting on them, as nothing else ends it once its pull request merged outside it.
- */
-export const cancellable = (r: Review) => (!ended.has(r.phase.kind) || needsPerson(r)) && landingVerb(r) === null;
+  rowOf(r.phase).awaitsBuilder?.(r.phase, r) === true ? { from: r.since, until: r.since + builderAwaitedMs } : null;
 
 /** A needs-person phase for `cause` whose holds are `items`. A string is a reason of the loop's own. */
 export const personPhase = (cause: HoldCause, ...items: readonly (Hold | string)[]) => {
