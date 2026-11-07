@@ -15,6 +15,7 @@ import type { NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
 import type { ByteStream } from "../../protocol/streams.ts";
 import { connectProbe } from "../../protocol/client.ts";
 import { localApiWhois } from "../../tailscale.ts";
+import { piEnv } from "../../guest-contract.ts";
 
 /** How to reach and verify the pylon's probe. `tailscaled` is the control plane's LocalAPI socket. */
 export interface BridgeTarget {
@@ -26,7 +27,7 @@ export interface BridgeTarget {
 }
 
 /** Through a login shell, so tool commands see the image's /etc/profile.d PATH and CA settings. */
-const daemon = ["bash", "-lc", 'exec /usr/local/libexec/nexus/pi-env "$@"', "pi-env"];
+const daemon = ["bash", "-lc", `exec ${piEnv} "$@"`, "pi-env"];
 
 const [targetJson, pylonId, ...serveArgs] = process.argv.slice(2);
 if (targetJson === undefined || pylonId === undefined || serveArgs[0] !== "serve") {
