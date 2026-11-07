@@ -162,7 +162,15 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
         ...rulesFile === undefined ? {} : { standingRules: rulesFileOf(rulesFile) },
       }) as Project;
       // Only an edit records who turned auto review on, so a new project's add cannot name someone else.
-      const p = auto == null ? added : await api("PATCH", `/v1/projects/${encodeURIComponent(added.id)}`, { autoReview: auto }) as Project;
+      let p = added;
+      if (auto != null) {
+        try {
+          p = await api("PATCH", `/v1/projects/${encodeURIComponent(added.id)}`, { autoReview: auto }) as Project;
+        } catch (err) {
+          if (!(err instanceof CliError)) throw err;
+          throw new CliError(err.kind, `Added project ${added.id}, but its auto review was not set: ${err.message}. Set it with nexus project edit ${added.id} --auto-review`, err.status, err.code);
+        }
+      }
       const rules = p.standingRules == null ? "" : ", with standing rules";
       const review = auto == null ? "" : `, ${autoReviewText(p)}`;
       return { json: p, text: p.repoUrl === null ? `Added scratch project ${p.id} on ${p.defaultNode}${rules}${review}` : `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}${rules}${review}` };

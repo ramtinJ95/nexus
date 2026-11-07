@@ -1796,6 +1796,10 @@ test("project edit turns reviews of its own on and off, and projects shows who t
   assert.equal(added.stdout, `Added scratch project overnight on ${node}, auto review and land, waiving holds, for ${laptop}\n`);
   assert.equal((await s.nexus(["project", "add", "bad", "--scratch", "--node", node, "--auto-review", "always"])).code, 64);
   assert.doesNotMatch((await s.nexus(["projects"])).stdout, /^bad /m, "an invalid value is refused before the add");
+  s.callAs(phone);
+  const refused = await s.nexus(["project", "add", "phoned", "--scratch", "--node", node, "--auto-review", "yolo"]);
+  assert.equal(refused.code, 3);
+  assert.match(refused.stderr, /^nexus: Added project phoned, but its auto review was not set: .*only deployers may.*\. Set it with nexus project edit phoned --auto-review/m);
 });
 
 test("project edit sets which pull requests get a second reviewer on another model, and project show says it", async (t) => {

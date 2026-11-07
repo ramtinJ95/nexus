@@ -67,7 +67,7 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
       const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
-        const review = mode === undefined ? kept : mode === null ? null : { mode: mode!, enabledBy: r.caller };
+        const review = mode === undefined ? kept : mode === null ? null : { mode, enabledBy: r.caller };
         // An off pipeline stays null, so the migration that turns it on for project nexus never turns it back on.
         const items = pipeline === undefined ? running : pipeline;
         const rules = standingRules === undefined ? standing : editedRules(standing, standingRules);

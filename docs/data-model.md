@@ -268,7 +268,7 @@ On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, tar
 
 ## Project edits and boot identity
 
-`Project.secondReview` is optional `{ always: true }` or `{ always: false, lines: number | null, reserved: boolean }`, absent when off: which pull requests a review gives a second reviewer on another model. `Project.autoReview` is optional `{ land: boolean, enabledBy: string }`, absent when off. `enabledBy` is the caller who turned it on, which only a project edit sets, and a landing it asks for merges and deploys for that caller.
+`Project.secondReview` is optional `{ always: true }` or `{ always: false, lines: number | null, reserved: boolean }`, absent when off: which pull requests a review gives a second reviewer on another model. `Project.autoReview` is optional `{ mode: "review" | "land" | "yolo", enabledBy: string }`, absent when off, and a record saved before modes with `land: boolean` reads as `land` or `review`. `enabledBy` is the caller who turned it on, which only a project edit sets, and a landing it asks for merges and deploys for that caller, as a `yolo` waiver waives for them ([Yolo landing](merge-policy.md#yolo-landing)).
 
 `Project.pipeline` is optional `{ autoStart: boolean }`, absent or null when off. Turning it off stores null, so the migration that turned it on for project `nexus` skips it when a registry rewound past that migration applies it again.
 
