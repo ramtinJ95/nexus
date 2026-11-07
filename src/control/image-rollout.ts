@@ -16,7 +16,7 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight } from "../single-flight.ts";
 import { failureMessage } from "./reconcile.ts";
 import { jobOutcome, submitJob } from "./tick.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { ImageOperation, ImageStep, Outcome, RecordedImage } from "./image-store.ts";
@@ -70,7 +70,7 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     const operation = registry.imageOperation();
     if (operation?.state !== "running") return null;
     if (operation.kind === kind && operation.image === image) return operation;
-    throw new HttpError(409, `a ${operation.kind} of ${operation.image} is running. Wait for it to finish`);
+    throw new Refusal("conflict", `a ${operation.kind} of ${operation.image} is running. Wait for it to finish`);
   }
 
   function start(operation: ImageOperation): ImageOperation {
@@ -80,11 +80,11 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
   }
 
   function rollout(image: ImageId, caller: TailnetNodeId): ImageOperation {
-    if (registry.image(image) === undefined) throw new HttpError(404, `no image ${image} is recorded`);
+    if (registry.image(image) === undefined) throw new Refusal("missing", `no image ${image} is recorded`);
     const same = running("rollout", image);
     if (same !== null) return same;
     const nodes = registry.nodes();
-    if (!nodes.some((n) => online(n) && holds(n, image))) throw new HttpError(409, `no online node holds ${image}, so no node could fetch it`);
+    if (!nodes.some((n) => online(n) && holds(n, image))) throw new Refusal("conflict", `no online node holds ${image}, so no node could fetch it`);
     return start({
       kind: "rollout", image, requestedBy: caller, requestedAt: Date.now(), state: "running",
       steps: nodes.map((n) => online(n)
@@ -213,14 +213,14 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
         return start({ kind: "build", release: options.release, image, requestedBy: caller, requestedAt: now, steps: [{ node, state: "done", job: null, reason: "recorded already" }], state: "done", finishedAt: now });
       }
       const record = registry.node(node);
-      if (record === undefined) throw new HttpError(409, `the image build node ${node} is not a node of this control plane`);
-      if (!online(record)) throw new HttpError(409, `the image build node ${node} is offline`);
+      if (record === undefined) throw new Refusal("conflict", `the image build node ${node} is not a node of this control plane`);
+      if (!online(record)) throw new Refusal("conflict", `the image build node ${node} is offline`);
       return start({ kind: "build", release: options.release, image, requestedBy: caller, requestedAt: Date.now(), steps: [{ node, state: "pending", job: null, reason: null }], state: "running" });
     },
     rollout,
     rollback(caller) {
       const previous = registry.previousImage();
-      if (previous === null) throw new HttpError(409, "no image was current before this one, so there is none to roll back to");
+      if (previous === null) throw new Refusal("conflict", "no image was current before this one, so there is none to roll back to");
       return rollout(previous, caller);
     },
     wake,

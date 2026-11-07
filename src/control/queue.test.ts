@@ -132,15 +132,15 @@ test("a queue record is checked as a start is, and freezes the size the project 
   const f = fixture(t);
   const q = f.queue();
   const a = f.thread("th-a");
-  const refused = (fn: () => unknown, status: number, message: RegExp) => assert.throws(fn, (err: { status?: number; message: string }) => err.status === status && message.test(err.message));
-  refused(() => q.add(f.request(), null, ["th-none"], laptop), 404, /no thread th-none/);
-  refused(() => q.add(f.request({ project: "nope" }), null, [a], laptop), 404, /no project nope/);
-  refused(() => q.add(f.request({ node: "nowhere" }), null, [a], laptop), 400, /no node nowhere/);
-  refused(() => q.add(f.request({ commit: "abc" }), null, [a], laptop), 400, /scratch project/);
-  refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], laptop), 400, /message is for a Nexus agent thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), 400, /reviewer, check or verify thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), 400, /reviewer, check or verify thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), 400, /reviewer, check or verify thread/);
+  const refused = (fn: () => unknown, kind: string, message: RegExp) => assert.throws(fn, (err: { kind?: string; message: string }) => err.kind === kind && message.test(err.message));
+  refused(() => q.add(f.request(), null, ["th-none"], laptop), "missing", /no thread th-none/);
+  refused(() => q.add(f.request({ project: "nope" }), null, [a], laptop), "missing", /no project nope/);
+  refused(() => q.add(f.request({ node: "nowhere" }), null, [a], laptop), "invalid", /no node nowhere/);
+  refused(() => q.add(f.request({ commit: "abc" }), null, [a], laptop), "invalid", /scratch project/);
+  refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], laptop), "invalid", /message is for a Nexus agent thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), "invalid", /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), "invalid", /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), "invalid", /reviewer, check or verify thread/);
   assert.deepEqual(f.registry.queuedThreads(), [], "a refused start records nothing");
 
   const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], laptop);
@@ -252,7 +252,7 @@ test("two passes and a start-queued at once start the thread once", async (t) =>
   await assert.rejects(late, /no longer queued/, "another queue's start loses to the transaction that marked it started");
   assert.equal(f.registry.threads().filter((x) => x.id === record.id).length, 1);
   assert.deepEqual(f.registry.queuedThread(record.id)!.startNow, { by: "nPHONE", at: f.registry.queuedThread(record.id)!.startNow!.at });
-  await assert.rejects(one.startNow(record.id, "nPHONE"), (err: { status: number; message: string }) => err.status === 409 && /has started/.test(err.message), "a started thread is no longer queued");
+  await assert.rejects(one.startNow(record.id, "nPHONE"), (err: { kind?: string; message: string }) => err.kind === "conflict" && /has started/.test(err.message), "a started thread is no longer queued");
 });
 
 test("archiving a queued thread while its start is in flight leaves no thread row", async (t) => {

@@ -160,7 +160,7 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
   f.review(tc, { kind: "cancelled", who: "builder", status: "deleted" });
   r.setThreadStatus(tc, "deleted");
   assert.equal(phase(r, c), "archived: its thread is deleted");
-  assert.throws(() => f.items.cancel(b, laptop), (err: { status: number; message: string }) => err.status === 409 && err.message.includes(`is thread ${tb} now`));
+  assert.throws(() => f.items.cancel(b, laptop), (err: { kind?: string; message: string }) => err.kind === "conflict" && err.message.includes(`is thread ${tb} now`));
 });
 
 test("an item is queued once across passes and restarts, under its request ID", async (t) => {
@@ -190,13 +190,13 @@ test("an item is queued once across passes and restarts, under its request ID", 
 
 test("an item is checked as a start is, and its pass records why a queue refused it", async (t) => {
   const f = fixture(t);
-  const refused = (fn: () => unknown, status: number, message: RegExp) => assert.throws(fn, (err: { status?: number; message: string }) => err.status === status && message.test(err.message));
-  refused(() => f.items.add(f.request("X", { project: "nope" }), "Go.", [], laptop), 404, /no project nope/);
-  refused(() => f.items.add(f.request("X"), "Go.", ["it-000000000000"], laptop), 404, /no item it-000000000000/);
-  refused(() => f.items.add(f.request("X", { claude: "Go" }), "Go.", [], laptop), 400, /message is for a Nexus agent thread/);
-  refused(() => f.items.add(f.request("X"), null, [], laptop), 400, /an item needs a brief/);
-  refused(() => f.items.add(f.request("X", { model: "m" }), "Go.", [], laptop), 400, /model requires claude/);
-  refused(() => f.items.approve(f.add("A"), laptop), 409, /starts its items on their own/);
+  const refused = (fn: () => unknown, kind: string, message: RegExp) => assert.throws(fn, (err: { kind?: string; message: string }) => err.kind === kind && message.test(err.message));
+  refused(() => f.items.add(f.request("X", { project: "nope" }), "Go.", [], laptop), "missing", /no project nope/);
+  refused(() => f.items.add(f.request("X"), "Go.", ["it-000000000000"], laptop), "missing", /no item it-000000000000/);
+  refused(() => f.items.add(f.request("X", { claude: "Go" }), "Go.", [], laptop), "invalid", /message is for a Nexus agent thread/);
+  refused(() => f.items.add(f.request("X"), null, [], laptop), "invalid", /an item needs a brief/);
+  refused(() => f.items.add(f.request("X", { model: "m" }), "Go.", [], laptop), "invalid", /model requires claude/);
+  refused(() => f.items.approve(f.add("A"), laptop), "conflict", /starts its items on their own/);
   assert.equal(f.registry.items().length, 1, "a refused item records nothing");
 
   const gone = f.add("On a node that goes", [], { node });

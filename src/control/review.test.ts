@@ -29,7 +29,7 @@ import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "./agent
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./start-request.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 
 const node = "node" as NodeName;
 const self = "nCONTROL" as TailnetNodeId;
@@ -137,7 +137,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     checks: {
       async start(_, __, head, ifRoom) {
         if (checkStartFails) throw new Error("no node took the check pylon");
-        if (ifRoom && !checkRoom) throw new HttpError(409, "no node has room for this pylon: node is overcommitted");
+        if (ifRoom && !checkRoom) throw new Refusal("conflict", "no node has room for this pylon: node is overcommitted");
         checkIfRoom.push(ifRoom === true);
         const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return id;
       },
@@ -146,7 +146,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     },
     live: {
       async start() {
-        if (refuse !== null) throw new HttpError(409, refuse);
+        if (refuse !== null) throw new Refusal("conflict", refuse);
         const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return id;
       },
       poll: () => live,
@@ -160,7 +160,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     brief: async (target) => { const agent = registry.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
     async startThread(request, caller) {
       const refused = refuseStart(request);
-      if (refused !== null) throw new HttpError(409, refused);
+      if (refused !== null) throw new Refusal("conflict", refused);
       started.push(request);
       const id = add(`th-reviewer-${started.length}`, request.claude !== undefined, caller);
       await onStart();
@@ -1522,14 +1522,14 @@ test("a live check that fails holds the landing like a failed check: the builder
   const toBuilder = f.sent.filter((s) => s.to === f.builder).map((s) => s.message.text).at(-1)!;
   assert.match(toBuilder, /the live check failed after the reviewer approved and the repository's checks passed/);
   assert.match(toBuilder, /LIVE \(P0\) \.nexus\/verify: The live check failed at 1{40}\n {4}verify-nexus: the thread never reported running/);
-  assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409 });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP"), { kind: "conflict" });
   f.reply(f.builder, answers(f.review(), [{ id: "LIVE", action: "rejected", reason: "The stack is flaky." }]));
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `The live check failed at ${head1}, and the builder pushed nothing for it: The stack is flaky.`,
     "The live check's output:\nverify-nexus: the thread never reported running",
   ] });
-  assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409, message: /not approved with its checks passing/ });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP"), { kind: "conflict", message: /not approved with its checks passing/ });
   assert.deepEqual(f.archived, f.liveThreads);
 
   const g = fixture(t, { path: ":memory:" });
@@ -2280,7 +2280,7 @@ test("an approved review whose PR the watch reads as closed or merged outside it
     const loop = await approved(f, null);
     assert.equal(f.review().phase.kind, "approved");
     f.watched(state);
-    assert.throws(() => loop.land(f.builder, "nLAPTOP"), { status: 409, message: new RegExp(`pull request #\\d+ is ${state} on GitHub outside this review, so there is nothing to land`) });
+    assert.throws(() => loop.land(f.builder, "nLAPTOP"), { kind: "conflict", message: new RegExp(`pull request #\\d+ is ${state} on GitHub outside this review, so there is nothing to land`) });
     assert.equal(f.review().phase.kind, "approved", `a ${state} PR starts no landing`);
   }
 });
@@ -2353,7 +2353,7 @@ test("the person cancels a review that is reviewing, fixing or checking, which a
   await loop.poll();
   assert.equal(f.sent.length, 1, "a cancelled review sends nothing more");
   assert.ok(!f.attention().includes("decision"));
-  assert.throws(() => loop.cancel(f.builder, "nPHONE"), (err: HttpError) => err.status === 409 && /already ended cancelled/.test(err.message));
+  assert.throws(() => loop.cancel(f.builder, "nPHONE"), (err: Refusal) => err.kind === "conflict" && /already ended cancelled/.test(err.message));
   assert.equal((await loop.start(f.builder, { land: null })).phase.kind, "reviewing", "a cancelled review makes way for a new one");
 
   const g = fixture(t);
@@ -2385,7 +2385,7 @@ test("a review that authorized its merge, is deploying or rolling back, or has e
   released(f, previous);
   const loop = await approved(f, "nLAPTOP");
   assert.equal(f.review().phase.kind, "deploying");
-  const seenThrough = (err: HttpError) => err.status === 409 && /a merge or deploy that has begun is seen through, so it cannot be cancelled/.test(err.message);
+  const seenThrough = (err: Refusal) => err.kind === "conflict" && /a merge or deploy that has begun is seen through, so it cannot be cancelled/.test(err.message);
   assert.throws(() => loop.cancel(f.builder, "nPHONE"), seenThrough);
   const deploying = f.review();
   for (const phase of [{ kind: "merging", authorized: head1 }, { kind: "rolling-back", commit: merged, previous, why: "failed", requested: true, deadline: 0 }] as const) {
@@ -2399,8 +2399,8 @@ test("a review that authorized its merge, is deploying or rolling back, or has e
   const g = fixture(t);
   const stopped = await approved(g, null);
   assert.equal(g.review().phase.kind, "approved");
-  assert.throws(() => stopped.cancel(g.builder, "nPHONE"), (err: HttpError) => err.status === 409 && /already ended approved, so there is nothing to cancel/.test(err.message));
-  assert.throws(() => stopped.cancel(g.add("th-other", true), "nPHONE"), (err: HttpError) => err.status === 409 && /has no review/.test(err.message));
+  assert.throws(() => stopped.cancel(g.builder, "nPHONE"), (err: Refusal) => err.kind === "conflict" && /already ended approved, so there is nothing to cancel/.test(err.message));
+  assert.throws(() => stopped.cancel(g.add("th-other", true), "nPHONE"), (err: Refusal) => err.kind === "conflict" && /has no review/.test(err.message));
 });
 
 test("the person cancels a review that ended for them, which ends its decision, archives its reviewer and leaves the builder", async (t) => {
@@ -2793,8 +2793,8 @@ test("a waiver lets the landing past only the holds it names, and only at the co
   const f = fixture(t);
   f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }, { path: "images/pylon/Dockerfile", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head2, reservedHolds), { status: 409, message: new RegExp(`is at ${head1}, not ${head2}`) });
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, ["The pull request's GitHub checks are pending."]), { status: 409, message: /not held by/ });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head2, reservedHolds), { kind: "conflict", message: new RegExp(`is at ${head1}, not ${head2}`) });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, ["The pull request's GitHub checks are pending."]), { kind: "conflict", message: /not held by/ });
 
   const image = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
   loop.land(f.builder, "nLAPTOP", head1, reservedHolds);
@@ -2808,7 +2808,7 @@ test("a waiver lets the landing past only the holds it names, and only at the co
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed.", ...reservedHolds, image] }, "a waiver never waives failing checks");
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, ["The pull request's GitHub checks are failed."]), { status: 409, message: /cannot be waived/ });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, ["The pull request's GitHub checks are failed."]), { kind: "conflict", message: /cannot be waived/ });
 
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
   loop.land(f.builder, "nLAPTOP", head1);
@@ -2826,7 +2826,7 @@ test("a Claude reviewer's approval is not waivable, and a change to .nexus/check
   const loop = await approved(f, "nLAPTOP");
   const [claude] = (f.review().phase as { reasons: string[] }).reasons;
   assert.match(claude!, /A Claude reviewer approved it/);
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [claude!]), { status: 409, message: /cannot be waived/ });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [claude!]), { kind: "conflict", message: /cannot be waived/ });
 
   const g = fixture(t, { path: ":memory:" });
   g.files = [{ path: ".nexus/check", previous: null, patch: "" }];
@@ -3143,7 +3143,7 @@ test("a held review with no round left, or one held with the reviewer's changes 
   assert.deepEqual(f.labelCalls, [humanLabel], "the label is added once");
   assert.equal(f.review().rounds.length, 1);
   assert.equal(f.sent.filter((s) => s.to === f.review().reviewer).length, 1, "the reviewer gets no round");
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409 }, "the old head is no longer offered for landing");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { kind: "conflict" }, "the old head is no longer offered for landing");
 
   const g = fixture(t);
   const gave = g.loop();
@@ -3631,7 +3631,7 @@ test("a Land press the policy can never take is refused, so the route and the da
   const f = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] });
   const loop = await approved(f, "nLAPTOP");
   assert.equal(f.review().phase.kind, "needs-person");
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409, message: /A Claude reviewer approved it/ }, "a press that would only hold again is refused with what holds it");
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { kind: "conflict", message: /A Claude reviewer approved it/ }, "a press that would only hold again is refused with what holds it");
   assert.equal(f.review().phase.kind, "needs-person", "and the review stays as it was");
 });
 
@@ -3706,7 +3706,7 @@ test("for every hold, and for an approval, the land route takes a press exactly 
     const offered = card.includes('data-action="land"');
     const waive = /data-holds="([^"]*)"/.exec(card)?.[1];
     let took = true;
-    try { loop.land(f.builder, "nLAPTOP", head1, waive === undefined ? undefined : JSON.parse(unescape(waive))); } catch (err) { if ((err as HttpError).status !== 409) throw err; took = false; }
+    try { loop.land(f.builder, "nLAPTOP", head1, waive === undefined ? undefined : JSON.parse(unescape(waive))); } catch (err) { if ((err as Refusal).kind !== "conflict") throw err; took = false; }
     assert.equal(took, offered, `${name}: the route ${took ? "takes" : "refuses"} a press the dashboard ${offered ? "offers" : "does not offer"}`);
     if (took) await loop.poll();
     else assert.deepEqual(f.review(), review, `${name}: a refused press leaves the review as it was`);
@@ -4026,7 +4026,7 @@ test("an approval by a reviewer on the builder's own model offers no Land press,
   const review = { ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } };
   f.registry.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, heldAt: { base: "main", holds: headHolds({ review, files: [], nexus: true }) } }] });
   assert.equal(landPress(f.review()).kind, "stuck");
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { status: 409, message: /builder's own model/ });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { kind: "conflict", message: /builder's own model/ });
   assert.deepEqual(f.review().phase, { kind: "approved" });
 });
 
@@ -4326,7 +4326,7 @@ test("an answer to a question about holds at a head the review left waives nothi
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
   await loop.poll();
   assert.equal(f.review().rounds.at(-1)!.head, head2);
-  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { status: 409, message: /moved on/ });
+  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { kind: "conflict", message: /moved on/ });
   assert.equal(f.review().waiver, null);
   assert.deepEqual(openHolds(f).map((q) => q.holds!.head), [head2], "the new head asks for itself");
 });
@@ -4384,9 +4384,9 @@ test("an answer to a question asked against another base waives nothing, as a re
   assert.equal(question!.holds!.base, "main");
   const round = f.review().rounds.at(-1)!;
   f.registry.saveReview({ ...f.review(), rounds: [...f.review().rounds, { head: round.head, base: "release", verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, waiver: null });
-  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { status: 409, message: /moved on/ });
+  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { kind: "conflict", message: /moved on/ });
   assert.equal(f.review().waiver, null);
-  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [imageHold]), { status: 409 });
+  assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [imageHold]), { kind: "conflict" });
 });
 
 test("a cancel while the loop reads the head's change leaves no question open", async (t) => {

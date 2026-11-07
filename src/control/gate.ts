@@ -96,7 +96,7 @@ export type CheckState =
 export interface CheckRuns {
   /**
    * Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node, or a verify pylon on a
-   * node that nests KVM. With `ifRoom` it is refused, as an HttpError, when no node has room for it.
+   * node that nests KVM. With `ifRoom` it is refused, as a Refusal, when no node has room for it.
    */
   start(builder: Thread, branch: string, head: string, ifRoom?: true): Promise<ThreadId>;
   /** The run's state. A run whose pylon just came up opens its pipe, unless `opens` is false. */

@@ -16,7 +16,7 @@ import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter,
 import type { Sender } from "./agent-protocol.ts";
 import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import { json, jsonOrNull, type Db, type Row } from "./db.ts";
 import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
@@ -455,7 +455,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const cursor = eventCursor(since);
     const oldest = sql("SELECT min(id) AS id FROM events").get()?.id as number | null;
     const newest = sql("SELECT max(id) AS id FROM events").get()?.id as number | null;
-    if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new HttpError(409, "event cursor expired; retained events cannot fill the gap");
+    if (cursor !== 0 && oldest !== null && cursor < oldest - 1) throw new Refusal("conflict", "event cursor expired; retained events cannot fill the gap");
     const clauses = ["id > ?"];
     const params: (string | number)[] = [cursor];
     for (const column of ["thread", "project"] as const) {
@@ -922,7 +922,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         const taken = new Set([...routed, ...(sql("SELECT https_port FROM previews WHERE node = ?").all(on) as Row[]).map((r) => r.https_port as number)]);
         let port = range.first;
         while (port <= range.last && taken.has(port)) port++;
-        if (port > range.last) throw new HttpError(503, `no https port is free for the preview of ${service}: pylons on ${on} hold or ${on} serves every port from ${range.first} to ${range.last}`);
+        if (port > range.last) throw new Refusal("unavailable", `no https port is free for the preview of ${service}: pylons on ${on} hold or ${on} serves every port from ${range.first} to ${range.last}`);
         sql("INSERT INTO previews (pylon, node, service, https_port, ready) SELECT id, node, ?, ?, 0 FROM pylons WHERE id = ?").run(service, port, pylonId);
         held.add(service);
       }

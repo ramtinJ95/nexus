@@ -211,7 +211,7 @@ test("a node that already holds the image under another sha256 fails the rollout
 test("rollback makes the previous image current again, and a second rollback goes forward", async (t) => {
   const s = withTwoImages(t, [firebat, testbench]);
   const worker = s.start();
-  assert.throws(() => worker.rollback(laptop), { status: 409, message: /no image was current before this one/ });
+  assert.throws(() => worker.rollback(laptop), { kind: "conflict", message: /no image was current before this one/ });
   s.nodes.hold(firebat, next, testbench);
   s.registry.setCurrentImage(next);
 
@@ -276,15 +276,15 @@ test("one operation runs at a time, and one that no node could carry out is refu
   const s = withTwoImages(t, [firebat, testbench]);
   const worker = s.start();
   s.registry.markOffline(testbench);
-  assert.throws(() => worker.rollout(next, laptop), { status: 409, message: `no online node holds ${next}, so no node could fetch it` });
-  await assert.rejects(worker.build(laptop), { status: 409, message: "the image build node infra-testbench is offline" });
-  assert.throws(() => worker.rollout("img-ffffffffffff", laptop), { status: 404, message: "no image img-ffffffffffff is recorded" });
+  assert.throws(() => worker.rollout(next, laptop), { kind: "conflict", message: `no online node holds ${next}, so no node could fetch it` });
+  await assert.rejects(worker.build(laptop), { kind: "conflict", message: "the image build node infra-testbench is offline" });
+  assert.throws(() => worker.rollout("img-ffffffffffff", laptop), { kind: "missing", message: "no image img-ffffffffffff is recorded" });
 
   s.nodes.observe(testbench);
   worker.rollout(next, laptop);
   assert.equal(worker.rollout(next, "nPHONE" as TailnetNodeId).requestedBy, laptop, "asking again returns the running rollout");
-  assert.throws(() => worker.rollout(old, laptop), { status: 409, message: `a rollout of ${next} is running. Wait for it to finish` });
-  await assert.rejects(worker.build(laptop), { status: 409, message: `a rollout of ${next} is running. Wait for it to finish` });
+  assert.throws(() => worker.rollout(old, laptop), { kind: "conflict", message: `a rollout of ${next} is running. Wait for it to finish` });
+  await assert.rejects(worker.build(laptop), { kind: "conflict", message: `a rollout of ${next} is running. Wait for it to finish` });
 });
 
 /**

@@ -6,7 +6,7 @@ import type { HealthSample } from "./node-metrics.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { Room, StoredPylon, Thread } from "./thread-store.ts";
 import { testCapacity, testObservation } from "../test-support/kit.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import { freeHeldRoom, placeAuto, placeNear, weighNodes } from "./placement.ts";
 import { observeNode, withImage } from "../test-support/api-kit.ts";
 
@@ -74,7 +74,7 @@ test("auto passes over a node whose host has too little memory free, however lit
 
 test("a start no node has free memory for fails with each node's reason", () => {
   const registry = fakeRegistry([{ name: "a", total: 32, committed: 0, free: 4.5 }, { name: "b", total: 32, committed: 0, free: 3 }]);
-  assert.throws(() => placeAuto(registry, need()), (err: unknown) => err instanceof HttpError && err.status === 409
+  assert.throws(() => placeAuto(registry, need()), (err: unknown) => err instanceof Refusal && err.kind === "conflict"
     && err.message === "no node can run this pylon: a has 4.5 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; b has 3 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare");
   assert.equal(placeAuto(registry, need(3.5)).node, "a", "1 GiB to spare is enough");
 });

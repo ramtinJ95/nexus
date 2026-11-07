@@ -7,6 +7,7 @@ import { isPipelineRequestId, requestIds, type ProjectId, type ThreadId } from "
 import type { StartKey } from "../start-request.ts";
 import type { Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
+import { Refusal } from "../refusal.ts";
 import { observedPylon } from "../observed.ts";
 import { queuedView, type QueuedThread, type ThreadQueue } from "../queue.ts";
 import { retryRefusal } from "../reconcile.ts";
@@ -142,7 +143,7 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
         const requestId = requestIds.brief(t.id);
         await sendWithStandingRules(registry, t.id, requestId, message, (brief) => harness.send(t.id, options.planning?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => options.planning?.sent(t, requestId), (err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
-          throw err instanceof HttpError ? new HttpError(err.status, why) : new Error(why);
+          throw err instanceof Refusal ? new Refusal(err.kind, why) : new Error(why);
         });
         const revision = registry.thread(t.id)?.standingRulesRevision;
         return revision === undefined ? t : { ...t, standingRulesRevision: revision };

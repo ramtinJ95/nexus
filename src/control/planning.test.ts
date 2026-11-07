@@ -136,7 +136,7 @@ test("an item waits on a pipeline item named by its ID even when a later proposa
   await f.plans.poll();
   const [qa] = f.registry.questions(thread.id);
   assert.match(qa!.text, /It waits on pipeline item it-0123456789ab\./);
-  assert.throws(() => f.registry.answerQuestion(qa!.id, { option: "accept", by: laptop, at: 1 }, f.plans.answered), (err: { status?: number; message: string }) => err.status === 404 && /no item it-0123456789ab/.test(err.message));
+  assert.throws(() => f.registry.answerQuestion(qa!.id, { option: "accept", by: laptop, at: 1 }, f.plans.answered), (err: { kind?: string; message: string }) => err.kind === "missing" && /no item it-0123456789ab/.test(err.message));
 });
 
 test("cards asked in one millisecond list block by block in the order the blocks were written, and each block's by index", async (t) => {
@@ -163,7 +163,7 @@ test("an accepted proposal adds the item named from its question once, and one a
   const [qa, qb] = f.registry.questions(thread.id);
   const answer = (id: string, option: string) => f.registry.answerQuestion(id, { option, by: laptop, at: 1 }, f.plans.answered);
   answer(qa!.id, "reject");
-  assert.throws(() => answer(qb!.id, "accept"), (err: { status?: number; message: string }) => err.status === 409 && /which was rejected, so it cannot be added/.test(err.message));
+  assert.throws(() => answer(qb!.id, "accept"), (err: { kind?: string; message: string }) => err.kind === "conflict" && /which was rejected, so it cannot be added/.test(err.message));
   assert.equal(f.registry.question(qb!.id)!.answer, null, "the refused answer is not recorded");
   answer(qb!.id, "reject");
   assert.deepEqual(f.registry.items(), []);
