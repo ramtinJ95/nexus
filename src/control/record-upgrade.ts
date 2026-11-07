@@ -7,7 +7,7 @@
 import { reviewPrefix } from "./agent-protocol.ts";
 import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
 import { personOnly, reservedCases, reservedNames, type HoldCode } from "./holds.ts";
-import { findingSchema, maxRounds, secondReads, type Change, type Review } from "./review-model.ts";
+import { blocks, findingSchema, maxRounds, secondReads, type Change, type Review, type Verdict } from "./review-model.ts";
 
 /** What a waiver saved before Nexus recorded the change it waives reads as, so it holds at its own head alone. */
 const unrecordedChange: Change = { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" };
@@ -15,7 +15,8 @@ const unrecordedChange: Change = { kind: "unknown", why: "the waiver was saved b
 /**
  * A stored record as this code reads it: a review saved with more rounds stops at the cap, old findings get
  * priorities, one saved before waivers has none, holds and a waiver saved before hold codes get them from their texts,
- * a waiver saved before changes gets one that is unknown, and a hold saved before causes gets one from its label.
+ * a waiver saved before changes gets one that is unknown, a hold saved before causes gets one from its label, and a
+ * verdict saved before its findings decided its word says "changes" unless it approved with no blocking finding.
  */
 export function upgradeReview(record: Review): Review {
   const { phase, waiver } = record;
@@ -27,11 +28,14 @@ export function upgradeReview(record: Review): Review {
       holds: phase.holds ?? phase.reasons.map((text) => ({ code: codeOfText(text), text })),
     } : phase,
     asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
-    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } })
+    rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: decided({ ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) }) })
+      .map((round) => round.secondVerdict == null ? round : { ...round, secondVerdict: decided(round.secondVerdict) })
       // A round of a review with a second reviewer that lacks its verdict has none, which never approves.
       .map((round, i) => secondReads(record) && i === record.rounds.length - 1 && round.secondVerdict === undefined ? { ...round, secondVerdict: null } : round),
   };
 }
+
+const decided = (v: Verdict): Verdict => ({ ...v, verdict: v.verdict === "approve" && !v.findings.some(blocks) ? "approve" : "changes" });
 
 /**
  * The code a hold's text had under the text rules, for records saved before holds carried codes: a needs-person

@@ -86,6 +86,25 @@ const fixtures: [string, unknown][] = [
   ["no second reviewer could run", testReview({ second: { kind: "none", rule: "the project gives every pull request one", why: "no model" } })],
 ];
 
+/** Stored rounds whose verdict's word its findings contradict, as the reviewer's own word was before findings decided it. */
+const p1 = [{ id: "F1", priority: "P1", summary: "The cache never expires" }];
+const p3 = [{ id: "N1", priority: "P3", summary: "Name the constant" }];
+const word = (verdict: string, findings: unknown[]) => ({ token: "x", verdict, findings, reserved: [], notCheckedLive: null }) as never;
+const worded: [string, Review, ("approve" | "changes" | null)[][]][] = [
+  ["an approval with a P1 open", testReview({ rounds: [{ head, verdict: word("approve", p1), check: null, answers: null }] }), [["changes", null]]],
+  ["changes with only a P3", testReview({ rounds: [{ head, verdict: word("changes", p3), check: null, answers: null }] }), [["changes", null]]],
+  ["a second reviewer's approval with a P1 open", testReview({ second, rounds: [{ head, verdict: word("approve", p3), secondVerdict: word("approve", p1), check: null, answers: null }] }), [["approve", "changes"]]],
+  ["words that agree with their findings", testReview({ second, rounds: [{ head, verdict: word("approve", []), check: null, answers: null }, { head, verdict: word("changes", p1), secondVerdict: word("approve", p3), check: null, answers: null }] }), [["approve", null], ["changes", "approve"]]],
+];
+
+test("the upgrade gives each stored verdict the word for the approval an older control plane read from it", () => {
+  for (const [name, record, words] of worded) {
+    const upgraded = upgradeReview(structuredClone(record));
+    assert.deepEqual(upgraded.rounds.map((r) => [r.verdict?.verdict ?? null, r.secondVerdict?.verdict ?? null]), words, name);
+    assert.deepEqual(upgraded.rounds.map((r) => ({ ...r, verdict: null, secondVerdict: null })), storedReview(structuredClone(record)).rounds.map((r) => ({ ...r, verdict: null, secondVerdict: null })), `${name}: nothing else changes`);
+  }
+});
+
 const unrecordedChange = { kind: "unknown", why: "the waiver was saved before Nexus recorded the change it waives" };
 
 test("the upgrade gives every stored-review fixture what storedReview read, and a waiver saved before changes an unknown one", () => {
@@ -98,7 +117,7 @@ test("the upgrade gives every stored-review fixture what storedReview read, and 
 });
 
 test("an upgraded record reads the same through storedReview, so an older control plane reads it, and upgrades no further", () => {
-  for (const [name, record] of fixtures) {
+  for (const [name, record] of [...fixtures, ...worded]) {
     const upgraded = upgradeReview(structuredClone(record) as Review);
     assert.deepEqual(storedReview(structuredClone(upgraded)), upgraded, name);
     assert.deepEqual(upgradeReview(structuredClone(upgraded)), upgraded, name);
