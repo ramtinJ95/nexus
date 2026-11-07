@@ -13,7 +13,7 @@ import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { checkStart, resourcesOf } from "./threads.ts";
@@ -54,7 +54,7 @@ export interface QueuedThread {
 }
 
 export interface ThreadQueue {
-  /** Validates and records, with `key` if given; throws HttpError. Does not start it; the caller calls poll() after. */
+  /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */
   add(request: StartRequest, message: string | null, after: readonly string[], caller: string, key?: StartKey): QueuedRecord;
   /**
    * Records startNow, then starts it now and returns the thread, or throws the start's error. The thread then stays
@@ -130,8 +130,8 @@ export function threadQueue(options: {
 
   function queued(id: ThreadId): QueuedRecord {
     const record = registry.queuedThread(id);
-    if (record === undefined) throw new HttpError(404, `no queued thread ${id}`);
-    if (record.status === "started") throw new HttpError(409, `thread ${id} has started, so it is no longer queued`);
+    if (record === undefined) throw new Refusal("missing", `no queued thread ${id}`);
+    if (record.status === "started") throw new Refusal("conflict", `thread ${id} has started, so it is no longer queued`);
     return record;
   }
 
@@ -148,17 +148,17 @@ export function threadQueue(options: {
 
   async function attempt(id: ThreadId): Promise<Thread> {
     const record = registry.queuedThread(id);
-    if (record?.status !== "queued") throw new HttpError(409, `thread ${id} is no longer queued`);
+    if (record?.status !== "queued") throw new Refusal("conflict", `thread ${id} is no longer queued`);
     let t: Thread;
     try {
       t = await gate.run(() => startThread(record.request, record.startedBy, id));
     } catch (err) {
       const message = (err as Error).message;
       const now = registry.queuedThread(id);
-      if (now?.status !== "queued") throw err instanceof HttpError ? err : new HttpError(409, message);
+      if (now?.status !== "queued") throw err instanceof Refusal ? err : new Refusal("conflict", message);
       if (now.lastError !== message) log(`queued thread ${id} did not start: ${message}`);
       const { refused: _, ...rest } = now;
-      registry.saveQueued({ ...rest, lastError: message, ...err instanceof HttpError && (err.code === "no-branch" || err.code === "too-long") ? { refused: { at: Date.now() } } : {} });
+      registry.saveQueued({ ...rest, lastError: message, ...err instanceof Refusal && (err.code === "no-branch" || err.code === "too-long") ? { refused: { at: Date.now() } } : {} });
       throw err;
     }
     await deliver(id).catch((err: unknown) => log(`queued thread ${id} started, but its first message was not sent yet: ${(err as Error).message}`));
@@ -191,13 +191,13 @@ export function threadQueue(options: {
   const passes = singleFlight(pass);
   return {
     add(request, message, after, caller, key) {
-      if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
+      if (message !== null && request.claude !== undefined) throw new Refusal("invalid", "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
       const project = checkStart(registry, request, caller);
       const ids = [...new Set(after)] as ThreadId[];
       for (const id of ids) {
         const t = registry.thread(id);
-        if (t === undefined && registry.queuedThread(id) === undefined) throw new HttpError(404, `no thread ${id}`);
-        if (t !== undefined && startedByNexus(registry, t)) throw new HttpError(400, `thread ${id} is a review loop's reviewer, check or verify thread, which merges no pull request of its own`);
+        if (t === undefined && registry.queuedThread(id) === undefined) throw new Refusal("missing", `no thread ${id}`);
+        if (t !== undefined && startedByNexus(registry, t)) throw new Refusal("invalid", `thread ${id} is a review loop's reviewer, check or verify thread, which merges no pull request of its own`);
       }
       const record: QueuedRecord = {
         id: newThreadId(), title: request.title, project: project.id, startedBy: caller, createdAt: Date.now(), after: ids,
@@ -209,14 +209,14 @@ export function threadQueue(options: {
     },
     async startNow(id, caller) {
       const record = queued(id);
-      if (record.status !== "queued") throw new HttpError(409, `thread ${id} is ${statusName(record.status)}, not queued`);
+      if (record.status !== "queued") throw new Refusal("conflict", `thread ${id} is ${statusName(record.status)}, not queued`);
       if (record.startNow === null) registry.saveQueued({ ...record, startNow: { by: caller, at: Date.now() } });
       return start(id);
     },
     setStatus(id, status) {
       const record = queued(id);
       const allowed = status === "archived" ? record.status === "queued" : status === "queued" ? record.status === "archived" : record.status !== "deleted";
-      if (!allowed) throw new HttpError(409, status === "queued" ? `thread ${id} is ${statusName(record.status)}, not cancelled` : `thread ${id} is ${statusName(record.status)}`);
+      if (!allowed) throw new Refusal("conflict", status === "queued" ? `thread ${id} is ${statusName(record.status)}, not cancelled` : `thread ${id} is ${statusName(record.status)}`);
       const next = { ...record, status };
       registry.saveQueued(next);
       return next;

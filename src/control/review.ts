@@ -26,7 +26,7 @@ import { defaultClaudeModel } from "../claude-state.ts";
 import { claudeNames } from "../deploy/credentials.ts";
 import { anthropicApiHost } from "./project.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
 import { isDraining } from "./drain.ts";
 import { caseOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
@@ -250,11 +250,11 @@ ${why === null ? "" : `${why.text}\n`}Land waives these at ${at}, and at a rebas
 // A Claude worker logs in from a granted token. Interactive /login needs a person, so it cannot serve a reviewer.
 const grantsClaude = (secrets: readonly SecretGrant[]) => secrets.some((s) => claudeNames.some((name) => name === s.name) && s.hosts.includes(anthropicApiHost));
 
-/** The reviewer's kind and model: another model family than the builder's where one can run. */
-export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } {
+/** The reviewer's kind and model: another model family than the builder's where one can run, or why none can. */
+export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } | { why: string } {
   if (builder.claude) return { claude: false, model: harnessModel };
   if (grantsClaude(secrets)) return { claude: true, model: defaultClaudeModel };
-  throw new HttpError(409, `no reviewer on another model can run for this thread: its agent runs ${builder.model} in the harness, and its project grants no Claude token. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`), or start the builder as a Claude worker`);
+  return { why: `no reviewer on another model can run for this thread: its agent runs ${builder.model} in the harness, and its project grants no Claude token. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`), or start the builder as a Claude worker` };
 }
 
 /** The Claude models a second reviewer may run, the strongest first. */
@@ -454,13 +454,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (check.thread === null) {
       const gone = await endedOnGitHub(r);
       if (gone !== null) return gone;
-      try {
-        return { ...r, phase: { ...phase, check: { ...check, thread: await checks.start(builder, r.pr.branch, round.head, true) } } };
-      } catch (err) {
-        // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
-        if (!(err instanceof HttpError)) throw err;
-        return { ...r, phase: { ...phase, check: { ...check, refused: err.message } } };
-      }
+      // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
+      return { ...r, phase: { ...phase, check: { ...check, ...await checks.start(builder, r.pr.branch, round.head, true) } } };
     }
     const state = checks.poll(check.thread, round.head);
     if (state.kind === "unrunnable") {
@@ -567,7 +562,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     try {
       landHolds({ ...question, holds: question.holds! }, setting.enabledBy as TailnetNodeId, project);
     } catch (err) {
-      if (!(err instanceof HttpError)) throw err;
+      if (!(err instanceof Refusal)) throw err;
       log(`review ${r.id} of ${r.builder}: project ${project}'s yolo setting did not land it (${err.message})`);
     }
   }
@@ -575,19 +570,19 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** What a Land press on `r` does, refused when no press lands it. */
   const pressOn = (r: Review) => {
     const press = landPress(r);
-    if (press.kind === "stuck") throw new HttpError(409, `review ${r.id} of ${r.builder} is held by what meets every landing of ${r.rounds.at(-1)!.head} again, so no Land press lands it: ${press.holds.map((h) => h.text).join(" ")}`);
+    if (press.kind === "stuck") throw new Refusal("conflict", `review ${r.id} of ${r.builder} is held by what meets every landing of ${r.rounds.at(-1)!.head} again, so no Land press lands it: ${press.holds.map((h) => h.text).join(" ")}`);
     return press;
   };
   /** The waiver of the holds the person named by `texts` at the review's latest head. */
   const waiverOf = (r: Review, by: string, texts: readonly string[], codes: Waiver["codes"]): Waiver => ({ head: r.rounds.at(-1)!.head, holds: [...texts], codes, by, at: now(), change: null });
   /** A Land press on `r`, which `landableAt` took, past the holds the person `waive`s, each one the review has now and the policy lets them waive. */
   const pressed = (r: Review, requestedBy: string, waive: readonly string[] | undefined): Review => {
-    if (waive?.length === 0) throw new HttpError(400, "a waiver names at least one hold");
+    if (waive?.length === 0) throw new Refusal("invalid", "a waiver names at least one hold");
     // The person names each hold by the text they saw, which must be one of the review's holds now.
     const waived = (text: string) => {
       const hold = heldBy(r).find((h) => h.text === text);
-      if (hold === undefined) throw new HttpError(409, `review ${r.id} is not held by "${text}", so there is nothing to waive. Look at it again`);
-      if (!waivable(hold.code)) throw new HttpError(409, `"${text}" cannot be waived: only the holds the merge policy reserves for the person`);
+      if (hold === undefined) throw new Refusal("conflict", `review ${r.id} is not held by "${text}", so there is nothing to waive. Look at it again`);
+      if (!waivable(hold.code)) throw new Refusal("conflict", `"${text}" cannot be waived: only the holds the merge policy reserves for the person`);
       return hold.code;
     };
     return pressWith(r, requestedBy, waive === undefined ? null : waiverOf(r, requestedBy, waive, waive.map(waived)));
@@ -750,7 +745,14 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // The check clones the head commit alone, so a result there, such as one from beside the reviewer, is kept, as the live check is.
       if (phase.thread === null && round.check !== null) return round.check.passed ? await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify")) : gateFailed(r, r);
       if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
-      if (phase.thread === null) return await endedOnGitHub(r) ?? { ...r, phase: { ...phase, thread: await checks.start(builder, r.pr.branch, round.head) } };
+      if (phase.thread === null) {
+        const gone = await endedOnGitHub(r);
+        if (gone !== null) return gone;
+        const started = await checks.start(builder, r.pr.branch, round.head);
+        // Only the check beside the reviewer waits for room, so a start refused here fails the step, which the next pass tries again.
+        if ("refused" in started) throw new Error(started.refused);
+        return { ...r, phase: { ...phase, thread: started.thread } };
+      }
       const state = checks.poll(phase.thread, round.head);
       if (state.kind === "void") {
         checks.discard(phase.thread);
@@ -773,13 +775,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (phase.thread === null) {
         const gone = await endedOnGitHub(r);
         if (gone !== null) return gone;
-        try {
-          return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: await live.start(builder, r.pr.branch, round.head) } };
-        } catch (err) {
-          // No node nests KVM with room to spare right now, which may change before the deadline.
-          if (!(err instanceof HttpError)) throw err;
-          return phase.refused === err.message ? r : { ...r, phase: { ...phase, refused: err.message } };
-        }
+        const started = await live.start(builder, r.pr.branch, round.head);
+        if ("thread" in started) return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: started.thread } };
+        // No node nests KVM with room to spare right now, which may change before the deadline.
+        return phase.refused === started.refused ? r : { ...r, phase: { ...phase, refused: started.refused } };
       }
       const state = live.poll(phase.thread, round.head);
       if (state.kind === "void") {
@@ -1111,17 +1110,18 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** Refuses a review of the builder's while one that has not ended runs. */
   function refuseIfRunning(builder: ThreadId): void {
     const existing = registry.review(builder);
-    if (existing !== null && !ended.has(existing.phase.kind)) throw new HttpError(409, `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
+    if (existing !== null && !ended.has(existing.phase.kind)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
   }
 
   /** Starts a review of `pr`, a PR of the builder's: the reviewer thread, its first request, and the record. */
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
     const snapshot = await github.poll(repo, number);
-    if (snapshot.pr.state !== "open") throw new HttpError(409, `pull request #${number} is ${snapshot.pr.state}`);
+    if (snapshot.pr.state !== "open") throw new Refusal("conflict", `pull request #${number} is ${snapshot.pr.state}`);
     const agent = registry.agent(builder);
     const builderModel = agent.kind === "claude" ? agent.worker.model ?? defaultClaudeModel : deps.harnessModel;
     const project = registry.project(builder.project)!;
     const kind = reviewerFor({ claude: agent.kind === "claude", model: builderModel }, project.secrets, deps.harnessModel);
+    if ("why" in kind) throw new Refusal("conflict", kind.why);
     const models = { builder: builderModel, reviewer: kind.model };
     // A later round whose head the rule names gets a second reviewer then, which stays for every round after it.
     const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(repo, number), deploys({ pr: { repo } }));
@@ -1181,7 +1181,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       }, reviewerCaller);
       return { ...r, second: { kind: "claude", rule: second.rule, thread: thread.id, model: second.model, expect, asked, since: now(), nudges: 0, outbox: null } };
     } catch (err) {
-      if (!(err instanceof HttpError)) throw err;
+      if (!(err instanceof Refusal)) throw err;
       if (now() - second.since < secondStartMs) return { ...r, second: { ...second, tried: now(), why: err.message } };
       const { secondVerdict: _, ...alone } = round;
       return { ...r, second: { kind: "none", rule: second.rule, why: `its thread did not start within ${secondStartMs / 60_000} minutes: ${err.message}` }, rounds: [...r.rounds.slice(0, -1), alone] };
@@ -1202,13 +1202,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     /** Starts a review of the builder's open PR: the reviewer thread, its first request, and the record. */
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {
       const builder = registry.thread(builderId);
-      if (builder === undefined) throw new HttpError(404, `no thread ${builderId}`);
-      if (builder.status !== "active") throw new HttpError(409, `thread ${builder.id} is ${builder.status}`);
-      if (registry.isReviewer(builder.id)) throw new HttpError(409, `thread ${builder.id} is a reviewer`);
+      if (builder === undefined) throw new Refusal("missing", `no thread ${builderId}`);
+      if (builder.status !== "active") throw new Refusal("conflict", `thread ${builder.id} is ${builder.status}`);
+      if (registry.isReviewer(builder.id)) throw new Refusal("conflict", `thread ${builder.id} is a reviewer`);
       refuseIfRunning(builder.id);
       const open = (registry.prWatch(builder.id)?.links ?? []).filter((l) => l.pr.state === "open" && (request.pr === undefined || l.pr.number === request.pr));
-      if (open.length === 0) throw new HttpError(409, `thread ${builder.id} has no open pull request${request.pr === undefined ? "" : ` #${request.pr}`} that the PR watch linked`);
-      if (open.length > 1) throw new HttpError(409, `thread ${builder.id} has ${open.length} open pull requests, so name one: ${open.map((l) => `#${l.pr.number}`).join(", ")}`);
+      if (open.length === 0) throw new Refusal("conflict", `thread ${builder.id} has no open pull request${request.pr === undefined ? "" : ` #${request.pr}`} that the PR watch linked`);
+      if (open.length > 1) throw new Refusal("conflict", `thread ${builder.id} has ${open.length} open pull requests, so name one: ${open.map((l) => `#${l.pr.number}`).join(", ")}`);
       return await begin(builder, open[0]!.pr, { rounds: request.rounds, land: request.land === null ? null : { requestedBy: request.land }, auto: false });
     },
 
@@ -1226,7 +1226,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         refuseIfRunning(t.id);
         await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
       } catch (err) {
-        if (!(err instanceof HttpError)) throw err;
+        if (!(err instanceof Refusal)) throw err;
         log(`${t.id}: no review started on its own for pull request #${pr.number}: ${err.message}`);
       }
     },
@@ -1266,9 +1266,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
      */
     cancel(builderId: ThreadId, by: string): Review {
       const r = registry.review(builderId);
-      if (r === null) throw new HttpError(409, `thread ${builderId} has no review`);
-      if (ended.has(r.phase.kind) && !needsPerson(r)) throw new HttpError(409, `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
-      if (!cancellable(r)) throw new HttpError(409, `review ${r.id} of ${builderId} is ${r.phase.kind}, and a merge or deploy that has begun is seen through, so it cannot be cancelled. It ends landed or with the person`);
+      if (r === null) throw new Refusal("conflict", `thread ${builderId} has no review`);
+      if (ended.has(r.phase.kind) && !needsPerson(r)) throw new Refusal("conflict", `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
+      if (!cancellable(r)) throw new Refusal("conflict", `review ${r.id} of ${builderId} is ${r.phase.kind}, and a merge or deploy that has begun is seen through, so it cannot be cancelled. It ends landed or with the person`);
       const next = end(r, { kind: "cancelled", who: "person", by });
       const archive = finished(...reviewersOf(r));
       registry.saveReview(next, archive.map((t) => t.id));
@@ -1286,7 +1286,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   function landHolds(question: ThreadQuestion & { holds: HeldQuestion }, by: TailnetNodeId, yolo?: ProjectId): Question {
     const { holds } = question;
     const r = registry.review(question.thread);
-    const moved = new HttpError(409, `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
+    const moved = new Refusal("conflict", `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
     if (r === null || !asksAt(r, holds)) throw moved;
     // The loop asked about these holds at this head and base, which may come from the change before the round
     // recorded them, so the waiver is the question's, and the landing reads the head's holds again before it merges.
@@ -1296,8 +1296,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (landable(r)) next = { ...pressWith(landableAt(question.thread, holds.head), by, waiver), ...yolo !== undefined && r.land?.fromProject && { land: r.land } };
     else {
       const builder = registry.thread(r.builder)!;
-      if (builder.status !== "active") throw new HttpError(409, `thread ${r.builder} is ${builder.status}`);
-      if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new HttpError(409, cannotLand(r, builder, watchedPr(r))!);
+      if (builder.status !== "active") throw new Refusal("conflict", `thread ${r.builder} is ${builder.status}`);
+      if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new Refusal("conflict", cannotLand(r, builder, watchedPr(r))!);
       pressOn(r);
       next = { ...r, land: r.land ?? { requestedBy: by, head: holds.head, base: holds.base }, waiver };
     }
@@ -1310,10 +1310,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
   function landableAt(builderId: ThreadId, head: string | undefined): Review {
     const r = registry.review(builderId);
-    if (r === null) throw new HttpError(409, `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
+    if (r === null) throw new Refusal("conflict", `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
     const refusal = cannotLand(r, registry.thread(builderId)!, watchedPr(r));
-    if (refusal !== null) throw new HttpError(409, refusal);
-    if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new HttpError(409, `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
+    if (refusal !== null) throw new Refusal("conflict", refusal);
+    if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new Refusal("conflict", `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
     return r;
   }
 }

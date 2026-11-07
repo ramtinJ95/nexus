@@ -11,7 +11,7 @@
 import { defaultClaudeModel } from "../claude-state.ts";
 import { singleFlight } from "../single-flight.ts";
 import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { checkBeside, liveNote, phaseNote } from "./review-model.ts";
 import type { Registry } from "./registry.ts";
@@ -120,15 +120,15 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
 
   function find(id: string): ItemRecord {
     const item = registry.item(id as ItemId);
-    if (item === undefined) throw new HttpError(404, `no item ${id}`);
+    if (item === undefined) throw new Refusal("missing", `no item ${id}`);
     return item;
   }
 
   /** Before it is queued, so a refusal says why it can never be. */
   function unstarted(item: ItemRecord, verb: string): void {
     const thread = itemThread(registry, item.id);
-    if (thread !== null) throw new HttpError(409, `item ${item.id} is thread ${thread} now, so it cannot be ${verb}. nexus archive ${thread} cancels it while it is queued`);
-    if (item.cancelled !== null) throw new HttpError(409, `item ${item.id} was cancelled by ${item.cancelled.by}`);
+    if (thread !== null) throw new Refusal("conflict", `item ${item.id} is thread ${thread} now, so it cannot be ${verb}. nexus archive ${thread} cancels it while it is queued`);
+    if (item.cancelled !== null) throw new Refusal("conflict", `item ${item.id} was cancelled by ${item.cancelled.by}`);
   }
 
   /** Each item is queued under its request ID, which the queued record's transaction stores, so it is queued once. */
@@ -157,16 +157,16 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
      * proposal's item takes an ID made from its question, which the planning thread is told.
      */
     add(request: StartRequest, message: string | null, after: readonly string[], caller: string, id = newItemId()): ItemRecord {
-      if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
-      if (message !== null && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's brief is its claude");
-      if (message === null && request.claude === undefined) throw new HttpError(400, "an item needs a brief: message for a Nexus agent thread, or claude for a Claude worker");
+      if (request.model !== undefined && request.claude === undefined) throw new Refusal("invalid", "model requires claude");
+      if (message !== null && request.claude !== undefined) throw new Refusal("invalid", "message is for a Nexus agent thread. A Claude worker's brief is its claude");
+      if (message === null && request.claude === undefined) throw new Refusal("invalid", "an item needs a brief: message for a Nexus agent thread, or claude for a Claude worker");
       const project = checkStart(registry, request, caller);
-      if (project.pipeline == null) throw new HttpError(409, `the pipeline does not run for project ${project.id}. nexus project edit ${project.id} --pipeline start turns it on`);
+      if (project.pipeline == null) throw new Refusal("conflict", `the pipeline does not run for project ${project.id}. nexus project edit ${project.id} --pipeline start turns it on`);
       const ids = [...new Set(after)] as ItemId[];
       for (const id of ids) {
         const ahead = registry.item(id);
-        if (ahead === undefined) throw new HttpError(404, `no item ${id}`);
-        if (ahead.project !== project.id) throw new HttpError(400, `item ${id} is in project ${ahead.project}, not ${project.id}`);
+        if (ahead === undefined) throw new Refusal("missing", `no item ${id}`);
+        if (ahead.project !== project.id) throw new Refusal("invalid", `item ${id} is in project ${ahead.project}, not ${project.id}`);
       }
       const record: ItemRecord = {
         id, project: project.id, title: request.title, request, message, after: ids, addedBy: caller, addedAt: Date.now(),
@@ -178,7 +178,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
     approve(id: string, caller: string): ItemRecord {
       const item = find(id);
       unstarted(item, "approved");
-      if (registry.project(item.project)?.pipeline?.autoStart !== false) throw new HttpError(409, `project ${item.project} ${registry.project(item.project)?.pipeline == null ? "has the pipeline off" : "starts its items on their own"}, so item ${item.id} needs no approval`);
+      if (registry.project(item.project)?.pipeline?.autoStart !== false) throw new Refusal("conflict", `project ${item.project} ${registry.project(item.project)?.pipeline == null ? "has the pipeline off" : "starts its items on their own"}, so item ${item.id} needs no approval`);
       if (item.approved !== null) return item;
       const next = { ...item, approved: { by: caller, at: Date.now() } };
       registry.saveItem(next);

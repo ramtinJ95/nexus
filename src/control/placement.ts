@@ -3,7 +3,7 @@ import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { diskRefusal } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "./reconcile.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
@@ -16,7 +16,7 @@ type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfi
 
 export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
   const { best, weighed } = weighNodes(registry, need);
-  if (best === null) throw new HttpError(409, `no node can run this pylon: ${refusals(weighed)}`);
+  if (best === null) throw new Refusal("conflict", `no node can run this pylon: ${refusals(weighed)}`);
   return { how: "auto", node: best, weighed };
 }
 
@@ -27,7 +27,7 @@ export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
  */
 export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName, ifRoom = false): Placement {
   const { best, weighed } = weighNodes(registry, need);
-  if (best === null && ifRoom) throw new HttpError(409, `no node has room for this pylon: ${refusals(weighed)}`);
+  if (best === null && ifRoom) throw new Refusal("conflict", `no node has room for this pylon: ${refusals(weighed)}`);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
@@ -215,7 +215,6 @@ export function uncounted(p: StoredPylon, seen: PylonObservation | undefined): R
 
 export const gib = (n: number) => Number(n.toFixed(1));
 
-/** A node's committed memory exceeds its memory. */
 export function overcommitted(c: NodeRecord["capacity"]): boolean {
   return c !== null && c.committedMemoryGiB > c.memoryGiB;
 }

@@ -5,7 +5,7 @@
  */
 import type { AgentCall, AgentKind, Tokens } from "./agent-usage.ts";
 import type { NodeName, ProjectId, ThreadId } from "../ids.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 
 export interface UsageTotals extends Tokens { total: number; calls: number }
 export const breakdowns = ["model", "project", "kind", "role", "day"] as const;
@@ -105,7 +105,7 @@ export function usageFilter(query: URLSearchParams, now: number): { since: numbe
   const since = query.get("since") ?? "all";
   const by = query.getAll("by").flatMap((b) => b.split(",")).filter((b) => b !== "");
   const unknown = by.find((b) => !(breakdowns as readonly string[]).includes(b));
-  if (unknown !== undefined) throw new HttpError(400, `by must be one of ${breakdowns.join(", ")}, not ${JSON.stringify(unknown)}`);
+  if (unknown !== undefined) throw new Refusal("invalid", `by must be one of ${breakdowns.join(", ")}, not ${JSON.stringify(unknown)}`);
   return {
     since: sinceOf(since, now),
     project: query.get("project") as ProjectId | null,
@@ -117,6 +117,6 @@ export function usageFilter(query: URLSearchParams, now: number): { since: numbe
 function sinceOf(value: string, now: number): number | null {
   if (Object.hasOwn(periods, value)) return periodStart(value as Period, now);
   const at = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(value) : Number.NaN;
-  if (Number.isNaN(at)) throw new HttpError(400, `since must be today, 7d, 30d, all or a date such as 2026-10-01, not ${JSON.stringify(value)}`);
+  if (Number.isNaN(at)) throw new Refusal("invalid", `since must be today, 7d, 30d, all or a date such as 2026-10-01, not ${JSON.stringify(value)}`);
   return at;
 }

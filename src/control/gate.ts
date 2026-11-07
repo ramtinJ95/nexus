@@ -19,6 +19,7 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { checkoutDir } from "../protocol/spawn.ts";
 import { runningProbe } from "./observed.ts";
+import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { StartRequest } from "./start-request.ts";
@@ -96,9 +97,9 @@ export type CheckState =
 export interface CheckRuns {
   /**
    * Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node, or a verify pylon on a
-   * node that nests KVM. With `ifRoom` it is refused, as an HttpError, when no node has room for it.
+   * node that nests KVM, or says why the start was refused. With `ifRoom` it is refused when no node has room for it.
    */
-  start(builder: Thread, branch: string, head: string, ifRoom?: true): Promise<ThreadId>;
+  start(builder: Thread, branch: string, head: string, ifRoom?: true): Promise<{ thread: ThreadId } | { refused: string }>;
   /** The run's state. A run whose pylon just came up opens its pipe, unless `opens` is false. */
   poll(thread: ThreadId, head: string, opens?: boolean): CheckState;
   /** Deletes the check thread and its pylon, or archives the verify pylon. Safe to repeat. */
@@ -178,9 +179,15 @@ export function checkRuns(options: {
   return {
     async start(builder, branch, head, ifRoom) {
       const projectCpus = registry.project(builder.project)?.resources.cpus ?? 0;
-      const t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, gate.caller);
+      let t: Thread;
+      try {
+        t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, gate.caller);
+      } catch (err) {
+        if (!(err instanceof Refusal)) throw err;
+        return { refused: err.message };
+      }
       runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
-      return t.id;
+      return { thread: t.id };
     },
     poll(id, head, opens = true) {
       const run = runs.get(id);

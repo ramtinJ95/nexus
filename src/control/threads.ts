@@ -7,7 +7,7 @@ import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
 import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId, type ThreadId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
 import type { Placement, Thread } from "./thread-store.ts";
 import { pylonLive } from "./live.ts";
@@ -29,15 +29,15 @@ const claudePromptOf = (request: StartRequest) =>
  */
 export function checkStart(registry: ThreadsRegistry, request: StartRequest, caller: string): Project {
   const claudePrompt = claudePromptOf(request);
-  if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new HttpError(400, "Claude prompt including /poteto-mode exceeds 16384 characters");
+  if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new Refusal("invalid", "Claude prompt including /poteto-mode exceeds 16384 characters");
   const project = registry.project(request.project as ProjectId);
-  if (project === undefined) throw new HttpError(404, `no project ${request.project}`);
+  if (project === undefined) throw new Refusal("missing", `no project ${request.project}`);
   const rules = standingRulesFor(project, request, caller);
   if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > 16_384) {
-    throw new HttpError(400, `Claude prompt including /poteto-mode and project ${project.id}'s standing rules exceeds 16384 characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
+    throw new Refusal("invalid", `Claude prompt including /poteto-mode and project ${project.id}'s standing rules exceeds 16384 characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
   }
-  if (request.node !== undefined && request.node !== "auto" && registry.node(request.node as NodeName) === undefined) throw new HttpError(400, `no node ${request.node}`);
-  if (!hasRemote(project) && request.commit !== undefined) throw new HttpError(400, `project ${project.id} is a scratch project, so it has no commit to check out`);
+  if (request.node !== undefined && request.node !== "auto" && registry.node(request.node as NodeName) === undefined) throw new Refusal("invalid", `no node ${request.node}`);
+  if (!hasRemote(project) && request.commit !== undefined) throw new Refusal("invalid", `project ${project.id} is a scratch project, so it has no commit to check out`);
   return project;
 }
 
@@ -75,7 +75,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     }
     if (inputs !== null) return { project, inputs };
     if (request.branch === undefined) return { fresh: `the remote has no branch ${branch}` };
-    throw new HttpError(400, `branch ${branch} does not exist on the remote of project ${project.id}. Push it first, or start from the project's default branch, ${project.defaultBranch}, by naming no branch, and the agent creates its own`, "no-branch");
+    throw new Refusal("invalid", `branch ${branch} does not exist on the remote of project ${project.id}. Push it first, or start from the project's default branch, ${project.defaultBranch}, by naming no branch, and the agent creates its own`, "no-branch");
   }
 
   /**
@@ -118,7 +118,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const claudePrompt = prompt === undefined ? undefined : withStandingRules(prompt, rules);
     const named = request.node !== undefined && request.node !== "auto";
     const image = registry.currentImage();
-    if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
+    if (image === null) throw new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
     const branch = request.branch ?? project.defaultBranch;
     // The repository as a fresh boot makes it. setUp pins a template boot's commit, and the pylon's boot freezes either.
     const freshRepo: RepoInit = hasRemote(project)
@@ -137,7 +137,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const { node } = placement;
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
-    if (short !== null) throw new HttpError(409, `${node} ${short}`);
+    if (short !== null) throw new Refusal("conflict", `${node} ${short}`);
     const release = registry.reserve(pylonId, node, resources);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.

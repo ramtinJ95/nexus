@@ -19,7 +19,7 @@ import { claudeTextProblem } from "../protocol/agent-kinds.ts";
 import { harnessView } from "./agent-conversation.ts";
 import type { ClaudeConversations } from "./claude-conversation.ts";
 import { claudeFrames, viewFrames, type Frames, type Watch } from "./conversation-view.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import type { Planning } from "./planning.ts";
 import { sendWithStandingRules } from "./standing-rules.ts";
@@ -44,7 +44,6 @@ export interface Agent<V> {
   /** The frames of one client of the CLI's stream of this kind. */
   frames(): Frames<V>;
   send(t: Thread, message: AgentMessage): Promise<Sent>;
-  /** Stops the turn that runs. */
   abort(t: Thread): Promise<void>;
   /** The snapshot ID of the latest turn, which the Changes view's turn base diffs against, or null before any. */
   latestTurn(t: Thread): Promise<string | null>;
@@ -75,7 +74,7 @@ export function threadAgents(options: {
   planning: Pick<Planning, "compose" | "sent"> | null;
 }): ThreadAgents {
   const { registry, harness, claude, inPylon, whileRunning, wake, planning } = options;
-  const refuse = (t: Thread): never => { throw new HttpError(409, noConversation(t)); };
+  const refuse = (t: Thread): never => { throw new Refusal("conflict", noConversation(t)); };
   const worker = (t: Thread) => registry.claudeWorker(t.id)!;
 
   const view = harnessView(harness);
@@ -127,23 +126,23 @@ export function threadAgents(options: {
       async send(t, message) {
         const text = message.text.replace(/\r\n?/g, "\n").trim();
         const problem = claudeTextProblem(text);
-        if (problem !== null) throw new HttpError(400, `Claude cannot take this message as typed: ${problem}`);
+        if (problem !== null) throw new Refusal("invalid", `Claude cannot take this message as typed: ${problem}`);
         const { session, model } = worker(t);
-        if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`, "not-ready");
+        if (session === null) throw new Refusal("conflict", `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`, "not-ready");
         const stored = registry.claudeMessage(t.id, message.requestId);
         if (stored?.state === "sent") return { claude: stored.result };
         const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)).catch((err: Partial<ProbeError>) => {
           if (err.code !== "unreachable") throw err;
           throw Object.assign(new Error(`${err.message}. The message may still reach Claude, as one queued in the pylon behind an earlier send does, and reaches it at most once. Send it again under request ID ${message.requestId} to learn what became of it`), { code: "unreachable" });
         }));
-        if (typed.kind === "uncertain") throw new HttpError(422, `an earlier send of request ${message.requestId} failed partway, or its pylon no longer knows how far it got, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
+        if (typed.kind === "uncertain") throw new Refusal("unprocessable", `an earlier send of request ${message.requestId} failed partway, or its pylon no longer knows how far it got, so Claude may have some or all of it. Check the conversation before sending it again under a new request ID`);
         if (typed.kind === "nothing") {
           const [refusal, code] = ({
             blocked: [`Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`, "blocked"],
             starting: [`Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`, "not-ready"],
             moved: [`Herdr pane ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`, "moved"],
           } as const)[typed.outcome];
-          throw new HttpError(409, refusal, code);
+          throw new Refusal("conflict", refusal, code);
         }
         void claude.refresh(t);
         return { claude: typed.sent };
@@ -155,10 +154,10 @@ export function threadAgents(options: {
        */
       async abort(t) {
         const { session } = worker(t);
-        if (session === null) throw new HttpError(409, `the Claude worker of ${t.id} has not started a session yet, so it has no turn to interrupt`);
+        if (session === null) throw new Refusal("conflict", `the Claude worker of ${t.id} has not started a session yet, so it has no turn to interrupt`);
         const { outcome } = await whileRunning(t, (probe, pylonId) => probe.command(pylonId, { kind: "interrupt-claude", session })) as Extract<CommandResult, { kind: "interrupt-claude" }>;
         if (outcome === "interrupted") return;
-        throw new HttpError(409, {
+        throw new Refusal("conflict", {
           blocked: `Claude waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it`,
           idle: `Claude is not working, so there is no turn to interrupt, and nothing was pressed`,
           unknown: `Herdr cannot tell yet whether Claude works or waits at a prompt, so nothing was pressed. Ask again in a moment`,

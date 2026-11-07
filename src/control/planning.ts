@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { mint, planningPrefix, tokenBlocks } from "./agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
-import { HttpError } from "./http-error.ts";
+import { Refusal } from "./refusal.ts";
 import type { Pipeline } from "./pipeline.ts";
 import type { ItemRecord } from "./pipeline-store.ts";
 import type { Proposal, Question, ThreadQuestion } from "./questions.ts";
@@ -124,8 +124,8 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
     return q.proposal.after.map((ref) => {
       const sibling = siblings.find((s) => s.proposal!.key === ref);
       if (sibling === undefined) return ref as ItemId;
-      if (sibling.answer === null) throw new HttpError(409, `"${q.proposal.title}" waits on "${sibling.proposal!.title}", which is not answered yet. Accept that one first`);
-      if (sibling.answer.option !== acceptOption) throw new HttpError(409, `"${q.proposal.title}" waits on "${sibling.proposal!.title}", which was rejected, so it cannot be added. Reject it too, and tell the planning thread what to change`);
+      if (sibling.answer === null) throw new Refusal("conflict", `"${q.proposal.title}" waits on "${sibling.proposal!.title}", which is not answered yet. Accept that one first`);
+      if (sibling.answer.option !== acceptOption) throw new Refusal("conflict", `"${q.proposal.title}" waits on "${sibling.proposal!.title}", which was rejected, so it cannot be added. Reject it too, and tell the planning thread what to change`);
       return proposalItem(sibling.id);
     });
   }
@@ -134,7 +134,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
   return {
     /** Marks a thread as planning, once. A repeat keeps its token. */
     begin(t: Thread): void {
-      if (registry.agent(t).kind !== "harness") throw new HttpError(400, "a planning thread is a Nexus agent thread, not a Claude worker");
+      if (registry.agent(t).kind !== "harness") throw new Refusal("invalid", "a planning thread is a Nexus agent thread, not a Claude worker");
       if (registry.planning(t.id) === null) registry.savePlanning({ thread: t.id, token: mint(t.id), read: 0, sent: [] });
     },
     /**
@@ -166,7 +166,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
      */
     answered(q: Question): ItemRecord | null {
       if (q.proposal === undefined || q.answer?.option !== acceptOption) return null;
-      if (options.pipeline === null) throw new HttpError(409, "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
+      if (options.pipeline === null) throw new Refusal("conflict", "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
       const t = registry.thread(q.thread)!;
       return options.pipeline.add({ project: t.project, title: q.proposal.title }, q.proposal.brief, resolveAfter(q as Question & { proposal: Proposal }), q.answer.by, proposalItem(q.id));
     },

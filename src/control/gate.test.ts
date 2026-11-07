@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { checkCaller, verifyCaller } from "./agent-protocol.ts";
 import { checkRuns, imageEnv, verifyGate, type CheckRuns, type CheckState } from "./gate.ts";
+import { Refusal } from "./refusal.ts";
 import type { Thread } from "./thread-store.ts";
 import { testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { processStream } from "../process-stream.ts";
@@ -16,6 +17,13 @@ import type { StartRequest } from "./start-request.ts";
 import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-support/kit.ts";
 
 const node = "node" as NodeName;
+
+/** The thread a start that was not refused started. */
+async function started(start: ReturnType<CheckRuns["start"]>): Promise<ThreadId> {
+  const result = await start;
+  assert.ok("thread" in result, `the start was refused: ${"refused" in result ? result.refused : ""}`);
+  return result.thread;
+}
 
 /**
  * A registry whose check threads' pylons run here: each pipe runs its argv as a local process, in a checkout with one
@@ -62,14 +70,15 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
   }
   const builder = add("person");
   const started: StartRequest[] = [];
+  let refuse: Error | null = null;
   const local = (argv: readonly string[]) => argv.map((a) => a.replaceAll(checkoutDir, repo).replace(imageEnv, `cat ${image}`));
   let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, local(argv).slice(1), () => {});
   const runs = (gate?: typeof verifyGate, ended?: (thread: ThreadId) => void): CheckRuns => checkRuns({
     registry, wake: () => {}, ...gate === undefined ? {} : { gate }, ...ended === undefined ? {} : { ended },
     probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
-    async startThread(request, caller) { started.push(request); return add(caller); },
+    async startThread(request, caller) { started.push(request); if (refuse !== null) throw refuse; return add(caller); },
   });
-  return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; } };
+  return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; }, set refuse(err: Error | null) { refuse = err; } };
 }
 
 /** Polls until the check ends. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
@@ -85,7 +94,7 @@ async function settle(poll: () => CheckState): Promise<CheckState> {
 test("a check runs in a fresh bare check thread of 4 CPUs at the commit, and its verdict is the pipe's exit status", async (t) => {
   const f = await fixture(t, "echo typecheck ok; echo tests ok");
   const runs = f.runs();
-  const id = await runs.start(f.builder, "feature", f.head);
+  const id = await started(runs.start(f.builder, "feature", f.head));
   assert.deepEqual(f.started, [{ project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, bare: true, resources: { cpus: 4 } }]);
   assert.equal(f.registry.thread(id)!.startedBy, checkCaller);
   assert.deepEqual(runs.poll(id, f.head), { kind: "waiting" }, "nothing runs until the pylon does");
@@ -95,10 +104,23 @@ test("a check runs in a fresh bare check thread of 4 CPUs at the commit, and its
   assert.equal(f.registry.thread(id)!.status, "deleted");
 });
 
+test("a start the control plane refuses says why, with or without room asked for, and any other failure is thrown", async (t) => {
+  const f = await fixture(t, "echo tests ok");
+  const runs = f.runs();
+  f.refuse = new Refusal("conflict", "no node has room for this pylon: node is overcommitted");
+  assert.deepEqual(await runs.start(f.builder, "feature", f.head, true), { refused: "no node has room for this pylon: node is overcommitted" });
+  f.refuse = new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
+  assert.deepEqual(await runs.start(f.builder, "feature", f.head), { refused: "no image is current yet, so a pylon has nothing to boot" });
+  f.refuse = new Error("the registry is closed");
+  await assert.rejects(runs.start(f.builder, "feature", f.head), { message: "the registry is closed" });
+  f.refuse = null;
+  assert.equal(f.registry.thread(await started(runs.start(f.builder, "feature", f.head)))!.startedBy, checkCaller);
+});
+
 test("a check pylon keeps the CPUs of a project sized over 4", async (t) => {
   const f = await fixture(t, "echo tests ok");
   f.registry.editProject(f.builder.project, (p) => ({ ...p, resources: { ...p.resources, cpus: 8 } }));
-  await f.runs().start(f.builder, "feature", f.head);
+  await started(f.runs().start(f.builder, "feature", f.head));
   assert.deepEqual(f.started.map((r) => r.resources), [{ cpus: 8 }]);
 });
 
@@ -106,7 +128,7 @@ test("a check's end is heard as it exits, without waiting for the next poll, and
   const f = await fixture(t, "echo ok");
   const ended: ThreadId[] = [];
   const runs = f.runs(undefined, (id) => { ended.push(id); });
-  const id = await runs.start(f.builder, "feature", f.head);
+  const id = await started(runs.start(f.builder, "feature", f.head));
   f.running(f.registry.thread(id)!);
   assert.deepEqual(runs.poll(id, f.head), { kind: "running" });
   await until("the check's end is heard", () => ended.length > 0);
@@ -114,7 +136,7 @@ test("a check's end is heard as it exits, without waiting for the next poll, and
   assert.deepEqual(runs.poll(id, f.head), { kind: "done", passed: true, output: "ok" });
 
   f.stream = async () => { throw new Error("the pipe could not open"); };
-  const lost = await runs.start(f.builder, "feature", f.head);
+  const lost = await started(runs.start(f.builder, "feature", f.head));
   f.running(f.registry.thread(lost)!);
   runs.poll(lost, f.head);
   await until("the void run's end is heard", () => ended.includes(lost));
@@ -126,7 +148,7 @@ test("a check that starts only where a node has room says so in its start, and a
   const runs = f.runs();
   let streams = 0;
   f.stream = async () => { streams++; throw new Error("no pipe expected"); };
-  const id = await runs.start(f.builder, "feature", f.head, true);
+  const id = await started(runs.start(f.builder, "feature", f.head, true));
   assert.equal(f.started[0]!.ifRoom, true);
   f.running(f.registry.thread(id)!);
   assert.deepEqual(runs.poll(id, f.head, false), { kind: "waiting" });
@@ -136,7 +158,7 @@ test("a check that starts only where a node has room says so in its start, and a
 test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 GiB that asks for nested virtualization, which is archived afterwards", async (t) => {
   const f = await fixture(t, "echo tests ok", "echo fleet booted; exit 4");
   const runs = f.runs(verifyGate);
-  const id = await runs.start(f.builder, "feature", f.head);
+  const id = await started(runs.start(f.builder, "feature", f.head));
   assert.deepEqual(f.started, [{
     project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, near: node, node: "auto", branch: "feature", commit: f.head, bare: true,
     resources: { cpus: 4, memoryGiB: 8, nestedVirtualization: true },
@@ -149,7 +171,7 @@ test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 Gi
 
   const none = await fixture(t, "echo tests ok");
   const missing = none.runs(verifyGate);
-  const unrunnable = await missing.start(none.builder, "feature", none.head);
+  const unrunnable = await started(missing.start(none.builder, "feature", none.head));
   none.running(none.registry.thread(unrunnable)!);
   assert.deepEqual(await settle(() => missing.poll(unrunnable, none.head)), { kind: "unrunnable", output: `The repository has no executable .nexus/verify at ${none.head}.` });
 });
@@ -157,7 +179,7 @@ test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 Gi
 test("what the check writes cannot pass it: a forged exit file or a printed status counts for nothing", async (t) => {
   const f = await fixture(t, `mkdir -p "$HOME/.nexus-checks"; echo 0 > exit; echo "done 0"; exit 3`);
   const runs = f.runs();
-  const id = await runs.start(f.builder, "feature", f.head);
+  const id = await started(runs.start(f.builder, "feature", f.head));
   f.running(f.registry.thread(id)!);
   const state = await settle(() => runs.poll(id, f.head));
   assert.equal(state.kind === "done" && state.passed, false);
@@ -167,12 +189,12 @@ test("the check runs in the image's environment, which the pipe's own shell lack
   const f = await fixture(t, `echo "$NODE_EXTRA_CA_CERTS $HOME"; [ -n "$NODE_EXTRA_CA_CERTS" ]`);
   f.stream = async (_, argv) => processStream("env", ["-i", `HOME=${f.root}`, "PATH=/usr/bin:/bin", ...f.local(argv)], () => {});
   const runs = f.runs();
-  const id = await runs.start(f.builder, "feature", f.head);
+  const id = await started(runs.start(f.builder, "feature", f.head));
   f.running(f.registry.thread(id)!);
   assert.deepEqual(await settle(() => runs.poll(id, f.head)), { kind: "done", passed: true, output: `/run/gondolin/ca-certificates.crt ${f.root}` }, "the image's CA, and the pipe's own HOME");
 
   await writeFile(f.image, "");
-  const unread = await runs.start(f.builder, "feature", f.head);
+  const unread = await started(runs.start(f.builder, "feature", f.head));
   f.running(f.registry.thread(unread)!);
   assert.deepEqual(await settle(() => runs.poll(unread, f.head)), { kind: "unrunnable", output: "The check pylon's image environment could not be read." });
 });
@@ -180,19 +202,19 @@ test("the check runs in the image's environment, which the pipe's own shell lack
 test("a check the pylon cannot run says so instead of failing: no .nexus/check, a missing command, or a pylon that did not boot", async (t) => {
   const none = await fixture(t, null);
   const runs = none.runs();
-  const id = await runs.start(none.builder, "feature", none.head);
+  const id = await started(runs.start(none.builder, "feature", none.head));
   none.running(none.registry.thread(id)!);
   const state = await settle(() => runs.poll(id, none.head));
   assert.ok(state.kind === "unrunnable" && /no executable \.nexus\/check/.test(state.output));
 
   const tool = await fixture(t, "echo installing; nexus-no-such-tool ci");
   const toolRuns = tool.runs();
-  const toolId = await toolRuns.start(tool.builder, "feature", tool.head);
+  const toolId = await started(toolRuns.start(tool.builder, "feature", tool.head));
   tool.running(tool.registry.thread(toolId)!);
   const missing = await settle(() => toolRuns.poll(toolId, tool.head));
   assert.ok(missing.kind === "unrunnable" && /installing\n.*nexus-no-such-tool.*not found/.test(missing.output), JSON.stringify(missing));
 
-  const failedBoot = await toolRuns.start(tool.builder, "feature", tool.head);
+  const failedBoot = await started(toolRuns.start(tool.builder, "feature", tool.head));
   const pylon = tool.registry.pylon(tool.registry.thread(failedBoot)!.pylonId)!;
   tool.registry.savePylon({ ...pylon, failed: ".nexus/setup exited 1" });
   assert.deepEqual(toolRuns.poll(failedBoot, tool.head), { kind: "unrunnable", output: "The check pylon did not boot: .nexus/setup exited 1" });
@@ -201,11 +223,11 @@ test("a check the pylon cannot run says so instead of failing: no .nexus/check, 
 test("a run that cannot give a verdict is void: a pylon at the wrong commit, a lost pipe, or a run this process does not hold", async (t) => {
   const f = await fixture(t, "true");
   const runs = f.runs();
-  const wrong = await runs.start(f.builder, "feature", f.head);
+  const wrong = await started(runs.start(f.builder, "feature", f.head));
   f.running(f.registry.thread(wrong)!);
   assert.deepEqual(await settle(() => runs.poll(wrong, "f".repeat(40))), { kind: "void" }, "a checkout at another commit says nothing of the change");
 
-  const lost = await runs.start(f.builder, "feature", f.head);
+  const lost = await started(runs.start(f.builder, "feature", f.head));
   f.stream = async () => ({ ...processStream("true", [], () => {}), done: Promise.resolve({ kind: "lost" as const }) });
   f.running(f.registry.thread(lost)!);
   assert.deepEqual(await settle(() => runs.poll(lost, f.head)), { kind: "void" });
@@ -218,7 +240,7 @@ test("a pipe that fails while it is consumed voids the run and deletes its check
   for (const failure of ["close", "read"] as const) {
     const f = await fixture(t, "true");
     const runs = f.runs();
-    const id = await runs.start(f.builder, "feature", f.head);
+    const id = await started(runs.start(f.builder, "feature", f.head));
     f.stream = async () => ({
       write: async () => {},
       close: async () => { if (failure === "close") throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" }); },
@@ -236,7 +258,7 @@ test("a check that exits 75 is void, so it runs again in a fresh check thread, a
   const f = await fixture(t, "echo npm error code ETIMEDOUT; exit 75");
   const runs = f.runs();
   const run = async () => {
-    const id = await runs.start(f.builder, "feature", f.head);
+    const id = await started(runs.start(f.builder, "feature", f.head));
     f.running(f.registry.thread(id)!);
     const state = await settle(() => runs.poll(id, f.head));
     return { state, status: f.registry.thread(id)!.status };
@@ -248,7 +270,7 @@ test("a check that exits 75 is void, so it runs again in a fresh check thread, a
 
   const failing = await fixture(t, "echo 1 test failed; exit 1");
   const failingRuns = failing.runs();
-  const id = await failingRuns.start(failing.builder, "feature", failing.head);
+  const id = await started(failingRuns.start(failing.builder, "feature", failing.head));
   failing.running(failing.registry.thread(id)!);
   assert.deepEqual(await settle(() => failingRuns.poll(id, failing.head)), { kind: "done", passed: false, output: "1 test failed" }, "any other failure is still a verdict");
 });
