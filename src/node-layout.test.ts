@@ -135,4 +135,5 @@ test("control.json's db is opened from the control plane's working directory", (
   const example = JSON.parse(read("deploy/control.example.json")) as Record<string, unknown>;
   assert.equal(parseConfig(JSON.stringify({ ...example, db: "registry.db" })).db, `${stateDirs.control}/registry.db`);
   assert.equal(parseConfig(JSON.stringify(example)).db, "/var/lib/nexus-control/registry.db");
+  assert.equal(parseConfig(JSON.stringify({ ...example, db: "/srv/nexus/registry.db" })).db, "/srv/nexus/registry.db");
 });
