@@ -33,7 +33,7 @@ import { controlSocket, run, socketPathLimit, stopForRetry } from "../../pylon-v
 import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../../pylon-vm/host-bridge.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
-import { asUser, controllerLog, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
+import { asUser, controllerLog, controllerLogTail, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
 import { readJson, saveJson } from "../../json-file.ts";
 import { diskBytes } from "../../disk-space.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
@@ -419,7 +419,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     const checkoutFailed = config.retrySetup && status.setupRecorded === false && setupFailed(status);
     const freshFailed = !config.retrySetup && setupFailed(status) && !hasCheckpoint(pylonId);
     // The startupError only points at the controller log, which holds what setup printed, so the log travels with the failure.
-    const log = await templates.controllerLogTail(instanceDir(pylonId));
+    const log = await controllerLogTail(instanceDir(pylonId));
     if (!checkoutFailed && !freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
     const name = instanceName(pylonId);
     await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
@@ -473,7 +473,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (record === null) return null;
       const up = vmHolds.safeParse(["starting", "unavailable", "running", "stopping"].includes(instance.status.state) ? instance.status.resources : undefined);
       const vm: BackendVm = state.vm === "stopped" ? { vm: "stopped", sessions: sidecar.sessions ?? null }
-        : state.vm === "broken" ? { ...state, logTail: await templates.controllerLogTail(instanceDir(pylonId)) } : state;
+        : state.vm === "broken" ? { ...state, logTail: await controllerLogTail(instanceDir(pylonId)) } : state;
       return {
         pylonId,
         ...vm,

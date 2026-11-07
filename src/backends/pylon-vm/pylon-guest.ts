@@ -16,13 +16,18 @@ import type { PylonLog } from "../../probe/guest/session-wake.ts";
 import { statusSchema } from "../../pylon-vm/contracts.ts";
 import { stamped } from "../../pylon-vm/controller-log.ts";
 import { shellQuote as q } from "../../shell.ts";
-import { existsError } from "../../pylon-vm/storage.ts";
+import { existsError, readLogTail } from "../../pylon-vm/storage.ts";
 
 /** A login shell as `user`, in `cwd`. The fork runs guest commands as root. */
 export const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`cd ${q(cwd)} && ${script}`)}`;
 
 /** The instance's controller log, which `logs` without a service reads. The controller appends to it too. */
 export const controllerLog = (dir: string): PylonLog => (line) => appendFile(join(dir, "controller.log"), `${stamped(line)}\n`, { mode: 0o600 });
+
+/** The end of a build's or an instance's controller log, for a JobFailure's or a broken pylon's logTail. */
+export async function controllerLogTail(dir: string): Promise<string> {
+  return (await readLogTail(join(dir, "controller.log"), 60)).output.slice(-8192);
+}
 
 /** gondolin build writes gondolin.json's env here, for login shells. sandboxd's execs get the same env directly. */
 export const imageEnv = "/etc/profile.d/gondolin-image-env.sh";
