@@ -8,7 +8,7 @@ The control plane decides every lifecycle step. A probe runs explicit jobs and r
 
 ### What a probe accepts
 
-A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the only authentication, and the home tailnet's policy stays unchanged, with no tags and no ACL edits. The probe asks its local `tailscaled` who the peer is (LocalAPI `whois`) and compares the peer's stable node ID with the one its config names for the route (`routeAuth` and `ProbeAuthConfig` in [`src/protocol/routes.ts`](../../src/protocol/routes.ts)).
+A probe serves HTTP on its tailnet address, port 7480. Tailnet identity is the only authentication, and the home tailnet's policy stays unchanged, with no tags and no ACL edits. The probe asks its local `tailscaled` who the peer is (LocalAPI `whois`) and compares the peer's stable node ID with the one its config names for the route (`probeRoutes`, `routeRole` and `ProbeAuthConfig` in [`src/protocol/routes.ts`](../../src/protocol/routes.ts)).
 
 | Route | Caller | Purpose |
 |---|---|---|

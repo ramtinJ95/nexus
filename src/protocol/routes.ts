@@ -49,8 +49,9 @@ export const probeRoutes = {
 } as const satisfies Record<string, ProbeRoute>;
 
 type ParamsOf<P extends string> = P extends `${string}{${infer K}}${infer Rest}` ? Record<K, string> & ParamsOf<Rest> : unknown;
-/** Only one route's literal path: a union of routes or a widened `ProbeRoute` names no parameters to require. */
-type PathArgs<P extends string> = string extends P ? never : [P] extends [`${string}{${string}`] ? [ParamsOf<P>] : P extends `${string}{${string}` ? never : [];
+type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
+/** One route's literal path only, since a union of routes or a widened `ProbeRoute` cannot say which parameters it needs. */
+type PathArgs<P extends string> = string extends P ? never : true extends IsUnion<P> ? never : P extends `${string}{${string}` ? [ParamsOf<P>] : [];
 
 /** The route's path with each parameter URI-encoded. */
 export function routePath<P extends string>(route: { path: P }, ...params: PathArgs<P>): string {

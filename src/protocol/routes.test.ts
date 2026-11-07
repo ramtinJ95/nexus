@@ -49,9 +49,14 @@ test("a route's path encodes each parameter, and only the stream upgrades and on
   assert.equal(routePath(probeRoutes.putPeers), "/v1/peers");
   // @ts-expect-error a route with a parameter needs it
   assert.throws(() => routePath(probeRoutes.job), /needs jobId/);
-  const either = Math.random() < 2 ? probeRoutes.job : probeRoutes.command;
-  // @ts-expect-error a union of routes names no parameters to require
+  const either = probeRoutes.job as typeof probeRoutes.job | typeof probeRoutes.command;
+  // @ts-expect-error a union of routes cannot say which parameters it needs
   assert.throws(() => routePath(either), /needs/);
+  // @ts-expect-error even given one route's parameters
+  routePath(either, { jobId: "job-1" });
+  const mixed = probeRoutes.job as typeof probeRoutes.job | typeof probeRoutes.putPeers;
+  // @ts-expect-error nor when only some of its routes have parameters
+  assert.throws(() => routePath(mixed), /needs/);
   const widened: { path: string } = probeRoutes.putPeers;
   // @ts-expect-error a widened path names no parameters to require
   routePath(widened);
