@@ -10,7 +10,7 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 
 | Module | Owns | Side |
 |---|---|---|
-| [`src/ids.ts`](../../src/ids.ts) | The shared IDs: nodes, pylons, jobs, projects, artifacts and live hashes. It imports nothing | Both |
+| [`src/ids.ts`](../../src/ids.ts) | The shared IDs and their grammar: nodes, threads, pylons, jobs, projects, items, artifacts, live hashes and the request IDs Nexus mints, each with its minter and parser. Some callers outside src/control still build or check IDs by hand until they move to it. It imports Node builtins only | Both |
 | [`src/protocol/`](../../src/protocol) | One file per message family, each with its types and its wire codec: the ID schemas and shared fields (`fields.ts`), the `Job` union, deadlines, the retry table and `JobFailure` (`jobs.ts`), observations (`observations.ts`), synchronous commands (`commands.ts`), streams (`streams.ts`), probe errors (`http.ts`), artifact copies (`artifacts.ts`), `routeAuth` (`routes.ts`) and `ProbeClient` (`client.ts`) | Both. Each family's wire encoding stays behind its own parse and encode functions, and the probe never loads `client.ts` |
 | [`src/control/reconcile.ts`](../../src/control/reconcile.ts) | The desired phase, the planner, the derived actual state, and record writes from observations | Control plane, pure |
 | [`src/probe/run.ts`](../../src/probe/run.ts) | `runJob`, `runCommand` and `commandPolicies` | Probe |

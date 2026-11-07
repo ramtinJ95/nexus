@@ -3,7 +3,7 @@
  */
 import { z } from "zod";
 import type { Planning } from "../planning.ts";
-import type { ProjectId, ThreadId } from "../../ids.ts";
+import { isPipelineRequestId, requestIds, type ProjectId, type ThreadId } from "../../ids.ts";
 import type { StartKey } from "../start-request.ts";
 import type { Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
@@ -115,7 +115,7 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
    */
   function start(body: unknown, caller: string): Promise<Thread | QueuedThread> {
     const { requestId, ...fields } = parse(startSchema, body);
-    if (requestId?.startsWith("pipeline:")) throw new HttpError(400, "request IDs that start with pipeline: are the pipeline's own, which names each item's thread by one");
+    if (requestId !== undefined && isPipelineRequestId(requestId)) throw new HttpError(400, "request IDs that start with pipeline: are the pipeline's own, which names each item's thread by one");
     if (requestId === undefined) return startOnce(fields, caller);
     const key = startKey(requestId, fields);
     const pending = starting.get(requestId);
@@ -139,7 +139,7 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
       const t = made === undefined ? await startThread({ ...request, planning }, caller, undefined, key) : registry.thread(made)!;
       if (planning) options.planning!.begin(t);
       if (message !== undefined && t.status !== "archived" && t.status !== "deleted") {
-        const requestId = `brief:${t.id}`;
+        const requestId = requestIds.brief(t.id);
         await sendWithStandingRules(registry, t.id, requestId, message, (brief) => harness.send(t.id, options.planning?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => options.planning?.sent(t, requestId), (err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
           throw err instanceof HttpError ? new HttpError(err.status, why) : new Error(why);

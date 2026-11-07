@@ -1,12 +1,11 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { fullCommit } from "../deploy/model.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, type BootInputs, type RepoInit } from "../spawn.ts";
-import type { ImageId, ProjectId, TemplateId, ThreadId } from "../ids.ts";
-import type { NodeName, PylonId } from "../ids.ts";
+import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId, type ThreadId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import { HttpError } from "./http-error.ts";
 import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
@@ -20,9 +19,6 @@ type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "latestH
 
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
-
-/** `pylon-<id>` must fit in 40 characters. */
-export const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
 
 const claudePromptOf = (request: StartRequest) =>
   request.claude === undefined || request.raw === true || /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
@@ -132,7 +128,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
 
     const resources = resourcesOf(request.resources, project);
     const id = queuedId ?? newThreadId();
-    const pylonId = `pylon-${id}` as PylonId;
+    const pylonId = pylonIdOf(id);
     const need = { image, resources, network, repo: freshRepo, dotfiles };
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }
       : request.node === "auto" || (request.near === undefined && project.defaultNode === "auto") ? placeAuto(registry, need)

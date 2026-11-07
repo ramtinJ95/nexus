@@ -4,7 +4,7 @@
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
 import { envelope, failureMessage, noAttempts, planPylon, type Attempts, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
-import type { CheckpointId, JobId, NodeName } from "../ids.ts";
+import { checkpointId, type CheckpointId, type JobId, type NodeName, type ThreadId } from "../ids.ts";
 import type { Job, JobEnvelope, JobStatus } from "../protocol/jobs.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { ProbeError } from "../protocol/http.ts";
@@ -41,7 +41,7 @@ export function newPylonRecord(fields: Omit<PylonRecord, "pauses" | "submitted" 
   return { ...fields, pauses: 0, submitted: null, attempts: noAttempts, failed: null, retrying: false };
 }
 
-export const nextCheckpoint = (pylon: PylonRecord): CheckpointId => `ckpt-${pylon.thread}-${pylon.pauses + 1}`;
+export const nextCheckpoint = (pylon: PylonRecord): CheckpointId => checkpointId(pylon.thread as ThreadId, pylon.pauses + 1);
 
 export interface TickContext {
   probe: ProbeClient;

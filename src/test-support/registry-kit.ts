@@ -2,11 +2,10 @@
  * The registry's fixtures. A node, the "acme" project, and threads whose pylon clones
  * git@example.com:acme.git. What needs no registry is in kit.ts.
  */
-import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import { testObservation } from "./kit.ts";
 import { newPylonRecord, type PylonRecord } from "../control/tick.ts";
-import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
+import { newThreadId, pylonIdOf, type LiveHash, type NodeName, type ProjectId, type PylonId, type TailnetNodeId, type ThreadId } from "../ids.ts";
 import type { RemoteProject } from "../control/project.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { PullRequest } from "../control/github.ts";
@@ -41,9 +40,9 @@ export function seedRegistry(registry: Registry, { nodes = [testNode], project =
 
 /** An active thread of "acme" that a person started just now, with a new ID unless `over` names one. */
 export function testThread(over: Partial<Thread> = {}): Thread {
-  const id = over.id ?? `th-${randomUUID().slice(0, 8)}` as ThreadId;
+  const id = over.id ?? newThreadId();
   return {
-    seenAt: null, lastReplyAt: null, id, title: "t", project: "acme" as ProjectId, pylonId: `pylon-${id}` as PylonId, status: "active", conversationId: null,
+    seenAt: null, lastReplyAt: null, id, title: "t", project: "acme" as ProjectId, pylonId: pylonIdOf(id), status: "active", conversationId: null,
     startedBy: "nLAPTOP", createdAt: Date.now(), agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(), ...over,
   };
 }

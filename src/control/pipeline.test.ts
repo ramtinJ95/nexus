@@ -5,13 +5,12 @@ import { turnGate } from "./drain.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import type { PullRequest } from "./github.ts";
 import { itemPhase, itemThread, itemView } from "./pipeline.ts";
-import type { ItemId } from "./pipeline-store.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { testPr, testReview } from "../test-support/registry-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import type { StartRequest } from "./start-request.ts";
 import { threadServices } from "./thread-services.ts";
-import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
+import type { ItemId, NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { PipelineSetting } from "./project.ts";
 import { tempDir, testImage } from "../test-support/kit.ts";
 
