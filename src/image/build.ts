@@ -21,7 +21,8 @@ import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup }
 import { artifactDirectory, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
 import { JobFailure } from "../protocol/jobs.ts";
 import { reapGroup, signalGroup } from "../process-group.ts";
-import { compare, imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "./images.ts";
+import { compare } from "../util/compare.ts";
+import { imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "./images.ts";
 import { loadImageRecipe } from "./recipe.ts";
 import { shellQuote } from "../shell.ts";
 import type { ImageId, NodeName } from "../ids.ts";

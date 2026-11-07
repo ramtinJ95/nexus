@@ -6,7 +6,9 @@
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
 import { z } from "zod";
-import { canonicalSha256, type PylonResources } from "../spawn.ts";
+import type { PylonResources } from "../spawn.ts";
+import { canonicalSha256 } from "../util/canonical-sha256.ts";
+import { compare } from "../util/compare.ts";
 import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
 
 // The base image.
@@ -128,8 +130,6 @@ export interface TemplateKey {
   image: ImageId;
   setupHash: string;
 }
-
-export const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 
 export interface TemplateBuildInputs {
   key: TemplateKey;
