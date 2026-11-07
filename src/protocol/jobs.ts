@@ -16,10 +16,10 @@ import type { BootInputs, LiveSpec } from "../spawn.ts";
 import type { ImageRecipe, TemplateBuildInputs } from "../image/images.ts";
 import { asSent, named, nonEmpty, parseJson, unchecked } from "../parse.ts";
 import {
-  isPortableArtifactId, type ArtifactId, type CheckpointId, type ImageId, type JobId, type LiveHash, type NodeName,
+  isArtifactId, isCheckpointId, isPortableArtifactId, type ArtifactId, type CheckpointId, type ImageId, type JobId, type LiveHash, type NodeName,
   type PortableArtifactId, type PylonId, type TemplateId,
 } from "../ids.ts";
-import { imageId, objectAs, pylonIdField, sha256, templateId } from "./fields.ts";
+import { imageId, nodeNameSchema, objectAs, pylonIdField, sha256, templateId } from "./fields.ts";
 
 export type Job =
   | { kind: "spawn"; pylonId: PylonId; boot: BootInputs; live: LiveSpec; liveHash: LiveHash; relaunch?: false }
@@ -114,7 +114,7 @@ export function encodeSubmitReply(reply: SubmitReply): { status: number; body: s
   return { status: "accepted" in reply ? submitStatus.accepted : submitStatus[reply.rejected], body: JSON.stringify(reply) };
 }
 
-const checkpointId = z.string().startsWith("ckpt-", "expected a checkpoint ID").pipe(z.custom<CheckpointId>());
+const checkpointId = z.string().pipe(z.custom<CheckpointId>(isCheckpointId, "expected a checkpoint ID"));
 
 const jobStatusFields = { jobId: named<JobId>(), subject: named<Subject>(), kind: named<Job["kind"]>() };
 export const jobStatusSchema = z.discriminatedUnion("state", [
@@ -172,15 +172,15 @@ const jobSchema = z.discriminatedUnion("kind", [
   z.looseObject({
     kind: z.literal("fetch-artifact"),
     // A checkpoint passes, for runJob to refuse with its reason.
-    artifact: z.string().refine((id) => isPortableArtifactId(id) || id.startsWith("ckpt-"), "expected an artifact ID").pipe(z.custom<ArtifactId>()),
-    from: named<NodeName>(), sha256,
+    artifact: z.string().pipe(z.custom<ArtifactId>(isArtifactId, "expected an artifact ID")),
+    from: nodeNameSchema, sha256,
   }),
   z.looseObject({ kind: z.literal("drop-artifact"), artifact: z.string().pipe(z.custom<PortableArtifactId>(isPortableArtifactId, "expected an image or template ID, and no job drops a checkpoint")) }),
 ]) satisfies z.ZodType<Job>;
 
 const timestamp = z.string().min(1).refine((t) => !Number.isNaN(Date.parse(t)), "expected a timestamp");
 const jobEnvelopeSchema = z.looseObject({
-  jobId: named<JobId>(), node: named<NodeName>(), issuedAt: timestamp, notAfter: timestamp, job: jobSchema,
+  jobId: named<JobId>(), node: nodeNameSchema, issuedAt: timestamp, notAfter: timestamp, job: jobSchema,
 }) satisfies z.ZodType<JobEnvelope>;
 
 /** The probe's side of PUT /v1/jobs/{jobId}. Throws with a message for the `invalid` reply. */
