@@ -6,6 +6,7 @@ import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop } from "./loop.ts";
 import { nodePylons } from "./placement.ts";
 import { openRegistry, type Registry } from "./registry.ts";
+import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
 import { addThread, seedRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
@@ -865,7 +866,7 @@ test("a record from before failed wakes for reading were kept apart, whose last 
   fake.finish(fake.running()[0]!);
   await archive(registry, fake, loop, thread);
   const failure = { at: Date.now(), code: "setup-failed" as const, message: "the disk is full" };
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, attempts: { count: 1, last: { ...failure, reading: true } as typeof failure } });
+  registry.savePylon({ ...registry.pylon(thread.pylonId)!, attempts: upgradeAttempts({ count: 1, last: { ...failure, reading: true } as typeof failure }) });
 
   registry.setThreadStatus(thread.id, "active");
   registry.recordActivity(thread.id, { human: Date.now() });
