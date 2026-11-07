@@ -6,7 +6,7 @@ import * as contract from "./guest-contract.ts";
 const image = (file: string) => readFileSync(new URL(`../images/pylon/${file}`, import.meta.url), "utf8");
 
 test("each guest path, name and limit equals the literal it replaced", () => {
-  const { asUser, onClaudeTranscript, startHerdrServer, focusScript, attachScript, ...values } = contract;
+  const { asUser, onClaudeTranscript, herdrPanePattern, startHerdrServer, focusScript, attachScript, ...values } = contract;
   assert.deepEqual(values, {
     home: "/home/user",
     workspaceDir: "/home/user/workspace",
@@ -29,6 +29,8 @@ test("each guest path, name and limit equals the literal it replaced", () => {
     herdrSession: "nexus",
     herdrServerStartMs: 5_000,
   });
+  assert.equal(herdrPanePattern.source, "^w[0-9]{1,9}:p[0-9]{1,9}$");
+  assert.equal(herdrPanePattern.flags, "");
   assert.deepEqual(asUser("id"), ["runuser", "-l", "user", "-c", "id"]);
   assert.equal(onClaudeTranscript("cat \"$f\"", 3), 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; cat "$f"; exit 0; done; exit 3');
   assert.equal(startHerdrServer, "setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1");

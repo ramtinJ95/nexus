@@ -112,7 +112,7 @@ test("every relative link in the repo's markdown names a tracked file or folder"
 });
 
 test("the modules other processes load as they are import nothing, so they need no node_modules or neighbours", () => {
-  for (const file of ["src/control/schema.ts", "images/pylon/nexus-contract.ts", "images/pylon/agent-setup/manifest.ts"]) {
+  for (const file of ["src/control/schema.ts", "src/guest-contract.ts", "images/pylon/nexus-contract.ts", "images/pylon/agent-setup/manifest.ts"]) {
     assert.deepEqual(specifiers(read(listed(file)), true), [], file);
   }
 });

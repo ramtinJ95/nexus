@@ -43,6 +43,8 @@ export const onClaudeTranscript = (body: string, none: number) => `for f in "$1"
 /** The named Herdr session every pane of a pylon runs in, and every terminal attaches to. */
 export const herdrSession = "nexus";
 export const herdrServerStartMs = 5_000;
+/** A Herdr pane's ID, such as w1:p1. */
+export const herdrPanePattern = /^w[0-9]{1,9}:p[0-9]{1,9}$/;
 
 /**
  * setsid detaches the server from the exec, and the redirects let the exec return without waiting on its output.

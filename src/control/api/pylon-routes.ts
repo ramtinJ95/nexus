@@ -7,13 +7,12 @@ import type { PortRange, Preview, Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
 import { checkoutReader, contentType, maxFileBytes, pathsFit, type CheckoutReader } from "../../checkout-files.ts";
-import { herdrPanePattern } from "../../contract/attach-parse.ts";
 import { linkedName } from "../../services-file.ts";
 import { reservedPorts } from "../../protocol/ports.ts";
 import { maxRecordBytes, readTranscriptImage } from "../claude-transcript.ts";
 import { partHash } from "../conversation-view.ts";
 import { ok, created, noContent, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
-import { checkoutDir, focusScript } from "../../guest-contract.ts";
+import { checkoutDir, focusScript, herdrPanePattern } from "../../guest-contract.ts";
 
 const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
 const sessionSchema = z.strictObject({

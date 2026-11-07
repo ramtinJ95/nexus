@@ -3,10 +3,9 @@ import { z } from "zod";
 import { defaultTerm, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach.ts";
 import { terminalSize } from "../guest-terminal.ts";
 import type { ActualState } from "../control/reconcile.ts";
+import { herdrPanePattern } from "../guest-contract.ts";
 
 const termPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
-/** A Herdr pane's ID, such as w1:p1. */
-export const herdrPanePattern = /^w[0-9]{1,9}:p[0-9]{1,9}$/;
 
 export const attachRoute = /^\/v1\/threads\/([^/]+)\/attach$/;
 

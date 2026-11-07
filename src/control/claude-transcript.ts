@@ -141,7 +141,7 @@ echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3))`,
 export async function readTranscript(open: OpenPipe, session: string, cursor: TranscriptCursor, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<TranscriptRead | null> {
   checkSession(session);
   const stream = await open(["sh", "-c", readScript, session, projects, String(cursor.offset), String(maxRecordBytes), cursor.before, String(beforeBytes)]);
-  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "the transcript", okCodes: [0, 3] });
+  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "the transcript", okCodes: [0, noTranscript] });
   if (code === noTranscript) return null;
   const newline = out.indexOf(0x0a);
   const header = newline < 0 ? null : /^(\d{1,15}) (\d{1,15}) (\d{1,15})$/.exec(out.subarray(0, newline).toString("latin1"));
@@ -173,7 +173,7 @@ export async function readTranscriptImage(open: OpenPipe, session: string, image
   checkSession(session);
   if (image.bytes > maxRecordBytes) return null;
   const stream = await open(["sh", "-c", imageScript, session, projects, String(image.offset), String(image.bytes)]);
-  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: image.bytes, what: "the transcript's image", okCodes: [0, 3] });
+  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: image.bytes, what: "the transcript's image", okCodes: [0, noTranscript] });
   if (code === noTranscript) return null;
   if (out.length !== image.bytes || sha256(out) !== image.sha256) return null;
   let record: unknown;
