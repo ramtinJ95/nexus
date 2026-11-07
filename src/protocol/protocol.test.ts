@@ -408,9 +408,9 @@ test("each union's list holds exactly its type's members, and the parser that re
   assert.equal(causes("cosmic-ray"), "unknown", "a cause this control plane does not know");
 });
 
-test("ids.ts imports nothing, so every module can take its IDs from it without a cycle", () => {
+test("ids.ts imports only Node builtins, so every module can take its IDs from it without a cycle", () => {
   const source = readFileSync(new URL("../ids.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /^\s*import\b|\bimport\s*\(/m);
+  assert.doesNotMatch(source, /^\s*import\b(?![^;]*\bfrom\s*"node:[a-z/]+";)|\bimport\s*\(/m);
   assert.doesNotMatch(source, /^\s*export\b[^;]*\bfrom\s*["']/m);
 });
 
