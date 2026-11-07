@@ -6,7 +6,7 @@ import type { StoredThread, Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 import type { PrWatchState } from "./pr-watch-store.ts";
 import { scopedFlight } from "../single-flight.ts";
-import { prWatchPrefix } from "../agent-protocol.ts";
+import { prWatchPrefix } from "./agent-protocol.ts";
 import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
 
 type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;

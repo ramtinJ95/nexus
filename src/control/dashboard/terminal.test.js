@@ -1,6 +1,6 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
-import { attachPath, defaultTerm } from "../../attach-route.ts";
+import { attachPath, defaultTerm } from "../../contract/attach.ts";
 import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing, steadyMs } from "./terminal.js";
 import { styleAdopter } from "./term-styles.js";
 

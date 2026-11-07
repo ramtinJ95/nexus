@@ -8,7 +8,7 @@ import { claudeConversations } from "./claude-conversation.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { addThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
-import { claudeProjects, maxEntries, type ClaudeEntry } from "../claude-transcript.ts";
+import { claudeProjects, maxEntries, type ClaudeEntry } from "./claude-transcript.ts";
 import { processStream } from "../process-stream.ts";
 import { claudeHook } from "../../images/pylon/nexus-contract.ts";
 import type { ImageId, LiveHash, NodeName } from "../ids.ts";

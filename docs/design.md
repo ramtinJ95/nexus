@@ -840,7 +840,7 @@ restarted, shows the transcript as of its last read. Only complete lines are tak
 and a record over 4 MiB is skipped with a visible marker, so one huge tool output
 cannot stall the reader.
 
-The parser in `src/claude-transcript.ts` was written against real Claude Code 2.1.308
+The parser in `src/control/claude-transcript.ts` was written against real Claude Code 2.1.308
 transcripts from a pylon. It turns them into a small model that only grows: prompts,
 replies, tool calls, tool results paired by call ID, background task notifications
 (subagents and shells), queue operations, notices, turn durations and the pull

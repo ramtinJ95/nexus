@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { mint, planningPrefix, tokenBlocks } from "../agent-protocol.ts";
+import { mint, planningPrefix, tokenBlocks } from "./agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Pipeline } from "./pipeline.ts";

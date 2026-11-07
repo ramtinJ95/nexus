@@ -4,7 +4,7 @@
  * take what they need from one read of it.
  */
 import type { ConversationView } from "@earendil-works/pi-durable";
-import { errorStop, type ClaudeEntry } from "../claude-transcript.ts";
+import { errorStop, type ClaudeEntry } from "./claude-transcript.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import { promptSenders, type PromptSenders } from "./inbox.ts";
 import type { Registry } from "./registry.ts";

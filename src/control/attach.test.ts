@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { duplexPair, PassThrough } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocket, WebSocketServer, type ClientOptions } from "ws";
-import { encodeMessage, type AttachRequest } from "../attach-wire.ts";
+import { encodeMessage, type AttachRequest } from "../contract/attach.ts";
 import { terminalSize, type Terminal } from "../guest-terminal.ts";
 import type { StreamEnd } from "../protocol/streams.ts";
 import { maxQueuedKeys, maxQueuedWrites, serveAttach, type AttachTiming, type Ending, type Look, type PylonDoor } from "./attach.ts";

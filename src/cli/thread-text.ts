@@ -8,7 +8,7 @@ import type { QueuedThread, Wait } from "../control/queue.ts";
 import type { Review } from "../control/review-model.ts";
 import type { Question } from "../control/questions.ts";
 import { reservedNames } from "../control/holds.ts";
-import { usageLimitText } from "../claude-transcript.ts";
+import { usageLimitText } from "../control/claude-transcript.ts";
 import { keptPastDay } from "../control/reconcile.ts";
 import { checkBeside, liveNote, phaseNote, reviewersNote, roundNote, roundsSpent } from "../control/review-model.ts";
 import type { Changes, Listing } from "../checkout-files.ts";

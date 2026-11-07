@@ -12,7 +12,7 @@
  * Only this process knows that it opened a run's pipe, so a check thread it holds no run for, as after a restart, may
  * have run something already. It is thrown away, and the check starts again in a fresh one.
  */
-import { checkCaller, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, verifyCaller } from "./agent-protocol.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";

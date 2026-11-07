@@ -8,9 +8,9 @@ import { HttpError } from "../http-error.ts";
 import { focusScript } from "../../probe/guest/sessions.ts";
 import { checkoutDir, sessionHarnessSchema } from "../../session-harness.ts";
 import { checkoutReader, contentType, maxFileBytes, pathsFit, type CheckoutReader } from "../../checkout-files.ts";
-import { herdrPanePattern } from "../../attach-wire.ts";
+import { herdrPanePattern } from "../../contract/attach-parse.ts";
 import { linkedName, reservedPorts } from "../../services-file.ts";
-import { maxRecordBytes, readTranscriptImage } from "../../claude-transcript.ts";
+import { maxRecordBytes, readTranscriptImage } from "../claude-transcript.ts";
 import { partHash } from "../dashboard/items.ts";
 import { ok, created, noContent, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
 

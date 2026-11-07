@@ -1,7 +1,7 @@
 /** Standing rules: a project's Markdown that each builder thread it starts gets with its first message. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
 import { checkGate, verifyGate } from "./gate.ts";
 import type { PipelineItem } from "./pipeline.ts";
 import type { QueuedThread } from "./queue.ts";

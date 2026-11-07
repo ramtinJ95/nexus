@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { claudeProjects, maxRecordBytes, type ClaudeConversation } from "../claude-transcript.ts";
+import { claudeProjects, maxRecordBytes, type ClaudeConversation } from "./claude-transcript.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

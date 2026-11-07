@@ -4,7 +4,7 @@
  * and what waits on the person.
  */
 import type { ThreadId } from "../../ids.ts";
-import { roleOf } from "../../agent-protocol.ts";
+import { roleOf } from "../agent-protocol.ts";
 import { keptPastDay } from "../reconcile.ts";
 import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pipeline.ts";
 import { checkBeside, checkThread, liveNote, roundsSpent, type PhaseKind, type Review } from "../review-model.ts";

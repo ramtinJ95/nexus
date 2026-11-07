@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { claudeProjects } from "../claude-transcript.ts";
+import { claudeProjects } from "./claude-transcript.ts";
 import { claudeHook } from "../../images/pylon/nexus-contract.ts";
 import { request } from "node:http";
 import { join } from "node:path";

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
-import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
 import type { PullRequest } from "./github.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";

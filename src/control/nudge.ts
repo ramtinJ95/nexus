@@ -7,7 +7,7 @@
  * thread to the person through its `decision` attention. A pull request ends it, and the person writing to the thread
  * leaves the thread alone for good.
  */
-import { nudgePrefix, startedByNexus } from "../agent-protocol.ts";
+import { nudgePrefix, startedByNexus } from "./agent-protocol.ts";
 import { gitPollMs } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";

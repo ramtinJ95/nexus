@@ -45,7 +45,7 @@ import { claudeConversations } from "./claude-conversation.ts";
 import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } from "./thread-agent.ts";
 import type { Whoami } from "./wire.ts";
 import type { UsageBackfillJob } from "./usage-backfill.ts";
-import { attachRoute, parseAttachQuery } from "../attach-wire.ts";
+import { attachRoute, parseAttachQuery } from "../contract/attach-parse.ts";
 import { openTerminal } from "../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "./attach.ts";
 import { HttpError, type ApiErrorCode } from "./http-error.ts";

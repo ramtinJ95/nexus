@@ -4,7 +4,7 @@
  * The upgrade fills in what the older record lacks, caps its rounds and gives its findings priorities, as the read
  * before it did, so a control plane rolled back to an older release reads the upgraded record unchanged.
  */
-import { reviewPrefix } from "../agent-protocol.ts";
+import { reviewPrefix } from "./agent-protocol.ts";
 import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
 import { personOnly, reservedCases, reservedNames, type HoldCode } from "./holds.ts";
 import { findingSchema, maxRounds, secondReads, type Change, type Review } from "./review-model.ts";

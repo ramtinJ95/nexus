@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { textLimits, type ClaudeEntry } from "../claude-transcript.ts";
+import { textLimits, type ClaudeEntry } from "./claude-transcript.ts";
 import { askAnswer, askedIn, askRecord, choicesSchema, choicesSummary, reportedAsks, type ClaudeAsk } from "./questions.ts";
 import type { ThreadId } from "../ids.ts";
 

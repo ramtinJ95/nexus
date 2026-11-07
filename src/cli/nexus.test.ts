@@ -19,7 +19,7 @@ import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { PipelineItem } from "../control/pipeline.ts";
-import { planningPrefix } from "../agent-protocol.ts";
+import { planningPrefix } from "../control/agent-protocol.ts";
 import type { QueuedThread } from "../control/queue.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { ThreadDetail } from "../control/wire.ts";
@@ -44,7 +44,7 @@ import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../pro
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import { checkoutDir } from "../session-harness.ts";
-import { claudeProjects, transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
+import { claudeProjects, transcriptStart, type ClaudeEntry } from "../control/claude-transcript.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-kit.ts";
 import { call, CliError, follow } from "./transport.ts";

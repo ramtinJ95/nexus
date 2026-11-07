@@ -15,7 +15,7 @@
  * passes nor a pass after a crash judge one failure twice or act on it twice.
  */
 import { z } from "zod";
-import { judgmentPrefix, latest, mint, roleOf } from "../agent-protocol.ts";
+import { judgmentPrefix, latest, mint, roleOf } from "./agent-protocol.ts";
 import type { ConversationId, HarnessHost } from "../harness/host.ts";
 import type { ThreadSetup } from "./templates.ts";
 import { liveHashOf } from "../spawn.ts";

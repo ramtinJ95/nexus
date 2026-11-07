@@ -14,7 +14,7 @@ import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
 import { prWatcher, summaryOf } from "./pr-watch.ts";
 import { commentCap } from "./pr-watch-model.ts";
-import { prWatchPrefix } from "../agent-protocol.ts";
+import { prWatchPrefix } from "./agent-protocol.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "../harness/host.ts";

@@ -6,7 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { ConversationView, EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, ThreadDetail } from "../../control/wire.ts";
 import type { Thread } from "../../control/thread-store.ts";
-import { maxEntries, type ClaudeConversation, type ClaudeEntry } from "../../claude-transcript.ts";
+import { maxEntries, type ClaudeConversation, type ClaudeEntry } from "../../control/claude-transcript.ts";
 import { agentView, claudeFrames, queuedOf, type ClaudeFrame, type ViewFrame } from "../../control/conversation-view.ts";
 import type { ActualState } from "../../control/reconcile.ts";
 import { CliError } from "../transport.ts";

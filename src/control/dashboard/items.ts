@@ -6,8 +6,8 @@ import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi
 import { isImage } from "../../image-types.ts";
 import { checkoutDir } from "../../session-harness.ts";
 import type { ThreadId } from "../../ids.ts";
-import type { ClaudeConversation, ClaudeEntry, PromptSource, TranscriptImage } from "../../claude-transcript.ts";
-import type { Sender } from "../../agent-protocol.ts";
+import type { ClaudeConversation, ClaudeEntry, PromptSource, TranscriptImage } from "../claude-transcript.ts";
+import type { Sender } from "../agent-protocol.ts";
 import type { PromptSenders } from "../inbox.ts";
 import { queuedOf, type AgentView } from "../conversation-view.ts";
 import { askedIn, askQuestionId, type AskedQuestion, type Question } from "../questions.ts";

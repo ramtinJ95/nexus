@@ -1,5 +1,5 @@
 /** A project's standing rules: which starts carry them, how they join a brief, and how an edit counts revisions. */
-import { roleOf } from "../agent-protocol.ts";
+import { roleOf } from "./agent-protocol.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Project, StandingRules } from "./project.ts";
 import type { StartRequest } from "./start-request.ts";

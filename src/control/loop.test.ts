@@ -22,7 +22,7 @@ import { chatgptTokenGrant } from "../secret-grants.ts";
 import { liveHashOf, type LiveSpec } from "../spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ReportedEvent } from "../events.ts";
-import { transcriptStart } from "../claude-transcript.ts";
+import { transcriptStart } from "./claude-transcript.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;

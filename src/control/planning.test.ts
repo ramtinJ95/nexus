@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { turnGate } from "./drain.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { planBlocks, planning, proposalItem } from "./planning.ts";
-import { planningPrefix } from "../agent-protocol.ts";
+import { planningPrefix } from "./agent-protocol.ts";
 import { openRegistry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { agentReader } from "./agent-conversation.ts";

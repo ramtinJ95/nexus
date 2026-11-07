@@ -6,7 +6,7 @@ import type { ThreadRow } from "../wire.ts";
 import { attentions, needsPerson } from "../attention.ts";
 import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import { usageLimitText } from "../../claude-transcript.ts";
+import { usageLimitText } from "../claude-transcript.ts";
 import { agoText, clock } from "./elapsed.ts";
 
 interface Page { status: number; headers: Record<string, string>; body: string }
