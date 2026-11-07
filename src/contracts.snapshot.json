@@ -62,6 +62,7 @@
     "src/probe/fake-tailscale.ts: reserved-path:tailnet",
     "src/probe/redact.ts: reserved-path:secrets",
     "src/probe/server.ts: reserved-path:auth",
+    "src/protocol/http.ts: reserved-path:auth",
     "src/protocol/routes.ts: reserved-path:auth",
     "src/protocol/secret-grants.ts: reserved-path:secrets",
     "src/pylon-vm/host-bridge.ts: reserved-path:egress",

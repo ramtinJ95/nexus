@@ -1,6 +1,7 @@
 import { request } from "node:http";
 import { BodyTooLarge, readBody } from "../request-body.ts";
-import { PeerRefused, verifyPeer, type Whois } from "../tailscale.ts";
+import { PeerRefused, verifyPeer } from "../tailscale.ts";
+import type { Whois } from "../protocol/http.ts";
 
 /** A deployment API answer other than 200. `body` is the whole response, and the message only its start. */
 export class DeployHttpError extends Error {

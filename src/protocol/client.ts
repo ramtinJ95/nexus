@@ -4,9 +4,9 @@
  * The wire encoding of node health is private to this module, which reads it in `health`.
  */
 import { Agent, request, type IncomingMessage } from "node:http";
+import type { Socket } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { localApiWhois, PeerRefused, verifyPeer, type Whois } from "../tailscale.ts";
 import { asSent, named, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactManifest } from "./images.ts";
 import type { JobId, NodeName, PortableArtifactId, PylonId, TailnetNodeId } from "../ids.ts";
@@ -17,7 +17,7 @@ import { clientByteStream, streamPath, streamProtocol, type ByteStream } from ".
 import { parseArtifactManifest } from "./artifacts.ts";
 import { artifactUsageSchema, dropReplySchema, type ArtifactUsage, type DropReply, type DropRequest } from "./cleanup.ts";
 import { gitReadReplySchema, probePort } from "./routes.ts";
-import { isProbeError, probeError, ProbeHttpError, text } from "./http.ts";
+import { isProbeError, probeError, ProbeHttpError, text, verifyPeer, type Whois } from "./http.ts";
 
 /**
  * The control plane's handle on one probe. Methods reject with ProbeError when the probe cannot be reached or is not
@@ -83,14 +83,11 @@ const dropTimeoutMs = 120_000;
 /** A command answers only when it is done: an exec of up to 60 s, or a session open that waits for its agent. */
 const commandTimeoutMs = 90_000;
 
-/**
- * `whois` defaults to the local tailscaled. Tests pass a fake one, and `port` exists so they can run
- * a probe on a free loopback port.
- */
-export function connectProbe(node: NodeName, tailnetHost: string, expected: TailnetNodeId, options: { port?: number; whois?: Whois; streamTimeoutMs?: number } = {}): ProbeClient {
+/** `whois` is the local tailscaled's, or a test's fake. `port` exists so tests can run a probe on a free loopback port. */
+export function connectProbe(node: NodeName, tailnetHost: string, expected: TailnetNodeId, options: { whois: Whois; port?: number; streamTimeoutMs?: number }): ProbeClient {
   // Plain HTTP, because WireGuard already encrypts the link. The identity check is whois on the socket we got.
   const port = options.port ?? probePort;
-  const whois = options.whois ?? localApiWhois();
+  const { whois } = options;
   const agent = new Agent({ keepAlive: false });
   const streamTimeoutMs = options.streamTimeoutMs ?? requestTimeoutMs;
 
@@ -109,15 +106,13 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (body !== null) req.setHeader("content-type", contentType);
       // A body can be a secret, so not even the request line goes out until whois names the connected peer.
       req.once("socket", (socket) => {
-        verifyPeer(socket, whois, (id) => id === expected).then(() => req.end(body ?? undefined), (err: Error) => req.destroy(refusal(err, "connection")));
+        verifyExpected(socket, "connection").then(() => req.end(body ?? undefined), (err: Error) => req.destroy(err));
       });
     });
   }
 
-  /** A ProbeError for verifyPeer's refusal, and whois's own error as it is. */
-  function refusal(err: Error, what: "connection" | "stream"): Error {
-    if (!(err instanceof PeerRefused)) return err;
-    return err.peer === null ? probeError("unreachable", `${node}: the ${what} closed before whois`) : probeError("forbidden", `${node}: ${err.message}, expected ${expected}`);
+  function verifyExpected(socket: Socket, what: "connection" | "stream"): Promise<void> {
+    return verifyPeer(socket, whois, (id) => id === expected, `${node}: the ${what} closed before whois`, (id, at) => `${node}: ${at} is tailnet node ${id ?? "unknown"}, expected ${expected}`);
   }
 
   function statusError(method: string, path: string, status: number, body: string, conflict?: "not-running"): ProbeHttpError {
@@ -216,11 +211,11 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
         req.on("upgrade", (_res, socket, head) => {
           // Node hands over an upgraded socket without its error handler. A reset ends the stream as lost.
           socket.on("error", () => undefined);
-          verifyPeer(socket, whois, (id) => id === expected).then(() => {
+          verifyExpected(socket, "stream").then(() => {
             // pi-env pings every 5 s, but a terminal can be silent for hours.
             socket.setTimeout(0);
             resolve(clientByteStream(socket, head));
-          }, (err: Error) => { socket.destroy(); reject(refusal(err, "stream")); });
+          }, (err: Error) => { socket.destroy(); reject(err); });
         });
         req.on("response", (res) => {
           text(res).then((body) => reject(res.statusCode === 504 ? probeError("unreachable", `${node}: ${body}`) : statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);

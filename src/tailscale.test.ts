@@ -6,7 +6,9 @@ import { connect, createServer as createNetServer, type AddressInfo } from "node
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localApiWhois, localApiWhoisNode, PeerRefused, verifyPeer, type Whois } from "./tailscale.ts";
+import { localApiWhois, localApiWhoisNode, PeerRefused, tailnetNodeIdPattern, verifyPeer } from "./tailscale.ts";
+import { tailnetNodeIdSchema } from "./protocol/fields.ts";
+import type { Whois } from "./protocol/http.ts";
 import type { TailnetNodeId } from "./ids.ts";
 
 // A stand-in for tailscaled's LocalAPI on a Unix socket. The real daemon is never contacted.
@@ -106,4 +108,10 @@ test("verifyPeer asks whois once a connecting socket connects, and refuses a soc
   asked.length = 0;
   await assert.rejects(verifyPeer(unconnected, whois, () => true), { peer: null, message: "the connection closed before whois" });
   assert.deepEqual(asked, [], "whois is not asked about a socket with no peer");
+});
+
+test("tailnetNodeIdPattern, which the bootstrap deployer checks with, accepts what protocol's tailnetNodeIdSchema accepts", () => {
+  for (const id of ["nAbCdEf1CNTRL", "n1", "n", "AbCdEf1CNTRL", "nAb-Cd", " nAbCd", "nAbCd\n", ""]) {
+    assert.equal(tailnetNodeIdPattern.test(id), tailnetNodeIdSchema.safeParse(id).success, JSON.stringify(id));
+  }
 });

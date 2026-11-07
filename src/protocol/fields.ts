@@ -9,7 +9,6 @@
  *   from the top of the payload, and what is wrong with it: `command.timeoutMs: Too big: expected number to be <=60000`.
  */
 import { z } from "zod";
-import { tailnetNodeIdPattern } from "../tailscale.ts";
 import { named } from "../parse.ts";
 import { isImageId, isNodeName, isPylonId, isTemplateId, type ImageId, type NodeName, type PylonId, type TailnetNodeId, type TemplateId } from "../ids.ts";
 
@@ -21,7 +20,7 @@ export const nodeNameSchema = z.string().pipe(z.custom<NodeName>(isNodeName, {
 export const pylonIdSchema = z.string().refine(isPylonId, "expected a pylon ID");
 
 export const tailnetNodeIdSchema = z.string()
-  .regex(tailnetNodeIdPattern, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)")
+  .regex(/^n[A-Za-z0-9]+$/, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)")
   .transform((id) => id as TailnetNodeId);
 
 export const imageId = z.string().pipe(z.custom<ImageId>(isImageId, "expected an image ID"));
