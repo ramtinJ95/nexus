@@ -3,11 +3,8 @@
  * not stored.
  */
 import { json, type Db } from "./db.ts";
-import type { ProjectId } from "../ids.ts";
+import type { ItemId, ProjectId } from "../ids.ts";
 import type { StartRequest } from "./start-request.ts";
-
-declare const brand: unique symbol;
-export type ItemId = string & { readonly [brand]: "ItemId" };
 
 export interface ItemRecord {
   id: ItemId;

@@ -11,12 +11,12 @@
 import { startedByNexus } from "./agent-protocol.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs } from "../spawn.ts";
-import type { ProjectId, ThreadId } from "../ids.ts";
+import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import { checkStart, newThreadId, resourcesOf } from "./threads.ts";
+import { checkStart, resourcesOf } from "./threads.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import { sendWithStandingRules } from "./standing-rules.ts";
@@ -141,7 +141,8 @@ export function threadQueue(options: {
     if (record?.status !== "started" || record.firstMessage !== "pending" || record.message === null) return;
     const t = registry.thread(id);
     if (t === undefined || t.status === "archived" || t.status === "deleted") return;
-    await sendWithStandingRules(registry, id, `queued:${id}`, record.message, (text) => send(id, text, `queued:${id}`));
+    const requestId = requestIds.queued(id);
+    await sendWithStandingRules(registry, id, requestId, record.message, (text) => send(id, text, requestId));
     registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" });
   }
 

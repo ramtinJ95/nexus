@@ -19,7 +19,7 @@ import type { StandingRulesStamp } from "./standing-rules.ts";
 import { HttpError } from "./http-error.ts";
 import { json, jsonOrNull, type Db, type Row } from "./db.ts";
 import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
-import type { NodeName, PylonId, ThreadId } from "../ids.ts";
+import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import type { HerdrStatus, NodeObservation } from "../protocol/observations.ts";
 import type { BootInputs } from "../spawn.ts";
@@ -153,7 +153,7 @@ function threadRow(r: Row): StoredThread {
     id: r.id as ThreadId,
     title: r.title as string,
     project: r.project as ProjectId,
-    pylonId: `pylon-${r.id as string}` as PylonId,
+    pylonId: pylonIdOf(r.id as string),
     status: r.status as ThreadStatus,
     conversationId: r.conversation_id as string | null,
     startedBy: r.started_by as string,

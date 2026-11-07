@@ -21,14 +21,13 @@ import { sampleOf } from "../node-metrics.ts";
 import { personPhase, type Review, type Round } from "../review-model.ts";
 import { personOnly, reservedNames } from "../holds.ts";
 import { proposalQuestion } from "../planning.ts";
-import { itemRequestId } from "../pipeline.ts";
 import { startKey } from "../threads.ts";
 import { claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { checkCaller, reviewPrefix, reviewerCaller, usageLimitPrefix, verifyCaller } from "../agent-protocol.ts";
 import type { AgentCall } from "../agent-usage.ts";
-import type { ImageId, NodeName, ProjectId, PylonId, ThreadId } from "../../ids.ts";
-import type { ItemId, ItemRecord } from "../pipeline-store.ts";
+import { requestIds, type ImageId, type ItemId, type NodeName, type ProjectId, type PylonId, type ThreadId } from "../../ids.ts";
+import type { ItemRecord } from "../pipeline-store.ts";
 import type { Thread } from "../thread-store.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import type { PylonObservation } from "../../protocol/observations.ts";
@@ -646,7 +645,7 @@ async function seedPipeline(d: Demo, world: World) {
   const graphs = world.threads.get("graphs")!;
   const prune = { project: "nexus", title: "Prune events older than 90 days" };
   const pruneBrief = "Add a pruning pass for events older than 90 days.";
-  d.queue!.add(prune, pruneBrief, [graphs.id], laptop, startKey(itemRequestId("it-prune" as ItemId), { request: prune, message: pruneBrief, after: [graphs.id] }));
+  d.queue!.add(prune, pruneBrief, [graphs.id], laptop, startKey(requestIds.pipeline("it-prune" as ItemId), { request: prune, message: pruneBrief, after: [graphs.id] }));
   await d.call("POST", "/v1/threads", { project: "storefront", title: "Wishlist sharing links", after: [world.threads.get("rounding")!.id], message: "Let a shopper share a wishlist by link." });
   for (const i of [
     item("it-prune", "nexus", "Prune events older than 90 days", 20 * hour, { approved: { by: laptop, at: now() - 19 * hour } }),
@@ -750,7 +749,7 @@ export async function seedDemo(d: Demo) {
     const t = await back(spec.ago, async () => {
       if (spec.item !== undefined) {
         const request = { project: spec.project, title: spec.title };
-        return d.startThread(request, laptop, undefined, startKey(itemRequestId(spec.item as ItemId), { request, message: null, after: [] }));
+        return d.startThread(request, laptop, undefined, startKey(requestIds.pipeline(spec.item as ItemId), { request, message: null, after: [] }));
       }
       if (spec.by !== undefined) return d.startThread({ project: spec.project, title: spec.title, ...(spec.by !== reviewerCaller ? { bare: true } : {}) }, spec.by);
       const res = await d.call("POST", "/v1/threads", {

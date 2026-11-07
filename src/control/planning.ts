@@ -19,18 +19,17 @@ import { mint, planningPrefix, tokenBlocks } from "./agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import { HttpError } from "./http-error.ts";
 import type { Pipeline } from "./pipeline.ts";
-import type { ItemId, ItemRecord } from "./pipeline-store.ts";
+import type { ItemRecord } from "./pipeline-store.ts";
 import type { Proposal, Question, ThreadQuestion } from "./questions.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import type { ThreadId } from "../ids.ts";
+import { isItemId, itemIdFrom, type ItemId, type ThreadId } from "../ids.ts";
 
 type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
 
 const planFence = "nexus-plan";
 const acceptOption = "accept";
 const rejectOption = "reject";
-const itemIdPattern = /^it-[0-9a-f]{12}$/;
 
 const blockSchema = z.object({
   token: z.string(),
@@ -45,7 +44,7 @@ const blockSchema = z.object({
     const earlier = items.slice(0, i).map((e) => e.key);
     if (earlier.includes(item.key)) ctx.addIssue({ code: "custom", message: `key ${item.key} is used twice` });
     for (const ref of item.after) {
-      if (!earlier.includes(ref) && !itemIdPattern.test(ref)) ctx.addIssue({ code: "custom", message: `${item.key} waits on ${ref}, which is neither an earlier item of the block nor a pipeline item's ID` });
+      if (!earlier.includes(ref) && !isItemId(ref)) ctx.addIssue({ code: "custom", message: `${item.key} waits on ${ref}, which is neither an earlier item of the block nor a pipeline item's ID` });
     }
   });
 });
@@ -61,7 +60,7 @@ export function planBlocks(replies: readonly string[], token: string): Proposal[
 /** The index is padded, so the cards of one block, asked together, list in the block's order. */
 const proposalId = (thread: ThreadId, p: Pick<Proposal, "block" | "index">) => `plan:${thread}:${p.block}:${String(p.index).padStart(2, "0")}`;
 /** The item an accepted proposal became. Made from the question, so the thread can be told it without a stored link. */
-export const proposalItem = (question: string) => `it-${createHash("sha256").update(question).digest("hex").slice(0, 12)}` as ItemId;
+export const proposalItem = (question: string) => itemIdFrom(question);
 
 export function proposalQuestion(t: Thread, p: Proposal, siblings: readonly Proposal[], askedAt: number): Omit<ThreadQuestion, "answer"> {
   const waits = p.after.map((ref) => {

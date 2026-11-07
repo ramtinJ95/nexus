@@ -8,21 +8,18 @@
  * phase is derived on every read from the records that thread has: the queued record, the thread, its pull request
  * links, its review and its attention.
  */
-import { randomBytes } from "node:crypto";
 import { defaultClaudeModel } from "../claude-state.ts";
 import { singleFlight } from "../single-flight.ts";
-import type { ProjectId, ThreadId } from "../ids.ts";
+import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
 import { HttpError } from "./http-error.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { checkBeside, liveNote, phaseNote } from "./review-model.ts";
 import type { Registry } from "./registry.ts";
 import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
-import type { ItemId, ItemRecord } from "./pipeline-store.ts";
+import type { ItemRecord } from "./pipeline-store.ts";
 
 type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
-
-const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
 
 const phaseKinds = ["planned", "queued", "building", "reviewing", "landing", "landed", "held", "archived", "cancelled"] as const;
 /** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */
@@ -45,8 +42,7 @@ export interface PipelineItem {
   approved: { by: string; at: number } | null;
 }
 
-export const itemRequestId = (id: ItemId) => `pipeline:${id}`;
-export const itemThread = (registry: PipelineRegistry, id: ItemId): ThreadId | null => registry.startRequest(itemRequestId(id))?.thread ?? null;
+export const itemThread = (registry: PipelineRegistry, id: ItemId): ThreadId | null => registry.startRequest(requestIds.pipeline(id))?.thread ?? null;
 
 const phase = (kind: ItemPhase["kind"], why: string): ItemPhase => ({ kind, why });
 
@@ -142,7 +138,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
       if (itemThread(registry, item.id) !== null || unqueued(registry, item) !== null) continue;
       const after = item.after.map((id) => itemThread(registry, id)!);
       try {
-        queue.add(item.request, item.message, after, item.addedBy, startKey(itemRequestId(item.id), { request: item.request, message: item.message, after }));
+        queue.add(item.request, item.message, after, item.addedBy, startKey(requestIds.pipeline(item.id), { request: item.request, message: item.message, after }));
         queuedAny = true;
         if (item.lastError !== null) registry.saveItem({ ...item, lastError: null });
       } catch (err) {

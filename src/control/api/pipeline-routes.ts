@@ -4,7 +4,7 @@
 import { z } from "zod";
 import { HttpError } from "../http-error.ts";
 import { itemView, type Pipeline } from "../pipeline.ts";
-import type { ItemId } from "../pipeline-store.ts";
+import type { ItemId } from "../../ids.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { startSchema } from "./thread-routes.ts";
 

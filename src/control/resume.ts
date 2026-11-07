@@ -18,7 +18,7 @@ import { singleFlight } from "../single-flight.ts";
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";
 import type { ClaudeResume, Thread } from "./thread-store.ts";
-import type { ThreadId } from "../ids.ts";
+import { requestIds, type ThreadId } from "../ids.ts";
 import type { PhaseKind } from "./review-model.ts";
 
 type ResumeRegistry = Pick<Registry, "agent" | "appendEvent" | "claudeResume" | "claudeTranscript" | "isReviewer" | "planning" | "resumedThreads" | "review" | "saveClaudeResume" | "storedThreads" | "thread">;
@@ -108,7 +108,7 @@ export function deadTurnResumer(options: {
    * it has tried for as long as a resume may take to start a turn.
    */
   async function deliver(t: Thread, { turn, count, since }: Extract<ClaudeResume, { state: "sending" }>) {
-    const requestId = `resume:${t.id}:${turn}`;
+    const requestId = requestIds.resume(t.id, turn);
     if (await inbox(t, { id: requestId, text, sender: "resume" }) !== "delivered") {
       if (clock() - since >= startMs) registry.saveClaudeResume(t.id, { state: "person", turn, count, why: `Its turn died, and Nexus could not type its resume into the session for ${startMs / 60_000} minutes.` });
       return;
