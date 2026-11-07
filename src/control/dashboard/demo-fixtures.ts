@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Message } from "@earendil-works/pi-ai";
 import { processStream } from "../../process-stream.ts";
-import { checkoutDir } from "../../session-harness.ts";
+import { checkoutDir } from "../../protocol/spawn.ts";
 import type { ByteStream } from "../../protocol/streams.ts";
 import { observeNode, image, laptop, type testApi } from "../../test-support/api-kit.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../test-support/kit.ts";

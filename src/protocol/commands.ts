@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { reservedPortMessage, reservedPorts } from "./ports.ts";
-import { claudeSessionId, claudeTextProblem, harnesses, sessionHarnessSchema, type SessionHarness } from "../session-harness.ts";
+import { claudeSessionId, claudeTextProblem, agentKinds, sessionHarnessSchema, type SessionHarness } from "./agent-kinds.ts";
 import { asSent, nonEmpty, parseJson, unchecked } from "../parse.ts";
 import type { ServiceFact, SessionIdentity } from "./observations.ts";
 
@@ -97,18 +97,18 @@ export type CommandResult =
   | { kind: "unlink-port"; refused: string | null };
 
 const port = z.int().min(1).max(65535).refine((p) => !reservedPorts.has(p), reservedPortMessage);
-/** Refuses an open-session field that only the harnesses whose agent has `takes` accept, and names them. */
-function onlyFor(takes: "promptReceipt" | "modelFlag") {
-  const labels = sessionHarnessSchema.options.filter((h) => harnesses[h].agent?.[takes] !== undefined).map((h) => harnesses[h].label);
+/** Refuses an open-session field that only some kinds of session take, and names them. */
+function onlyFor(field: "prompt" | "model") {
+  const labels = sessionHarnessSchema.options.filter((h) => agentKinds[h].takes[field]).map((h) => agentKinds[h].label);
   return z.never({ error: `only a ${labels.join(" or ")} session takes it` }).exactOptional();
 }
 const openSession = (harness: SessionHarness) => {
-  const { agent } = harnesses[harness];
+  const { takes } = agentKinds[harness];
   return z.looseObject({
     kind: z.literal("open-session"), title: nonEmpty, harness: z.literal(harness),
-    resume: agent === null ? z.never({ error: `a ${harness} session has nothing to resume` }).exactOptional() : nonEmpty.exactOptional(),
-    prompt: agent?.promptReceipt === undefined ? onlyFor("promptReceipt") : nonEmpty.max(16_384).exactOptional(),
-    model: agent?.modelFlag === undefined ? onlyFor("modelFlag") : nonEmpty.max(200).exactOptional(),
+    resume: takes.resume ? nonEmpty.exactOptional() : z.never({ error: `a ${harness} session has nothing to resume` }).exactOptional(),
+    prompt: takes.prompt ? nonEmpty.max(16_384).exactOptional() : onlyFor("prompt"),
+    model: takes.model ? nonEmpty.max(200).exactOptional() : onlyFor("model"),
   });
 };
 const claudeSession = z.string().regex(claudeSessionId, "expected a Claude Code session ID");

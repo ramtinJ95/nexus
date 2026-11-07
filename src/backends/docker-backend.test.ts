@@ -7,7 +7,7 @@ import { createDockerBackend } from "./docker-backend.ts";
 import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { dockerServices } from "./docker-services.ts";
 import type { PylonId } from "../ids.ts";
-import { checkoutDir } from "../session-harness.ts";
+import { checkoutDir } from "../protocol/spawn.ts";
 import { freePort } from "../test-support/kit.ts";
 
 type Reply = { stdout?: string; stderr?: string; code?: number };

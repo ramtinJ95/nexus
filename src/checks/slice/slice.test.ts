@@ -42,10 +42,10 @@ import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from
 import type { BackendPylon, Guest, VmBackend } from "../../backends/backend.ts";
 import { loginHosts } from "../../control/project.ts";
 import { renderOverlay } from "../../control/overlay.ts";
-import type { BootInputs, CloneRepo, OverlayFile, PreviewAssignment } from "../../protocol/spawn.ts";
+import { type BootInputs, checkoutDir, type CloneRepo, type OverlayFile, type PreviewAssignment } from "../../protocol/spawn.ts";
 import type { ProjectId } from "../../ids.ts";
 import { sessionFacts, sessionsFile } from "../../probe/guest/sessions.ts";
-import { checkoutDir, type SessionHarness } from "../../session-harness.ts";
+import type { SessionHarness } from "../../protocol/agent-kinds.ts";
 import { freePort } from "../../test-support/kit.ts";
 
 const execFileAsync = promisify(execFile);

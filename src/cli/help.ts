@@ -1,5 +1,5 @@
 /** The CLI's help text, whole for --help and by command for each command's --help. */
-import { sessionHarnessSchema } from "../session-harness.ts";
+import { sessionHarnessSchema } from "../protocol/agent-kinds.ts";
 import { version } from "../version.ts";
 import { configFile } from "./config.ts";
 

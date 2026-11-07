@@ -123,6 +123,7 @@
     "src/probe/gateway.ts: reserved-path:auth",
     "src/probe/guest/git-facts.py: reserved-path:auth",
     "src/probe/guest/git-facts.ts: reserved-path:auth",
+    "src/probe/guest/launchers.ts: reserved-path:auth",
     "src/probe/guest/listening.ts: reserved-path:auth",
     "src/probe/guest/outputs.ts: reserved-path:auth",
     "src/probe/guest/session-wake.ts: reserved-path:auth",

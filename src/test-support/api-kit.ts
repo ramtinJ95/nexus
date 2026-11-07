@@ -26,7 +26,7 @@ import type { ImageRollout } from "../control/image-rollout.ts";
 import type { UsageBackfillJob } from "../control/usage-backfill.ts";
 import type { ProjectMirror } from "../control/templates.ts";
 import { processStream } from "../process-stream.ts";
-import { checkoutDir } from "../session-harness.ts";
+import { checkoutDir } from "../protocol/spawn.ts";
 import { tokenDigest } from "../deploy/model.ts";
 import { call as callJson, runningPylon, tempDir, testCapacity, testImage, testObservation } from "./kit.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";

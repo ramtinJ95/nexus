@@ -20,7 +20,7 @@ import type {
   HerdrStatus, NodeObservation, PausedSession, ProbeEvent, PylonObservation, RunningFacts, SessionFact,
 } from "../protocol/observations.ts";
 import { requiredArtifacts, type BootInputs, type LiveSpec, type PylonSource } from "../protocol/spawn.ts";
-import { harnessNamed, type SessionHarness } from "../session-harness.ts";
+import { harnessNamed, type SessionHarness } from "../protocol/agent-kinds.ts";
 
 export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
 /** `reading` runs an archived thread's pylon for the usage backfill without bringing its sessions back. */
