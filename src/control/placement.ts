@@ -252,3 +252,9 @@ export function nodePylons(registry: PlacementRegistry, node: NodeRecord): NodeP
   }
   return { ...tallies, orphaned };
 }
+
+/** The node as `GET /v1/nodes` and `nexus doctor` read it: its record without the observation, and what its pylons hold. */
+export function nodeSummary(registry: PlacementRegistry, record: NodeRecord) {
+  const { observation, ...n } = record;
+  return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
+}

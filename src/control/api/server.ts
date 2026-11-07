@@ -39,7 +39,6 @@ import { joinNode, joinRequestSchema } from "../join.ts";
 import type { Registry } from "../registry.ts";
 import type { JoinedNode } from "../node-store.ts";
 import type { PortRange, StoredPylon, Thread } from "../thread-store.ts";
-import { liveStreams } from "../dashboard/live-frames.ts";
 import { attachScript } from "../../probe/guest/sessions.ts";
 import { claudeConversations } from "../claude-conversation.ts";
 import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } from "../thread-agent.ts";
@@ -161,7 +160,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const wakeThread = access.wakeThread;
   const claude = claudeConversations({ registry, probes });
   const agents: ThreadAgents = threadAgents({ registry, harness, claude, inPylon, whileRunning, wake: wakeThread, planning: options.planning ?? null });
-  const live = liveStreams();
 
   const views = threadViews(registry, agents, options);
   const { pylonState } = views;
@@ -186,7 +184,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   const draining = () => isDraining(registry.drain());
   const gate = options.gate ?? turnGate(draining);
-  const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, live, agentOf, draining, gate };
+  const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, agentOf, draining, gate };
 
   const routes: readonly RouteEntry[] = [["GET", /^\/v1\/health$/, () => ok(health())], ...featureRoutes(kit, options, nodeHealth)];
 

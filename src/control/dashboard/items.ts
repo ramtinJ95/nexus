@@ -1,5 +1,4 @@
 /** Reads a conversation, pi's or a Claude worker's transcript, into the items the thread page shows. */
-import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
@@ -9,7 +8,7 @@ import type { ThreadId } from "../../ids.ts";
 import type { ClaudeConversation, ClaudeEntry, PromptSource, TranscriptImage } from "../claude-transcript.ts";
 import type { Sender } from "../agent-protocol.ts";
 import type { PromptSenders } from "../inbox.ts";
-import { queuedOf, type AgentView } from "../conversation-view.ts";
+import { partHash, queuedOf, type AgentView } from "../conversation-view.ts";
 import { askedIn, askQuestionId, type AskedQuestion, type Question } from "../questions.ts";
 import { clock } from "./elapsed.ts";
 import type { Tone } from "./view.ts";
@@ -54,9 +53,6 @@ const imageRoute = (thread: ThreadId, query: Record<string, string | number>) =>
 const inlineShots = (images: readonly { src: string }[]): Shot[] => images.map(({ src }, i) => ({ src, label: `Image ${i + 1}`, caption: null }));
 const transcriptShots = (thread: ThreadId, images: readonly TranscriptImage[] = []): Shot[] => inlineShots(images.map((image) => ({ src: imageRoute(thread, { source: "transcript", ...image }) })));
 const fileShots = (thread: ThreadId, paths: readonly string[]): Shot[] => paths.map((path) => ({ src: imageRoute(thread, { source: "file", path }), label: path, caption: path }));
-/** A part's hash, once per part, since a page renders the same committed parts again and again. */
-const partHashes = new WeakMap<ImageContent, string>();
-export const partHash = (part: ImageContent) => partHashes.get(part) ?? partHashes.set(part, createHash("sha256").update(part.data).digest("hex")).get(part)!;
 /** The image parts of a harness message, each named by its entry's ID, the message's place in the entry, its own place and its hash. */
 function harnessShots(thread: ThreadId, entry: number, message: number, content: UserMessage["content"]): Shot[] {
   if (typeof content === "string") return [];

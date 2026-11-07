@@ -5,7 +5,6 @@ import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { ClaudeConversations } from "../claude-conversation.ts";
-import type { liveStreams } from "../dashboard/live-frames.ts";
 import type { TurnGate } from "../drain.ts";
 import { HttpError } from "../http-error.ts";
 import type { Registry } from "../registry.ts";
@@ -47,7 +46,6 @@ export interface ApiKit extends Access, PylonAccess, ThreadViews, EventStreams {
   startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread>;
   claude: ClaudeConversations;
   agents: ThreadAgents;
-  live: ReturnType<typeof liveStreams>;
   agentOf(t: Thread): ThreadAgents["harness" | "claude"];
   draining(): boolean;
   gate: TurnGate;
