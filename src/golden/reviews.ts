@@ -11,7 +11,7 @@ import { holdOptions, type HeldQuestion } from "../control/questions.ts";
 import { personPhase, type ModelFailure, type Review, type Round, type SecondReviewer, type Verdict } from "../control/review-model.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { ThreadId } from "../ids.ts";
-import { reviewerCaller } from "../agent-protocol.ts";
+import { reviewerCaller } from "../control/agent-protocol.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
 

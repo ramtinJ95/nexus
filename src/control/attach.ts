@@ -1,6 +1,6 @@
 /**
  * One attached terminal's life on the control plane, after the attach route's 101: it waits for the thread's pylon,
- * opens Herdr's client on a pty in it, and pumps bytes until one side ends. attach-wire.ts is the protocol.
+ * opens Herdr's client on a pty in it, and pumps bytes until one side ends. contract/attach.ts is the protocol.
  *
  * Waiting, each try records human activity and wakes the node, as a CLI command that needs the pylon running does,
  * so a paused pylon wakes on attach. Attached, the probe's count of Herdr clients keeps the human present. Every end
@@ -15,7 +15,8 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { WebSocket } from "ws";
-import { encodeMessage, parseClientMessage, type AttachErrorKind, type AttachRequest, type ServerMessage } from "../attach-wire.ts";
+import { encodeMessage, type AttachErrorKind, type AttachRequest, type ServerMessage } from "../contract/attach.ts";
+import { parseClientMessage } from "../contract/attach-parse.ts";
 import type { Terminal, TerminalSize } from "../guest-terminal.ts";
 import type { StreamEnd } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";

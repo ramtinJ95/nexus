@@ -2,7 +2,7 @@
 import type { LiveState } from "@earendil-works/pi-durable";
 import type { ThreadDetail } from "../wire.ts";
 import type { Thread, ThreadAgent } from "../thread-store.ts";
-import type { ClaudeConversation } from "../../claude-transcript.ts";
+import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { AgentView } from "../conversation-view.ts";
 import { isOpen } from "../questions.ts";
 import { clock } from "./elapsed.ts";

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import type { Question } from "./questions.ts";
 import type { PipelineItem } from "./pipeline.ts";
-import { planningPrefix } from "../agent-protocol.ts";
+import { planningPrefix } from "./agent-protocol.ts";
 import type { QueuedThread } from "./queue.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ImageId, PylonId, TailnetNodeId } from "../ids.ts";

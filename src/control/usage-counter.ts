@@ -6,7 +6,7 @@
  * read only while its node's last observation reports it running, so reading never wakes one, and a failed read keeps
  * what is recorded.
  */
-import { readAgentUsage, agentLogs, sealAgentLogs, type FileCursor } from "../agent-usage.ts";
+import { readAgentUsage, agentLogs, sealAgentLogs, type FileCursor } from "./agent-usage.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { ConversationId } from "../harness/host.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";

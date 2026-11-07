@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { reviewPrefix } from "../agent-protocol.ts";
+import { reviewPrefix } from "./agent-protocol.ts";
 import { tempDir } from "../test-kit.ts";
 import { personOnly, reservedNames, type HoldCode, type ReservedCase } from "./holds.ts";
 import { upgradeAttempts, upgradeReview } from "./record-upgrade.ts";

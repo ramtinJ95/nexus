@@ -4,11 +4,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { maxRecordBytes, parseRecord, readTranscript, readTranscriptImage, transcriptStart as start, usageLimitStop, usageLimitText, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
-import { localPipes } from "./backends/fake-guest.ts";
-import type { ByteStream } from "./protocol/streams.ts";
-import { tempDir } from "./test-kit.ts";
+import { localPipes } from "../backends/fake-guest.ts";
+import type { ByteStream } from "../protocol/streams.ts";
+import { tempDir } from "../test-kit.ts";
 
-const fixture = await readFile(new URL("./fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
+const fixture = await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8");
 const lines = fixture.split("\n").filter((line) => line !== "");
 const session = "11111111-2222-4333-8444-555555555501";
 
@@ -310,7 +310,7 @@ test("a transcript replaced by one at least as long starts over from its beginni
   assert.equal(rest.cursor.offset, Buffer.byteLength(replaced));
 });
 
-const apiErrors = (await readFile(new URL("./fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "");
+const apiErrors = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "");
 
 test("a usage limit's error notice says when the limit resets, and other API errors stay plain error notices", () => {
   const [session, weekly, limited, overloaded] = apiErrors.map(parseRecord);
@@ -346,7 +346,7 @@ test("a session stopped on its usage limit while the newest entry, bookkeeping a
 });
 
 test("Claude Code's own continue after the reset is a prompt from Claude Code, which ends the stop", async () => {
-  const session = (await readFile(new URL("./fixtures/claude-usage-limit-session.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "");
+  const session = (await readFile(new URL("../fixtures/claude-usage-limit-session.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "");
   const entries = session.flatMap(parseRecord);
   assert.deepEqual(entries.at(-1), { kind: "prompt", at: Date.parse("2026-10-26T05:55:36.839Z"), from: "other", text: "Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete." });
   assert.equal(usageLimitStop(entries), null);

@@ -5,8 +5,8 @@
  */
 import type { Db, Row } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
-import { roleOf } from "../agent-protocol.ts";
-import type { AgentCall } from "../agent-usage.ts";
+import { roleOf } from "./agent-protocol.ts";
+import type { AgentCall } from "./agent-usage.ts";
 import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
 
 /**

@@ -6,8 +6,8 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { claudeProjects } from "./claude-transcript.ts";
-import { parseJson } from "./parse.ts";
-import { openPython, pipeOutput, type OpenPipe } from "./pipe.ts";
+import { parseJson } from "../parse.ts";
+import { openPython, pipeOutput, type OpenPipe } from "../pipe.ts";
 
 export type AgentKind = "claude" | "pi";
 export interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }

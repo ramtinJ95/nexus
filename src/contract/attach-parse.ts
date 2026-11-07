@@ -1,10 +1,8 @@
-/** The attach route's parsers, for the ends that run in Node. The protocol itself is in attach-route.ts. */
+/** The attach route's parsers, for the ends that run in Node. They need zod, so they stay out of attach.ts, which the dashboard bundles. */
 import { z } from "zod";
-import { defaultTerm, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach-route.ts";
-import { terminalSize } from "./guest-terminal.ts";
-import type { ActualState } from "./control/reconcile.ts";
-
-export { attachPath, defaultTerm, encodeMessage, type AttachErrorKind, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach-route.ts";
+import { defaultTerm, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach.ts";
+import { terminalSize } from "../guest-terminal.ts";
+import type { ActualState } from "../control/reconcile.ts";
 
 const termPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 /** A Herdr pane's ID, such as w1:p1. */

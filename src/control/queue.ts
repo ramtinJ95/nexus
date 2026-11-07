@@ -8,7 +8,7 @@
  * so it starts once whatever crashes, restarts or concurrent passes come between. What blocks it is derived on every
  * pass and read rather than stored, so a reopened or later-merged pull request unblocks it.
  */
-import { startedByNexus } from "../agent-protocol.ts";
+import { startedByNexus } from "./agent-protocol.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
 import type { BootInputs } from "../spawn.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";

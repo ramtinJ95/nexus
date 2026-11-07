@@ -6,7 +6,7 @@
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
-import { usageLimitPrefix } from "../agent-protocol.ts";
+import { usageLimitPrefix } from "./agent-protocol.ts";
 
 type UsageLimitRegistry = Pick<Registry, "appendEvent" | "claudeMessage" | "claudeWorker" | "storedThreads" | "thread">;
 

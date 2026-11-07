@@ -13,7 +13,7 @@
  * where no session ends. Only a death in the last hour is resumed, so a control plane that starts, or starts this,
  * leaves the turns that died long before to the person.
  */
-import { resumePrefix, startedByNexus } from "../agent-protocol.ts";
+import { resumePrefix, startedByNexus } from "./agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";

@@ -11,8 +11,8 @@
  * Claude Code version shows something rather than nothing.
  */
 import { createHash } from "node:crypto";
-import { pipeOutput, type OpenPipe } from "./pipe.ts";
-import { claudeSessionId } from "./session-harness.ts";
+import { pipeOutput, type OpenPipe } from "../pipe.ts";
+import { claudeSessionId } from "../session-harness.ts";
 
 /**
  * Who a prompt came from: the person, a slash command, or something else, such as a plugin. A finished background

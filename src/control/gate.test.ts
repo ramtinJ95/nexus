@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { checkCaller, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, verifyCaller } from "./agent-protocol.ts";
 import { checkRuns, imageEnv, verifyGate, type CheckRuns, type CheckState } from "./gate.ts";
 import type { Thread } from "./thread-store.ts";
 import { testPylon, testRegistry, testThread } from "./test-kit.ts";

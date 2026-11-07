@@ -18,7 +18,7 @@
  * ended because the agent's model failed gets the same request again, after a wait that grows with each failure in a row.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "./agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../secret-grants.ts";

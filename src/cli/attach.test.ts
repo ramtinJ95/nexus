@@ -4,7 +4,8 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { duplexPair, PassThrough, Writable } from "node:stream";
 import { WebSocket, WebSocketServer, type ClientOptions } from "ws";
-import { encodeMessage, parseClientMessage, type ServerMessage } from "../attach-wire.ts";
+import { encodeMessage, type ServerMessage } from "../contract/attach.ts";
+import { parseClientMessage } from "../contract/attach-parse.ts";
 import { attachTerminal, type Tty } from "./attach.ts";
 import { CliError } from "./transport.ts";
 

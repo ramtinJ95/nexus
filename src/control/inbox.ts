@@ -5,7 +5,7 @@
  * for the twenty minutes a human visit does.
  */
 import { createHash } from "node:crypto";
-import { senderPrefixes, type Sender } from "../agent-protocol.ts";
+import { senderPrefixes, type Sender } from "./agent-protocol.ts";
 import type { HarnessHost } from "../harness/host.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";

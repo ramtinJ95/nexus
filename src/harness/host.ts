@@ -26,8 +26,8 @@ import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
-import type { AgentCall } from "../agent-usage.ts";
-import { senderNames, type Sender } from "../agent-protocol.ts";
+import type { AgentCall } from "../control/agent-usage.ts";
+import { senderNames, type Sender } from "../control/agent-protocol.ts";
 
 export type { ConversationId };
 

@@ -1,6 +1,6 @@
 // A thread page's browser terminal: the attach route's WebSocket, as docs/cli.md describes it, joined to a terminal
 // such as xterm.js. It lands where `nexus attach` does, and Herdr keeps its sessions when the terminal ends.
-import { attachPath, defaultTerm, encodeMessage } from "../../attach-route.ts";
+import { attachPath, defaultTerm, encodeMessage } from "../../contract/attach.ts";
 
 /**
  * The attach route for a terminal of `size` on the page's own host, which the route checks against the Origin. It

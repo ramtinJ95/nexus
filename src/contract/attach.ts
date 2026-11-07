@@ -1,14 +1,14 @@
 /**
  * The attach route's WebSocket protocol, one definition for both ends: the control plane serves it, the CLI and the
  * dashboard's terminal speak it, and docs/cli.md describes the same thing. It imports nothing at run time, so a
- * browser can bundle it. attach-wire.ts parses it.
+ * browser can bundle it. attach-parse.ts parses it.
  *
  * GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&pane=P] upgrades to a plain RFC 6455 WebSocket, with no subprotocol
  * and no extensions. After the 101, binary messages carry terminal bytes both ways, and text messages carry one JSON
  * object each, whose `type` says what it is. Either end ignores a type it does not know.
  */
-import type { TerminalSize } from "./guest-terminal.ts";
-import type { ActualState } from "./control/reconcile.ts";
+import type { TerminalSize } from "../guest-terminal.ts";
+import type { ActualState } from "../control/reconcile.ts";
 
 export const defaultTerm = "xterm-256color";
 

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { ConversationView } from "@earendil-works/pi-durable";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import type { ClaudeConversation } from "../../claude-transcript.ts";
+import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { PromptSenders } from "../inbox.ts";
 import { agentView, type AgentView } from "../conversation-view.ts";
 import type { Question } from "../questions.ts";

@@ -7,7 +7,7 @@ import { scriptedModel, scriptedModels, type ScriptedRequest } from "../harness/
 import { desiredPhase } from "./reconcile.ts";
 import type { NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
 import { briefOf, judgmentPass, type JudgmentPass } from "./judgment.ts";
 import type { Judgment } from "./judgment-store.ts";
 import { openRegistry, type Registry } from "./registry.ts";

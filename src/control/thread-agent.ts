@@ -9,7 +9,7 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ConversationView } from "@earendil-works/pi-durable";
-import type { ClaudeConversation } from "../claude-transcript.ts";
+import type { ClaudeConversation } from "./claude-transcript.ts";
 import type { PylonId } from "../ids.ts";
 import type { CommandResult } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";

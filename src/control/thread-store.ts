@@ -13,7 +13,7 @@ import { attentionOf, type Attention } from "./attention.ts";
 import { pylonEventSchema } from "../events.ts";
 import type { ReportedEvent } from "../events.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
-import type { Sender } from "../agent-protocol.ts";
+import type { Sender } from "./agent-protocol.ts";
 import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
 import { HttpError } from "./http-error.ts";
@@ -29,7 +29,7 @@ import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "./tick.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { defaultClaudeModel } from "../claude-state.ts";
-import { errorStop, maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "../claude-transcript.ts";
+import { errorStop, maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import type { NodeStore } from "./node-store.ts";
 import { upgradeAttempts } from "./record-upgrade.ts";
 

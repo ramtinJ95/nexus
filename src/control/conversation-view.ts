@@ -3,7 +3,7 @@
  * here holds state beyond one client's frames.
  */
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
-import type { ClaudeConversation, ClaudeEntry } from "../claude-transcript.ts";
+import type { ClaudeConversation, ClaudeEntry } from "./claude-transcript.ts";
 
 /** A thread's conversation, tagged with the kind of agent it is from. */
 export type AgentView = { kind: "harness"; view: ConversationView } | { kind: "claude"; view: ClaudeConversation };

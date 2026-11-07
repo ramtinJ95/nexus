@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Thread } from "./thread-store.ts";
 import type { Review, Round } from "./review-model.ts";
 import type { ImageId, NodeName, TailnetNodeId } from "../ids.ts";
-import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
 import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../test-kit.ts";
 import { testReview } from "./test-kit.ts";
 import { testApi } from "./api-test-kit.ts";

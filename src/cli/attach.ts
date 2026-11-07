@@ -1,11 +1,12 @@
 /**
  * `nexus attach`: this terminal on a pylon's Herdr session, through the control plane's attach route, which wakes the
  * pylon and waits for it. The CLI only owns the terminal: raw mode while attached, its size, and putting it back the
- * way it was on every way out. attach-wire.ts is the protocol.
+ * way it was on every way out. contract/attach.ts is the protocol.
  */
 import type { Readable, Writable } from "node:stream";
 import type { WebSocket } from "ws";
-import { attachPath, encodeMessage, parseServerMessage, termOf, type ServerMessage } from "../attach-wire.ts";
+import { attachPath, encodeMessage, type ServerMessage } from "../contract/attach.ts";
+import { parseServerMessage, termOf } from "../contract/attach-parse.ts";
 import { terminalSize, type TerminalSize } from "../guest-terminal.ts";
 import { CliError } from "./transport.ts";
 
