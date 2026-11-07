@@ -43,7 +43,7 @@ import { deadTurnResumer } from "./resume.ts";
 import { usageCounter } from "./usage-counter.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { startImageRollout } from "./image-rollout.ts";
-import { loadImageRecipe } from "../image-build.ts";
+import { loadImageRecipe } from "../image/build.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";

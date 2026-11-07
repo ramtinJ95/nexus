@@ -512,8 +512,8 @@ The registry and the conversations come back as they were at the backup, so what
 The image bakes this Mac's Claude Code plugins, skills, pi packages and pi extensions, as `images/pylon/agent-setup/manifest.json` pins them. To refresh them, capture them on the Mac in the nexus checkout, then commit and push the manifest:
 
 ```sh
-node src/agent-setup.ts --dry-run
-node src/agent-setup.ts
+node src/image/agent-setup.ts --dry-run
+node src/image/agent-setup.ts
 git commit -m "chore(image): refresh the pylon agent setup" images/pylon/agent-setup/manifest.json && git push
 ```
 

@@ -28,7 +28,7 @@ import { connectProbe } from "../../protocol/client.ts";
 import { startProbe } from "../../probe/server.ts";
 import { nodeSecrets } from "../../probe/config.ts";
 import { herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
-import type { TemplateBuildInputs, TemplateManifest } from "../../images.ts";
+import type { TemplateBuildInputs, TemplateManifest } from "../../image/images.ts";
 
 // Under /tmp, not os.tmpdir(): macOS's per-user temp dir is too long for the controllers' Unix sockets.
 const scratch = await mkdtemp("/tmp/nexus-pvb-");

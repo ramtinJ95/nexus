@@ -6,8 +6,8 @@
  * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
  */
 import { z } from "zod";
-import { canonicalSha256, type PylonResources } from "./spawn.ts";
-import type { ImageId, NodeName, ProjectId, TemplateId } from "./ids.ts";
+import { canonicalSha256, type PylonResources } from "../spawn.ts";
+import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
 
 // The base image.
 
@@ -112,7 +112,7 @@ export interface ImageManifest {
   sha256: string; // of the sparse archive peers fetch, artifactArchive in artifacts.ts
 }
 
-// buildImage, which runs on the image build node, lives in image-build.ts.
+// buildImage, which runs on the image build node, lives in build.ts.
 
 // Project templates.
 

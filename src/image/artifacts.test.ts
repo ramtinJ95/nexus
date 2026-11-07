@@ -7,10 +7,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { artifactArchive, artifactDirectory, fileCodec, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
-import { JobFailure } from "./protocol/jobs.ts";
+import { JobFailure } from "../protocol/jobs.ts";
 import type { ImageManifest, TemplateManifest } from "./images.ts";
-import type { ImageId, TemplateId } from "./ids.ts";
-import { gnuTar, tempDir } from "./test-support/kit.ts";
+import type { ImageId, TemplateId } from "../ids.ts";
+import { gnuTar, tempDir } from "../test-support/kit.ts";
 
 const template: TemplateId = "tpl-0123456789ab";
 const image: ImageId = "img-0123456789ab";

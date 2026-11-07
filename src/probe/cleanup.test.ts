@@ -6,7 +6,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { startProbe } from "./server.ts";
 import { nodeSecrets } from "./config.ts";
-import { artifactDirectory, fileCodec } from "../artifacts.ts";
+import { artifactDirectory, fileCodec } from "../image/artifacts.ts";
 import { connectProbe } from "../protocol/client.ts";
 import { JobFailure } from "../protocol/jobs.ts";
 import { tempDir } from "../test-support/kit.ts";

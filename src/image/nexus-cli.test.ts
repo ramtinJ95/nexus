@@ -6,18 +6,18 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import type { Guest } from "./backends/backend.ts";
-import { fakeGuest } from "./backends/fake-guest.ts";
-import { renderOverlay } from "./control/overlay.ts";
-import type { ProjectId } from "./ids.ts";
-import type { ServiceDecl } from "./services-file.ts";
-import type { NodeName, PylonId } from "./ids.ts";
-import type { DeclaredOutput, ServiceFact } from "./protocol/observations.ts";
-import { listenHostBridge } from "./host-bridge.ts";
-import { createPylonApi, pylonInfoFile } from "./probe/pylon-api.ts";
-import { freePort } from "./test-support/kit.ts";
+import type { Guest } from "../backends/backend.ts";
+import { fakeGuest } from "../backends/fake-guest.ts";
+import { renderOverlay } from "../control/overlay.ts";
+import type { ProjectId } from "../ids.ts";
+import type { ServiceDecl } from "../services-file.ts";
+import type { NodeName, PylonId } from "../ids.ts";
+import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
+import { listenHostBridge } from "../host-bridge.ts";
+import { createPylonApi, pylonInfoFile } from "../probe/pylon-api.ts";
+import { freePort } from "../test-support/kit.ts";
 
-const cli = fileURLToPath(new URL("../images/pylon/nexus", import.meta.url));
+const cli = fileURLToPath(new URL("../../images/pylon/nexus", import.meta.url));
 const pylonId = "pylon-t1" as PylonId;
 const pylonJson = renderOverlay({
   pylonId, threadId: "t1", project: "acme" as ProjectId, node: "infra-testbench" as NodeName, allowedHosts: ["github.com"],

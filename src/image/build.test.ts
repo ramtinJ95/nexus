@@ -5,15 +5,15 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { artifactDirectory, tarCodec } from "./artifacts.ts";
-import { JobFailure } from "./protocol/jobs.ts";
+import { JobFailure } from "../protocol/jobs.ts";
 import {
   buildImage, debugfsErrors, debugfsModeCommands, debugfsStatCommands, loadImageRecipe, modeMismatches,
   parseDebugfsModes, parseModeListing, pylonRecipeDir, smokeChecks, smokeFailure,
-} from "./image-build.ts";
+} from "./build.ts";
 import { imageIdOf, type ImageRecipe } from "./images.ts";
-import { agentSetupManifest, installedLayout, parseAgentSetup } from "../images/pylon/agent-setup/manifest.ts";
-import type { NodeName } from "./ids.ts";
-import { tempDir } from "./test-support/kit.ts";
+import { agentSetupManifest, installedLayout, parseAgentSetup } from "../../images/pylon/agent-setup/manifest.ts";
+import type { NodeName } from "../ids.ts";
+import { tempDir } from "../test-support/kit.ts";
 
 const pins: ImageRecipe["pins"] = {
   debianDigest: `sha256:${"a".repeat(64)}`,
@@ -76,7 +76,7 @@ test("a recipe is every file under its directory and the shared checkout helper,
   assert.deepEqual(await loadImageRecipe(dir), {
     files: [
       { path: "Dockerfile", mode: 0o644, content: "FROM scratch\n" },
-      { path: "checkout-files.py", mode: 0o644, content: await readFile(new URL("./checkout-files.py", import.meta.url), "utf8") },
+      { path: "checkout-files.py", mode: 0o644, content: await readFile(new URL("../checkout-files.py", import.meta.url), "utf8") },
       { path: "dotfiles-common/pi/AGENTS.md", mode: 0o644, content: "pi rules" },
       { path: "nexus", mode: 0o755, content: "#!/bin/sh\n" },
     ],

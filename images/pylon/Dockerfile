@@ -1,4 +1,4 @@
-# The base pylon image's root filesystem. buildImage (src/image-build.ts) passes the versions in pins.json as
+# The base pylon image's root filesystem. buildImage (src/image/build.ts) passes the versions in pins.json as
 # build args, then gondolin build turns the result into the guest rootfs with Alpine's kernel and initramfs.
 # PATH and NODE_EXTRA_CA_CERTS live in gondolin.json's env, because only Gondolin's env reaches sandboxd's
 # execs as well as login shells. Logins and secrets are never in the image.
@@ -110,7 +110,7 @@ RUN cd /opt/nexus/dotfiles \
  && git add -A \
  && GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
     git -c user.name=nexus -c user.email=nexus@pylon commit -q -m "dotfiles common layer at ${DOTFILES_COMMIT}"
-# This Mac's Claude Code plugins, skills, pi packages and pi extensions, which src/agent-setup.ts captured into
+# This Mac's Claude Code plugins, skills, pi packages and pi extensions, which src/image/agent-setup.ts captured into
 # agent-setup/manifest.json. The installer fetches and installs what the manifest pins, then runs Herdr's
 # integrations, the order every boot repeats, so Herdr's hook merges into the settings.json that the plugin
 # installs wrote. It fails the build on any difference from the manifest. pi and Claude Code make their config

@@ -18,7 +18,7 @@ import type { BrokenCause, GuestNotAnswering, PausedSession, ServiceFact } from 
 import type { ByteStream } from "../protocol/streams.ts";
 import type { BootInputs, LiveSpec, OverlayFile } from "../spawn.ts";
 import type { ServiceDecl, ServiceName } from "../services-file.ts";
-import type { ArtifactManifest, ImageRecipe, TemplateBuildInputs } from "../images.ts";
+import type { ArtifactManifest, ImageRecipe, TemplateBuildInputs } from "../image/images.ts";
 import type { HostBridge } from "../host-bridge.ts";
 
 export interface VmBackend {
@@ -37,7 +37,7 @@ export interface VmBackend {
   ensureDeleted(pylonId: PylonId, signal: AbortSignal): Promise<void>;
   /** Boot the image, clone, preSetup, `.nexus/setup` as user, stop, publish. A setup failure publishes nothing. Published already: no-op. */
   buildTemplate(template: TemplateId, inputs: TemplateBuildInputs, signal: AbortSignal): Promise<void>;
-  /** buildImage in src/image-build.ts, into the artifact store under `image`, which must be the recipe's ID. Built already: no-op. */
+  /** buildImage in src/image/build.ts, into the artifact store under `image`, which must be the recipe's ID. Built already: no-op. */
   buildImage(image: ImageId, recipe: ImageRecipe, node: NodeName, signal: AbortSignal): Promise<void>;
   /** Cheap, with no guest exec. The probe layers guest facts (git, sessions, previews) on top. */
   list(): Promise<readonly BackendPylon[]>;
@@ -121,7 +121,7 @@ export type PreviewOrigin = `http://127.0.0.1:${number}`;
 /**
  * Immutable directories under /var/lib/nexus/artifacts/<id>/ with a manifest, at the same path on every
  * node, because checkpoints and templates are qcow2 overlays whose backing file is the image's rootfs.
- * Only images and templates move between nodes (src/artifacts.ts). A checkpoint holds the pylon's Claude and pi
+ * Only images and templates move between nodes (src/image/artifacts.ts). A checkpoint holds the pylon's Claude and pi
  * logins and stays in its pylon's instance on its own node.
  */
 export interface ArtifactStore {
@@ -160,7 +160,7 @@ export interface SecretSource { value(name: string): string | undefined; names()
  * the dotfiles, every boot after the first runs `.nexus/resume`, and every spawn rewrites the overlay.
  * A template is the fork's prepare published into the artifact store (src/backends/pylon-vm/pylon-vm-templates.ts). A pylon booted
  * from one copies its disk in, and its first boot checks out the pylon's own commit and runs `.nexus/resume`.
- * Images and templates move between nodes as verified ArtifactStore archives (src/artifacts.ts).
+ * Images and templates move between nodes as verified ArtifactStore archives (src/image/artifacts.ts).
  * Requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached (change 4).
  * Still to change in the fork:
  * 3. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.

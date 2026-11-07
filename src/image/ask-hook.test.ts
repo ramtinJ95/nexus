@@ -5,11 +5,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "../images/pylon/nexus-ask.ts";
-import { answerExits, type AskAnswer } from "../images/pylon/nexus-contract.ts";
-import { tempDir } from "./test-support/kit.ts";
+import { askDecision, askKey, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "../../images/pylon/nexus-ask.ts";
+import { answerExits, type AskAnswer } from "../../images/pylon/nexus-contract.ts";
+import { tempDir } from "../test-support/kit.ts";
 
-const hook = new URL("../images/pylon/nexus-claude-hook", import.meta.url).pathname;
+const hook = new URL("../../images/pylon/nexus-claude-hook", import.meta.url).pathname;
 
 /** AskUserQuestion's input as Claude Code 2.1.310 hands it to a PreToolUse or PermissionRequest hook. */
 const input = {

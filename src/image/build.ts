@@ -17,15 +17,15 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
-import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../images/pylon/agent-setup/manifest.ts";
+import { agentSetupManifest, installedLayout, parseAgentSetup, type AgentSetup } from "../../images/pylon/agent-setup/manifest.ts";
 import { artifactDirectory, sha256Of, tarCodec, type ArtifactDirectory } from "./artifacts.ts";
-import { JobFailure } from "./protocol/jobs.ts";
-import { reapGroup, signalGroup } from "./process-group.ts";
+import { JobFailure } from "../protocol/jobs.ts";
+import { reapGroup, signalGroup } from "../process-group.ts";
 import { compare, imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "./images.ts";
-import { shellQuote } from "./shell.ts";
-import type { ImageId, NodeName } from "./ids.ts";
+import { shellQuote } from "../shell.ts";
+import type { ImageId, NodeName } from "../ids.ts";
 
-export const pylonRecipeDir = fileURLToPath(new URL("../images/pylon/", import.meta.url));
+export const pylonRecipeDir = fileURLToPath(new URL("../../images/pylon/", import.meta.url));
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));
 
 /** build.sh only runs a build. pins.json becomes ImageRecipe.pins. */
@@ -43,7 +43,7 @@ export async function loadImageRecipe(dir: string = pylonRecipeDir): Promise<Ima
   const load = async (path: string, from: string | URL) => {
     files.push({ path, mode: ((await stat(from)).mode & 0o100) === 0 ? 0o644 : 0o755, content: await readFile(from, "utf8") });
   };
-  for (const path of sharedFiles) await load(path, new URL(`./${path}`, import.meta.url));
+  for (const path of sharedFiles) await load(path, new URL(`../${path}`, import.meta.url));
   for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
     if (entry.isDirectory()) continue;
     const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/");
@@ -632,7 +632,7 @@ async function run(command: string, args: readonly string[], signal: AbortSignal
 if (import.meta.main) {
   const [node, artifacts] = process.argv.slice(2);
   if (node === undefined || artifacts === undefined) {
-    console.error("usage: node src/image-build.ts <node name> <artifacts directory>");
+    console.error("usage: node src/image/build.ts <node name> <artifacts directory>");
     process.exit(64);
   }
   const recipe = await loadImageRecipe();

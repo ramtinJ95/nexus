@@ -1,6 +1,6 @@
 // build.sh's step between Gondolin's build and the tag's removal: buildImage's mode fix, for the test image.
 //   node images/pylon-test/restore-modes.ts <Docker tag> <Gondolin assets directory> <container label>
-import { restoreModes } from "../../src/image-build.ts";
+import { restoreModes } from "../../src/image/build.ts";
 import { JobFailure } from "../../src/protocol/jobs.ts";
 
 const [tag, assets, label] = process.argv.slice(2);
