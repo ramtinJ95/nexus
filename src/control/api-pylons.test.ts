@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { ThreadDetail } from "./wire.ts";
 import { ingest } from "./reconcile.ts";
 import { processStream } from "../process-stream.ts";
-import { repoInitCommand } from "../pylon-vm-backend.ts";
+import { repoInitCommand } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import { focusScript } from "../probe/guest/sessions.ts";
 import { checkoutDir } from "../session-harness.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";

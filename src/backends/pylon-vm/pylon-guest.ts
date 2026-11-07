@@ -8,15 +8,15 @@ import { appendFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Guest, PreviewOrigin } from "../backends/backend.ts";
-import { processStream } from "../process-stream.ts";
-import type { PylonId } from "../ids.ts";
-import type { ServiceFact } from "../protocol/observations.ts";
-import type { PylonLog } from "../probe/guest/session-wake.ts";
-import { statusSchema } from "./contracts.ts";
-import { stamped } from "./controller-log.ts";
-import { shellQuote as q } from "../shell.ts";
-import { existsError } from "./storage.ts";
+import type { Guest, PreviewOrigin } from "../backend.ts";
+import { processStream } from "../../process-stream.ts";
+import type { PylonId } from "../../ids.ts";
+import type { ServiceFact } from "../../protocol/observations.ts";
+import type { PylonLog } from "../../probe/guest/session-wake.ts";
+import { statusSchema } from "../../pylon-vm/contracts.ts";
+import { stamped } from "../../pylon-vm/controller-log.ts";
+import { shellQuote as q } from "../../shell.ts";
+import { existsError } from "../../pylon-vm/storage.ts";
 
 /** A login shell as `user`, in `cwd`. The fork runs guest commands as root. */
 export const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`cd ${q(cwd)} && ${script}`)}`;

@@ -37,7 +37,7 @@ import { defaultProjectResources, type Project } from "../control/project.ts";
 import { titleOf } from "../thread-title.ts";
 import { openTerminal, terminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
-import { repoInitCommand } from "../pylon-vm-backend.ts";
+import { repoInitCommand } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import type { ImageId, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";

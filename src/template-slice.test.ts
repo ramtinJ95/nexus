@@ -25,7 +25,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { artifactArchive } from "./artifacts.ts";
 import { createDockerBackend } from "./backends/docker-backend.ts";
-import { createPylonVmBackend } from "./pylon-vm-backend.ts";
+import { createPylonVmBackend } from "./backends/pylon-vm/pylon-vm-backend.ts";
 import { run as pylonVm } from "./pylon-vm/client.ts";
 import { nodeSecrets } from "./probe/config.ts";
 import { startProbe, type Probe } from "./probe/server.ts";

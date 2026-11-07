@@ -57,10 +57,10 @@ const authWords = new RegExp(`whois|caller|allowed|person|deployer|mayLand|canDe
 const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
   { case: "secrets", matches: (p) => names(p, /secret|credential/i) || p === "src/probe/redact.ts" || shipsFrom(p, "deploy/") },
   { case: "egress", matches: (p, patch) => ["src/pylon-vm/host-bridge.ts", "src/pylon-vm/runtime.ts"].includes(p) || names(p, /network|egress|allowlist/i)
-    || ((["src/control/project.ts", "src/control/overlay.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || shipsFrom(p, "src/pylon-vm")) && changes(patch, egressWords)) },
+    || ((["src/control/project.ts", "src/control/overlay.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || shipsFrom(p, "src/pylon-vm/", "src/backends/pylon-vm/")) && changes(patch, egressWords)) },
   { case: "auth", matches: (p, patch) => ["src/control/api/server.ts", "src/control/login.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts", "src/protocol/routes.ts", "src/control/api/access.ts", "src/control/api/kit.ts", "src/control/api/pylon-access.ts", "src/probe/config.ts", "src/probe/server.ts", "src/deploy/control-plane.ts", "src/deploy/http.ts"].includes(p) || names(p, /auth|login|whois/i)
     || ((["src/control/main.ts", "src/control/releases.ts"].includes(p) || shipsFrom(p, "src/control/api/", "src/probe/", "src/deploy/")) && changes(patch, authWords))
-    || (shipsFrom(p, "src/pylon-vm") && changes(patch, modeWords)) },
+    || (shipsFrom(p, "src/pylon-vm/", "src/backends/pylon-vm/") && changes(patch, modeWords)) },
   { case: "tailnet", matches: (p) => names(p, /tailnet|tailscale/i) },
   { case: "image-rebuild", matches: (p) => p.startsWith("images/") || p === "src/agent-setup.ts" },
   { case: "irreversible", matches: (p, patch) => p === "src/control/schema.ts" && (patch === "" || /^@@.*\bmigrations\b|^\+.*\b(CREATE|ALTER|DROP) (TABLE|INDEX)\b/im.test(patch)) },

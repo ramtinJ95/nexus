@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { nexusApi } from "../control/overlay.ts";
 import type { PylonId } from "../ids.ts";
 import type { HostBridgeAnswer } from "../host-bridge.ts";
-import { pylonVmHostBridge } from "../pylon-vm-backend.ts";
+import { pylonVmHostBridge } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import type { BootSpec } from "./contracts.ts";
 import { bridgeHost, hostBridgeHook, hostBridgeSocket } from "./host-bridge.ts";
 import { networkOptions } from "./network.ts";

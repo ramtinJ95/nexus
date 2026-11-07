@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { stampLines, unstamped } from "./controller-log.ts";
-import { controllerLog } from "./pylon-guest.ts";
+import { controllerLog } from "../backends/pylon-vm/pylon-guest.ts";
 
 test("a stamped stream starts each line with its time, and keeps the bytes and encodings written to it", async () => {
 	const chunks: Buffer[] = [];
