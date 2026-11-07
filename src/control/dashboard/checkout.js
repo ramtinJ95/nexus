@@ -85,9 +85,9 @@ export async function readChanges(wake = false) {
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the closing, not the failure it caused, is what to show.
       if (threadClosed(factsNow())) return changesUnreadable(factsNow());
-      // A pylon that is not running answers 409 while the read wakes it, even one the page still shows running, as
-      // the page's state lags the node's. So the read happens again once the page shows it running.
-      if (err.status === 409) {
+      // A pylon that is not running refuses the read as retryable while the read wakes it, even one the page still
+      // shows running, as the page's state lags the node's. So the read happens again once the page shows it running.
+      if (err.retryable) {
         checkout.wanted = true;
         return changesUnreadable(factsNow());
       }
