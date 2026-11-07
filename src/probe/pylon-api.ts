@@ -10,7 +10,7 @@ import { pylonEventSchema, type PylonEvent } from "../events.ts";
  * guest's own refusals (an unknown service, a declared name given to `service start`) come through in.
  */
 import { z } from "zod";
-import type { Guest } from "../backend.ts";
+import type { Guest } from "../backends/backend.ts";
 import type { HostBridgeAnswer } from "../host-bridge.ts";
 import type { PortLinks } from "./run.ts";
 import { addOutput, listOutputs, OutputRefused } from "./guest/outputs.ts";

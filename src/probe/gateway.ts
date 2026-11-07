@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { STATUS_CODES, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeader, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { pipeline } from "node:stream";
-import type { PreviewOrigin } from "../backend.ts";
+import type { PreviewOrigin } from "../backends/backend.ts";
 import type { ServiceName } from "../services-file.ts";
 import type { PylonId } from "../ids.ts";
 

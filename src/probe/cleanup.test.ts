@@ -11,7 +11,7 @@ import { connectProbe } from "../protocol/client.ts";
 import { JobFailure } from "../protocol/jobs.ts";
 import { tempDir } from "../test-kit.ts";
 import { diskBytes } from "../disk-space.ts";
-import type { VmBackend } from "../backend.ts";
+import type { VmBackend } from "../backends/backend.ts";
 import type { ImageId, NodeName, PortableArtifactId, TailnetNodeId, TemplateId } from "../ids.ts";
 
 const controlPlane = "nCONTROL" as TailnetNodeId;

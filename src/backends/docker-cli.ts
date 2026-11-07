@@ -1,9 +1,12 @@
 /** How the Docker test double runs the docker CLI, and the labels it puts on what it creates. */
 import { spawn } from "node:child_process";
-import { exit, output } from "./exec.ts";
+import { exit, output } from "../exec.ts";
 
 /** `sessions` on a checkpoint is what its pause recorded, as base64url JSON, or empty when it recorded none. */
-export const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build" } as const;
+export const label = { pylon: "nexus.pylon", image: "nexus.image", bootedFrom: "nexus.booted-from", checkpoint: "nexus.checkpoint", sessions: "nexus.sessions", templateBuild: "nexus.template-build", bridgeToken: "nexus.bridge-token" } as const;
+
+/** `docker` filter arguments that select only what carries every label. */
+export const labelFilters = (labels: Readonly<Record<string, string>>): string[] => Object.entries(labels).flatMap(([k, v]) => ["--filter", `label=${k}=${v}`]);
 
 const maxBuffer = 64 << 20;
 

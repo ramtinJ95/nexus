@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { openTerminal, terminalSize, type Terminal } from "./guest-terminal.ts";
-import { localPipes } from "./fake-guest.ts";
+import { localPipes } from "./backends/fake-guest.ts";
 import { attachScript } from "./probe/guest/sessions.ts";
 
 /** Everything the terminal printed so far, read as it arrives. */

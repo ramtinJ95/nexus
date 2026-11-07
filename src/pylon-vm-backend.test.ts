@@ -14,7 +14,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
-import type { BackendPylon } from "./backend.ts";
+import type { BackendPylon } from "./backends/backend.ts";
 import { bootHooks, createPylonVmBackend, hostNestsKvm, piChatgptLoginCommand, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { settled, type Inspection } from "./pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "./pylon-vm/identity.ts";
@@ -27,7 +27,7 @@ import type { BrokenCause, ProbeEvent } from "./protocol/observations.ts";
 import { connectProbe } from "./protocol/client.ts";
 import { startProbe } from "./probe/server.ts";
 import { nodeSecrets } from "./probe/config.ts";
-import { herdrOk, herdrPane, herdrSnapshot } from "./fake-guest.ts";
+import { herdrOk, herdrPane, herdrSnapshot } from "./backends/fake-guest.ts";
 import type { TemplateBuildInputs, TemplateManifest } from "./images.ts";
 
 // Under /tmp, not os.tmpdir(): macOS's per-user temp dir is too long for the controllers' Unix sockets.

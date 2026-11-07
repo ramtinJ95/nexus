@@ -7,7 +7,7 @@ import { open, readFile } from "node:fs/promises";
 import { BlockList, isIPv6 } from "node:net";
 import { basename, dirname, isAbsolute } from "node:path";
 import { z } from "zod";
-import type { SecretSource } from "../backend.ts";
+import type { SecretSource } from "../backends/backend.ts";
 import { parseJson } from "../parse.ts";
 import type { ControlPlane } from "../deploy/control-plane.ts";
 import { type ImageId, isImageId, type TailnetNodeId } from "../ids.ts";

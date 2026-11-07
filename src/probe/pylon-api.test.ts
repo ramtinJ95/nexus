@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Guest } from "../backend.ts";
-import { fakeGuest } from "../fake-guest.ts";
+import type { Guest } from "../backends/backend.ts";
+import { fakeGuest } from "../backends/fake-guest.ts";
 import { renderOverlay, type PylonOverlay } from "../control/overlay.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ServiceDecl } from "../services-file.ts";
