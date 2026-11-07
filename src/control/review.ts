@@ -39,7 +39,7 @@ import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
 import { holdOptions, isOpen, type HeldQuestion, type Question, type ThreadQuestion } from "./questions.ts";
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, heldForGate, humanLabel,
-  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, verdictSchema,
+  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, seatsFor, seatsOf, verdictAt, verdictsFor, verdictSchema,
   type Answer, type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
@@ -389,9 +389,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * The next round's request to each reviewer, which hears only of its own findings' answers. A second reviewer that
    * joins at this round, or starts again after the loop archived it at an approval, gets its first request instead.
    */
-  const toReviewers = async (r: Review, previous: Round, base: string): Promise<Review> => {
-    const joined = await joinSecond(r);
-    const slot = secondReads(joined) ? withRound(joined, { secondVerdict: null }) : joined;
+  const toReviewers = async (r: Review, head: string, base: string): Promise<Review> => {
+    const previous = r.rounds.at(-1)!;
+    const slot = reviewRound(await joinSecond(r), head, base);
     const next = send(slot, "reviewer", (token) => nextRound(slot, previous, token, base), { kind: "reviewing" });
     return sendSecond(next, (token) => nextRound(slot, previous, token, base, "second"));
   };
@@ -416,7 +416,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (round.base !== base) return null;
     const [before, after] = [await changeAt(r, base, round.head), await changeAt(r, base, head)];
     if (before.kind !== "known" || after.kind !== "known" || changedPaths(before, after).length) return null;
-    return { ...r, rounds: [...r.rounds, { head, base, verdict: round.verdict, ...round.secondVerdict !== undefined && { secondVerdict: round.secondVerdict }, check: checkedAt(r, head), answers: null, carried: { from: round.head, ...held && { held } } }] };
+    return { ...r, rounds: [...r.rounds, { head, base, ...verdictsFor(seatsOf(round), round), check: checkedAt(r, head), answers: null, carried: { from: round.head, ...held && { held } } }] };
   };
   /**
    * The reviewer's approval of the latest round carried to `head`, so the checks run at `head` with no reviewer round.
@@ -436,11 +436,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (carried !== null) return carried;
     const n = roundsSpent(r);
     if (n >= r.maxRounds) return end(r, { ...personPhase("rounds", `${why} after round ${n}, the last this review allows, so ${head} is unreviewed.`), label: { state: "adding" }, unreviewed: head });
-    return await toReviewers(reviewRound(r, head, base), r.rounds.at(-1)!, base);
+    return await toReviewers(r, head, base);
   };
   /** `r` with a round for the reviewer at `head`. The person's waiver was of the change against the latest round's base. */
   const reviewRound = (r: Review, head: string, base: string): Review =>
-    ({ ...r, rounds: [...r.rounds, { head, base, verdict: null, check: checkedAt(r, head), answers: null }], waiver: r.rounds.at(-1)!.base === base ? r.waiver : null });
+    ({ ...r, rounds: [...r.rounds, { head, base, ...verdictsFor(seatsFor(r)), check: checkedAt(r, head), answers: null }], waiver: r.rounds.at(-1)!.base === base ? r.waiver : null });
   /**
    * The round's check beside its reviewer, started at the round's head unless the round has its result, which is
    * recorded once the run gives one. A run that cannot give one starts again in a fresh thread, and one the pylon
@@ -662,7 +662,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         next = withRound({ ...next, second: { ...read, nudges: 0 } }, { secondVerdict });
       }
       const round = next.rounds.at(-1)!;
-      if (round.verdict === null || round.secondVerdict === null) {
+      if (seatsOf(round).some((seat) => verdictAt(round, seat) === null)) {
         if (next !== r) return next;
         // A check that cannot start yet must not keep the reviewer's reminders, retries and deadline from running.
         const checked = await checkWhileReading(r, phase, builder).catch((err: unknown) => {
@@ -679,8 +679,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         const after: Phase = phase.check === undefined || phase.check.refused !== undefined ? checking() : { kind: "checking", startedAt: phase.check.startedAt, thread: phase.check.thread };
         return reviewersFindings(round).length ? send(next, "builder", () => builderNotes(next), after) : { ...next, phase: after, nudges: 0 };
       }
-      const secondAsks = round.secondVerdict != null && round.secondVerdict.findings.some(blocks);
-      const asking = !secondAsks ? "The reviewer still requests" : round.verdict.findings.some(blocks) ? "Both reviewers still request" : "The second reviewer still requests";
+      const asks = seatsOf(round).filter((seat) => verdictAt(round, seat)!.verdict === "changes");
+      const asking = asks.length === 2 ? "Both reviewers still request" : asks[0] === "second" ? "The second reviewer still requests" : "The reviewer still requests";
       if (n >= r.maxRounds) return ranOut(next, `${asking} changes after ${n} rounds, the most this review allows.`);
       // A fix round almost always moves the head, so the check stops rather than hold a pylon through it. A result it
       // gave meanwhile is kept for a round at the same head.
@@ -726,7 +726,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (carried !== null) return carried;
       }
       if (n >= r.maxRounds) return ranOut(withAnswers, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
-      return await toReviewers(reviewRound(withAnswers, snapshot.detail.head, snapshot.detail.base), withAnswers.rounds.at(-1)!, snapshot.detail.base);
+      return await toReviewers(withAnswers, snapshot.detail.head, snapshot.detail.base);
     },
     async quoting(r, phase, __, reviewer) {
       if (phase.asked === null) {
@@ -1129,10 +1129,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return null;
     });
     const id = `rv-${randomBytes(4).toString("hex")}`;
+    const second = rule === null ? {} : { second: secondFor(rule, models, project.secrets) };
     const draft: Review = {
       id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
-      maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto, brief,
-      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, verdict: null, check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
+      maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto, brief, ...second,
+      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
       since: now(), nudges: 0, startedAt: now(), asked: "",
     };
     const prompt = reviewerRequest(draft, snapshot.detail, draft.expect, kind.model);
@@ -1144,10 +1145,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
       }, reviewerCaller);
       review = { ...draft, reviewer: reviewer.id, asked: prompt, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
-      if (rule !== null) {
-        review = { ...review, second: secondFor(rule, models, project.secrets) };
-        if (secondReads(review)) review = await startSecond(withRound(review, { secondVerdict: null }), snapshot.detail);
-      }
+      if (secondReads(review)) review = await startSecond(review, snapshot.detail);
       registry.saveReview(review);
     } finally {
       beginning--;

@@ -136,3 +136,17 @@ test("approval by seat gives every verdict combination of two rounds the approva
   assert.ok(changed > 0 && changed < combinations, `${changed} combinations with a contradicted verdict`);
 });
 
+test("a stored approval with a P1 open is no approval to the rounds spent, the round note and the landing either", () => {
+  const stored = { ...parsed("approve"), findings: parsed("changes", "P1").findings };
+  const r = upgradeReview(testReview({ rounds: [
+    { head, base: "main", verdict: stored, check: { passed: true, output: "" }, answers: null },
+    { head, base: "main", verdict: parsed("approve"), check: { passed: true, output: "" }, answers: null },
+  ] }));
+  const was = upgradedBefore(testReview({ rounds: [{ head, base: "main", verdict: stored, check: { passed: true, output: "" }, answers: null }, { head, base: "main", verdict: parsed("approve"), check: { passed: true, output: "" }, answers: null }] }));
+  assert.equal(reviewerApproved(r.rounds[0]!), approvedBefore(was.rounds[0]!), "approval stays as main read it");
+  assert.deepEqual([roundsSpent(r), spentBefore(was)], [2, 1], "main counted a round after it as one that reviewed nothing new");
+  assert.deepEqual([roundNote(r), noteBefore(was) !== null], [null, true], "main said the round after it followed an approval");
+  const latest = upgradeReview(testReview({ rounds: [{ head, base: "main", verdict: stored, check: { passed: true, output: "" }, answers: null }] }));
+  assert.deepEqual(landingHolds({ review: latest, pr, heldAt: { base: "main", holds: [] } }).filter((h) => h.code === "not-approved" || h.code === "open-findings").map((h) => h.code), ["not-approved"],
+    "a landing holds on it as not approved, where main held it as open findings, a hold with the same rule");
+});
