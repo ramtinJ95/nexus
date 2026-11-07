@@ -5,7 +5,7 @@
  * sessions file keeps every session the relaunch did not bring back (`failed` in sessions.ts), so the next
  * pause records it again and the next wake retries it.
  */
-import type { Guest } from "../../backend.ts";
+import type { Guest } from "../../backends/backend.ts";
 import type { PylonId } from "../../ids.ts";
 import type { PausedSession } from "../../protocol/observations.ts";
 import { recordSessions, relaunchSessions, toPaused, type RelaunchOutcome } from "./sessions.ts";

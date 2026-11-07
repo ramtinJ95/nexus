@@ -12,10 +12,10 @@
  */
 import type { PreviewOrigin } from "./backend.ts";
 import { docker, dockerExec } from "./docker-cli.ts";
-import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "./services-file.ts";
-import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "./preview-links.ts";
-import type { ServiceFact } from "./protocol/observations.ts";
-import { checkoutDir } from "./session-harness.ts";
+import { linkedName, parseServicesFile, wantsPreview, withPublicUrls, type ServiceDecl, type ServiceName } from "../services-file.ts";
+import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "../preview-links.ts";
+import type { ServiceFact } from "../protocol/observations.ts";
+import { checkoutDir } from "../session-harness.ts";
 
 /** Published on loopback by every `docker run` of the double. */
 export const publishedPorts = { first: 8000, last: 8007 } as const;

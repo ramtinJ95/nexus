@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import type { Guest } from "../../backend.ts";
+import type { Guest } from "../../backends/backend.ts";
 import { parseJson } from "../../parse.ts";
 import type { GitFacts } from "../../protocol/observations.ts";
 import { checkoutDir } from "../../session-harness.ts";

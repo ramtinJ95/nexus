@@ -2,7 +2,7 @@
  * What the probe reads from each running pylon's guest for an observation. Each kind of read has at most one
  * outstanding per pylon, and git's read is reused for gitPollMs.
  */
-import type { BackendPylon, VmBackend } from "../backend.ts";
+import type { BackendPylon, VmBackend } from "../backends/backend.ts";
 import type { LiveHash, PylonId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
 import { gitPollMs, type DeclaredOutput, type GitFacts, type ListeningFact, type PylonObservation, type ServiceFact, type SessionFact } from "../protocol/observations.ts";

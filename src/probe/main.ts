@@ -10,7 +10,7 @@
  * pauses each running pylon first, and the next boot's probe marks them for a wake (shutdown.ts).
  * A second signal during the close kills the probe at once.
  */
-import { createDockerBackend } from "../docker-backend.ts";
+import { createDockerBackend } from "../backends/docker-backend.ts";
 import { createPylonVmBackend } from "../pylon-vm-backend.ts";
 import { sweepScratch } from "../pylon-vm/client.ts";
 import { localApiWhois } from "../tailscale.ts";

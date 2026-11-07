@@ -14,7 +14,7 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | [`src/protocol/`](../../src/protocol) | One file per message family, each with its types and its wire codec: the ID schemas and shared fields (`fields.ts`), the `Job` union, deadlines, the retry table and `JobFailure` (`jobs.ts`), observations (`observations.ts`), synchronous commands (`commands.ts`), streams (`streams.ts`), probe errors (`http.ts`), artifact copies (`artifacts.ts`), `routeAuth` (`routes.ts`) and `ProbeClient` (`client.ts`) | Both. Each family's wire encoding stays behind its own parse and encode functions, and the probe never loads `client.ts` |
 | [`src/control/reconcile.ts`](../../src/control/reconcile.ts) | The desired phase, the planner, the derived actual state, and record writes from observations | Control plane, pure |
 | [`src/probe/run.ts`](../../src/probe/run.ts) | `runJob`, `runCommand` and `commandPolicies` | Probe |
-| [`src/backend.ts`](../../src/backend.ts) | `VmBackend`, `Guest`, `ArtifactStore`, and the pi-sandbox fork's mapping and changes | Probe |
+| [`src/backends/backend.ts`](../../src/backends/backend.ts) | `VmBackend`, `Guest`, `ArtifactStore`, and the pi-sandbox fork's mapping and changes | Probe |
 | [`src/services-file.ts`](../../src/services-file.ts) | The `.nexus/services.yaml` schema and parser, the port rules, and `withPublicUrls` | Both. The pylon-vm controller loads it with type stripping |
 | [`src/spawn.ts`](../../src/spawn.ts) | What a spawn carries: `BootInputs`, `LiveSpec` and its hash, `RepoInit`, `GitIdentity` and `PylonResources` | Both |
 | [`src/secret-grants.ts`](../../src/secret-grants.ts) | `SecretGrant`, its name and host patterns, and the GitHub and ChatGPT grants | Both |
@@ -24,7 +24,7 @@ Nexus needs three contracts before any code. The first says how lifecycle work r
 | [`src/images.ts`](../../src/images.ts) | The image recipe and ID, template keys and build inputs, and the artifact manifests | Both |
 | [`src/control/templates.ts`](../../src/control/templates.ts) | Template records, template choice, setup hashes, and garbage | Control plane |
 
-A reconcile tick traces through three files. `src/control/reconcile.ts` plans, `src/protocol/` carries, and `src/probe/run.ts` executes against `src/backend.ts`'s `VmBackend`.
+A reconcile tick traces through three files. `src/control/reconcile.ts` plans, `src/protocol/` carries, and `src/probe/run.ts` executes against `src/backends/backend.ts`'s `VmBackend`.
 
 - **The control plane is the only writer.** Every record comes from `NodeObservation` facts. `Pylon.desiredState` and `actualState` become derived values, not stored fields.
 - **A spawn converges to a spec.** `BootInputs` apply when the VM boots. `LiveSpec` (previews and overlay files) applies on every spawn and is hashed. After a probe restart its observations report `liveHash: null`, and the planner sends spawn again. The probe persists nothing of its own.
@@ -77,7 +77,7 @@ Grafts from B:
 
 Fixes from the judge's check of pi-sandbox:
 
-- pi-sandbox's package exports only its extension, so Nexus cannot import `run` as both sketches assumed. Nexus owns a hard fork instead, trimmed to what it uses. Its first changes are listed in [`src/backend.ts`](../../src/backend.ts).
+- pi-sandbox's package exports only its extension, so Nexus cannot import `run` as both sketches assumed. Nexus owns a hard fork instead, trimmed to what it uses. Its first changes are listed in [`src/backends/backend.ts`](../../src/backends/backend.ts).
 - `create { template }` reuses the template's recorded config, so the fork makes network policy and resources inputs to every start.
 - Exec timeouts call pi-sandbox's `exec-kill`, because exec only waits.
 - Per-stream user switching is gone (see the user rule above).
@@ -126,4 +126,4 @@ These need a spike or a source check:
 
 ## Next implementation step
 
-The first slice is done: `planPylon` with a table test, and a probe that runs spawn, pause and delete against the Docker backend end to end (`npm test`, `npm run test:slice`). The second slice is done too: `pylon-vm`, the pi-sandbox fork in `src/pylon-vm/`, passes the same slice test on `infra-testbench` with real Gondolin VMs. Next come the remaining fork changes listed in `src/backend.ts`.
+The first slice is done: `planPylon` with a table test, and a probe that runs spawn, pause and delete against the Docker backend end to end (`npm test`, `npm run test:slice`). The second slice is done too: `pylon-vm`, the pi-sandbox fork in `src/pylon-vm/`, passes the same slice test on `infra-testbench` with real Gondolin VMs. Next come the remaining fork changes listed in `src/backends/backend.ts`.

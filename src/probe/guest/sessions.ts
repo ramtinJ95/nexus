@@ -17,7 +17,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import type { Guest } from "../../backend.ts";
+import type { Guest } from "../../backends/backend.ts";
 import type { HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "../../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/commands.ts";
 import { nonEmpty, parse, parseJson } from "../../parse.ts";

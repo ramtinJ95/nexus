@@ -22,7 +22,7 @@ import { createServer } from "node:http";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { packagedDaemon } from "@earendil-works/pi-env";
-import { createDockerBackend } from "../../../../src/docker-backend.ts";
+import { createDockerBackend } from "../../../../src/backends/docker-backend.ts";
 import { scriptedModel, scriptedModels } from "../../../../src/harness/test-fixture.ts";
 import { checkoutDir } from "../../../../src/session-harness.ts";
 import { startControlPlane } from "../../../../src/control/main.ts";
