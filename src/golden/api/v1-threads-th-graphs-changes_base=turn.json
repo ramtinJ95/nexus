@@ -1,4 +1,6 @@
 422 application/json
 {
-  "error": "the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead"
+  "error": "the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead",
+  "code": null,
+  "retryable": false
 }

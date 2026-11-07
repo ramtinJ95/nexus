@@ -258,10 +258,10 @@ test("event followers share the streams' places with thread streams, past which 
   const page = s.events(`/v1/threads/${thread.id}/events`);
   await page.next();
   const follow = await s.call("GET", "/v1/events?follow=true");
-  assert.deepEqual(follow, { status: 503, body: { error: "too many streams" } });
+  assert.deepEqual(follow, { status: 503, body: { error: "too many streams", code: null, retryable: false } });
   const threadStream = await s.call("GET", `/v1/threads/${thread.id}/events`);
-  assert.deepEqual(threadStream, { status: 503, body: { error: `${maxStreams} streams are open, the most this control plane serves at once` } });
-  assert.deepEqual(await s.call("GET", "/v1/events?since=-1&follow=true"), { status: 400, body: { error: "invalid event cursor" } }, "a bad cursor is refused before the place is counted");
+  assert.deepEqual(threadStream, { status: 503, body: { error: `${maxStreams} streams are open, the most this control plane serves at once`, code: null, retryable: false } });
+  assert.deepEqual(await s.call("GET", "/v1/events?since=-1&follow=true"), { status: 400, body: { error: "invalid event cursor", code: null, retryable: false } }, "a bad cursor is refused before the place is counted");
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   assert.equal(await page.ended, "end");
   const after = s.registry.appendEvent("release.changed", null, {});
@@ -273,14 +273,14 @@ test("an event cursor older than what the log retains is refused with 409", asyn
   const s = await testApi(t);
   for (let i = 0; i < 10_002; i++) s.registry.appendEvent("release.changed", null, {});
   for (const path of ["/v1/events?since=1", "/v1/events?since=1&follow=true"]) {
-    assert.deepEqual(await s.call("GET", path), { status: 409, body: { error: "event cursor expired; retained events cannot fill the gap" } });
+    assert.deepEqual(await s.call("GET", path), { status: 409, body: { error: "event cursor expired; retained events cannot fill the gap", code: null, retryable: false } });
   }
 });
 
 test("an event read that fails for any other reason answers 500, not the expired cursor's 409", async (t) => {
   const s = await testApi(t);
   s.registry.eventBatch = () => { throw new Error("database disk image is malformed"); };
-  assert.deepEqual(await s.call("GET", "/v1/events?since=0"), { status: 500, body: { error: "database disk image is malformed" } });
+  assert.deepEqual(await s.call("GET", "/v1/events?since=0"), { status: 500, body: { error: "database disk image is malformed", code: null, retryable: false } });
 });
 
 test("event followers replay a disconnect gap with since and filter without losing order", async (t) => {

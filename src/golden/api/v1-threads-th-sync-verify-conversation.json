@@ -1,4 +1,6 @@
 409 application/json
 {
-  "error": "thread th-sync-verify has no conversation"
+  "error": "thread th-sync-verify has no conversation",
+  "code": null,
+  "retryable": false
 }

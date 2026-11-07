@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.68.0
+
+Adds `retryable` to the API's error body, and sets `code` on every error reply, null where the API sends no code, so the body is `{"error": string, "code": string | null, "retryable": boolean}`, as [Failures](cli.md#failures) describes. It also adds the codes `draining`, `probe-unreachable` and `probe-forbidden`. A control plane older than 0.68.0 sends no `retryable`, sends `code` only where it is set, and sends none of these three codes. The CLI reads a missing `code` as null, so it acts the same with either.
+
 ## 0.67.0
 
 Adds yolo landing: `project edit --auto-review yolo`, and `--auto-review` on `project add`, under which the review loop answers each review's holds question with Land for the deployer who turned it on, as [Yolo landing](merge-policy.md#yolo-landing) describes. `Project.autoReview` is now `{ mode, enabledBy }`, `mode` being `review`, `land` or `yolo`, and `PATCH /v1/projects/<id>` takes `autoReview: { mode }`, and still `{ land }`. `Waiver.yolo` names the project whose setting gave a waiver, which `show` prints and the `review.waived` event carries. A control plane older than 0.67.0 refuses `{ mode }` with 400, so `--auto-review` fails with exit code 64, and sends `{ land, enabledBy }`, which the CLI reads as the mode it means.

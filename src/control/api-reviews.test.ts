@@ -42,9 +42,9 @@ test("only a project edit turns on reviews of its own, landing needs a deployer,
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", autoReview: { mode: "land", enabledBy: laptop } })).status, 400, "a new project cannot name who turned it on");
   s.callAs("nFIREBAT" as TailnetNodeId);
-  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } }), { status: 403, body: { error: "caller may not edit a project: only a person may, never the control plane, infrastructure nodes or pylons" } });
+  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } }), { status: 403, body: { error: "caller may not edit a project: only a person may, never the control plane, infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs(phone);
-  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons" } });
+  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
   const reviewing = await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } });
   assert.deepEqual(reviewing.body.autoReview, { mode: "review", enabledBy: phone }, "reviewing alone lands nothing, so it needs no deployer");
   s.callAs(laptop);

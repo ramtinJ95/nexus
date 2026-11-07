@@ -55,14 +55,14 @@ test("only a deployer reads a node's health, which the node's probe answers, and
   s.nodeHealth(async () => { reads++; return health; });
   assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 200, body: health });
   s.callAs(phone);
-  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 403, body: { error: "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons" } });
+  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 403, body: { error: "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("GET", `/v1/nodes/${node}/health`)).status, 403, "the control node is never a deployer, though listed");
   s.callAs(laptop);
-  assert.deepEqual(await s.call("GET", "/v1/nodes/nowhere/health"), { status: 404, body: { error: "no node nowhere" } });
+  assert.deepEqual(await s.call("GET", "/v1/nodes/nowhere/health"), { status: 404, body: { error: "no node nowhere", code: null, retryable: false } });
   for (const method of ["POST", "PUT", "DELETE"]) assert.equal((await s.call(method, `/v1/nodes/${node}/health`, {})).status, 405, `${method} is no route`);
   s.nodeHealth(async () => { throw Object.assign(new Error(`${node}: connect ECONNREFUSED`), { code: "unreachable" }); });
-  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 503, body: { error: `${node}: connect ECONNREFUSED` } });
+  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 503, body: { error: `${node}: connect ECONNREFUSED`, code: "probe-unreachable", retryable: false } });
   assert.equal(reads, 1, "a refused caller reaches no probe");
   const off = await testApi(t);
   assert.equal((await off.call("GET", `/v1/nodes/${node}/health`)).status, 403, "with no deployers configured, nobody reads it");

@@ -159,7 +159,7 @@ test("a pylon whose disk holds a failed setup cannot be retried, and its detail 
   const refusal = "Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project";
   assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.retryRefused, refusal);
   const res = await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`);
-  assert.deepEqual(res, { status: 409, body: { error: `pylon ${thread.pylonId} cannot be retried. ${refusal}` } });
+  assert.deepEqual(res, { status: 409, body: { error: `pylon ${thread.pylonId} cannot be retried. ${refusal}`, code: null, retryable: false } });
   assert.notEqual(s.registry.pylon(thread.pylonId)!.failed, null, "a refused retry leaves the verdict");
 
   broken("services");

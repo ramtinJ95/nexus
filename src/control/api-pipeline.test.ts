@@ -17,7 +17,7 @@ test("an item is added to a project the pipeline runs for, becomes a queued thre
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   s.registry.setCurrentImage(image.id as ImageId);
   const off = await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." });
-  assert.deepEqual(off, { status: 409, body: { error: "the pipeline does not run for project acme. nexus project edit acme --pipeline start turns it on" } });
+  assert.deepEqual(off, { status: 409, body: { error: "the pipeline does not run for project acme. nexus project edit acme --pipeline start turns it on", code: null, retryable: false } });
 
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 403, "the control plane cannot turn approvals off");
@@ -40,7 +40,7 @@ test("an item is added to a project the pipeline runs for, becomes a queued thre
   assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "C", message: "Go.", requestId: "x" })).status, 400, "an item takes no request ID");
 
   s.callAs("nFIREBAT" as TailnetNodeId);
-  assert.deepEqual(await s.call("POST", `/v1/items/${item.id}/approve`, {}), { status: 403, body: { error: "caller may not approve an item: only a person may, never the control plane, infrastructure nodes or pylons" } });
+  assert.deepEqual(await s.call("POST", `/v1/items/${item.id}/approve`, {}), { status: 403, body: { error: "caller may not approve an item: only a person may, never the control plane, infrastructure nodes or pylons", code: null, retryable: false } });
   assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "D", message: "Go." })).status, 403, "the control plane, and so a harness thread, adds no item");
   assert.equal((await s.call("POST", `/v1/items/${b.id}/cancel`, {})).status, 403);
   s.callAs(laptop);
@@ -190,9 +190,9 @@ test("a planning thread's proposals become cards only a person answers, an accep
 
   const answer = (q: Question, option: string) => s.call("POST", `/v1/questions/${q.id}/answer`, { option });
   s.callAs("nFIREBAT" as TailnetNodeId);
-  assert.deepEqual(await answer(a!, "accept"), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons" } });
+  assert.deepEqual(await answer(a!, "accept"), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs(phone);
-  assert.deepEqual(await answer(b!, "accept"), { status: 409, body: { error: `"B: nudge a stalled builder" waits on "A: archive what landed", which is not answered yet. Accept that one first` } });
+  assert.deepEqual(await answer(b!, "accept"), { status: 409, body: { error: `"B: nudge a stalled builder" waits on "A: archive what landed", which is not answered yet. Accept that one first`, code: null, retryable: false } });
   assert.equal(s.registry.question(b!.id)!.answer, null, "a refused accept leaves the card open");
   assert.equal((await answer(a!, "accept")).status, 200);
   assert.equal((await answer(b!, "reject")).status, 200);

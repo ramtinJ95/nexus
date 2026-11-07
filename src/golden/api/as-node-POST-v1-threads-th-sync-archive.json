@@ -1,4 +1,6 @@
 403 application/json
 {
-  "error": "caller may not archive a thread: only a person may, never the control plane, infrastructure nodes or pylons"
+  "error": "caller may not archive a thread: only a person may, never the control plane, infrastructure nodes or pylons",
+  "code": null,
+  "retryable": false
 }

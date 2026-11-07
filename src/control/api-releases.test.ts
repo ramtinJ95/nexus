@@ -43,7 +43,7 @@ test("a deployer report may carry every report state", () => {
 
 test("anyone allowed reads the usage backfill and its dry run, only a deployer starts or stops it, and without one its routes answer 409", async (t) => {
   const off = await testApi(t, { deployment });
-  for (const method of ["GET", "POST", "DELETE"]) assert.deepEqual(await off.call(method, "/v1/usage/backfill"), { status: 409, body: { error: "the usage backfill is not configured" } });
+  for (const method of ["GET", "POST", "DELETE"]) assert.deepEqual(await off.call(method, "/v1/usage/backfill"), { status: 409, body: { error: "the usage backfill is not configured", code: null, retryable: false } });
   const s = await testApi(t, {
     deployment,
     usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => assert.fail("nothing is read") }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
@@ -58,7 +58,7 @@ test("anyone allowed reads the usage backfill and its dry run, only a deployer s
   });
 
   s.callAs("nFIREBAT" as TailnetNodeId);
-  const refused = { status: 403, body: { error: "caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons" } };
+  const refused = { status: 403, body: { error: "caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } };
   assert.deepEqual(await s.call("POST", "/v1/usage/backfill"), refused);
   assert.deepEqual(await s.call("DELETE", "/v1/usage/backfill"), refused);
   assert.deepEqual((await s.call("GET", "/v1/usage/backfill")).body.backfill, { state: "never" });
@@ -82,7 +82,7 @@ test("a root-authenticated drain blocks every turn-entry route and can be releas
   for (const path of ["/v1/threads", "/v1/threads/anything/messages", "/v1/threads/anything/retry", "/v1/threads/anything/start"]) {
     const refused = await s.call("POST", path, {});
     assert.equal(refused.status, 409);
-    assert.deepEqual(refused.body, { error: "control plane is draining for deployment; retry after the release completes" });
+    assert.deepEqual(refused.body, { error: "control plane is draining for deployment; retry after the release completes", code: "draining", retryable: true });
   }
   assert.equal((await s.call("PUT", "/v1/release", { commit: "b".repeat(40) })).status, 409);
   s.callAs("nFIREBAT" as TailnetNodeId);
