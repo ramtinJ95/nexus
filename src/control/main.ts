@@ -245,7 +245,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       void reviews?.wake(id as ThreadId);
     }
     if (!events.some((e) => wakesDeployers(registry, e))) return;
-    for (const probe of probeMap.values()) probe.wakeDeployer?.().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
+    for (const probe of probeMap.values()) probe.wakeDeployer().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
   }, (err) => log(`following events for wake-ups failed, going on from the newest: ${err.message}`));
   for (const poll of threads.polls) every(15_000, poll);
   const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });

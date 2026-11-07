@@ -200,6 +200,10 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; heldSecrets?:
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
     health: () => Promise.reject(new Error("unused")),
+    artifactUsage: () => Promise.reject(new Error("unused")),
+    dropArtifacts: () => Promise.reject(new Error("unused")),
+    wakeDeployer: () => Promise.reject(new Error("unused")),
+    readGit: () => Promise.reject(new Error("unused")),
     putPeers: async () => {},
     async putSecret(name) {
       if (!reachable) throw Object.assign(new Error("probe unreachable"), { code: "unreachable" });

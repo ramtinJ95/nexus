@@ -51,6 +51,10 @@ function fakeProbe() {
     putSecret: () => Promise.reject(new Error("unused")),
     putPeers: () => Promise.reject(new Error("unused")),
     health: () => Promise.reject(new Error("unused")),
+    artifactUsage: () => Promise.reject(new Error("unused")),
+    dropArtifacts: () => Promise.reject(new Error("unused")),
+    wakeDeployer: () => Promise.reject(new Error("unused")),
+    readGit: () => Promise.reject(new Error("unused")),
   };
   const ended = (jobId: JobId) => ({ jobId, subject: building.id, kind: "build-template" as const, finishedAt: new Date().toISOString() });
   return {

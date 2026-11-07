@@ -123,6 +123,8 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
     const unused = () => Promise.reject(new Error("unused"));
     return {
       node: node.name, submit: unused, job: unused, command: unused, stream: unused, manifest: unused, putSecret: unused, health: options.health ?? unused,
+      // The probe has nothing to clean up.
+      artifactUsage: async () => ({ artifacts: [] }), dropArtifacts: unused,
       async wakeDeployer() { wakes.push([node.name, Date.now()]); },
       // Older than any snapshot the fake sends, so the read waits for none.
       async readGit(pylonId) { gitReads.push(pylonId); return "2000-01-01T00:00:00.000Z"; },
