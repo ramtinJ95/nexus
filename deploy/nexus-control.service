@@ -4,7 +4,7 @@
 # the control plane holds the harness's model login, and the probe answers every tailnet caller. Its state is
 # /var/lib/nexus-control (its home): the registry, the harness's storage and the model login.
 #
-# The harness runs one bridge process per busy pylon (src/harness/bridge.ts). The default KillMode stops them
+# The harness runs one bridge process per busy pylon (src/control/harness/bridge.ts). The default KillMode stops them
 # with the control plane, which ends each pylon's pi-env daemon and every command it started. After a restart,
 # a tool call that was running reports `interrupted` to the model.
 

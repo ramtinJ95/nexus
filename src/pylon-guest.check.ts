@@ -26,7 +26,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentReader } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createEnvConformance } from "@earendil-works/pi-durable/testing";
-import { pylonEnvs } from "./harness/pylon-env.ts";
+import { pylonEnvs } from "./control/harness/pylon-env.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./probe/fake-tailscale.ts";
 import { nodeSecrets } from "./probe/config.ts";
 import { startProbe } from "./probe/server.ts";

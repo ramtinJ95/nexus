@@ -1,7 +1,7 @@
 /**
  * The program pi-env's Connection starts in place of its daemon, one per pylon with a live connection:
  *
- *   node src/harness/bridge.ts <BridgeTarget JSON> <pylonId> serve --token <hex>
+ *   node src/control/harness/bridge.ts <BridgeTarget JSON> <pylonId> serve --token <hex>
  *
  * Connection appends `serve --token <hex>`. The bridge opens a raw pipe on the pylon's probe that runs the
  * daemon in the guest with those arguments, then pumps its own stdin and stdout through it. It exits with
@@ -11,10 +11,10 @@
  * It imports only the probe client, because one runs per busy pylon and each costs a Node process.
  */
 import { once } from "node:events";
-import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { ByteStream } from "../protocol/streams.ts";
-import { connectProbe } from "../protocol/client.ts";
-import { localApiWhois } from "../tailscale.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
+import type { ByteStream } from "../../protocol/streams.ts";
+import { connectProbe } from "../../protocol/client.ts";
+import { localApiWhois } from "../../tailscale.ts";
 
 /** How to reach and verify the pylon's probe. `tailscaled` is the control plane's LocalAPI socket. */
 export interface BridgeTarget {

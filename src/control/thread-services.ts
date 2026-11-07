@@ -2,7 +2,7 @@
  * The services that start threads (starter, queue, pipeline and planning), wired once for the control plane and the
  * tests that stand in for it.
  */
-import type { HarnessHost } from "../harness/host.ts";
+import type { HarnessHost } from "./harness/host.ts";
 import type { TurnGate } from "./drain.ts";
 import { pipeline } from "./pipeline.ts";
 import { planning } from "./planning.ts";

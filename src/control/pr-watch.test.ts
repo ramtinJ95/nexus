@@ -17,7 +17,7 @@ import { commentCap } from "./pr-watch-model.ts";
 import { prWatchPrefix } from "./agent-protocol.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
-import type { HarnessHost } from "../harness/host.ts";
+import type { HarnessHost } from "./harness/host.ts";
 import { runningPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 
 function fixture(path = ":memory:") {

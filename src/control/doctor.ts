@@ -7,7 +7,7 @@ import type { NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
 import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts } from "./reconcile.ts";
 import type { ReleaseReport, ReleaseView } from "../deploy/model.ts";
-import type { LoginState } from "../harness/credentials.ts";
+import type { LoginState } from "./harness/credentials.ts";
 import type { BackupStatusRead } from "./backup-status.ts";
 import type { NodeSummary } from "./wire.ts";
 import { worst, type Check, type ControlCheckName, type DoctorReport, type NodeCheckName, type Verdict } from "./doctor-model.ts";

@@ -80,7 +80,7 @@ Per thread, the control plane passes the conversation's creation options and the
 
 The program does not have to be the daemon. It only has to carry bytes to a daemon and pass the arguments through. Nexus gives `Connection` a bridge:
 
-1. The `command` function waits until the thread's pylon is running, then returns `[process.execPath, "src/harness/bridge.ts", node, pylonId]`.
+1. The `command` function waits until the thread's pylon is running, then returns `[process.execPath, "src/control/harness/bridge.ts", node, pylonId]`.
 2. `Connection` spawns the bridge with `serve --token <hex>` appended.
 3. The bridge calls `ProbeClient.stream(pylonId, { pty: null, argv: [daemon, "serve", "--token", hex] })` (`src/protocol.ts:168-198`) and pumps stdin and stdout through the `ByteStream`.
 
@@ -159,7 +159,7 @@ No probe change is needed for activity.
 
 ### Modules
 
-All new code lives in `src/harness/`, beside the control plane.
+All new code lives in `src/control/harness/`, beside the control plane.
 
 - `host.ts` opens storage and the harness, installs the registry, and exposes `startThread(thread)`, `send(threadId, text, requestId, mode)`, `abort(threadId)` and `watch(threadId)`. It is the only importer of pi-durable.
 - `pylon-env.ts` holds the `env` factory and the per-pylon `Connection` cache, and waits for a running pylon inside the `command` function.

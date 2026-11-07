@@ -7,7 +7,7 @@ import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
 import { stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { ModelsError, type Models } from "@earendil-works/pi-ai/models";
-import { harnessModels, loginState, openCredentials } from "../harness/credentials.ts";
+import { harnessModels, loginState, openCredentials } from "./harness/credentials.ts";
 import { readBackupStatus, writeBackupStatus } from "./backup-status.ts";
 import { changesKeptMs, checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { healthView, type Check, type DoctorReport, type Status } from "./doctor-model.ts";

@@ -6,7 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import { senderPrefixes, type Sender } from "./agent-protocol.ts";
-import type { HarnessHost } from "../harness/host.ts";
+import type { HarnessHost } from "./harness/host.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";

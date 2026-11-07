@@ -12,7 +12,7 @@
     "pretest": "npm run build",
     "test": "node --test --test-timeout=600000 'src/**/!(slice|template-slice).test.{ts,js}'",
     "test:slice": "node --test --test-concurrency=1 --test-timeout=600000 src/slice.test.ts src/template-slice.test.ts",
-    "test:harness": "node --test --test-timeout=600000 src/harness/slice.test.ts",
+    "test:harness": "node --test --test-timeout=600000 src/control/harness/slice.test.ts",
     "probe": "node src/probe/main.ts",
     "demo": "npm run build && node src/control/dashboard/demo.ts"
   },

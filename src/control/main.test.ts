@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { scriptedModel, scriptedModels } from "../harness/test-fixture.ts";
+import { scriptedModel, scriptedModels } from "./harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";

@@ -5,7 +5,7 @@
  */
 import { connect } from "node:tls";
 import type { TailnetNodeId } from "../ids.ts";
-import type { LoginState } from "../harness/credentials.ts";
+import type { LoginState } from "./harness/credentials.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { BackupStatusRead } from "./backup-status.ts";
 import { doctorReport, type CertificateFact } from "./doctor.ts";
