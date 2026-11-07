@@ -5,7 +5,7 @@ export const refusalStatus = {
   invalid: 400, forbidden: 403, missing: 404, method: 405, conflict: 409, "too-large": 413, unsupported: 415,
   unprocessable: 422, upstream: 502, unavailable: 503, timeout: 504,
 } as const satisfies Record<RefusalKind, number>;
-type RefusalStatus = (typeof refusalStatus)[RefusalKind];
+export type RefusalStatus = (typeof refusalStatus)[RefusalKind];
 const kindOf = Object.fromEntries(Object.entries(refusalStatus).map(([kind, status]) => [status, kind])) as Record<RefusalStatus, RefusalKind>;
 
 /** A refusal named by the HTTP status of its kind, as control-plane code not yet moved to refusal kinds throws it. */

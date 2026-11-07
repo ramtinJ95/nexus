@@ -6,19 +6,19 @@ import { BodyTooLarge } from "../request-body.ts";
 import { withThread } from "../test-support/api-kit.ts";
 import { errorReply } from "./api/server.ts";
 import { DeployDraining } from "./drain.ts";
-import { HttpError } from "./http-error.ts";
+import { HttpError, type RefusalStatus } from "./http-error.ts";
 import { Refusal, type RefusalKind } from "./refusal.ts";
 
 /** Each kind of refusal with the status the API answered it with before refusals had kinds. */
-const statuses: Readonly<Record<RefusalKind, number>> = {
+const statuses: Readonly<Record<RefusalKind, RefusalStatus>> = {
   invalid: 400, forbidden: 403, missing: 404, method: 405, conflict: 409, "too-large": 413, unsupported: 415,
   unprocessable: 422, upstream: 502, unavailable: 503, timeout: 504,
 };
 
 test("every refusal kind, and each error the API answered before kinds, keeps the status it had", () => {
-  for (const [kind, status] of Object.entries(statuses) as [RefusalKind, number][]) {
+  for (const [kind, status] of Object.entries(statuses) as [RefusalKind, RefusalStatus][]) {
     assert.deepEqual(errorReply(new Refusal(kind, "no")), { status, body: { error: "no", code: null, retryable: false } }, kind);
-    assert.deepEqual(errorReply(new HttpError(status as never, "no")), { status, body: { error: "no", code: null, retryable: false } }, `HttpError ${status}`);
+    assert.deepEqual(errorReply(new HttpError(status, "no")), { status, body: { error: "no", code: null, retryable: false } }, `HttpError ${status}`);
   }
   const cases: [string, unknown, number, string | null, boolean][] = [
     ["a drain", new DeployDraining(), 409, "draining", true],
