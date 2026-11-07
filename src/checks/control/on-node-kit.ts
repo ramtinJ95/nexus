@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../../image/artifacts.ts";
 import { readControlPlane } from "../../deploy/control-plane.ts";
 import { exit, type Exit } from "../../exec.ts";
@@ -20,9 +19,9 @@ import { isImageId, type TailnetNodeId } from "../../ids.ts";
 import { tailnetNodeIdSchema } from "../../protocol/fields.ts";
 import { probePort } from "../../protocol/routes.ts";
 import { scriptedModel, scriptedModels } from "../../control/harness/test-fixture.ts";
-import { parseSelfDnsName, readProbeConfig } from "../../probe/config.ts";
-import { parseServeStatus, tailscaleCli } from "../../probe/serve.ts";
-import { localApiWhois } from "../../tailscale.ts";
+import { readProbeConfig } from "../../probe/config.ts";
+import { parseServeStatus } from "../../probe/serve.ts";
+import { localApiWhois, selfDnsName, tailscaleCli, tailscaleStatus } from "../../tailscale.ts";
 import { callText } from "../../test-support/kit.ts";
 import type { ThreadDetail } from "../../control/wire.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "../../control/main.ts";
@@ -45,10 +44,9 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
   if (probeConfig.listen.port !== probePort) throw new Error(`the probe listens on port ${probeConfig.listen.port}, and the control plane reaches probes on ${probePort} only`);
   if (previews === undefined) throw new Error(`set previews in the probe's config, then restart the probe. This check opens ${options.opens}`);
   const tailscale = tailscaleCli();
-  const statusJson = await tailscale(["status", "--json"], AbortSignal.timeout(30_000));
-  const self = z.object({ Self: z.object({ ID: tailnetNodeIdSchema }) }).parse(JSON.parse(statusJson)).Self.ID;
-  // Preview URLs name the node by its MagicDNS name, because that is the name its tailscale serve certificate is for.
-  const dnsName = parseSelfDnsName(statusJson);
+  const status = await tailscaleStatus(tailscale);
+  const self = tailnetNodeIdSchema.parse(status.self?.id ?? "");
+  const dnsName = selfDnsName(status);
   const trusted = (await readControlPlane()).tailnetNodeId;
   if (trusted !== self) throw new Error(`/etc/nexus/control-plane.json names ${trusted} as the control plane, not this node's ID ${self}. Point it at this node with sudo deploy/set-control-plane.sh ${self} <url>`);
   const tailscaledSocket = await personWhois(self);
@@ -82,7 +80,7 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     return await startControlPlane(config, scriptedModels());
   };
 
-  const serveJson = () => tailscale(["serve", "status", "--json"], AbortSignal.timeout(30_000));
+  const serveJson = () => tailscale(["serve", "status", "--json"]);
 
   /**
    * Refuses to go on while tailscale serve serves a port in `ports`, which this check's previews would get. Taking over

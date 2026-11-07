@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { connect, createServer as createNetServer, type AddressInfo } from "node:net";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localApiWhois, localApiWhoisNode, PeerRefused, tailnetNodeIdPattern, verifyPeer } from "./tailscale.ts";
+import { localApiWhois, localApiWhoisNode, parseTailscaleStatus, PeerRefused, selfDnsName, tailnetNodeIdPattern, tailscaleCli, verifyPeer } from "./tailscale.ts";
+import { tailnetDevices, tailnetMisses } from "./deploy/setup.ts";
 import { tailnetNodeIdSchema } from "./protocol/fields.ts";
 import type { Whois } from "./protocol/http.ts";
 import type { TailnetNodeId } from "./ids.ts";
@@ -114,4 +115,72 @@ test("tailnetNodeIdPattern, which the bootstrap deployer checks with, accepts wh
   for (const id of ["nAbCdEf1CNTRL", "n1", "n", "AbCdEf1CNTRL", "nAb-Cd", " nAbCd", "nAbCd\n", ""]) {
     assert.equal(tailnetNodeIdPattern.test(id), tailnetNodeIdSchema.safeParse(id).success, JSON.stringify(id));
   }
+});
+
+test("tailscaleCli resolves with stdout as printed, and a failure names the command and its stderr, or else Node's reason", async (t) => {
+  const bin = await mkdtemp(join(tmpdir(), "nexus-tailscale-bin-"));
+  t.after(() => rm(bin, { recursive: true }));
+  await writeFile(join(bin, "tailscale"), [
+    "#!/bin/sh",
+    'case "$1" in',
+    "  ok) printf '  {\"TCP\":{}}\\n\\n' ;;",
+    "  said) printf '\\n  no such serve config  \\n' >&2; exit 1 ;;",
+    "  quiet) exit 2 ;;",
+    "  slow) exec sleep 30 ;;",
+    "esac",
+  ].join("\n"), { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  t.after(() => { process.env.PATH = path; });
+  const cli = tailscaleCli();
+  const signal = AbortSignal.timeout(5000);
+
+  assert.equal(await cli(["ok", "--json"], signal), '  {"TCP":{}}\n\n');
+  await assert.rejects(cli(["said", "--https=443", "off"], signal), { message: "tailscale said --https=443 off: no such serve config" });
+  await assert.rejects(cli(["quiet", "status"], signal), (err: Error) => err.message.startsWith("tailscale quiet status: Command failed: tailscale quiet status"));
+  const abort = new AbortController();
+  const slow = cli(["slow"], abort.signal);
+  abort.abort();
+  await assert.rejects(slow, { message: /^tailscale slow: .*aborted/ });
+});
+
+test("the node's tailnet name comes from tailscale status without its trailing dot", () => {
+  assert.equal(selfDnsName(parseTailscaleStatus(JSON.stringify({ Version: "1.90.0", Self: { ID: "n1", DNSName: "infra-testbench.example.ts.net." } }))), "infra-testbench.example.ts.net");
+  assert.throws(() => selfDnsName(parseTailscaleStatus(JSON.stringify({ Self: { DNSName: "" } }))), /no MagicDNS name/);
+  assert.throws(() => selfDnsName(parseTailscaleStatus(JSON.stringify({ BackendState: "Stopped" }))), /no Self\.DNSName/);
+  assert.throws(() => selfDnsName(parseTailscaleStatus(JSON.stringify({ Self: { DNSName: "." } }))), /no MagicDNS name/);
+});
+
+// What install.sh's greps, setup.ts's parseTailnet, probe/config.ts's parseSelfDnsName and on-node-kit.ts's Self.ID
+// schema each read from these fixtures on main at dfc39f4, before one parser replaced the four. Null is a throw.
+const recorded = new Map<string, { misses: string[]; devices: string[] | null; dnsName: string | null; id: string | null }>([
+  ["certificates-off", { misses: ["certificates-off"], devices: ["nFirebat1CNTRL rj-firebat rj-firebat.tail1234.ts.net 100.64.0.2", "nBench1CNTRL infra-testbench infra-testbench.tail1234.ts.net 100.64.0.3"], dnsName: "rj-firebat.tail1234.ts.net", id: "nFirebat1CNTRL" }],
+  ["ipv6-only", { misses: [], devices: null, dnsName: "rj-firebat.tail1234.ts.net", id: "nFirebat1CNTRL" }],
+  ["magicdns-off", { misses: ["magicdns-off", "certificates-off"], devices: ["nFirebat1CNTRL rj-firebat rj-firebat.tail1234.ts.net 100.64.0.2"], dnsName: "rj-firebat.tail1234.ts.net", id: "nFirebat1CNTRL" }],
+  ["needs-login", { misses: ["not-running"], devices: null, dnsName: null, id: null }],
+  ["running", { misses: [], devices: ["nFirebat1CNTRL rj-firebat rj-firebat.tail1234.ts.net 100.64.0.2", "nBench1CNTRL infra-testbench infra-testbench.tail1234.ts.net 100.64.0.3", "nMac1CNTRL ramtins-macbook-pro ramtins-macbook-pro.tail1234.ts.net 100.64.0.4"], dnsName: "rj-firebat.tail1234.ts.net", id: "nFirebat1CNTRL" }],
+  ["stopped", { misses: ["not-running"], devices: ["nFirebat1CNTRL rj-firebat rj-firebat.tail1234.ts.net 100.64.0.2"], dnsName: "rj-firebat.tail1234.ts.net", id: "nFirebat1CNTRL" }],
+
+]);
+
+test("every reader of tailscale status reads the recorded fixtures as its own parser did", async () => {
+  for (const [name, want] of recorded) {
+    const json = await readFile(new URL(`fixtures/tailscale-status/${name}.json`, import.meta.url), "utf8");
+    const status = parseTailscaleStatus(json);
+    assert.deepEqual(tailnetMisses(json), want.misses, `${name}: install.sh's misses`);
+    if (want.devices === null) assert.throws(() => tailnetDevices(status), /gives this machine no ID, MagicDNS name and IPv4 address/, name);
+    else {
+      const { self, peers } = tailnetDevices(status);
+      assert.deepEqual([self, ...peers].map((d) => `${d.id} ${d.name} ${d.host} ${d.ip}`), want.devices, `${name}: setup's devices`);
+    }
+    if (want.dnsName === null) assert.throws(() => selfDnsName(status), /no MagicDNS name/, name);
+    else assert.equal(selfDnsName(status), want.dnsName, `${name}: the probe's preview host`);
+    if (want.id === null) assert.throws(() => tailnetNodeIdSchema.parse(status.self?.id ?? ""), /must be a Tailscale stable node ID/, name);
+    else assert.equal(tailnetNodeIdSchema.parse(status.self?.id ?? ""), want.id, `${name}: the node check's self`);
+  }
+});
+
+test("install.sh's check reads text that is not JSON as a tailscale that is not running", () => {
+  assert.deepEqual(tailnetMisses(""), ["not-running"]);
+  assert.deepEqual(tailnetMisses("null"), ["not-running"]);
 });

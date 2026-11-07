@@ -15,23 +15,15 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { JobFailure } from "../protocol/jobs.ts";
 import type { TailscaleServe } from "./run.ts";
-import { output } from "../exec.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
+import type { TailscaleCli } from "../tailscale.ts";
 import { serialQueue } from "../single-flight.ts";
 import { startGateway, warmHeader, type GatewayOptions, type PreviewGateway, type PreviewRoute } from "./gateway.ts";
 
-/** Runs the tailscale CLI and resolves to its stdout. Rejects when it exits nonzero. */
-export type TailscaleCli = (args: readonly string[], signal: AbortSignal) => Promise<string>;
-
 /** One GET that resolves to the HTTP status. The probe uses fetch. Tests route it to the gateway without TLS. */
 export type HttpsGet = (url: string, headers: Record<string, string>, signal: AbortSignal) => Promise<number>;
-
-/** The binary is looked up on PATH. On the nodes it is the home tailnet's `tailscale`. */
-export function tailscaleCli(binary = "tailscale"): TailscaleCli {
-  return (args, signal) => output(binary, args, { signal, timeout: 30_000 });
-}
 
 export const fetchGet: HttpsGet = async (url, headers, signal) => {
   const res = await fetch(url, { headers, signal });

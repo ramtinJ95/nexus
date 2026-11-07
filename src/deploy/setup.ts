@@ -4,11 +4,13 @@
  * `node src/deploy/setup.ts write|join|credentials|left [--node <control device>] [--join <token>] [--admit <device>]...
  * [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]`.
  * `node src/deploy/setup.ts signed-in <control.json>` exits 0 when the harness that config names is signed in.
+ * `tailscale status --json | node src/deploy/setup.ts check` prints the tailscale settings install.sh reports as missing.
  * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins and modules that do too.
  */
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
+import { text } from "node:stream/consumers";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, harnessSignedIn, locations, provision, scripted, secretNames, stores, system, terminal, type FollowUp } from "./credentials.ts";
 import { readControlPlane } from "./control-plane.ts";
@@ -17,7 +19,7 @@ import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { isImageId } from "../ids.ts";
-import { localApiWhois } from "../tailscale.ts";
+import { localApiWhois, parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { configFiles, ports, rootPath, servicePath, stateDirs, users } from "../node-layout.ts";
 import type { Whois } from "../protocol/http.ts";
 
@@ -40,21 +42,28 @@ type JsonObject = { readonly [key: string]: Json };
 export interface Device { id: string; name: string; host: string; ip: string }
 export interface Tailnet { self: Device; peers: readonly Device[] }
 
-function device(raw: unknown): Device | undefined {
-  const { ID, DNSName, TailscaleIPs } = (raw ?? {}) as { ID?: unknown; DNSName?: unknown; TailscaleIPs?: unknown };
-  const ip = Array.isArray(TailscaleIPs) ? TailscaleIPs.find((a): a is string => typeof a === "string" && !a.includes(":")) : undefined;
-  if (typeof ID !== "string" || ID === "" || typeof DNSName !== "string" || DNSName === "" || ip === undefined) return undefined;
-  const host = DNSName.replace(/\.$/, "");
-  return { id: ID, name: host.split(".")[0]!, host, ip };
+/** The devices setup can name. One without a stable ID, a MagicDNS name or an IPv4 address cannot be configured, so it is left out. */
+export function tailnetDevices(status: TailscaleStatus): Tailnet {
+  const self = device(status.self);
+  if (self === undefined) throw new Error("tailscale status --json gives this machine no ID, MagicDNS name and IPv4 address. Is tailscale up, with MagicDNS on?");
+  return { self, peers: status.peers.flatMap((p) => device(p) ?? []) };
 }
 
-/** `tailscale status --json`. A peer without a stable ID, a MagicDNS name or an IPv4 address cannot be configured, so it is left out. */
-export function parseTailnet(statusJson: string): Tailnet {
-  const status = JSON.parse(statusJson) as { Self?: unknown; Peer?: Record<string, unknown> | null };
-  const self = device(status.Self);
-  if (self === undefined) throw new Error("tailscale status --json gives this machine no ID, MagicDNS name and IPv4 address. Is tailscale up, with MagicDNS on?");
-  const peers = Object.values(status.Peer ?? {}).flatMap((p) => device(p) ?? []);
-  return { self, peers };
+function device(d: TailnetDevice | null): Device | undefined {
+  if (d === null || d.id === null || d.host === null || d.ipv4 === null) return undefined;
+  return { id: d.id, name: d.host.split(".")[0]!, host: d.host, ip: d.ipv4 };
+}
+
+/** What install.sh reports from `tailscale status --json`: the settings Nexus needs that are off, by name. Text that is not JSON is a tailscale that is not running. */
+export function tailnetMisses(statusJson: string): string[] {
+  let status: TailscaleStatus;
+  try {
+    status = parseTailscaleStatus(statusJson);
+  } catch {
+    return ["not-running"];
+  }
+  if (!status.running) return ["not-running"];
+  return [...status.magicDns ? [] : ["magicdns-off"], ...status.certificates ? [] : ["certificates-off"]];
 }
 
 export interface Flags {
@@ -413,8 +422,7 @@ async function readJsonFile(path: string, errors: string[]): Promise<Json | unde
 }
 
 async function tailnet(): Promise<Tailnet> {
-  const { stdout } = await exec("tailscale", ["status", "--json"], { maxBuffer: 16 * 1024 * 1024 });
-  return parseTailnet(stdout);
+  return tailnetDevices(await tailscaleStatus(tailscaleCli()));
 }
 
 async function write(flags: Flags): Promise<number> {
@@ -526,12 +534,16 @@ async function main(args: readonly string[]): Promise<number> {
     }
     return 0;
   }
+  if (command === "check") {
+    for (const miss of tailnetMisses(await text(process.stdin))) console.log(miss);
+    return 0;
+  }
   if (command === "signed-in" && args[1] !== undefined) return await signedIn(args[1]) ? 0 : 1;
   if (command === "left") {
     console.log(formatLeft(left(await gather(flags))));
     return 0;
   }
-  console.error("usage: node src/deploy/setup.ts write|join|credentials|left|signed-in [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
+  console.error("usage: node src/deploy/setup.ts write|join|credentials|left|signed-in|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
   return 1;
 }
 

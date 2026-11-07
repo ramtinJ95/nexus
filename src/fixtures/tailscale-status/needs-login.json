@@ -1,0 +1,26 @@
+{
+  "Version": "1.90.0",
+  "TUN": true,
+  "BackendState": "NeedsLogin",
+  "HaveNodeKey": true,
+  "AuthURL": "",
+  "TailscaleIPs": null,
+  "Self": {
+    "ID": "",
+    "PublicKey": "nodekey:f1",
+    "HostName": "rj-firebat",
+    "DNSName": "",
+    "OS": "linux",
+    "UserID": 0,
+    "TailscaleIPs": null,
+    "Online": false
+  },
+  "Health": [
+    "You are logged out."
+  ],
+  "MagicDNSSuffix": "",
+  "CurrentTailnet": null,
+  "CertDomains": null,
+  "Peer": null,
+  "User": null
+}
