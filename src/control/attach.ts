@@ -27,7 +27,7 @@ export interface AttachError { kind: AttachErrorKind; message: string }
 /** The thread now: its pylon's state, or why no terminal can open on it. */
 export type Look = { kind: "pylon"; state: ActualState } | { kind: "over"; error: AttachError };
 
-/** What serveAttach asks of the thread's pylon. api.ts makes one per attach from the registry and the node's probe. */
+/** What serveAttach asks of the thread's pylon. api/server.ts makes one per attach from the registry and the node's probe. */
 export interface PylonDoor {
   readonly thread: string;
   look(): Look;

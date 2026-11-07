@@ -22,7 +22,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "./harness/test-fixture.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
 import { testImage } from "../test-kit.ts";
-import { startApi } from "./api.ts";
+import { startApi } from "./api/server.ts";
 import type { ThreadHarness } from "./thread-agent.ts";
 import { threadStarter } from "./threads.ts";
 import { readEvents } from "./event-reader.ts";

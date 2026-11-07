@@ -1226,7 +1226,7 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(holds("src/control/releases.ts", "-  return options !== undefined && options.deployers.has(caller) && isPerson(registry, options, caller);"), ["reserved-path:auth"]);
   assert.deepEqual(holds("src/probe/server.ts", `-    return routeAuth[route] === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);`), ["reserved-path:auth"]);
   assert.deepEqual(holds("src/control/api/kit.ts", "+export const x = 1;"), ["reserved-path:auth"]);
-  assert.deepEqual(holds("src/control/api.ts", "-    if (req.method !== \"GET\") requireJson(req);"), ["reserved-path:auth"], "the API's admission of every request");
+  assert.deepEqual(holds("src/control/api/server.ts", "-    if (req.method !== \"GET\") requireJson(req);"), ["reserved-path:auth"], "the API's admission of every request");
   assert.deepEqual(holds("src/pylon-vm/runtime.ts", "+\t\t\thttpHooks: {},"), ["reserved-path:egress"], "a hook that replaces the allowlist's");
   assert.deepEqual(holds("src/probe/redact.ts", "-const minValueLength = 8;", "+const minValueLength = 32;"), ["reserved-path:secrets"], "what keeps granted secrets out of the probe's logs");
   assert.deepEqual(patched("src/control/api/thread-routes.ts", `@@ -40,4 +40,5 @@ export function threadRoutes(\n     const t = thread(m[1]!);\n+    if (r.query.has("debug")) return ok(dump(t));\n     personOnly(r.caller, "read a thread");`), ["reserved-path:auth"], "a line added beside a guard it gets around, which only the context names");
@@ -3635,7 +3635,7 @@ test("a Land press the policy can never take is refused, so the route and the da
 
 test("a description that says what could not be checked live only after the approving round lands once the person presses Land, through the reviewer's quote", async (t) => {
   const f = fixture(t);
-  f.files = [{ path: "src/control/api.ts", previous: null, patch: "" }];
+  f.files = [{ path: "src/control/api/server.ts", previous: null, patch: "" }];
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
   const loop = f.loop();
   await loop.start(f.builder, { land: "nLAPTOP" });
@@ -3643,7 +3643,7 @@ test("a description that says what could not be checked live only after the appr
   const reviewer = f.review().reviewer;
   f.reply(reviewer, verdict(f.review(), { notCheckedLive: null }));
   await loop.poll();
-  const auth = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
+  const auth = "Always needs the person: changes to login or auth, as it changes src/control/api/server.ts.";
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live.", auth] });
 
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache.\n\n## Not checked live\n\nThe cache under real traffic on the fleet." } };

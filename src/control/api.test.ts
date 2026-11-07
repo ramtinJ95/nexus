@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
-import { featureRoutes, type ApiOptions } from "./api.ts";
+import { featureRoutes, type ApiOptions } from "./api/server.ts";
 import type { ApiKit } from "./api/kit.ts";
 import { version } from "../version.ts";
 import type { QueuedThread } from "./queue.ts";

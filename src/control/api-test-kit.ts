@@ -11,7 +11,7 @@ import { request } from "node:http";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
-import { startApi, type ApiOptions } from "./api.ts";
+import { startApi, type ApiOptions } from "./api/server.ts";
 import { threadServices } from "./thread-services.ts";
 import { turnGate } from "./drain.ts";
 import type { AttachTiming } from "./attach.ts";

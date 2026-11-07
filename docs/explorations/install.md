@@ -87,7 +87,7 @@ What an install needs, and where each lives today:
 | A git SSH key | Clone and push over SSH, terminated on the host | `/etc/nexus/git_ed25519` and `git_known_hosts` on each node, named by `gitSsh` in `probe.json` | By hand, then an installer rerun |
 | A Claude or Codex login inside a pylon | One interactive session | The pylon's own disk, gone with the thread | `/login` in the pylon ([design](../design.md#network-and-credentials) line 93) |
 
-A project grants secrets by name and host. Values never sit in the registry or in a pylon ([design](../design.md#network-and-credentials) lines 89 to 91). Changing a project's grants is person-only (`nexus project edit`), and the merge policy reserves changes to secrets, login or auth for the person ([merge-policy.md](../merge-policy.md#always-needs-the-person) line 25), with every path under `deploy/`, `src/deploy/`, `src/control/login.ts` and `src/control/api.ts` reserved for Nexus's own pull requests.
+A project grants secrets by name and host. Values never sit in the registry or in a pylon ([design](../design.md#network-and-credentials) lines 89 to 91). Changing a project's grants is person-only (`nexus project edit`), and the merge policy reserves changes to secrets, login or auth for the person ([merge-policy.md](../merge-policy.md#always-needs-the-person) line 25), with every path under `deploy/`, `src/deploy/`, `src/control/login.ts` and `src/control/api/server.ts` reserved for Nexus's own pull requests.
 
 ### Shared credentials for the whole install
 
@@ -138,7 +138,7 @@ With a join token, the admin runs `sudo deploy/install.sh --join-token` on the c
 The costs:
 
 - Nodes, deploy keys and callers move from `control.json` into the registry, with `control.json`'s lists kept as seeds so the person's own install changes nothing. That is a registry migration, which the merge policy holds for the person, and the control plane must add and drop probes at runtime, which its wiring in `src/control/main.ts` does once at startup today.
-- The join route is open to any tailnet node that holds a valid token, so it must be the only route an unadmitted node can call besides `/v1/whoami` (`src/control/api.ts` lines 1231 to 1236, where `/v1/health` skips admission only for a request from the control plane's own address), and it changes auth, which holds its pull request for the person.
+- The join route is open to any tailnet node that holds a valid token, so it must be the only route an unadmitted node can call besides `/v1/whoami` (`src/control/api/server.ts` lines 1231 to 1236, where `/v1/health` skips admission only for a request from the control plane's own address), and it changes auth, which holds its pull request for the person.
 - Probes need a peer list they refresh from the control plane, which changes the probe's auth and the image fetch path between probes.
 
 A token, rather than admitting any tailnet node that asks, keeps the rule that a node is registered only by someone who is root on the control plane's machine.
@@ -162,7 +162,7 @@ Every route that changes a credential, a caller, a node or a deployer must answe
 - A per-person login route, if built, answers only `isPerson` callers, and only for the caller's own tailnet user. Its response carries no credential, and nothing reads a stored credential back out.
 - The join route takes a token only root on the control plane's machine can mint, and records only what whois says about the caller.
 - A pylon's host bridge stays a closed list with none of these (`src/project.ts` lines 510 to 518, [design](../design.md#who-starts-a-thread)). Gondolin passes no request from a pylon to the control plane unless a person adds it to a project's hosts.
-- Every pull request that builds these touches `deploy/`, `src/deploy/`, `src/control/api.ts` or `src/control/main.ts`, so it holds for the person under [the reserved paths](../merge-policy.md#paths-that-hold-a-nexus-pull-request).
+- Every pull request that builds these touches `deploy/`, `src/deploy/`, `src/control/api/server.ts` or `src/control/main.ts`, so it holds for the person under [the reserved paths](../merge-policy.md#paths-that-hold-a-nexus-pull-request).
 
 ## Build order
 

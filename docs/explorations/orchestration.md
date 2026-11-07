@@ -87,7 +87,7 @@ What Nexus should take: one nudge, then hand it on. The review loop already nudg
 
 ### What the survey shows
 
-Every tool that delegates lets the model start children, and every one of them keeps the parent alive while it waits, either in a held tool call or in a session that a completion message wakes. None runs a multi-day pipeline from one model's context. The parts that survive a crash are code: t3code's receipts and outbox, Muse's admission-only commands, the Action's tracking comment. Nexus's control plane is already that kind of code, with request IDs on messages ([`src/control/api.ts`](../../src/control/api.ts) lines 265 to 271) and a review loop that saves each step before it acts. Nexus takes the code half of these tools and leaves the model half: under [the decision of 2026-10-28](#decided-on-2026-10-28-a-thread-never-drives-another-thread), no model in Nexus starts a child thread.
+Every tool that delegates lets the model start children, and every one of them keeps the parent alive while it waits, either in a held tool call or in a session that a completion message wakes. None runs a multi-day pipeline from one model's context. The parts that survive a crash are code: t3code's receipts and outbox, Muse's admission-only commands, the Action's tracking comment. Nexus's control plane is already that kind of code, with request IDs on messages ([`src/control/api/server.ts`](../../src/control/api/server.ts) lines 265 to 271) and a review loop that saves each step before it acts. Nexus takes the code half of these tools and leaves the model half: under [the decision of 2026-10-28](#decided-on-2026-10-28-a-thread-never-drives-another-thread), no model in Nexus starts a child thread.
 
 ## What the Mac coordinator did
 

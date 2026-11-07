@@ -17,7 +17,7 @@ import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertif
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
 import { openHarnessHost, type ConversationId } from "./harness/host.ts";
-import { startApi } from "./api.ts";
+import { startApi } from "./api/server.ts";
 import { registryLocator } from "./locator.ts";
 import { startLoop } from "./loop.ts";
 import { openRegistry } from "./registry.ts";
