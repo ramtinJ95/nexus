@@ -6,9 +6,9 @@
  * preview on to 127.0.0.1 or `::1`. One bound to another loopback address such as 127.0.0.2, or to any other address,
  * is left out, and so are Nexus's own listeners, the relay's among them.
  */
-import type { Guest } from "./backend.ts";
-import { reservedPorts } from "./services-file.ts";
-import type { ListeningFact } from "./protocol/observations.ts";
+import type { Guest } from "../../backend.ts";
+import { reservedPorts } from "../../services-file.ts";
+import type { ListeningFact } from "../../protocol/observations.ts";
 
 /** The kernel's TCP_LISTEN state, as /proc/net/tcp prints it. */
 const listenState = "0A";

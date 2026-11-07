@@ -2,7 +2,7 @@
  * Node validation for sessions.ts against a real Herdr, which the unit tests only fake. Run it inside a
  * scratch pylon as `user`, from a copy of src/, with the image's Node:
  *
- *   node src/sessions.check.ts
+ *   node src/probe/guest/sessions.check.ts
  *
  * It drives a local Guest (execFile and fs), so every Herdr call is the one the probe makes. It stops the
  * pylon's Herdr server twice and deletes its persisted state, which ends every session in it, so never
@@ -18,10 +18,10 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { Guest } from "./backend.ts";
-import { exit } from "./exec.ts";
-import { unusedGuest } from "./fake-guest.ts";
-import type { SessionFact } from "./protocol/observations.ts";
+import type { Guest } from "../../backend.ts";
+import { exit } from "../../exec.ts";
+import { unusedGuest } from "../../fake-guest.ts";
+import type { SessionFact } from "../../protocol/observations.ts";
 import { closeSession, herdrSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 
 const cwd = "/home/user";

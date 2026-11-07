@@ -4,10 +4,10 @@ import { execFile, type ExecFileOptions } from "node:child_process";
 import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { fakeGuest } from "./fake-guest.ts";
+import { fakeGuest } from "../../fake-guest.ts";
 import { gitFacts } from "./git-facts.ts";
-import { checkoutDir } from "./session-harness.ts";
-import { tempDir } from "./test-kit.ts";
+import { checkoutDir } from "../../session-harness.ts";
+import { tempDir } from "../../test-kit.ts";
 
 const exec = promisify(execFile);
 const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };

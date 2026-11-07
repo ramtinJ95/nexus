@@ -7,10 +7,10 @@ import type { LiveHash, PylonId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
 import type { DeclaredOutput, GitFacts, ListeningFact, PylonObservation, ServiceFact, SessionFact } from "../protocol/observations.ts";
 import type { ServiceName } from "../services-file.ts";
-import { attachedTerminals, sessionFacts } from "../sessions.ts";
-import { listOutputs } from "../outputs.ts";
-import { listeningFacts } from "../listening.ts";
-import { gitFacts, gitPollMs } from "../git-facts.ts";
+import { attachedTerminals, sessionFacts } from "./guest/sessions.ts";
+import { listOutputs } from "./guest/outputs.ts";
+import { listeningFacts } from "./guest/listening.ts";
+import { gitFacts, gitPollMs } from "./guest/git-facts.ts";
 
 /** Short, because snapshots are read one at a time and a stuck guest would hold up every observer. */
 const sessionReadTimeoutMs = 3_000;

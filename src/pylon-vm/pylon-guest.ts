@@ -12,7 +12,7 @@ import type { Guest, PreviewOrigin } from "../backend.ts";
 import { processStream } from "../process-stream.ts";
 import type { PylonId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
-import type { PylonLog } from "../session-wake.ts";
+import type { PylonLog } from "../probe/guest/session-wake.ts";
 import { statusSchema } from "./contracts.ts";
 import { stamped } from "./controller-log.ts";
 import { shellQuote as q } from "../shell.ts";

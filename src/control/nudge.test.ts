@@ -10,7 +10,7 @@ import { prWatcher } from "./pr-watch.ts";
 import { pushedBranches } from "./pr-watch-model.ts";
 import type { GitHub, PullRequest } from "./github.ts";
 import { ingest } from "../reconcile.ts";
-import { gitPollMs } from "../git-facts.ts";
+import { gitPollMs } from "../probe/guest/git-facts.ts";
 import { checkCaller, nudgePrefix, reviewerCaller } from "../agent-protocol.ts";
 import { turnGate } from "./drain.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";

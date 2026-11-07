@@ -44,7 +44,7 @@ import { loginHosts } from "./control/project.ts";
 import { renderOverlay } from "./control/overlay.ts";
 import type { BootInputs, CloneRepo, OverlayFile, PreviewAssignment } from "./spawn.ts";
 import type { ProjectId } from "./ids.ts";
-import { sessionFacts, sessionsFile } from "./sessions.ts";
+import { sessionFacts, sessionsFile } from "./probe/guest/sessions.ts";
 import { checkoutDir, type SessionHarness } from "./session-harness.ts";
 import { freePort } from "./test-kit.ts";
 

@@ -9,10 +9,10 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import type { Guest } from "./backend.ts";
-import { parseJson } from "./parse.ts";
-import type { DeclaredOutput } from "./protocol/observations.ts";
-import { checkoutDir } from "./session-harness.ts";
+import type { Guest } from "../../backend.ts";
+import { parseJson } from "../../parse.ts";
+import type { DeclaredOutput } from "../../protocol/observations.ts";
+import { checkoutDir } from "../../session-harness.ts";
 
 export const outputsDir = "/home/user/.nexus/outputs";
 
@@ -30,7 +30,7 @@ const listingBudgetBytes = 60_000;
 /** A diff of a large tree can take a while to write. Above the helper's 45 s for one git command, so a slow git is its refusal. */
 const diffTimeoutMs = 60_000;
 /** Sent with each diff rather than run from the image, whose copy on an older pylon has no diff-to. */
-const helper = readFileSync(new URL("./checkout-files.py", import.meta.url), "utf8");
+const helper = readFileSync(new URL("../../checkout-files.py", import.meta.url), "utf8");
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const objectId = z.string().regex(/^[0-9a-f]{40,64}$/);
 const diffReply = z.strictObject({ base: objectId, commit: objectId.nullable(), sha256, bytes: z.number().int().nonnegative() });
