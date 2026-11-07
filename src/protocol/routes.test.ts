@@ -48,9 +48,15 @@ test("a route's path encodes each parameter, and only the stream upgrades and on
   assert.equal(routePath(probeRoutes.job, { jobId: "a/b c" }), "/v1/jobs/a%2Fb%20c");
   assert.equal(routePath(probeRoutes.putPeers), "/v1/peers");
   // @ts-expect-error a route with a parameter needs it
-  routePath(probeRoutes.job);
-  assert.deepEqual(routes.filter((r) => "upgrade" in r).map((r) => r.path), ["/v1/pylons/{pylonId}/stream"]);
-  assert.deepEqual(routes.filter((r) => "retry" in r).map((r) => [r.method, r.path]), [["PUT", "/v1/jobs/{jobId}"]]);
+  assert.throws(() => routePath(probeRoutes.job), /needs jobId/);
+  const either = Math.random() < 2 ? probeRoutes.job : probeRoutes.command;
+  // @ts-expect-error a union of routes names no parameters to require
+  assert.throws(() => routePath(either), /needs/);
+  const widened: { path: string } = probeRoutes.putPeers;
+  // @ts-expect-error a widened path names no parameters to require
+  routePath(widened);
+  assert.deepEqual(routes.filter((r) => "upgrade" in r).map((r) => [r.path, r.upgrade]), [["/v1/pylons/{pylonId}/stream", "nexus-stream"]]);
+  assert.deepEqual(routes.filter((r) => "retry" in r).map((r) => [r.method, r.path, r.retry]), [["PUT", "/v1/jobs/{jobId}", "until-expired"]]);
 });
 
 test("each call the client and an artifact fetch make is a route in the table, with the upgrade the table names", async (t) => {

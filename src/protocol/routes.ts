@@ -49,11 +49,17 @@ export const probeRoutes = {
 } as const satisfies Record<string, ProbeRoute>;
 
 type ParamsOf<P extends string> = P extends `${string}{${infer K}}${infer Rest}` ? Record<K, string> & ParamsOf<Rest> : unknown;
+/** Only one route's literal path: a union of routes or a widened `ProbeRoute` names no parameters to require. */
+type PathArgs<P extends string> = string extends P ? never : [P] extends [`${string}{${string}`] ? [ParamsOf<P>] : P extends `${string}{${string}` ? never : [];
 
 /** The route's path with each parameter URI-encoded. */
-export function routePath<P extends string>(route: { path: P }, ...params: keyof ParamsOf<P> extends never ? [] : [ParamsOf<P>]): string {
-  const given = (params[0] ?? {}) as Record<string, string>;
-  return route.path.replace(/\{(\w+)\}/g, (_, key: string) => encodeURIComponent(given[key]!));
+export function routePath<P extends string>(route: { path: P }, ...params: PathArgs<P>): string {
+  const given: Partial<Record<string, string>> = params[0] ?? {};
+  return route.path.replace(/\{(\w+)\}/g, (_, key: string) => {
+    const value = given[key];
+    if (value === undefined) throw new Error(`${route.path} needs ${key}`);
+    return encodeURIComponent(value);
+  });
 }
 
 /**
