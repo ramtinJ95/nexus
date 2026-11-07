@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.67.0
+
+Adds yolo landing: `project edit --auto-review yolo`, and `--auto-review` on `project add`, under which the review loop answers each review's holds question with Land for the deployer who turned it on, as [Yolo landing](merge-policy.md#yolo-landing) describes. `Project.autoReview` is now `{ mode, enabledBy }`, `mode` being `review`, `land` or `yolo`, and `PATCH /v1/projects/<id>` takes `autoReview: { mode }`, and still `{ land }`. `Waiver.yolo` names the project whose setting gave a waiver, which `show` prints and the `review.waived` event carries. A control plane older than 0.67.0 refuses `{ mode }` with 400, so `--auto-review` fails with exit code 64, and sends `{ land, enabledBy }`, which the CLI reads as the mode it means.
+
 ## 0.66.0
 
 Adds a second reviewer on another model: `project edit --second-reviewer off|on|always|reserved,lines=N`, `Project.secondReview` and `secondReview` in `PATCH /v1/projects/<id>`, `Review.second`, `Round.secondVerdict`, the hold `no-second-reviewer`, `second` in the `review.changed` event, and the line `show` prints of both reviewers' verdicts, as [Reviews and landing](cli.md#reviews-and-landing) and [Project editing](cli.md#project-editing) describe. A control plane older than 0.66.0 refuses `secondReview` with 400, so `--second-reviewer` fails with exit code 64.

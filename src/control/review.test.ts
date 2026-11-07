@@ -2529,7 +2529,7 @@ const rebased = (f: ReturnType<typeof fixture>) => { f.snapshot = { ...f.snapsho
 const unshownChange = (from: string, to: string) => `Nexus cannot tell whether the change at ${to.slice(0, 12)} is the one nLAPTOP pressed Land for at ${from.slice(0, 12)}, as GitHub shows no patch for src/control/schema.ts, so that waiver does not carry over. Look at the change again, and press Land to waive the holds at ${to.slice(0, 12)}.`;
 
 test("a builder's PR in a project that lands on its own is reviewed with no command and lands for whoever turned it on", async (t) => {
-  const f = fixture(t, { autoReview: { land: true, enabledBy: "nLAPTOP" } });
+  const f = fixture(t, { autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
   released(f, previous);
   const loop = f.loop();
   await loop.auto(f.registry.thread(f.builder)!, f.pr);
@@ -2548,7 +2548,7 @@ test("nothing starts on its own without the project's setting, for a thread the 
   await off.loop().auto(off.registry.thread(off.builder)!, off.pr);
   assert.equal(off.registry.review(off.builder), null, "a project without the setting");
 
-  const f = fixture(t, { path: tempDb(), autoReview: { land: false, enabledBy: "nPHONE" } });
+  const f = fixture(t, { path: tempDb(), autoReview: { mode: "review", enabledBy: "nPHONE" } });
   const loop = f.loop();
   for (const [id, by] of [["th-reviewing", reviewerCaller], ["th-checking", checkCaller]] as const) {
     await loop.auto(f.registry.thread(f.add(id, true, by))!, f.pr);
@@ -2678,7 +2678,7 @@ test("each landing asks again whether its lander may deploy, and whether the pro
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["nLAPTOP, who asked for this landing, is not among the control plane's deployers, so only the person can land it."] });
 
-  const auto = fixture(t, { path: tempDb(), autoReview: { land: true, enabledBy: "nLAPTOP" } });
+  const auto = fixture(t, { path: tempDb(), autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
   const own = auto.loop();
   await own.auto(auto.registry.thread(auto.builder)!, auto.pr);
   await own.poll();
@@ -2737,7 +2737,7 @@ test("a held review ends before its label is retried, and one whose PR watch sto
 });
 
 test("a PR that another thread on its branch has a review of gets none on its own", async (t) => {
-  const f = fixture(t, { autoReview: { land: false, enabledBy: "nLAPTOP" } });
+  const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
   const loop = f.loop();
   await loop.auto(f.registry.thread(f.builder)!, f.pr);
   await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
@@ -2746,7 +2746,7 @@ test("a PR that another thread on its branch has a review of gets none on its ow
 });
 
 test("a PR stays reviewed once its builder's record moves on to a review of another PR", async (t) => {
-  const f = fixture(t, { autoReview: { land: false, enabledBy: "nLAPTOP" } });
+  const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
   const loop = f.loop();
   await loop.auto(f.registry.thread(f.builder)!, f.pr);
   await loop.poll();
@@ -3590,7 +3590,7 @@ test("a review stored before carried approvals and waiver changes still loads, a
 });
 
 test("an approved review in a project that leaves landing to the person waits on them until it lands, merges or closes outside it, or its builder is archived", async (t) => {
-  const reviewOnly = { autoReview: { land: false, enabledBy: "nLAPTOP" }, repo: "acme/app" };
+  const reviewOnly = { autoReview: { mode: "review" as const, enabledBy: "nLAPTOP" }, repo: "acme/app" };
   const approve = async (f: ReturnType<typeof fixture>) => {
     const loop = f.loop();
     await loop.auto(f.registry.thread(f.builder)!, f.pr);
@@ -4190,6 +4190,91 @@ test("a Land answer given before a hold appears does not cover it: the landing h
   const [again] = openHolds(f);
   assert.deepEqual(again!.holds!.holds.map((h) => h.code), ["reserved:irreversible", "reserved-path:image-rebuild"]);
   assert.match(again!.text, /waiving anything irreversible and pylon image rebuilds\?/);
+});
+
+const yolo = { mode: "yolo" as const, enabledBy: "nLAPTOP" };
+
+test("a yolo project's review answers its own holds question with Land for whoever turned it on, and lands with the waiver naming the setting", async (t) => {
+  const f = fixture(t, { autoReview: yolo });
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  const [question, ...more] = holdQuestions(f);
+  assert.deepEqual(more, []);
+  assert.deepEqual({ option: question!.answer?.option, by: question!.answer?.by }, { option: "Land", by: "nLAPTOP" }, "answered in the pass that asked it");
+  const { at, ...waiver } = f.review().waiver!;
+  assert.deepEqual(waiver, { head: head1, holds: [imageHold], codes: ["reserved-path:image-rebuild"], by: "nLAPTOP", change: null, yolo: "nexus" });
+  assert.match(reviewText(f.review()), /^waived by nLAPTOP, by project nexus's yolo setting, at 1{40}, /m);
+  assert.equal(f.registry.events("0", { kinds: ["review.waived"], thread: f.builder }).at(-1)?.payload.yolo, "nexus");
+  assert.notEqual(f.registry.attention(f.builder), "decision");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a yolo project's waiver never covers what the policy lets no one waive: a failed check still stops the landing", async (t) => {
+  const f = fixture(t, { autoReview: yolo });
+  f.files = dockerfile;
+  f.check = { kind: "done", passed: false, output: "boom" };
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  assert.deepEqual(f.review().waiver?.yolo, "nexus");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "fixing", "the failed check goes back to the builder, as it would without the waiver");
+  assert.ok(f.review().waiver!.codes.every((code) => code === "reserved-path:image-rebuild"), "the waiver covers only the hold the person may waive");
+});
+
+test("a project switched from yolo to land answers no more holds questions, and the one it answered stays answered", async (t) => {
+  const f = fixture(t, { autoReview: yolo });
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  const [first] = holdQuestions(f);
+  assert.equal(first!.answer?.option, "Land");
+  f.registry.editProject("nexus" as ProjectId, (p) => ({ ...p, autoReview: { mode: "land", enabledBy: "nLAPTOP" } }));
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  const [open, ...more] = openHolds(f);
+  assert.deepEqual(more, []);
+  assert.deepEqual(open!.holds!.holds.map((h) => h.code), ["reserved:cli-breaking", "reserved-path:image-rebuild"], "the new holds wait on the person");
+  assert.equal(f.registry.question(first!.id)?.answer?.option, "Land");
+});
+
+test("a landing a yolo setting answered at approval holds again once the project stops landing on its own", async (t) => {
+  const f = fixture(t, { autoReview: yolo });
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
+  f.check = { kind: "running" };
+  await loop.poll();
+  assert.equal(f.review().waiver?.yolo, "nexus", "answered once the reviewer named the case");
+  assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", fromProject: true }, "still the project's landing");
+  f.registry.editProject("nexus" as ProjectId, (p) => ({ ...p, autoReview: { mode: "review", enabledBy: "nLAPTOP" } }));
+  f.check = { kind: "done", passed: true, output: "ok" };
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
+    "Project nexus no longer lands its builders' pull requests on its own, so this one is the person's to land.",
+    `${personOnly}${reservedNames["cli-breaking"]}, by the reviewer's reading (it renames a flag).`,
+  ] });
+});
+
+test("a yolo setting turned on by someone who is not a deployer answers nothing", async (t) => {
+  const f = fixture(t, { autoReview: { mode: "yolo", enabledBy: "nPHONE" } });
+  f.files = dockerfile;
+  const loop = f.loop();
+  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.poll();
+  assert.equal(openHolds(f).length, 1);
+  assert.equal(f.review().waiver, null);
 });
 
 test("Leave it waives nothing, and the review holds for the person without asking the same holds again", async (t) => {

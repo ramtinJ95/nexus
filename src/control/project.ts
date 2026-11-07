@@ -24,8 +24,9 @@ export interface Project {
   /** A script stored in Nexus, not the repo. It runs as user before .nexus/setup, so a project can be set up without a commit. */
   preSetup: string | null;
   /**
-   * Whether the review loop starts on its own for each builder's pull request, and lands it once approved. Only a
-   * person sets it, and `enabledBy` is the caller who did, on whose behalf a landing merges and deploys.
+   * Whether the review loop starts on its own for each builder's pull request, lands it once approved, and in yolo
+   * mode answers its own holds question with Land too. Only a person sets it, and `enabledBy` is the caller who did,
+   * on whose behalf a landing merges and deploys and a yolo waiver waives.
    */
   autoReview?: AutoReview | null | undefined;
   /** Which pull requests a review gives a second reviewer on another model. Absent or null is none, as for a project that never set it. */
@@ -40,7 +41,17 @@ export interface Project {
 }
 /** What `nexus project add` and the dashboard's new-project dialog give a project unless told otherwise. */
 export const defaultProjectResources: Readonly<Project["resources"]> = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
-export interface AutoReview { land: boolean; enabledBy: string }
+export type AutoReviewMode = "review" | "land" | "yolo";
+export interface AutoReview { mode: AutoReviewMode; enabledBy: string }
+/** Whether the setting lands what its reviews approve, which yolo does too. */
+export const landsOnItsOwn = (setting: AutoReview | null | undefined) => setting != null && setting.mode !== "review";
+/** A project as this code reads it: one saved before modes has `land: boolean` in place of its mode. */
+export function upgradeProject(project: Project): Project {
+  const setting = project.autoReview as (AutoReview & { land?: boolean }) | null | undefined;
+  if (setting == null || setting.mode !== undefined) return project;
+  const { land, ...rest } = setting;
+  return { ...project, autoReview: { ...rest, mode: land === true ? "land" : "review" } };
+}
 /** Every pull request, or one that changes at least `lines` lines, tests and docs included, or has a reserved path hold. */
 export type SecondReview = { always: true } | { always: false; lines: number | null; reserved: boolean };
 /**

@@ -252,7 +252,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
-    + "    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer\n"
+    + "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer\n"
     + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n"
     + "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
@@ -1787,8 +1787,19 @@ test("project edit turns reviews of its own on and off, and projects shows who t
   const landing = await s.nexus(["project", "edit", "auto", "--auto-review", "land"]);
   assert.equal(landing.stdout, `Updated project auto, auto review and land, for ${laptop}, pipeline off. Existing threads keep their boot settings and grants; start a new thread to apply them.\n`);
   assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review and land, for ${laptop} +pipeline off +scratch$`, "m"));
-  assert.deepEqual((await s.json(["project", "edit", "auto", "--auto-review", "review"])).autoReview, { land: false, enabledBy: laptop });
+  assert.deepEqual((await s.json(["project", "edit", "auto", "--auto-review", "review"])).autoReview, { mode: "review", enabledBy: laptop });
+  const yolo = await s.nexus(["project", "edit", "auto", "--auto-review", "yolo"]);
+  assert.equal(yolo.stdout, `Updated project auto, auto review and land, waiving holds, for ${laptop}, pipeline off. Existing threads keep their boot settings and grants; start a new thread to apply them.\n`);
+  assert.match((await s.nexus(["project", "show", "auto"])).stdout, new RegExp(`^auto review and land, waiving holds, for ${laptop}, pipeline off$`, "m"));
   assert.equal((await s.json(["project", "edit", "auto", "--auto-review", "off"])).autoReview, undefined);
+  const added = await s.nexus(["project", "add", "overnight", "--scratch", "--node", node, "--auto-review", "yolo"]);
+  assert.equal(added.stdout, `Added scratch project overnight on ${node}, auto review and land, waiving holds, for ${laptop}\n`);
+  assert.equal((await s.nexus(["project", "add", "bad", "--scratch", "--node", node, "--auto-review", "always"])).code, 64);
+  assert.doesNotMatch((await s.nexus(["projects"])).stdout, /^bad /m, "an invalid value is refused before the add");
+  s.callAs(phone);
+  const refused = await s.nexus(["project", "add", "phoned", "--scratch", "--node", node, "--auto-review", "yolo"]);
+  assert.equal(refused.code, 3);
+  assert.match(refused.stderr, /^nexus: Added project phoned, but its auto review was not set: .*only deployers may.*\. Set it with nexus project edit phoned --auto-review/m);
 });
 
 test("project edit sets which pull requests get a second reviewer on another model, and project show says it", async (t) => {

@@ -743,6 +743,22 @@ const chipOf = (page: string) => /<span class="chip-label">([^<]*)<\/span>/.exec
 const dockOf = (page: string) => page.split('<div class="dock">')[1]!.split('<div id="run"')[0]!;
 const actionsOf = (html: string) => [...html.matchAll(/data-action="([^"]+)"|<a [^>]*href="([^"]+)"[^>]*data-write/g)].map((m) => m[1] ?? m[2]);
 
+test("each project in the overview shows its auto-review setting, and a deployer switches it between off, review, land and yolo", async (t) => {
+  const s = await seeded(t, landingOptions());
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "yolo" } })).status, 200);
+  const buttons = async () => [...sectionOf((await s.call("GET", "/")).text, "project-acme").matchAll(/<button [^>]*data-action="auto-review"[^>]*>/g)].map((m) => m[0]);
+  const shown = (all: string[]) => all.map((b) => [/data-mode="(\w+)"/.exec(b)![1], b.includes('aria-pressed="true"'), b.includes(" disabled")]);
+  const deployer = await buttons();
+  assert.deepEqual(shown(deployer), [["off", false, false], ["review", false, false], ["land", false, false], ["yolo", true, true]], "the setting is pressed, and every other one is a press away");
+  assert.ok(deployer.every((b) => b.includes('data-project="acme"')));
+  assert.match(textOf(/data-confirm="([^"]*)"/.exec(deployer[3]!)![1]!), /^Turn on yolo for project acme\? .* until you switch it off\.$/);
+  assert.match(sectionOf((await s.call("GET", "/")).text, "project-acme"), new RegExp(`aria-label="Auto review for acme, set by ${laptop}"`));
+  s.callAs(phone);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "review" } })).status, 200, "the press a device that is not a deployer may make");
+  assert.deepEqual(shown(await buttons()), [["off", false, false], ["review", true, true], ["land", false, true], ["yolo", false, true]], "it cannot turn on landing, which deploys");
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "yolo" } })).status, 403, "and the route refuses it whatever the page shows");
+});
+
 test("every source of a thread's decision has a card on its page with the action that resolves it, and Needs you shows that card with the same actions", async (t) => {
   const s = await seeded(t, landingOptions());
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).status, 200);
@@ -1806,7 +1822,7 @@ test("a scratch project shows as scratch, and starting a thread on it starts an 
   assert.deepEqual([...dialog.matchAll(/<input type="radio" name="project" required value="([^"]*)"[^>]*?( data-scratch)?( checked)?><span class="seg-name">[^<]*<\/span><span class="seg-repo">([^<]*)</g)].map((m) => [m[1], m[2] !== undefined, m[4]]),
     [["acme", false, "git@example.com:acme.git"], ["beta", false, "git@example.com:beta.git"], ["sketch", true, "scratch"]]);
   assert.match(dialog, /name="project" required value="sketch" data-node="rj-firebat" data-branch="main"[^>]* data-scratch[ >]/, "client.js says the thread starts an empty repository from these");
-  assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote New thread/);
+  assert.match(textOf(sectionOf(page, "project-sketch")), /^sketch scratch, no remote Auto review Off Review Land Yolo New thread/);
 });
 
 test("every page has somewhere to say a refresh failed", async (t) => {

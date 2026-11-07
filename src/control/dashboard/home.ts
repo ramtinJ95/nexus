@@ -7,6 +7,7 @@ import type { ThreadDetail } from "../wire.ts";
 import { isOpen } from "../questions.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
+import type { Project } from "../project.ts";
 import { cannotLand, roundsSpent, settledKinds, type Review } from "../review-model.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
@@ -51,6 +52,17 @@ export function home(c: Context, dialogs: Pick<Shell, "start" | "addProject">, p
   });
 }
 
+const autoModes = [["off", "Off"], ["review", "Review"], ["land", "Land"], ["yolo", "Yolo"]] as const;
+/** The project's auto-review setting, which a press switches as `nexus project edit --auto-review` does. Landing modes need a deployer. */
+function autoReviewSwitch(c: Context, p: Project): Html {
+  const current = p.autoReview?.mode ?? "off";
+  const by = p.autoReview == null ? "" : `, set by ${p.autoReview.enabledBy}`;
+  return html`<span class="auto-review" role="group" aria-label="Auto review for ${p.id}${by}"><span class="dim">Auto review</span>${autoModes.map(([mode, label]) => {
+  const refused = mode !== current && (mode === "land" || mode === "yolo") && c.landRefusal === "not a deployer";
+  return html`<button type="button" class="btn btn-xs${mode === current ? " btn-primary" : ""}" data-action="auto-review" data-project="${p.id}" data-mode="${mode}" aria-pressed="${mode === current ? "true" : "false"}"${(mode === current || refused) && html` disabled`}${refused && html` title="Landing deploys, so only a deployer may turn it on"`}${mode === "yolo" && html` data-confirm="Turn on yolo for project ${p.id}? Nexus then answers each review's holds question with Land for you, waiving every hold the policy lets you waive, reserved paths and data-deleting migrations included, until you switch it off."`}>${label}</button>`;
+})}</span>`;
+}
+
 /** Each project's threads as a table of what each pylon is asked to be and is, with its queued threads and its quiet and closed folds. */
 function overview(c: Context): Html {
   const projects = c.registry.projects();
@@ -75,7 +87,7 @@ function overview(c: Context): Html {
   const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
   return html`<section aria-labelledby="project-${p.id}">
-<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code><a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
+<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code>${autoReviewSwitch(c, p)}<a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
 ${recent.length > 0 ? table(recent) : quiet.length === 0 && html`<p class="empty">No open threads.</p>`}
 ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-queued">
 <thead><tr><th>Thread</th><th>Waits for</th><th class="wide">Node</th></tr></thead>

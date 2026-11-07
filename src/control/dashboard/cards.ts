@@ -7,6 +7,7 @@ import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, reviewersNote, roundNote, roundsSpent, type Review } from "../review-model.ts";
 import { holdRule, reservedNames } from "../holds.ts";
+import { landsOnItsOwn } from "../project.ts";
 import { heldBy, landPress } from "../policy.ts";
 import { isOpen, type AnswerRefusal, type AskedQuestion, type NodeQuestion, type Question } from "../questions.ts";
 import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
@@ -245,7 +246,7 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
  */
 function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof prOf>, id: (name: string) => string, card: boolean): Html {
   const outside = pr === undefined || pr.state === "open" ? null : pr.state;
-  const land = c.registry.project(d.thread.project)?.autoReview?.land === true;
+  const land = landsOnItsOwn(c.registry.project(d.thread.project)?.autoReview);
   const refusal = land || c.landRefusal === "no review loop" ? c.landRefusal : null;
   const again = outside === null && d.thread.status === "active";
   const confirm = `Review pull request #${r.pr.number}, "${r.pr.title}", again? A new reviewer thread starts at round 1${land ? ", and Nexus lands the pull request once it approves, as this project lands its reviews" : ""}.`;

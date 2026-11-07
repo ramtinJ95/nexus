@@ -1,12 +1,12 @@
 import { json, type Db, type Row } from "./db.ts";
 import type { ProjectId } from "../ids.ts";
-import type { Project } from "./project.ts";
+import { upgradeProject, type Project } from "./project.ts";
 
 export function projectStore(db: Db) {
   const { transaction, sql } = db;
   function project(id: ProjectId): Project | undefined {
     const row = sql("SELECT record FROM projects WHERE id = ?").get(id);
-    return row && json<Project>(row.record);
+    return row && upgradeProject(json<Project>(row.record));
   }
   return {
     editProject(id: ProjectId, edit: (stored: Project) => Project): Project | undefined {
@@ -19,7 +19,7 @@ export function projectStore(db: Db) {
       });
     },
     createProject(project: Project) { sql("INSERT INTO projects (id, record) VALUES (?, ?)").run(project.id, JSON.stringify(project)); },
-    projects: () => (sql("SELECT record FROM projects ORDER BY id").all() as Row[]).map((r) => json<Project>(r.record)),
+    projects: () => (sql("SELECT record FROM projects ORDER BY id").all() as Row[]).map((r) => upgradeProject(json<Project>(r.record))),
     project,
   };
 }

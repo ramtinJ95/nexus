@@ -7,7 +7,7 @@ import type { Pipeline } from "../pipeline.ts";
 import { HttpError } from "../http-error.ts";
 import { chatgptTokenGrant, secretHostPattern, secretNamePattern } from "../../secret-grants.ts";
 import { gitIdentitySchema } from "../../spawn.ts";
-import { gitUrl, type Project } from "../project.ts";
+import { gitUrl, type AutoReviewMode, type Project } from "../project.ts";
 import { editedRules, standingRulesLimit } from "../standing-rules.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 
@@ -37,7 +37,7 @@ const secondReviewSchema = z.union([
 /** Only an edit sets `autoReview`, and the API records its caller in it, so a project's add cannot name someone else. */
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true })
   .extend({
-    resources: projectSchema.shape.resources.partial(), autoReview: z.strictObject({ land: z.boolean() }).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
+    resources: projectSchema.shape.resources.partial(), autoReview: z.union([z.strictObject({ mode: z.enum(["review", "land", "yolo"]) }), z.strictObject({ land: z.boolean() })]).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
     standingRules: rulesText.nullable(), secondReview: secondReviewSchema.nullable(),
   }).partial();
 
@@ -61,11 +61,13 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
   return [
     ["PATCH", /^\/v1\/projects\/([^/]+)$/, { person: "edit a project" }, async ([, id], r) => {
       const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
-      if (autoReview?.land) mayLand(r.caller);
+      // A CLI older than modes sends `land`.
+      const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
+      if (mode === "land" || mode === "yolo") mayLand(r.caller);
       const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
-        const review = autoReview === undefined ? kept : autoReview === null ? null : { land: autoReview.land, enabledBy: r.caller };
+        const review = mode === undefined ? kept : mode === null ? null : { mode, enabledBy: r.caller };
         // An off pipeline stays null, so the migration that turns it on for project nexus never turns it back on.
         const items = pipeline === undefined ? running : pipeline;
         const rules = standingRules === undefined ? standing : editedRules(standing, standingRules);
