@@ -11,14 +11,14 @@
 import { z } from "zod";
 import { tailnetNodeIdPattern } from "../tailscale.ts";
 import { named } from "../parse.ts";
-import { isImageId, isTemplateId, maxPylonIdLength, type ImageId, type NodeName, type PylonId, type TailnetNodeId, type TemplateId } from "../ids.ts";
+import { isImageId, isNodeName, isPylonId, isTemplateId, type ImageId, type NodeName, type PylonId, type TailnetNodeId, type TemplateId } from "../ids.ts";
 
-/** A tailnet machine name, which is one DNS label, so at most 63 characters. */
-export const nodeNameSchema = z.string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "must be a lowercase tailnet machine name of at most 63 characters")
-  .refine((name) => name !== "auto", "auto is what `start --node auto` asks for, so no node may be named it")
-  .transform((name) => name as NodeName);
-export const pylonIdSchema = z.string().max(maxPylonIdLength).regex(/^[a-z][a-z0-9-]*$/);
+export const nodeNameSchema = z.string().pipe(z.custom<NodeName>(isNodeName, {
+  error: (issue) => issue.input === "auto"
+    ? "auto is what `start --node auto` asks for, so no node may be named it"
+    : "must be a lowercase tailnet machine name of at most 63 characters",
+}));
+export const pylonIdSchema = z.string().refine(isPylonId, "expected a pylon ID");
 
 export const tailnetNodeIdSchema = z.string()
   .regex(tailnetNodeIdPattern, "must be a Tailscale stable node ID, such as nAbCdEf1CNTRL (tailscale status --json)")

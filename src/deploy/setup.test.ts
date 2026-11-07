@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parseConfig } from "../control/main.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
-import { formatLeft, left, paths, parseFlags, parseTailnet, report, setup, type Existing, type Facts, type FileWrite, type Json, type Setup } from "./setup.ts";
+import { formatLeft, holdsImage, left, paths, parseFlags, parseTailnet, report, setup, type Existing, type Facts, type FileWrite, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -370,4 +373,15 @@ test("a node is told how to join the control plane, unless this run joined it", 
   assert.equal(formatLeft(items).split("\n")[0], "What is left:");
   const joined = left({ self: tailnet.self, secretNames: [], gitKey: true, role: "node", control, joined: true }).flatMap((i) => i.run).join("\n");
   assert.doesNotMatch(joined, /--join/);
+});
+
+test("a store holds an image only once an image ID is in it, not a crashed fill's partial", async () => {
+  const store = await mkdtemp(join(tmpdir(), "nexus-store-"));
+  assert.equal(await holdsImage(join(store, "missing")), false);
+  assert.equal(await holdsImage(store), false);
+  await mkdir(join(store, "img-0123456789ab.partial"));
+  await mkdir(join(store, "tpl-0123456789ab"));
+  assert.equal(await holdsImage(store), false);
+  await mkdir(join(store, "img-0123456789ab"));
+  assert.equal(await holdsImage(store), true);
 });

@@ -54,6 +54,7 @@ test("a probe refuses an envelope that fails any check of its fields", () => {
   const bad: unknown[] = [
     null, [], "x",
     { ...envelope(spawn), issuedAt: "yesterday" }, { ...envelope(spawn), notAfter: 1 }, { ...envelope(spawn), jobId: "" }, without(envelope(spawn), "node"), { ...envelope(spawn), job: [] },
+    ...["auto", "Rj-firebat", "rj.firebat", "-rj", ""].map((name) => ({ ...envelope(spawn), node: name })),
     ...[
       { ...spawn, pylonId: "" }, { ...spawn, boot: { ...spawn.boot, pylonId: "pylon-other" } }, { ...spawn, boot: { ...spawn.boot, image: "img-ABC" } },
       { ...spawn, boot: { ...spawn.boot, image: `img-${"a".repeat(41)}` } }, { ...spawn, boot: { ...spawn.boot, source: { kind: "snapshot" } } },
@@ -65,6 +66,7 @@ test("a probe refuses an envelope that fails any check of its fields", () => {
       { kind: "pause", pylonId, checkpoint: "abc" }, { kind: "pause", checkpoint: "ckpt-1" }, { kind: "delete", pylonId: 1 },
       { kind: "build-image", image: template, recipe: {} }, { kind: "build-image", image, recipe: [] }, { kind: "build-template", template: image, inputs: {} }, { kind: "build-template", template },
       { kind: "fetch-artifact", artifact: pylonId, from: "n", sha256: hex }, { kind: "fetch-artifact", artifact: image, sha256: hex }, { kind: "fetch-artifact", artifact: image, from: "n", sha256: hex.toUpperCase() },
+      ...["auto", "Rj-firebat", "rj.firebat", "-rj"].map((from) => ({ kind: "fetch-artifact", artifact: image, from, sha256: hex })),
       { kind: "drop-artifact", artifact: "ckpt-abc" }, { kind: "migrate", pylonId }, { pylonId },
     ].map(envelope),
   ];

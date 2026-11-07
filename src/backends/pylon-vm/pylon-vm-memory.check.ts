@@ -15,7 +15,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { output } from "../../exec.ts";
 import type { BootInputs } from "../../spawn.ts";
-import type { CheckpointId, PylonId } from "../../ids.ts";
+import { checkpointId, pylonIdOf, threadOfPylon, type ThreadId } from "../../ids.ts";
 import { parseMeminfo } from "../../probe/host.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 
@@ -29,7 +29,7 @@ const diskGiB = Number(diskArg ?? 3);
 assert.ok(Number.isInteger(memoryGiB) && Number.isInteger(touchGiB) && touchGiB > 0 && touchGiB < memoryGiB, "memory and touch are whole GiB, and touch is below memory");
 assert.ok(Number.isInteger(diskGiB) && diskGiB > 0 && diskGiB < 6, "the disk write is whole GiB, and fits the 8 GiB disk");
 
-const pylonId = `pylon-mem-${Date.now().toString(36)}` as PylonId;
+const pylonId = pylonIdOf(`mem-${Date.now().toString(36)}` as ThreadId);
 const signal = () => AbortSignal.timeout(20 * 60_000);
 const { backend, image } = checkBackend(imageDir, stateRoot);
 const boot = (source: BootInputs["source"]) => checkBoot(pylonId, image, source, { memoryGiB });
@@ -126,7 +126,7 @@ print('released', flush=True)
   assert.ok(grown >= diskGiB * 2 ** 30 * 0.9, "the write reached the running disk");
   assert.notEqual(await fsType(overlay), "tmpfs", "the running disk's writes do not land in host RAM");
 
-  const checkpoint = `ckpt-${pylonId}-1` as CheckpointId;
+  const checkpoint = checkpointId(threadOfPylon(pylonId), 1);
   const paused = performance.now();
   await backend.ensurePaused(pylonId, checkpoint, signal());
   step("PAUSE_SECONDS", ((performance.now() - paused) / 1000).toFixed(1));

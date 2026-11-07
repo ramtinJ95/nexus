@@ -15,8 +15,8 @@ const old = {
   pipelineRequest: (id: string) => id.startsWith("pipeline:"),
   checkpoint: (id: string) => id.startsWith("ckpt-"),
   artifact: (id: string) => isPortableArtifactId(id) || id.startsWith("ckpt-"),
-  nodeName: (name: string) => nodeNameSchema.safeParse(name).success,
-  pylon: (id: string) => pylonIdSchema.safeParse(id).success,
+  nodeName: (name: string) => /^[a-z0-9][a-z0-9-]{0,62}$/.test(name) && name !== "auto",
+  pylon: (id: string) => id.length <= 40 && /^[a-z][a-z0-9-]*$/.test(id),
 };
 
 async function filesUnder(dir: string): Promise<string[]> {
@@ -55,6 +55,8 @@ test("every ID in the fixtures and goldens gets the verdict the old checks gave 
     ...differ("artifact", corpus.artifact, old.artifact, isArtifactId),
     ...differ("node name", corpus.nodeName, old.nodeName, isNodeName),
     ...differ("pylon", corpus.pylon, old.pylon, isPylonId),
+    ...differ("node name schema", corpus.nodeName, old.nodeName, (name) => nodeNameSchema.safeParse(name).success),
+    ...differ("pylon schema", corpus.pylon, old.pylon, (id) => pylonIdSchema.safeParse(id).success),
   ], []);
 });
 
