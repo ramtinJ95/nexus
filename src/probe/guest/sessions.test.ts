@@ -1,4 +1,4 @@
-import { seedClaudeState } from "../../claude-state.ts";
+import { seedClaudeState } from "./launchers.ts";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

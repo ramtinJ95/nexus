@@ -9,7 +9,7 @@
  * pass and read rather than stored, so a reopened or later-merged pull request unblocks it.
  */
 import { startedByNexus } from "./agent-protocol.ts";
-import { defaultClaudeModel } from "../claude-state.ts";
+import { defaultClaudeModel } from "../protocol/agent-kinds.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";

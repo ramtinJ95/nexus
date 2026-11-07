@@ -29,7 +29,7 @@ import { usageLimitPrefix } from "../agent-protocol.ts";
 import { startHint, type HintPart } from "./start-hint.ts";
 import { agoText, clock } from "./elapsed.ts";
 import { imageTypes } from "../../image-types.ts";
-import { defaultClaudeModel } from "../../claude-state.ts";
+import { defaultClaudeModel } from "../../protocol/agent-kinds.ts";
 import { testApi, type TestApiOptions } from "../../test-support/api-kit.ts";
 
 const node = "rj-firebat" as NodeName;

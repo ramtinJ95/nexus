@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { seedClaudeState } from "../../claude-state.ts";
+import { seedClaudeState } from "./launchers.ts";
 import { fakeGuest, herdrArgs, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type HerdrArgs } from "../../backends/fake-guest.ts";
 import type { PylonId } from "../../ids.ts";
 import type { PausedSession } from "../../protocol/observations.ts";

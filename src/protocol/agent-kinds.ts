@@ -5,6 +5,8 @@
  */
 import { z } from "zod";
 
+export const defaultClaudeModel = "claude-opus-5-5";
+
 /** A Claude Code session ID as Nexus takes one: it names the session's transcript file and its launch directory. */
 export const claudeSessionId = /^[A-Za-z0-9-]{1,200}$/;
 

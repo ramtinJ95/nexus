@@ -22,7 +22,7 @@ import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus
 import { releaseOutcome, type ReleaseView } from "../deploy/model.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
-import { defaultClaudeModel } from "../claude-state.ts";
+import { defaultClaudeModel } from "../protocol/agent-kinds.ts";
 import { claudeNames } from "../deploy/credentials.ts";
 import { anthropicApiHost } from "./project.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
