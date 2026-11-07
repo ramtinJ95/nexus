@@ -14,6 +14,7 @@ import { joinControlPlane } from "../deploy/setup.ts";
 import { call as callJson, tempDir, testObservation, until } from "../test-support/kit.ts";
 import { mintJoinToken } from "./join.ts";
 import { parseConfig, startControlPlane } from "./main.ts";
+import { defaultHarnessModel } from "../protocol/models.ts";
 import { openRegistry } from "./registry.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 import { addThread, seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
@@ -25,6 +26,7 @@ const probeExample = await readFile(new URL("../../deploy/probe.example.json", i
 test("the shipped example config parses", () => {
   const config = parseConfig(example);
   assert.deepEqual(config.harness.model, { provider: "openai", modelId: "gpt-6-astra" });
+  assert.deepEqual(config.harness.model, defaultHarnessModel, "the example names the harness model a new control.json does");
   assert.deepEqual(config.dotfiles, { repo: "https://github.com/example/dotfiles.git", ref: "main" });
 });
 

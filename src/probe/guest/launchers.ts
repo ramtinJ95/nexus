@@ -5,7 +5,8 @@
  */
 import { randomUUID } from "node:crypto";
 import type { Guest } from "../../backends/backend.ts";
-import { defaultClaudeModel, type agentKinds, type SessionHarness } from "../../protocol/agent-kinds.ts";
+import type { agentKinds, SessionHarness } from "../../protocol/agent-kinds.ts";
+import { defaultClaudeModel } from "../../protocol/models.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { callTimeoutMs, onClaudeTranscript } from "../../guest-contract.ts";

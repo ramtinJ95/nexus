@@ -20,6 +20,7 @@ import { isImageId } from "../ids.ts";
 import { localApiWhois } from "../tailscale.ts";
 import { configFiles, ports, rootPath, servicePath, stateDirs, users } from "../node-layout.ts";
 import type { Whois } from "../protocol/http.ts";
+import { defaultHarnessModel } from "../protocol/models.ts";
 
 const exec = promisify(execFile);
 
@@ -253,7 +254,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       harness: {
         storage: `${stateDirs.control}/harness.sqlite`,
         credentials: stores.harness.file,
-        model: { provider: "openai", modelId: "gpt-6-astra" },
+        model: defaultHarnessModel,
       },
     };
     const written = file(paths.control, 0o644, existing.control, generated, Object.keys(generated.deployKeys as JsonObject).map((id) => `deployKeys.${id}`));
