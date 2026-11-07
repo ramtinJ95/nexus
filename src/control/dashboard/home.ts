@@ -8,7 +8,7 @@ import { isOpen } from "../questions.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import type { Project } from "../project.ts";
-import { cannotLand, roundsSpent, settledKinds, type Review } from "../review-model.ts";
+import { cannotLand, roundsSpent, settled, type Review } from "../review-model.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, HeldWork, Need, ThreadNeed } from "./context.ts";
 import { prose, inline } from "./markdown.ts";
@@ -213,7 +213,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
  */
 function whereNow(c: Context, d: ThreadDetail, life: Life, items: readonly Item[] | null): Html {
   // A review still under way names the pull request Land merges. One that ended may be of an older one.
-  const r = d.review !== null && !settledKinds.some((k) => k === d.review!.phase.kind) ? d.review : null;
+  const r = d.review !== null && !settled(d.review) ? d.review : null;
   const pr = r?.pr ?? d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   const reply = items?.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
   const role = threadRole(c, d.thread.id);

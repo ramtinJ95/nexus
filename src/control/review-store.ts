@@ -8,7 +8,7 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
 import type { EventKind } from "../events.ts";
 import { reviewerCaller } from "./agent-protocol.ts";
-import { builderAwaited, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import { builderAwaited, kindsWhere, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 
 export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void }) {
@@ -22,21 +22,23 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     }
   });
   const reviewOf = (builder: ThreadId): Review | null => recordOf<Review>("reviews", "builder", builder);
+  const awaitedKinds = JSON.stringify(kindsWhere((row) => row.awaitsBuilder));
+  const settledKinds = JSON.stringify(kindsWhere((row) => row.settled));
   const isCurrentReview = (review: Review) => JSON.stringify(reviewOf(review.builder)) === JSON.stringify(review);
   return {
     participant: {
       needsPerson: (thread: ThreadId) => waitsOnPerson(recordOf<Review>("reviews", "builder", thread)),
       awaited: (threads: readonly ThreadId[]) => new Map(sql(`SELECT record FROM reviews WHERE builder IN (SELECT value FROM json_each(?))
-        AND json_extract(record, '$.phase.kind') IN ('reviewing', 'fixing')`).all(JSON.stringify(threads)).map((r) => json<Review>(r.record))
+        AND json_extract(record, '$.phase.kind') IN (SELECT value FROM json_each(?))`).all(JSON.stringify(threads), awaitedKinds).map((r) => json<Review>(r.record))
         .flatMap((r) => { const hold = builderAwaited(r); return hold === null ? [] : [[r.builder, hold] as const]; })),
     },
     review: reviewOf,
     /** Whether `review` is the builder's review as stored, so no other save came since it was read. */
     isCurrentReview,
     reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => json<Review>(r.record)),
-    /** The reviews but those whose phase is one of `settled` with no message left to send. */
-    reviewsToStep: (settled: readonly string[]): Review[] => sql(`SELECT record FROM reviews WHERE json_extract(record, '$.phase.kind') NOT IN (SELECT value FROM json_each(?))
-      OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(JSON.stringify(settled)).map((r) => json<Review>(r.record)),
+    /** The reviews but those settled with no message left to send. */
+    reviewsToStep: (): Review[] => sql(`SELECT record FROM reviews WHERE json_extract(record, '$.phase.kind') NOT IN (SELECT value FROM json_each(?))
+      OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(settledKinds).map((r) => json<Review>(r.record)),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */

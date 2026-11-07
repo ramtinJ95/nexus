@@ -1900,7 +1900,7 @@ test("a review that ends while the reviewer reads throws its check thread away",
     assert.equal(f.checkThreads.length, 1, kind);
     await ending(f);
     await loop.poll();
-    assert.ok(ended.has(f.review().phase.kind), `${kind}: ${f.review().phase.kind}`);
+    assert.ok(ended(f.review()), `${kind}: ${f.review().phase.kind}`);
     assert.deepEqual(f.discarded, f.checkThreads, `${kind}: the check thread goes with the review`);
   }
 });
