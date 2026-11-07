@@ -18,6 +18,7 @@ import { checkCaller, nudgePrefix, reviewerCaller } from "../agent-protocol.ts";
 import { turnGate } from "./drain.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
+import type { AutoReview } from "./project.ts";
 import { gitPollMs, type PylonObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-kit.ts";
@@ -38,10 +39,10 @@ const assistant = (text: string) => ({
 function fixture(t: import("node:test").TestContext) {
   const registry = testRegistry(t);
   const resources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
-  const project = (id: string, autoReview: { land: boolean; enabledBy: string } | null) =>
+  const project = (id: string, autoReview: AutoReview | null) =>
     ({ id: id as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources, allowedHosts: [], secrets: [], logins: [], preSetup: null, autoReview });
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
-  registry.createProject(project("reviewed", { land: false, enabledBy: "nLAPTOP" }));
+  registry.createProject(project("reviewed", { mode: "review", enabledBy: "nLAPTOP" }));
   registry.createProject(project("plain", null));
   const capacity = testCapacity();
   registry.apply({ record: "node", node, state: "online", capacity });

@@ -705,6 +705,8 @@ h4.md-h { font-size: 1.07em; }
 .ov-head h2 { margin: 0; font: 600 15px/1.4 var(--sans); color: var(--text); }
 .ov-head code { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ov-head .btn { margin-left: auto; }
+.auto-review { margin-left: auto; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-size: 12px; }
+.ov-head .auto-review .btn, .ov-head .auto-review + .btn { margin-left: 0; }
 .ov { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .ov th:first-child { width: 36%; }
 .ov th { text-align: left; font: 500 11.5px var(--sans); color: var(--text-3); padding: 4px 10px; border-bottom: 1px solid var(--line-soft); }

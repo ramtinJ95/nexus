@@ -1,6 +1,6 @@
 /** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
-import { defaultProjectResources, defaultSecondReview, type Project, type SecondReview } from "../../control/project.ts";
+import { defaultProjectResources, defaultSecondReview, upgradeProject, type Project, type SecondReview } from "../../control/project.ts";
 import { secretHostPattern, secretNamePattern, type SecretGrant } from "../../secret-grants.ts";
 import { CliError } from "../transport.ts";
 import { type Command, str, strs, int, resourcesOf, placementOptions, table } from "../kit.ts";
@@ -19,10 +19,22 @@ function secretGrantOf(flag: string): SecretGrant {
   return { name, hosts };
 }
 
-const autoReviews = { off: null, review: { land: false }, land: { land: true } } as const;
+const autoReviews = { off: null, review: { mode: "review" }, land: { mode: "land" }, yolo: { mode: "yolo" } } as const;
+/** `--auto-review`, as the API's edit takes it. */
+function autoReviewOf(v: Parameters<typeof str>[0]) {
+  const auto = str(v, "auto-review");
+  if (auto === undefined) return undefined;
+  if (!(auto in autoReviews)) throw new CliError("invalid", "--auto-review takes off, review, land or yolo");
+  return autoReviews[auto as keyof typeof autoReviews];
+}
 const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart: true } } as const;
 const pipelineText = (p: Project) => p.pipeline == null ? "pipeline off" : p.pipeline.autoStart ? "pipeline starts items" : "pipeline waits for approval";
-const autoReviewText = (p: Project) => p.autoReview == null ? "auto review off" : p.autoReview.land ? `auto review and land, for ${p.autoReview.enabledBy}` : `auto review, set by ${p.autoReview.enabledBy}`;
+/** Read through `upgradeProject`, since a control plane older than modes sends `land`. */
+const autoReviewText = (project: Project) => {
+  const setting = upgradeProject(project).autoReview;
+  if (setting == null) return "auto review off";
+  return setting.mode === "yolo" ? `auto review and land, waiving holds, for ${setting.enabledBy}` : setting.mode === "land" ? `auto review and land, for ${setting.enabledBy}` : `auto review, set by ${setting.enabledBy}`;
+};
 
 const secondReviewText = (p: Project) => {
   const rule = p.secondReview;
@@ -111,11 +123,8 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       if ((name === undefined) !== (email === undefined) || (v["clear-git-identity"] && name !== undefined)) throw new CliError("invalid", "use --git-name with --git-email, or --clear-git-identity");
       if (v["clear-git-identity"]) patch.gitIdentity = null;
       else if (name !== undefined) patch.gitIdentity = { name, email };
-      const auto = str(v, "auto-review");
-      if (auto !== undefined) {
-        if (!(auto in autoReviews)) throw new CliError("invalid", "--auto-review takes off, review or land");
-        patch.autoReview = autoReviews[auto as keyof typeof autoReviews];
-      }
+      const auto = autoReviewOf(v);
+      if (auto !== undefined) patch.autoReview = auto;
       const items = str(v, "pipeline");
       if (items !== undefined) {
         if (!(items in pipelines)) throw new CliError("invalid", "--pipeline takes off, approve or start");
@@ -137,7 +146,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     options: {
       ...placementOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
-      scratch: { type: "boolean" }, "rules-file": { type: "string" },
+      scratch: { type: "boolean" }, "rules-file": { type: "string" }, "auto-review": { type: "string" },
     },
     async run(api, [id, url], v) {
       // A forgotten URL must not quietly make a scratch project.
@@ -146,13 +155,17 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       const resources = { cpus: int(str(v, "cpus"), "--cpus", defaultProjectResources.cpus), memoryGiB: int(str(v, "memory"), "--memory", defaultProjectResources.memoryGiB), diskGiB: int(str(v, "disk"), "--disk", defaultProjectResources.diskGiB) };
       const secrets = strs(v, "secret").map(secretGrantOf);
       const rulesFile = str(v, "rules-file");
-      const p = await api("POST", "/v1/projects", {
+      const auto = autoReviewOf(v);
+      const added = await api("POST", "/v1/projects", {
         id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
         allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login"), preSetup: null,
         ...rulesFile === undefined ? {} : { standingRules: rulesFileOf(rulesFile) },
       }) as Project;
+      // Only an edit records who turned auto review on, so a new project's add cannot name someone else.
+      const p = auto == null ? added : await api("PATCH", `/v1/projects/${encodeURIComponent(added.id)}`, { autoReview: auto }) as Project;
       const rules = p.standingRules == null ? "" : ", with standing rules";
-      return { json: p, text: p.repoUrl === null ? `Added scratch project ${p.id} on ${p.defaultNode}${rules}` : `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}${rules}` };
+      const review = auto == null ? "" : `, ${autoReviewText(p)}`;
+      return { json: p, text: p.repoUrl === null ? `Added scratch project ${p.id} on ${p.defaultNode}${rules}${review}` : `Added project ${p.id} (${p.repoUrl}) on ${p.defaultNode}${rules}${review}` };
     },
   },
 };

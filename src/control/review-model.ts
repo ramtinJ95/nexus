@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ChangedFile, PullRequest } from "./github.ts";
 import { reservedCases, type Hold, type HoldCode } from "./holds.ts";
-import type { ThreadId } from "../ids.ts";
+import type { ProjectId, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 
 /** The most rounds a review runs, and how many it runs unless asked for fewer. */
@@ -168,9 +168,9 @@ export function changedPaths(a: Extract<Change, { kind: "known" }>, b: Extract<C
  * The person's waiver of holds the policy reserves for them, for this review at `head`: `holds` as the person saw
  * them, and `codes`, which the landing matches. `change` is the change at the head they pressed Land at, null until
  * the landing reads it, and `from` that head once the waiver carried to a later head with the same change. It lasts
- * for the landing it started, and a later land replaces it.
+ * for the landing it started, and a later land replaces it. `yolo` is the project whose yolo setting gave it for `by`.
  */
-export interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: string; at: number; change: Change | null; from?: string }
+export interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: string; at: number; change: Change | null; from?: string; yolo?: ProjectId }
 
 /** A message saved before it is sent. `attempted` is when its first send began, saved before it. */
 interface Outbox { id: string; text: string; attempted: number | null }

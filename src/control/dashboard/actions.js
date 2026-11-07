@@ -29,6 +29,8 @@ const actions = {
   "review-again": (thread, { pr, land }) => api("POST", `/v1/threads/${thread}/review`, { pr: Number(pr), land: land === "true" }),
   "approve-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/approve`, {}),
   "cancel-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/cancel`, {}),
+  // As `nexus project edit --auto-review`.
+  "auto-review": (_, { project, mode }) => api("PATCH", `/v1/projects/${encodeURIComponent(project)}`, { autoReview: mode === "off" ? null : { mode } }),
   answer: (_, { question, option }) => api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option }),
   // As `nexus session open`, then shows the session in the terminal.
   "open-session": async (thread, { harness }) => {

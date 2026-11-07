@@ -89,7 +89,7 @@ A second reviewer never approves by failing. One that gives no verdict Nexus can
 
 ## What the person may waive
 
-Answering Land to the review's question, pressing Land on the dashboard, or confirming `nexus land --waive` in a terminal, is how the person waives a hold. `nexus land` without the flag never waives one, so an agent that drives the CLI does not waive a hold by accident.
+Answering Land to the review's question, pressing Land on the dashboard, or confirming `nexus land --waive` in a terminal, is how the person waives a hold. `nexus land` without the flag never waives one, so an agent that drives the CLI does not waive a hold by accident. A project in yolo mode answers for the person, as [Yolo landing](#yolo-landing) says.
 
 | Hold | The person may waive it | Why |
 |---|---|---|
@@ -112,6 +112,12 @@ Answering Land to the review's question, pressing Land on the dashboard, or conf
 The Land card on the dashboard marks each hold "you may waive" or not, with the reason. While the review's question about these holds is open, the card sends the person to it. Otherwise, when every hold that would meet the landing again is one the person may waive, its Land button waives them, as after a Leave it. Its confirmation names the pull request, the commit and that it waives the holds the policy reserves for the person, and the button sends that commit and those holds. The caller must still be a deployer, and each named hold must be one the review has at that commit. The landing then checks every condition again, as `nexus land` does, with the named holds met at that commit and nothing else. The review records the waiver, who waived which holds at which commit, `nexus show` prints it, and the event stream gets a `review.waived` event.
 
 A waiver names each hold by the text the person saw, and the control plane records the kind of hold that text was. The landing matches a waiver by that kind at the waiver's head, so rewording a hold does not undo a waiver, and a waiver of a reserved case the reviewer named never covers a reserved path that hits the same case. A waiver lasts for the landing it starts, across a rebase that leaves the pull request's change as it was: the same patch and mode for every file against the same base, hunk positions aside. A changed line, a changed mode, a new base, or a file GitHub shows no patch for, stops it, and the review names the files whose patches differ. If that landing holds again for anything else, such as checks that turned pending or a reserved path the reviewer did not name, the review lists every hold it met, those the person waived too, and the person confirms them all again.
+
+## Yolo landing
+
+`nexus project edit <id> --auto-review yolo`, or the dashboard's Auto review switch on the project, turns on yolo landing: the project reviews and lands its builders' pull requests on its own, as `land` does, and the review loop also answers each review's holds question with Land, in the person's place, so a batch keeps landing while no one watches. It answers for the caller who turned it on, who must be a deployer, as `land` needs, and again on every answer. The loop answers in the same pass that asks, once that pass has saved its steps, through the same code a Land answer takes: the waiver names the holds the question named, at its head, and records the project whose setting gave it, so `nexus show` prints `waived by <caller>, by project <id>'s yolo setting`, and the `review.waived` event carries `yolo`. It answers only a review asked to land, by its project or with `--land`, so a review the person started without `--land` still stops at approval.
+
+The setting waives only what the person may waive, which the table below lists, every reserved case among them, data-deleting migrations and changes to auth included. Everything else still holds every landing: open findings, a failed or missing check, a reviewer that has not approved, a Claude reviewer's approval, failing GitHub checks. A waiver lasts for the head it names, as any waiver does, so a new push asks again and the setting answers again. Switching the project back to `land` or `review` answers nothing from the next pass on, and a question already answered stays answered. The setting has no expiry and covers the whole project, not one batch.
 
 ## Known limits of waivers
 

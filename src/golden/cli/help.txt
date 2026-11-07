@@ -43,11 +43,12 @@ nexus <version>, the Nexus control plane from this Mac
   nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...
     [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]
-    [--auto-review off|review|land]   review each builder's PR on its own, and land it too; land needs a deployer
+    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer
     [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own
     [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names
   nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]
                     [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH|-]
+                    [--auto-review off|review|land|yolo]
   nexus review <thread> [--pr N] [--rounds N] [--land]
     a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy
   nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying

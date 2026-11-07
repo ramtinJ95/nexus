@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ReviewLoop } from "./review.ts";
-import type { TailnetNodeId } from "../ids.ts";
+import type { ProjectId, TailnetNodeId } from "../ids.ts";
 import { laptop, phone, project, testApi, withThread, deployment } from "./api-test-kit.ts";
 
 test("a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer", async (t) => {
@@ -40,20 +40,33 @@ test("a review needs the GitHub token's loop, and landing, at its start or later
 test("only a project edit turns on reviews of its own, landing needs a deployer, and the project records who turned it on", async (t) => {
   const s = await testApi(t, { deployment });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
-  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", autoReview: { land: true, enabledBy: laptop } })).status, 400, "a new project cannot name who turned it on");
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", autoReview: { mode: "land", enabledBy: laptop } })).status, 400, "a new project cannot name who turned it on");
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } }), { status: 403, body: { error: "caller may not edit a project: only a person may, never the control plane, infrastructure nodes or pylons" } });
   s.callAs(phone);
   assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons" } });
   const reviewing = await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } });
-  assert.deepEqual(reviewing.body.autoReview, { land: false, enabledBy: phone }, "reviewing alone lands nothing, so it needs no deployer");
+  assert.deepEqual(reviewing.body.autoReview, { mode: "review", enabledBy: phone }, "reviewing alone lands nothing, so it needs no deployer");
   s.callAs(laptop);
-  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).body.autoReview, { land: true, enabledBy: laptop });
-  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { defaultBranch: "trunk" })).body.autoReview, { land: true, enabledBy: laptop }, "another edit keeps it");
-  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true, enabledBy: "nPHONE" } })).status, 400);
+  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).body.autoReview, { mode: "land", enabledBy: laptop });
+  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { defaultBranch: "trunk" })).body.autoReview, { mode: "land", enabledBy: laptop }, "another edit keeps it");
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "land", enabledBy: "nPHONE" } })).status, 400);
+  s.callAs(phone);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "yolo" } })).status, 403, "yolo lands, so it needs a deployer as land does");
+  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "review" } })).body.autoReview, { mode: "review", enabledBy: phone });
+  s.callAs(laptop);
+  assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "yolo" } })).body.autoReview, { mode: "yolo", enabledBy: laptop });
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "always" } })).status, 400);
   const off = await s.call("PATCH", "/v1/projects/acme", { autoReview: null });
   assert.equal(off.body.autoReview, undefined);
   assert.equal((await s.call("GET", "/v1/projects")).body.find((p: { id: string }) => p.id === "acme").autoReview, undefined);
+});
+
+test("a project saved before auto-review modes reads its land setting as a mode", async (t) => {
+  const s = await testApi(t, { deployment });
+  for (const [id, land] of [["lands", true], ["reviews", false]] as const) s.registry.createProject({ ...project, id: id as ProjectId, autoReview: { land, enabledBy: laptop } } as never);
+  const read = (await s.call("GET", "/v1/projects")).body as { id: string; autoReview: unknown }[];
+  assert.deepEqual(read.map((p) => [p.id, p.autoReview]), [["lands", { mode: "land", enabledBy: laptop }], ["reviews", { mode: "review", enabledBy: laptop }]]);
 });
 
 test("a deployer's land names the holds it waives at the commit it confirmed, and the review loop decides whether they may be waived", async (t) => {

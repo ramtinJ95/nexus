@@ -35,14 +35,14 @@ import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, watchStopped } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
+import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
 import { holdOptions, isOpen, type HeldQuestion, type Question, type ThreadQuestion } from "./questions.ts";
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, endedKinds, findingsOf, gateFailure, heldForGate, humanLabel,
   landable, landingVerb, liveOutput, maxRounds, needsPerson, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, settledKinds, verdictSchema,
   type Answer, type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Waiver,
 } from "./review-model.ts";
-import type { Project } from "./project.ts";
+import { landsOnItsOwn, type Project } from "./project.ts";
 import type { StartRequest } from "./start-request.ts";
 
 type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
@@ -488,7 +488,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    */
   const unauthorized = (r: Review, builder: Thread): Hold[] => {
     const setting = registry.project(builder.project)?.autoReview;
-    if (r.land?.fromProject && setting?.land !== true) return [{ code: "loop", text: `Project ${builder.project} no longer lands its builders' pull requests on its own, so this one is the person's to land.` }];
+    if (r.land?.fromProject && !landsOnItsOwn(setting)) return [{ code: "loop", text: `Project ${builder.project} no longer lands its builders' pull requests on its own, so this one is the person's to land.` }];
     const by = r.land?.fromProject ? setting!.enabledBy : r.land!.requestedBy;
     return deps.mayLand(by) ? [] : [{ code: "loop", text: `${by}, who ${r.land?.fromProject ? `turned on landing for project ${builder.project}` : "asked for this landing"}, is not among the control plane's deployers, so only the person can land it.` }];
   };
@@ -548,6 +548,26 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
     askFor(question);
     return r;
+  }
+  /**
+   * `r`'s holds question answered Land by whoever turned on the project's yolo setting, as their own press would, when
+   * the setting is on and they may land. Its waiver names the project, and the landing still meets every hold the
+   * policy lets no one waive. A refusal leaves the question to the person. It runs once the pass saved its steps, so
+   * its save never races theirs.
+   */
+  function yolo(r: Review): void {
+    const project = registry.thread(r.builder)?.project;
+    const setting = project === undefined ? undefined : registry.project(project)?.autoReview;
+    // Only a review asked to land is landed: one the person started without --land stops at approval, as they asked.
+    if (r.land === null || setting?.mode !== "yolo" || !deps.mayLand(setting.enabledBy) || !registry.isCurrentReview(r)) return;
+    const question = registry.questions(r.builder).find((q) => isOpen(q) && q.holds !== undefined && asksAt(r, q.holds));
+    if (question === undefined) return;
+    try {
+      landHolds({ ...question, holds: question.holds! }, setting.enabledBy as TailnetNodeId, project);
+    } catch (err) {
+      if (!(err instanceof HttpError)) throw err;
+      log(`review ${r.id} of ${r.builder}: project ${project}'s yolo setting did not land it (${err.message})`);
+    }
   }
 
   /** What a Land press on `r` does, refused when no press lands it. */
@@ -1078,6 +1098,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
           for (const t of archive) deps.wake(t);
           r = next;
         }
+        yolo(r);
       } catch (err) {
         // Never log transport errors' text: a fetch implementation may put authorization headers in them.
         log(`review ${r.id} of ${r.builder}: a step failed and will be retried (${(err as Error).name})`);
@@ -1201,7 +1222,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (registry.prReviewed(pr.repo, pr.number)) return;
       try {
         refuseIfRunning(t.id);
-        await begin(t, pr, { land: setting.land ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
+        await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
       } catch (err) {
         if (!(err instanceof HttpError)) throw err;
         log(`${t.id}: no review started on its own for pull request #${pr.number}: ${err.message}`);
@@ -1230,34 +1251,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
 
     /**
      * Records the person's answer to a question about a review's holds. Land is a Land press waiving the holds the
-     * question names: on a review the land route takes, the press itself, and on one still under review at the
-     * question's head, the waiver and the landing request alone, so the review lands once the reviewer approves and
-     * its checks pass. Leave it waives nothing.
+     * question names, so the review lands once the reviewer approves and its checks pass. Leave it waives nothing.
      */
     answerHolds(question: ThreadQuestion & { holds: HeldQuestion }, option: string, by: TailnetNodeId): Question {
-      const answer = { option, by, at: now() };
-      if (!isOpen(question) || option !== "Land") return registry.answerQuestion(question.id, answer);
-      const { holds } = question;
-      const r = registry.review(question.thread);
-      const moved = new HttpError(409, `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
-      if (r === null || !asksAt(r, holds)) throw moved;
-      // The loop asked about these holds at this head and base, which may come from the change before the round
-      // recorded them, so the waiver is the question's, and the landing reads the head's holds again before it merges.
-      const waiver = waiverOf(r, by, holds.holds.map((h) => h.text), holds.holds.map((h) => h.code));
-      let next: Review;
-      if (landable(r)) next = pressWith(landableAt(question.thread, holds.head), by, waiver);
-      else {
-        const builder = registry.thread(r.builder)!;
-        if (builder.status !== "active") throw new HttpError(409, `thread ${r.builder} is ${builder.status}`);
-        if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new HttpError(409, cannotLand(r, builder, watchedPr(r))!);
-        pressOn(r);
-        next = { ...r, land: r.land ?? { requestedBy: by, head: holds.head, base: holds.base }, waiver };
-      }
-      const answered = registry.answerQuestion(question.id, answer, () => {
-        if (!registry.saveReview(next, [], r)) throw moved;
-      });
-      void poll();
-      return answered;
+      if (!isOpen(question) || option !== "Land") return registry.answerQuestion(question.id, { option, by, at: now() });
+      return landHolds(question, by);
     },
 
     /**
@@ -1277,6 +1275,35 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return next;
     },
   };
+
+  /**
+   * The Land answer to a question about a review's holds, by `by`: on a review the land route takes, the press itself,
+   * and on one still under review at the question's head, the waiver and the landing request alone. `yolo` is the
+   * project whose setting answered it in the person's place.
+   */
+  function landHolds(question: ThreadQuestion & { holds: HeldQuestion }, by: TailnetNodeId, yolo?: ProjectId): Question {
+    const { holds } = question;
+    const r = registry.review(question.thread);
+    const moved = new HttpError(409, `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
+    if (r === null || !asksAt(r, holds)) throw moved;
+    // The loop asked about these holds at this head and base, which may come from the change before the round
+    // recorded them, so the waiver is the question's, and the landing reads the head's holds again before it merges.
+    const waiver = { ...waiverOf(r, by, holds.holds.map((h) => h.text), holds.holds.map((h) => h.code)), ...yolo !== undefined && { yolo } };
+    let next: Review;
+    if (landable(r)) next = pressWith(landableAt(question.thread, holds.head), by, waiver);
+    else {
+      const builder = registry.thread(r.builder)!;
+      if (builder.status !== "active") throw new HttpError(409, `thread ${r.builder} is ${builder.status}`);
+      if (ended.has(r.phase.kind) || landingVerb(r) !== null) throw new HttpError(409, cannotLand(r, builder, watchedPr(r))!);
+      pressOn(r);
+      next = { ...r, land: r.land ?? { requestedBy: by, head: holds.head, base: holds.base }, waiver };
+    }
+    const answered = registry.answerQuestion(question.id, { option: "Land", by, at: now() }, () => {
+      if (!registry.saveReview(next, [], r)) throw moved;
+    });
+    void poll();
+    return answered;
+  }
 
   function landableAt(builderId: ThreadId, head: string | undefined): Review {
     const r = registry.review(builderId);
