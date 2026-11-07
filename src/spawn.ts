@@ -1,7 +1,7 @@
 /** What a spawn carries, split by when it applies. */
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { CheckpointId, ImageId, LiveHash, PylonId, TemplateId } from "./ids.ts";
+import type { CheckpointId, ImageId, LiveHash, PortableArtifactId, PylonId, TemplateId } from "./ids.ts";
 import type { SecretGrant } from "./secret-grants.ts";
 import type { ServiceName } from "./services-file.ts";
 
@@ -40,6 +40,11 @@ export interface BootInputs {
   network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[] };
   repo: RepoInit; // set up on template and fresh boots only
   dotfiles: { repo: string; ref: string }; // pulled on every boot
+}
+
+/** The image first, because a template or checkpoint is an overlay on it. */
+export function requiredArtifacts(boot: BootInputs): readonly PortableArtifactId[] {
+  return boot.source.kind === "template" ? [boot.image, boot.source.template] : [boot.image];
 }
 
 /** Applied on every spawn, including to a running pylon. Hashed into LiveHash. */
