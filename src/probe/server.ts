@@ -23,7 +23,7 @@ import { parsePylonCommand, type CommandResult, type PylonCommand } from "../pro
 import { notAnswering, parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropRequest } from "../protocol/cleanup.ts";
-import { peersSchema, probePort, routeAuth, type GitReadReply, type ProbeAuthConfig } from "../protocol/routes.ts";
+import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type GitReadReply, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
 import { onePerClaudeSession } from "./guest/session-wake.ts";
 import type { Whois } from "../protocol/http.ts";
@@ -506,12 +506,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     for (const event of queued) if (event.type !== "snapshot") write(event);
   }
 
-  async function authorized(req: IncomingMessage, route: keyof typeof routeAuth): Promise<boolean> {
+  async function authorized(req: IncomingMessage, role: CallerRole): Promise<boolean> {
     const { remoteAddress, remotePort } = req.socket;
     if (remoteAddress === undefined || remotePort === undefined) return false;
     const caller = await whois(remoteAddress, remotePort);
     if (caller === null) return false;
-    return routeAuth[route] === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);
+    return role === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);
   }
 
   const routes: readonly ProbeRoute[] = [{
@@ -674,9 +674,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       return;
     }
     const path = new URL(req.url ?? "/", "http://probe").pathname;
-    const route = (Object.keys(routeAuth) as (keyof typeof routeAuth)[]).find((prefix) => path === prefix || path.startsWith(`${prefix}/`));
-    if (route === undefined) return send(res, 404, `no route ${path}`);
-    if (!await authorized(req, route)) return send(res, 403, "caller is not the tailnet node this route allows");
+    const role = routeRole(path);
+    if (role === undefined) return send(res, 404, `no route ${path}`);
+    if (!await authorized(req, role)) return send(res, 403, "caller is not the tailnet node this route allows");
 
     for (const entry of routes) {
       const match = entry.path.exec(path);
@@ -693,7 +693,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   async function stream(req: IncomingMessage, socket: Duplex, head: Buffer, left: AbortSignal) {
     const url = new URL(req.url ?? "/", "http://probe");
     if (!url.pathname.startsWith("/v1/pylons/")) return refuse(socket, 404, `no upgrade route ${url.pathname}`);
-    if (!await authorized(req, "/v1/pylons")) return refuse(socket, 403, "caller is not the tailnet node this route allows");
+    if (!await authorized(req, probeRoutes.stream.role)) return refuse(socket, 403, "caller is not the tailnet node this route allows");
     let parsed: ReturnType<typeof parseStreamRequest>;
     try {
       parsed = parseStreamRequest(req.headers.upgrade, url);
@@ -792,7 +792,7 @@ function refuse(socket: Duplex, status: number, body: string) {
 
 type RouteHandler = (req: IncomingMessage, res: ServerResponse, match: RegExpExecArray) => Promise<unknown> | void;
 /**
- * A route under routeAuth: its whole path and a handler per method. With `notAllowed`, any other method answers 405
+ * A route under probeRoutes: its whole path and a handler per method. With `notAllowed`, any other method answers 405
  * with it after the reason. Without it, another method falls through to the 404.
  */
 interface ProbeRoute { path: RegExp; GET?: RouteHandler; PUT?: RouteHandler; POST?: RouteHandler; notAllowed?: string }

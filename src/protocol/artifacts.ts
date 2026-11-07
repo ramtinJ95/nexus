@@ -13,6 +13,7 @@ import { asSent, named, nonEmpty, parse } from "../parse.ts";
 import { isImageId, isTemplateId, type NodeName, type PortableArtifactId, type ProjectId, type TailnetNodeId } from "../ids.ts";
 import { imageId, sha256, templateId } from "./fields.ts";
 import { probeError, ProbeHttpError, text, verifyPeer, type Whois } from "./http.ts";
+import { probeRoutes, routePath } from "./routes.ts";
 
 const manifestHeader = "x-nexus-manifest";
 /** A copy that sends nothing for this long has broken off. tar can be slow to start on a large sparse file. */
@@ -32,10 +33,10 @@ export type ArtifactCopy = { manifest: ArtifactManifest; stream: Readable } | { 
  * ArtifactStore.import checks it against the manifest's sha256 before anything uses it.
  */
 export function fetchArtifact(peer: { host: string; port: number }, artifact: PortableArtifactId, sha256: string, check: { whois: Whois; peers: readonly TailnetNodeId[] }, signal: AbortSignal): Promise<ArtifactCopy> {
-  const path = `/v1/artifacts/${encodeURIComponent(artifact)}?sha256=${encodeURIComponent(sha256)}`;
+  const path = `${routePath(probeRoutes.fetchArtifact, { artifact })}?sha256=${encodeURIComponent(sha256)}`;
   const where = `${peer.host}:${peer.port}`;
   return new Promise((resolve, reject) => {
-    const req = request({ host: peer.host, port: peer.port, method: "GET", path, agent: false, timeout: artifactIdleMs, signal }, (res) => {
+    const req = request({ host: peer.host, port: peer.port, method: probeRoutes.fetchArtifact.method, path, agent: false, timeout: artifactIdleMs, signal }, (res) => {
       verifyPeer(res.socket, check.whois, (id) => check.peers.includes(id), `${where}: the connection closed before whois`, (id) => `${where} is tailnet node ${id ?? "unknown"}, which is not a configured peer`).then(() => {
         if (res.statusCode === 409) return text(res).then((refused) => resolve({ refused }), reject);
         if (res.statusCode !== 200) return text(res).then((body) => reject(new ProbeHttpError(`${where}: GET ${path}: HTTP ${res.statusCode}: ${body}`, res.statusCode ?? 0)), reject);

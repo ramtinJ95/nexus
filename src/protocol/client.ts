@@ -13,10 +13,10 @@ import type { JobId, NodeName, PortableArtifactId, PylonId, TailnetNodeId } from
 import { jobStatusSchema, parseSubmitReply, type JobEnvelope, type JobStatus, type SubmitReply } from "./jobs.ts";
 import { parseProbeEvent, type DiskFact, type ProbeEvent } from "./observations.ts";
 import { parseCommandResult, type CommandResult, type PylonCommand } from "./commands.ts";
-import { clientByteStream, streamPath, streamProtocol, type ByteStream } from "./streams.ts";
+import { clientByteStream, streamPath, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { artifactUsageSchema, dropReplySchema, type ArtifactUsage, type DropReply, type DropRequest } from "./cleanup.ts";
-import { gitReadReplySchema, probePort } from "./routes.ts";
+import { gitReadReplySchema, probePort, probeRoutes, routePath, type ProbeRoute } from "./routes.ts";
 import { isProbeError, probeError, ProbeHttpError, text, verifyPeer, type Whois } from "./http.ts";
 
 /**
@@ -92,7 +92,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   const streamTimeoutMs = options.streamTimeoutMs ?? requestTimeoutMs;
 
   /** A silent socket for `requestTimeoutMs` fails the call as unreachable. Observe lifts the limit once its stream starts. */
-  function open(method: "GET" | "PUT" | "POST", path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {
+  function open(method: ProbeRoute["method"], path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {
     return new Promise((resolve, reject) => {
       const req = request({ host: tailnetHost, port, method, path, agent, timeout: timeoutMs, ...(signal ? { signal } : {}) }, (res) => {
         if (res.statusCode === 403) {
@@ -121,15 +121,17 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     return new ProbeHttpError(`${node}: ${method} ${path}: HTTP ${status}: ${body}`, status);
   }
 
+  interface Reply { method: string; path: string; status: number; body: string }
+
   /** Throws for any status but `expected`. `conflict` is what a 409 means to a method that gives it one. */
-  function expectStatus(method: string, path: string, res: { status: number; body: string }, expected: number, conflict?: "not-running"): void {
-    if (res.status !== expected) throw statusError(method, path, res.status, res.body, conflict);
+  function expectStatus(res: Reply, expected: number, conflict?: "not-running"): void {
+    if (res.status !== expected) throw statusError(res.method, res.path, res.status, res.body, conflict);
   }
 
-  async function call(method: "GET" | "PUT" | "POST", path: string, body: string | null = null, timeoutMs = requestTimeoutMs, contentType?: string): Promise<{ status: number; body: string }> {
+  async function call(method: ProbeRoute["method"], path: string, body: string | null = null, timeoutMs = requestTimeoutMs, contentType?: string): Promise<Reply> {
     const res = await open(method, path, body, undefined, timeoutMs, contentType);
     try {
-      return { status: res.statusCode ?? 0, body: await text(res) };
+      return { method, path, status: res.statusCode ?? 0, body: await text(res) };
     } catch (err) {
       throw probeError("unreachable", `${node}: the response broke off: ${(err as Error).message}`);
     }
@@ -138,74 +140,75 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   return {
     node,
     async submit(env) {
+      const { method, retry } = probeRoutes.submit;
       for (;;) {
         try {
-          const res = await call("PUT", `/v1/jobs/${encodeURIComponent(env.jobId)}`, JSON.stringify(env));
+          const res = await call(method, routePath(probeRoutes.submit, { jobId: env.jobId }), JSON.stringify(env));
           return parseSubmitReply(res.status, res.body);
         } catch (err) {
-          if (!isProbeError(err) || err.code !== "unreachable" || Date.now() >= Date.parse(env.notAfter)) throw err;
+          if (retry !== "until-expired" || !isProbeError(err) || err.code !== "unreachable" || Date.now() >= Date.parse(env.notAfter)) throw err;
           await delay(500);
         }
       }
     },
     async job(jobId) {
-      const res = await call("GET", `/v1/jobs/${encodeURIComponent(jobId)}`);
+      const res = await call(probeRoutes.job.method, routePath(probeRoutes.job, { jobId }));
       if (res.status === 404) return "unknown";
-      expectStatus("GET", `/v1/jobs/${jobId}`, res, 200);
+      expectStatus(res, 200);
       return parseJson(asSent(jobStatusSchema), res.body, "status");
     },
     async *observe(signal) {
-      const res = await open("GET", "/v1/observe", null, signal);
-      if (res.statusCode !== 200) expectStatus("GET", "/v1/observe", { status: res.statusCode ?? 0, body: await text(res) }, 200);
+      const { method } = probeRoutes.observe;
+      const path = routePath(probeRoutes.observe);
+      const res = await open(method, path, null, signal);
+      if (res.statusCode !== 200) expectStatus({ method, path, status: res.statusCode ?? 0, body: await text(res) }, 200);
       // The first snapshot arrives with the headers. After that, events can be a minute apart.
       res.socket.setTimeout(0);
       for await (const line of lines(res)) yield parseProbeEvent(line);
     },
     /** Never retried here. */
     async command(pylonId, command) {
-      const path = `/v1/pylons/${encodeURIComponent(pylonId)}/commands`;
-      const res = await call("POST", path, JSON.stringify(command), commandTimeoutMs);
-      expectStatus("POST", path, res, 200, "not-running");
+      const res = await call(probeRoutes.command.method, routePath(probeRoutes.command, { pylonId }), JSON.stringify(command), commandTimeoutMs);
+      expectStatus(res, 200, "not-running");
       return parseCommandResult(command, res.body);
     },
     async health() {
-      const res = await call("GET", "/v1/node-health");
-      expectStatus("GET", "/v1/node-health", res, 200);
+      const res = await call(probeRoutes.health.method, routePath(probeRoutes.health));
+      expectStatus(res, 200);
       return parseJson(asSent(nodeHealthSchema), res.body, "health");
     },
     async putSecret(name, value) {
-      const path = `/v1/secrets/${encodeURIComponent(name)}`;
-      const res = await call("PUT", path, value, requestTimeoutMs, "text/plain; charset=utf-8");
-      expectStatus("PUT", path, res, 204);
+      const res = await call(probeRoutes.putSecret.method, routePath(probeRoutes.putSecret, { name }), value, requestTimeoutMs, "text/plain; charset=utf-8");
+      expectStatus(res, 204);
     },
     async artifactUsage() {
-      const res = await call("GET", "/v1/cleanup");
-      expectStatus("GET", "/v1/cleanup", res, 200);
+      const res = await call(probeRoutes.artifactUsage.method, routePath(probeRoutes.artifactUsage));
+      expectStatus(res, 200);
       return parseJson(artifactUsageSchema, res.body, "artifact usage");
     },
     async dropArtifacts(ids) {
-      const res = await call("POST", "/v1/cleanup", JSON.stringify({ drop: ids } satisfies DropRequest), dropTimeoutMs);
-      expectStatus("POST", "/v1/cleanup", res, 200);
+      const res = await call(probeRoutes.dropArtifacts.method, routePath(probeRoutes.dropArtifacts), JSON.stringify({ drop: ids } satisfies DropRequest), dropTimeoutMs);
+      expectStatus(res, 200);
       return parseJson(dropReplySchema, res.body, "cleanup");
     },
     async readGit(pylonId) {
-      const path = `/v1/pylons/${encodeURIComponent(pylonId)}/git`;
-      const res = await call("POST", path);
-      expectStatus("POST", path, res, 200, "not-running");
+      const res = await call(probeRoutes.readGit.method, routePath(probeRoutes.readGit, { pylonId }));
+      expectStatus(res, 200, "not-running");
       return parseJson(gitReadReplySchema, res.body, "git read").observedAt;
     },
     async wakeDeployer() {
-      const res = await call("POST", "/v1/deployer/wake");
-      expectStatus("POST", "/v1/deployer/wake", res, 204);
+      const res = await call(probeRoutes.wakeDeployer.method, routePath(probeRoutes.wakeDeployer));
+      expectStatus(res, 204);
     },
     async putPeers(peers) {
-      const res = await call("PUT", "/v1/peers", JSON.stringify(peers));
-      expectStatus("PUT", "/v1/peers", res, 204);
+      const res = await call(probeRoutes.putPeers.method, routePath(probeRoutes.putPeers), JSON.stringify(peers));
+      expectStatus(res, 204);
     },
     stream(pylonId, argv) {
+      const { method, upgrade } = probeRoutes.stream;
       const path = streamPath(pylonId, argv);
       return new Promise((resolve, reject) => {
-        const req = request({ host: tailnetHost, port, method: "GET", path, agent, timeout: streamTimeoutMs, headers: { connection: "upgrade", upgrade: streamProtocol } });
+        const req = request({ host: tailnetHost, port, method, path, agent, timeout: streamTimeoutMs, headers: { connection: "upgrade", upgrade } });
         let sent = false;
         req.once("finish", () => { sent = true; });
         req.on("upgrade", (_res, socket, head) => {
@@ -218,7 +221,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
           }, (err: Error) => { socket.destroy(); reject(err); });
         });
         req.on("response", (res) => {
-          text(res).then((body) => reject(res.statusCode === 504 ? probeError("unreachable", `${node}: ${body}`) : statusError("GET", path, res.statusCode ?? 0, body, "not-running")), reject);
+          text(res).then((body) => reject(res.statusCode === 504 ? probeError("unreachable", `${node}: ${body}`) : statusError(method, path, res.statusCode ?? 0, body, "not-running")), reject);
         });
         // The probe answers a slow guest itself before this runs out, so a probe that took the request and is silent is stuck.
         req.on("timeout", () => req.destroy(sent
@@ -229,10 +232,9 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       });
     },
     async manifest(artifact) {
-      const path = `/v1/manifests/${encodeURIComponent(artifact)}`;
-      const res = await call("GET", path);
+      const res = await call(probeRoutes.manifest.method, routePath(probeRoutes.manifest, { artifact }));
       if (res.status === 404) return null;
-      expectStatus("GET", path, res, 200);
+      expectStatus(res, 200);
       return parseArtifactManifest(JSON.parse(res.body));
     },
   };
