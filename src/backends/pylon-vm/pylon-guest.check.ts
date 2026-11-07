@@ -30,7 +30,7 @@ import { pylonEnvs } from "../../control/harness/pylon-env.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../probe/fake-tailscale.ts";
 import { nodeSecrets } from "../../probe/config.ts";
 import { startProbe } from "../../probe/server.ts";
-import { checkpointId, threadOfPylon, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../../ids.ts";
+import { checkpointId, pylonIdOf, threadOfPylon, type JobId, type NodeName, type PylonId, type TailnetNodeId, type ThreadId } from "../../ids.ts";
 import type { Job } from "../../protocol/jobs.ts";
 import { connectProbe } from "../../protocol/client.ts";
 import { checkBackend, checkBoot } from "./pylon-vm-check-kit.ts";
@@ -49,7 +49,7 @@ const harnesses = (process.env["NEXUS_CHECK_SESSIONS"] ?? "shell,claude-code,pi"
 const unknown = harnesses.filter((h) => !["shell", "claude-code", "pi"].includes(h));
 if (unknown.length > 0) throw new Error(`NEXUS_CHECK_SESSIONS names no harness ${unknown.join(", ")}`);
 const run = randomUUID().slice(0, 8);
-const pylonId = `pylon-check-${run}` as PylonId;
+const pylonId = pylonIdOf(`check-${run}` as ThreadId);
 const node = "check-node" as NodeName;
 const controlPlaneId = "nCHECKCONTROL" as TailnetNodeId;
 const probeId = "nCHECKPROBE" as TailnetNodeId;

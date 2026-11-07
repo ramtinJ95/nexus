@@ -18,7 +18,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { BootInputs } from "../../spawn.ts";
-import { checkpointId, threadOfPylon, type PylonId } from "../../ids.ts";
+import { checkpointId, pylonIdOf, threadOfPylon, type ThreadId } from "../../ids.ts";
 import { checkBackend, checkBoot, emptyLive } from "./pylon-vm-check-kit.ts";
 import { unstamped } from "../../pylon-vm/controller-log.ts";
 
@@ -32,7 +32,7 @@ assert.ok(Number.isInteger(rounds) && rounds > 0 && Number.isInteger(readers) &&
 /** The controller's 5 s wait for guest actions, plus each request's own round trip. */
 const settleLimitMs = 8_000;
 
-const pylonId = `pylon-race-${Date.now().toString(36)}` as PylonId;
+const pylonId = pylonIdOf(`race-${Date.now().toString(36)}` as ThreadId);
 const signal = () => AbortSignal.timeout(20 * 60_000);
 const { backend, image } = checkBackend(imageDir, stateRoot);
 const boot = (source: BootInputs["source"]) => checkBoot(pylonId, image, source, { memoryGiB: 4 });
