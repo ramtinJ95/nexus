@@ -2,7 +2,7 @@
  * Renders a thread's page and a queued thread's page: the conversation, the inspector and the pylon's
  * facts and sessions.
  */
-import { desiredPhase } from "../../reconcile.ts";
+import { desiredPhase } from "../reconcile.ts";
 import { linkedPort } from "../../services-file.ts";
 import { harnessNamed, type SessionHarness } from "../../session-harness.ts";
 import type { ThreadDetail } from "../wire.ts";

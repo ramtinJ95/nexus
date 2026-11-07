@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { openRegistry } from "./registry.ts";
 import { testPr, testPylon, testRegistry, testThread } from "./test-kit.ts";
-import { desiredPhase, ingest } from "../reconcile.ts";
+import { desiredPhase, ingest } from "./reconcile.ts";
 import { fakeGuest } from "../fake-guest.ts";
 import { gitFacts } from "../probe/guest/git-facts.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";

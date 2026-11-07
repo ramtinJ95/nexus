@@ -12,7 +12,7 @@ import { connectProbe, type ProbeClient } from "../protocol/client.ts";
 import { canDeploy, wakesDeployers } from "./releases.ts";
 import { gitIdentitySchema } from "../spawn.ts";
 import { gitUrl } from "./project.ts";
-import { ingest } from "../reconcile.ts";
+import { ingest } from "./reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "../harness/credentials.ts";

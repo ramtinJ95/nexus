@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { ChangedFile, PullRequest } from "./github.ts";
 import { reservedCases, type Hold, type HoldCode } from "./holds.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
-import type { ThreadStatus } from "../reconcile.ts";
+import type { ThreadStatus } from "./reconcile.ts";
 
 /** The most rounds a review runs, and how many it runs unless asked for fewer. */
 export const maxRounds = 5;

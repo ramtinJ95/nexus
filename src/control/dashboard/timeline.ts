@@ -6,7 +6,7 @@
 import type { ThreadDetail } from "../wire.ts";
 import { isOpen } from "../questions.ts";
 import type { ThreadId } from "../../ids.ts";
-import { keptPastDay } from "../../reconcile.ts";
+import { keptPastDay } from "../reconcile.ts";
 import { blocks, checkBeside, findingsOf, phaseNote, reviewerApproved, reviewersNote, roundsSpent, type Review, type Round, type Verdict } from "../review-model.ts";
 import { Html, html, ago, short, dot, icon, limitText, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";

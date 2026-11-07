@@ -32,7 +32,7 @@ import { startProbe, type Probe } from "./probe/server.ts";
 import type { CheckpointId, ImageId, LiveHash, NodeName, PylonId, TailnetNodeId, TemplateId } from "./ids.ts";
 import type { Job, JobStatus } from "./protocol/jobs.ts";
 import { connectProbe, type ProbeClient } from "./protocol/client.ts";
-import { envelope } from "./reconcile.ts";
+import { envelope } from "./control/reconcile.ts";
 import { templateIdOf } from "./control/templates.ts";
 import type { TemplateBuildInputs, TemplateManifest } from "./images.ts";
 import type { BootInputs, Checkout } from "./spawn.ts";

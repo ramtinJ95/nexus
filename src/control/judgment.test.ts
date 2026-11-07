@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openHarnessHost, type ConversationId, type HarnessHost } from "../harness/host.ts";
 import { scriptedModel, scriptedModels, type ScriptedRequest } from "../harness/test-fixture.ts";
-import { desiredPhase } from "../reconcile.ts";
+import { desiredPhase } from "./reconcile.ts";
 import type { NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import { checkCaller, reviewerCaller, verifyCaller } from "../agent-protocol.ts";

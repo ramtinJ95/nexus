@@ -26,7 +26,7 @@ import { parseRecord, transcriptStart, type ClaudeEntry } from "../claude-transc
 import { tempDir, watch } from "../test-kit.ts";
 import { testPr, testPylon, testReview, testThread } from "./test-kit.ts";
 import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "../agent-protocol.ts";
-import { desiredPhase, idlePolicy } from "../reconcile.ts";
+import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./start-request.ts";
 import { HttpError } from "./http-error.ts";

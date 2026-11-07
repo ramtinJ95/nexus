@@ -7,7 +7,7 @@
  */
 import { json, jsonOrNull, type Db } from "./db.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
-import type { ThreadStatus } from "../reconcile.ts";
+import type { ThreadStatus } from "./reconcile.ts";
 import { askQuestionId, askRecord, isNodeQuestion, isOpen, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 

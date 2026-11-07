@@ -8,7 +8,7 @@
  * object each, whose `type` says what it is. Either end ignores a type it does not know.
  */
 import type { TerminalSize } from "./guest-terminal.ts";
-import type { ActualState } from "./reconcile.ts";
+import type { ActualState } from "./control/reconcile.ts";
 
 export const defaultTerm = "xterm-256color";
 

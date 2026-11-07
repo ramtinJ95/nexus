@@ -7,7 +7,7 @@ import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, type BootInputs, type RepoInit } from "../spawn.ts";
 import type { ImageId, ProjectId, TemplateId, ThreadId } from "../ids.ts";
 import type { NodeName, PylonId } from "../ids.ts";
-import { newPylonRecord, type PylonRecord } from "../tick.ts";
+import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import { HttpError } from "./http-error.ts";
 import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
 import type { Placement, Thread } from "./thread-store.ts";

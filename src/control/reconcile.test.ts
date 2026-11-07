@@ -1,18 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  actualState, archivedDiskMs, backoffMs, desiredPhase, diskKept, envelope, idlePolicy, ingest, planPylon, requiredArtifacts,
+  actualState, archivedDiskMs, backoffMs, desiredPhase, diskKept, envelope, idlePolicy, ingest, planPylon,
   type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
-import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "./ids.ts";
-import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "./protocol/jobs.ts";
+import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "../ids.ts";
+import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "../protocol/jobs.ts";
 import {
   encodeProbeEvent, minProbeContract, parseProbeEvent, probeContract, type PausedSession, type ProbeEvent,
   type PylonObservation, type RunningFacts, type SessionFact,
-} from "./protocol/observations.ts";
-import { chatgptTokenGrant } from "./secret-grants.ts";
-import type { BootInputs, PylonSource } from "./spawn.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "./test-kit.ts";
+} from "../protocol/observations.ts";
+import { chatgptTokenGrant } from "../secret-grants.ts";
+import { requiredArtifacts, type BootInputs, type PylonSource } from "../spawn.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-kit.ts";
 
 const now = 1_800_000_000_000;
 const pylonId = "pylon-t1" as PylonId;

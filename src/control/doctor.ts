@@ -5,7 +5,7 @@
  */
 import type { NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
-import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts } from "../reconcile.ts";
+import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts } from "./reconcile.ts";
 import type { ReleaseReport, ReleaseView } from "../deploy/model.ts";
 import type { LoginState } from "../harness/credentials.ts";
 import type { BackupStatusRead } from "./backup-status.ts";

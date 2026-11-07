@@ -7,7 +7,7 @@ import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { addThread as addTestThread, observeNode, seedRegistry, testRegistry } from "./test-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
-import { archivedDiskMs, desiredPhase, diskKept, envelope } from "../reconcile.ts";
+import { archivedDiskMs, desiredPhase, diskKept, envelope } from "./reconcile.ts";
 import type { ImageId, JobId, LiveHash, NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity } from "../test-kit.ts";

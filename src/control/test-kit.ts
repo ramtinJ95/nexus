@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import { testObservation } from "../test-kit.ts";
-import { newPylonRecord, type PylonRecord } from "../tick.ts";
+import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { RemoteProject } from "./project.ts";
 import type { NodeObservation } from "../protocol/observations.ts";

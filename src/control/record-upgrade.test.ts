@@ -10,7 +10,7 @@ import { findingSchema, maxRounds, secondReads, type Review, type SecondReviewer
 import type { ThreadId } from "../ids.ts";
 import { addThread, seedRegistry, testRegistry, testReview } from "./test-kit.ts";
 import { openRegistry } from "./registry.ts";
-import { noAttempts, type Attempts, type FailedAttempt } from "../reconcile.ts";
+import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
 
 /** storedReview and legacyHoldCode as main had them at c22d002, before the upgrade replaced them, kept as the proof's baseline. */
 function storedReview(record: Review): Review {

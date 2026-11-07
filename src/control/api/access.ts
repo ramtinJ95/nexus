@@ -6,7 +6,7 @@ import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { QueuedRecord } from "../queue-store.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
-import type { ThreadStatus } from "../../reconcile.ts";
+import type { ThreadStatus } from "../reconcile.ts";
 import { HttpError } from "../http-error.ts";
 import { answerRefusal, type AnswerRefusal, type Question } from "../questions.ts";
 import { canDeploy, isPerson, type DeploymentOptions } from "../releases.ts";

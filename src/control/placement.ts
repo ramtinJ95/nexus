@@ -2,7 +2,7 @@ import type { BootInputs } from "../spawn.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { diskRefusal } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
-import { desiredPhase } from "../reconcile.ts";
+import { desiredPhase } from "./reconcile.ts";
 import { HttpError } from "./http-error.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
 import type { Registry } from "./registry.ts";

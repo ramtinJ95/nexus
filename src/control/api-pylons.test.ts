@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThreadDetail } from "./wire.ts";
-import { ingest } from "../reconcile.ts";
+import { ingest } from "./reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../pylon-vm-backend.ts";
 import { focusScript } from "../probe/guest/sessions.ts";

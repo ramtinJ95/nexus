@@ -87,7 +87,7 @@ The desired phase is `running`, `reading`, `paused`, or `deleted`. It follows th
 | Thread state | Desired phase |
 |---|---|
 | `active` or `idle` | `running` while a harness or reported session turn runs, or the agent was active in the last 5 minutes, or a human in the last 20, or a review awaits the agent (`Thread.awaitedUntil`). Otherwise `paused` |
-| `archived` | `deleted` once the thread has been archived `archivedDiskMs` (24 hours), its usage is settled (`Thread.usageSettledAt`) and the newest verified backup began after that (`Thread.backedUpAt`), as `diskKept` in `src/reconcile.ts` says. Before then `reading` while the usage backfill or the archive's settle reads its pylon (`Thread.readingUsage`), and `paused` otherwise, at once |
+| `archived` | `deleted` once the thread has been archived `archivedDiskMs` (24 hours), its usage is settled (`Thread.usageSettledAt`) and the newest verified backup began after that (`Thread.backedUpAt`), as `diskKept` in `src/control/reconcile.ts` says. Before then `reading` while the usage backfill or the archive's settle reads its pylon (`Thread.readingUsage`), and `paused` otherwise, at once |
 | `deleted` | `deleted` |
 
 A message, an attached terminal, a dashboard visit or a preview hit counts as human activity, so each one wakes a paused pylon.

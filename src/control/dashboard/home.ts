@@ -1,5 +1,5 @@
 /** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
-import { archivedDiskMs, desiredPhase, keptPastDay, settleStuck } from "../../reconcile.ts";
+import { archivedDiskMs, desiredPhase, keptPastDay, settleStuck } from "../reconcile.ts";
 import type { ThreadId } from "../../ids.ts";
 import { threadPhase } from "../pipeline.ts";
 import { needsPerson } from "../attention.ts";

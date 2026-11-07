@@ -19,7 +19,7 @@ import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type
 import { JobFailure } from "./protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "./image-build.ts";
 import { chatgptTokenGrant } from "./secret-grants.ts";
-import type { BootInputs, CloneRepo, LiveSpec, RepoInit } from "./spawn.ts";
+import { requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "./spawn.ts";
 import { shellQuote as q } from "./shell.ts";
 import { type CheckpointId, type ImageId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "./ids.ts";
 import { pylonIdSchema } from "./protocol/fields.ts";
@@ -27,7 +27,6 @@ import type { PausedSession } from "./protocol/observations.ts";
 import { imageIdOf, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
-import { requiredArtifacts } from "./reconcile.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "./probe/guest/session-wake.ts";
 import { checkoutDir, sessionHarnessSchema } from "./session-harness.ts";
 import { controlSocket, run, socketPathLimit, stopForRetry } from "./pylon-vm/client.ts";
