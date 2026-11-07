@@ -20,13 +20,13 @@ const old = {
 };
 
 async function filesUnder(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+  const entries = await readdir(new URL(dir, import.meta.url), { withFileTypes: true, recursive: true });
   return entries.filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name));
 }
 
 const sources = [
-  ...await filesUnder("src/golden"), ...await filesUnder("src/test-support"), ...await filesUnder("src/fixtures"),
-  "src/control/dashboard/demo-fixtures.ts", "src/control/harness/test-fixture.ts",
+  ...await filesUnder("./golden/"), ...await filesUnder("./test-support/"), ...await filesUnder("./fixtures/"),
+  new URL("./control/dashboard/demo-fixtures.ts", import.meta.url), new URL("./control/harness/test-fixture.ts", import.meta.url),
 ];
 const text = (await Promise.all(sources.map((f) => readFile(f, "utf8")))).join("\n");
 const found = (pattern: RegExp) => [...new Set([...text.matchAll(pattern)].map((m) => m[1]!))];

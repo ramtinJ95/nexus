@@ -47,7 +47,7 @@ export const isPortableArtifactId = (id: unknown): id is PortableArtifactId => i
 export const isNodeName = (name: unknown): name is NodeName => typeof name === "string" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(name) && name !== "auto";
 
 export const newThreadId = () => `th-${randomBytes(6).toString("hex")}` as ThreadId;
-export const pylonIdOf = (thread: ThreadId | string) => `pylon-${thread}` as PylonId;
+export const pylonIdOf = (thread: ThreadId) => `pylon-${thread}` as PylonId;
 export const isPylonId = (id: unknown): id is PylonId => typeof id === "string" && id.length <= maxPylonIdLength && /^[a-z][a-z0-9-]*$/.test(id);
 /** The thread a pylon ID names, read back out of `pylon-<thread>`. An ID without the prefix is returned as it is. */
 export const threadOfPylon = (pylon: PylonId) => pylon.replace(/^pylon-/, "") as ThreadId;
@@ -57,7 +57,7 @@ export const newItemId = () => `it-${randomBytes(6).toString("hex")}` as ItemId;
 export const itemIdFrom = (seed: string) => `it-${createHash("sha256").update(seed).digest("hex").slice(0, 12)}` as ItemId;
 export const isItemId = (id: unknown): id is ItemId => typeof id === "string" && /^it-[0-9a-f]{12}$/.test(id);
 
-export const checkpointId = (thread: ThreadId | string, pause: number): CheckpointId => `ckpt-${thread}-${pause}`;
+export const checkpointId = (thread: ThreadId, pause: number): CheckpointId => `ckpt-${thread}-${pause}`;
 export const shutdownCheckpointId = (pylon: PylonId, at: number): CheckpointId => `ckpt-${threadOfPylon(pylon)}-shutdown-${at}`;
 export const isCheckpointId = (id: unknown): id is CheckpointId => typeof id === "string" && id.startsWith("ckpt-");
 export const isArtifactId = (id: unknown): id is ArtifactId => isPortableArtifactId(id) || isCheckpointId(id);

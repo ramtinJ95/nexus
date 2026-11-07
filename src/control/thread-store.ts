@@ -153,7 +153,7 @@ function threadRow(r: Row): StoredThread {
     id: r.id as ThreadId,
     title: r.title as string,
     project: r.project as ProjectId,
-    pylonId: pylonIdOf(r.id as string),
+    pylonId: pylonIdOf(r.id as ThreadId),
     status: r.status as ThreadStatus,
     conversationId: r.conversation_id as string | null,
     startedBy: r.started_by as string,
