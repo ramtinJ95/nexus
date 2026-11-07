@@ -1,13 +1,11 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import type { Guest } from "./backend.ts";
-import { parseJson } from "./parse.ts";
-import type { GitFacts } from "./protocol/observations.ts";
-import { checkoutDir } from "./session-harness.ts";
+import type { Guest } from "../../backend.ts";
+import { parseJson } from "../../parse.ts";
+import type { GitFacts } from "../../protocol/observations.ts";
+import { checkoutDir } from "../../session-harness.ts";
 
-/** How long the probe reuses a pylon's git read, so a snapshot holds the branches pushed that long before it was taken. */
-export const gitPollMs = 60_000;
-const helper = readFileSync(new URL("./git-facts.py", import.meta.url), "utf8");
+let helper: string | undefined;
 const hash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 const schema = z.strictObject({
   head: hash,
@@ -21,6 +19,7 @@ const schema = z.strictObject({
  * The guest timeout bounds the process, not its controller RPC; the probe separately bounds and tracks that wait.
  */
 export async function gitFacts(guest: Guest): Promise<GitFacts> {
+  helper ??= readFileSync(new URL("./git-facts.py", import.meta.url), "utf8");
   const read = await guest.exec(["python3", "-c", helper], { cwd: checkoutDir, timeoutMs: 3000 });
   if (read.exitCode !== 0 || read.truncated || Buffer.byteLength(read.output) > 60 * 1024 + 1) throw new Error("checkout git facts could not be read within their limits");
   return parseJson(schema, read.output, "checkout git facts");

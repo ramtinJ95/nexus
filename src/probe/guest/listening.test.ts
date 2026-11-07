@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { listeningFacts, parseListening } from "./listening.ts";
-import { fakeGuest } from "./fake-guest.ts";
+import { fakeGuest } from "../../fake-guest.ts";
 
 const header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode";
 const tail = "00000000:00000000 00:00000000 00000000  1000        0 22000 1 0000000000000000 100 0 0 10 0";

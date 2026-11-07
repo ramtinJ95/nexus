@@ -40,7 +40,7 @@ import type { Registry } from "./registry.ts";
 import type { JoinedNode } from "./node-store.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { liveStreams } from "./dashboard/live-frames.ts";
-import { attachScript } from "../sessions.ts";
+import { attachScript } from "../probe/guest/sessions.ts";
 import { claudeConversations } from "./claude-conversation.ts";
 import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } from "./thread-agent.ts";
 import type { Whoami } from "./wire.ts";

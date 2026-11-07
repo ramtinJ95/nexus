@@ -7,7 +7,7 @@ import { maxStreams } from "./api/sse.ts";
 import type { AttachTiming } from "./attach.ts";
 import type { Thread } from "./thread-store.ts";
 import { processStream } from "../process-stream.ts";
-import { attachScript } from "../sessions.ts";
+import { attachScript } from "../probe/guest/sessions.ts";
 import { encodeMessage } from "../attach-wire.ts";
 import { terminalSize } from "../guest-terminal.ts";
 import { runningPylon, testObservation, until } from "../test-kit.ts";

@@ -9,10 +9,10 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import type { Guest } from "./backend.ts";
-import { parseJson } from "./parse.ts";
-import type { DeclaredOutput } from "./protocol/observations.ts";
-import { checkoutDir } from "./session-harness.ts";
+import type { Guest } from "../../backend.ts";
+import { parseJson } from "../../parse.ts";
+import type { DeclaredOutput } from "../../protocol/observations.ts";
+import { checkoutDir } from "../../session-harness.ts";
 
 export const outputsDir = "/home/user/.nexus/outputs";
 
@@ -30,7 +30,7 @@ const listingBudgetBytes = 60_000;
 /** A diff of a large tree can take a while to write. Above the helper's 45 s for one git command, so a slow git is its refusal. */
 const diffTimeoutMs = 60_000;
 /** Sent with each diff rather than run from the image, whose copy on an older pylon has no diff-to. */
-const helper = readFileSync(new URL("./checkout-files.py", import.meta.url), "utf8");
+let helper: string | undefined;
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const objectId = z.string().regex(/^[0-9a-f]{40,64}$/);
 const diffReply = z.strictObject({ base: objectId, commit: objectId.nullable(), sha256, bytes: z.number().int().nonnegative() });
@@ -78,6 +78,7 @@ export async function addOutput(guest: Guest, declaration: OutputDeclaration): P
     output = { id, kind: "file", path, title, sha256: digest.output.slice(0, 64) };
   } else {
     const file = `${outputsDir}/${id}.diff`;
+    helper ??= readFileSync(new URL("../../checkout-files.py", import.meta.url), "utf8");
     const diff = await guest.exec(["python3", "-c", helper, checkoutDir, "diff-to", file, "head"], { cwd: "/", timeoutMs: diffTimeoutMs });
     if (diff.exitCode === 3) throw new OutputRefused(parseJson(diffRefusal, diff.output, "the working tree diff's refusal").message);
     if (diff.exitCode !== 0) throw new Error(`snapshotting the working tree failed with exit ${diff.exitCode}: ${diff.output}`);

@@ -1,4 +1,4 @@
-// S14: src/sessions.ts against the real Herdr in a pylon booted from the base image, on infra-testbench from
+// S14: src/probe/guest/sessions.ts against the real Herdr in a pylon booted from the base image, on infra-testbench from
 // ~/nexus-spikes (for its node_modules):
 //   S14_IMAGE=<image dir, e.g. images/img-1a0db1870fb1> S14_SRC=<dir holding src/> node s14-sessions.mjs
 // The rootfs is in memory, so the run leaves nothing behind. The image has Herdr's pi and Claude integrations,
@@ -55,7 +55,7 @@ try {
   await vm.exec(['chown', '-R', 'user:user', '/home/user/s14']);
   console.log(`COPIED ${files.length} files`);
 
-  const check = await run('STEP3_CHECK', asUser('cd /home/user/s14 && node src/sessions.check.ts'));
+  const check = await run('STEP3_CHECK', asUser('cd /home/user/s14 && node src/probe/guest/sessions.check.ts'));
   await run('STEP5_SNAPSHOT', asUser("herdr --session nexus server </dev/null >/dev/null 2>&1 & sleep 1; time herdr --session nexus api snapshot >/dev/null"));
   console.log(check.exitCode === 0 && /SESSIONS_CHECK_PASS/.test(check.stdout) ? 'S14_PASS' : 'S14_FAIL');
 } finally {

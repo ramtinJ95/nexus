@@ -28,7 +28,7 @@ import { imageIdOf, type TemplateManifest } from "./images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "./public-urls.ts";
 import { requiredArtifacts } from "./reconcile.ts";
-import { finishRelaunch, pauseSessions, type RelaunchMark } from "./session-wake.ts";
+import { finishRelaunch, pauseSessions, type RelaunchMark } from "./probe/guest/session-wake.ts";
 import { checkoutDir, sessionHarnessSchema } from "./session-harness.ts";
 import { controlSocket, run, socketPathLimit, stopForRetry } from "./pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "./pylon-vm/contracts.ts";

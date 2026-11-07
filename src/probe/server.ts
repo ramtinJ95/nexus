@@ -25,7 +25,7 @@ import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropRequest } from "../protocol/cleanup.ts";
 import { peersSchema, probePort, routeAuth, type GitReadReply, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
-import { onePerClaudeSession } from "../session-wake.ts";
+import { onePerClaudeSession } from "./guest/session-wake.ts";
 import type { Whois } from "../tailscale.ts";
 import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";

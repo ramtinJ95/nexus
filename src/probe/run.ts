@@ -6,7 +6,7 @@ import type { ArtifactCopy } from "../protocol/artifacts.ts";
 import type { PreviewAssignment } from "../spawn.ts";
 import type { ServiceName } from "../services-file.ts";
 import { checkoutDir } from "../session-harness.ts";
-import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "../sessions.ts";
+import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "./guest/sessions.ts";
 import { type SecretSource, type VmBackend } from "../backend.ts";
 import { refuseShortDisk } from "../disk-space.ts";
 

@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { OpenedSession } from "../wire.ts";
 import type { PortRange, Preview, Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
-import { focusScript } from "../../sessions.ts";
+import { focusScript } from "../../probe/guest/sessions.ts";
 import { checkoutDir, sessionHarnessSchema } from "../../session-harness.ts";
 import { checkoutReader, contentType, maxFileBytes, pathsFit, type CheckoutReader } from "../../checkout-files.ts";
 import { herdrPanePattern } from "../../attach-wire.ts";

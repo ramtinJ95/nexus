@@ -7,7 +7,7 @@ import { openRegistry } from "./registry.ts";
 import { testPr, testPylon, testRegistry, testThread } from "./test-kit.ts";
 import { desiredPhase, ingest } from "../reconcile.ts";
 import { fakeGuest } from "../fake-guest.ts";
-import { gitFacts } from "../git-facts.ts";
+import { gitFacts } from "../probe/guest/git-facts.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";

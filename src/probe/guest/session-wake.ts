@@ -5,11 +5,11 @@
  * sessions file keeps every session the relaunch did not bring back (`failed` in sessions.ts), so the next
  * pause records it again and the next wake retries it.
  */
-import type { Guest } from "./backend.ts";
-import type { PylonId } from "./ids.ts";
-import type { PausedSession } from "./protocol/observations.ts";
+import type { Guest } from "../../backend.ts";
+import type { PylonId } from "../../ids.ts";
+import type { PausedSession } from "../../protocol/observations.ts";
 import { recordSessions, relaunchSessions, toPaused, type RelaunchOutcome } from "./sessions.ts";
-import { harnesses } from "./session-harness.ts";
+import { harnesses } from "../../session-harness.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
 export type PylonLog = (line: string) => Promise<void>;

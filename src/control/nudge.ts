@@ -8,7 +8,7 @@
  * leaves the thread alone for good.
  */
 import { nudgePrefix, startedByNexus } from "../agent-protocol.ts";
-import { gitPollMs } from "../git-facts.ts";
+import { gitPollMs } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";

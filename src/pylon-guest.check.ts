@@ -37,7 +37,7 @@ import { checkBackend, checkBoot } from "./pylon-vm-check-kit.ts";
 import { unstamped } from "./pylon-vm/controller-log.ts";
 import { envelope } from "./reconcile.ts";
 import { snapshot } from "./tick.ts";
-import { herdrSession, sessionFacts, sessionsFile } from "./sessions.ts";
+import { herdrSession, sessionFacts, sessionsFile } from "./probe/guest/sessions.ts";
 import { checkoutDir, harnesses as harnessTable, type SessionHarness } from "./session-harness.ts";
 import { loginHosts } from "./control/project.ts";
 import type { BootInputs, LiveSpec, OverlayFile } from "./spawn.ts";
