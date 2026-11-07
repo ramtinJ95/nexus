@@ -17,12 +17,12 @@ import type { NodeName, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
-import { checkoutDir } from "../protocol/spawn.ts";
 import { runningProbe } from "./locator.ts";
 import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { StartRequest } from "./start-request.ts";
+import { checkoutDir } from "../guest-contract.ts";
 
 type GateRegistry = Pick<Registry, "node" | "project" | "pylon" | "recordActivity" | "sealedBoot" | "setThreadStatus" | "thread">;
 

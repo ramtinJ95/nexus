@@ -26,10 +26,10 @@ import { startProbe, type Probe } from "../../probe/server.ts";
 import { connectProbe } from "../../protocol/client.ts";
 import { localApiWhois } from "../../tailscale.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
 import { openHarnessHost, type HarnessHost } from "./host.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { scriptedModel, scriptedModels, type ChildArgs } from "./test-fixture.ts";
+import { checkoutDir } from "../../guest-contract.ts";
 
 const execFileAsync = promisify(execFile);
 const docker = async (...args: string[]) => (await execFileAsync("docker", args, { maxBuffer: 64 << 20 })).stdout.trim();

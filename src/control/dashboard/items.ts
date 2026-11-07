@@ -3,7 +3,6 @@ import { posix } from "node:path";
 import type { AssistantMessage, ImageContent, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { isImage } from "../../image-types.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
 import type { ThreadId } from "../../ids.ts";
 import type { ClaudeConversation, ClaudeEntry, PromptSource, TranscriptImage } from "../claude-transcript.ts";
 import type { Sender } from "../agent-protocol.ts";
@@ -12,6 +11,7 @@ import { partHash, queuedOf, type AgentView } from "../conversation-view.ts";
 import { askedIn, askQuestionId, type AskedQuestion, type Question } from "../questions.ts";
 import { clock } from "./elapsed.ts";
 import type { Tone } from "./view.ts";
+import { checkoutDir } from "../../guest-contract.ts";
 
 /**
  * One row of the conversation. A tool call carries its result, which the transcript holds in a later entry, and the

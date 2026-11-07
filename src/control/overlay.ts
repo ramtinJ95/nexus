@@ -8,6 +8,7 @@ import { shellQuote } from "../shell.ts";
 import { chatgptTokenGrant, githubTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
 import type { GitIdentity, OverlayFile, RepoInit } from "../protocol/spawn.ts";
 import type { LoginKind } from "./project.ts";
+import { checkoutDir, pylonGuideFile, pylonInfoFile } from "../guest-contract.ts";
 
 export interface PylonOverlay {
   gitIdentity?: GitIdentity | undefined;
@@ -62,8 +63,8 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
   };
   return [
     { path: "/etc/profile.d/nexus.sh", mode: 0o644, owner: "root", content: Object.entries(env).map(([name, value]) => `export ${name}=${shellQuote(value)}\n`).join("") },
-    { path: "/home/user/.nexus/pylon.json", mode: 0o644, owner: "user", content: JSON.stringify(info, null, 2) + "\n" },
-    { path: "/home/user/.nexus/PYLON.md", mode: 0o644, owner: "user", content: pylonGuide(overlay) },
+    { path: pylonInfoFile, mode: 0o644, owner: "user", content: JSON.stringify(info, null, 2) + "\n" },
+    { path: pylonGuideFile, mode: 0o644, owner: "user", content: pylonGuide(overlay) },
   ];
 }
 
@@ -100,7 +101,7 @@ This machine is a pylon, a microVM that Nexus runs for one thread. You run as \`
 - Node: ${o.node}
 - Pylon: ${o.pylonId}
 
-\`nexus info --json\` prints these facts, and /home/user/.nexus/pylon.json holds them.
+\`nexus info --json\` prints these facts, and ${pylonInfoFile} holds them.
 
 ${repositorySection(o)}
 ## Network
@@ -167,11 +168,11 @@ function repositorySection(o: PylonOverlay): string {
   let publish: string[];
   switch (o.repo.kind) {
     case "clone":
-      origin = `/home/user/workspace/repo is a clone of ${o.repo.url}, on branch ${o.repo.checkout.branch} from ${o.repo.checkout.commit}.`;
+      origin = `${checkoutDir} is a clone of ${o.repo.url}, on branch ${o.repo.checkout.branch} from ${o.repo.checkout.commit}.`;
       publish = github ? [token, push] : [];
       break;
     case "empty":
-      origin = `/home/user/workspace/repo is a new repository on branch ${o.repo.branch} with no commits and no remote. Nothing in this pylon is kept when the thread is deleted, so publish anything worth keeping.`;
+      origin = `${checkoutDir} is a new repository on branch ${o.repo.branch} with no commits and no remote. Nothing in this pylon is kept when the thread is deleted, so publish anything worth keeping.`;
       publish = github ? [`${token} To publish this repository:
 
 \`\`\`sh

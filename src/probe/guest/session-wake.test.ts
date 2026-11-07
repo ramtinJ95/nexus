@@ -5,7 +5,8 @@ import { fakeGuest, herdrArgs, herdrError, herdrOk, herdrPane, herdrSnapshot, se
 import type { PylonId } from "../../ids.ts";
 import type { PausedSession } from "../../protocol/observations.ts";
 import { finishRelaunch, onePerClaudeSession, pauseSessions, recordBeforePause, relaunchAfterWake, type RelaunchMark } from "./session-wake.ts";
-import { sendToClaude, sessionFacts, sessionsFile, type SessionRecord } from "./sessions.ts";
+import { sendToClaude, sessionFacts, type SessionRecord } from "./sessions.ts";
+import { sessionsFile } from "../../guest-contract.ts";
 
 const pylonId = "pyl-session-wake" as PylonId;
 

@@ -19,9 +19,8 @@ import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
 import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
 import { parseJson } from "../parse.ts";
+import { callTimeoutMs, pylonInfoFile } from "../guest-contract.ts";
 
-/** What `nexus info --json` prints: /home/user/.nexus/pylon.json, which renderOverlay writes. */
-export const pylonInfoFile = "/home/user/.nexus/pylon.json";
 export const pylonInfoSchema = z.strictObject({
   pylonId: z.string(),
   threadId: z.string(),
@@ -167,7 +166,7 @@ export function createPylonApi(deps: PylonApiDeps): PylonApi {
   }
 
   async function info(guest: Guest, pylonId: PylonId): Promise<PylonInfo> {
-    const read = await guest.exec(["cat", pylonInfoFile], { cwd: "/", timeoutMs: 10_000 });
+    const read = await guest.exec(["cat", pylonInfoFile], { cwd: "/", timeoutMs: callTimeoutMs });
     if (read.exitCode !== 0) throw new Error(`reading ${pylonInfoFile} failed with exit ${read.exitCode}: ${read.output}`);
     const info = parseJson(pylonInfoSchema, read.output, `${pylonInfoFile} is not the file Nexus wrote`);
     if (info.pylonId !== pylonId) throw new Error(`${pylonInfoFile} names ${info.pylonId}, but the request came from ${pylonId}`);

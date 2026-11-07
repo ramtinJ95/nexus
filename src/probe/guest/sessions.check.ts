@@ -22,7 +22,8 @@ import type { Guest } from "../../backends/backend.ts";
 import { exit } from "../../exec.ts";
 import { unusedGuest } from "../../backends/fake-guest.ts";
 import type { SessionFact } from "../../protocol/observations.ts";
-import { closeSession, herdrSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { herdrSession } from "../../guest-contract.ts";
 
 const cwd = "/home/user";
 const shellCwd = "/home/user/check-shell-cwd";

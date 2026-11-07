@@ -33,7 +33,6 @@ import { run as pylonVm } from "../../pylon-vm/client.ts";
 import { nodeSecrets, type NodeSecrets } from "../../probe/config.ts";
 import { startProbe, type Probe } from "../../probe/server.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../probe/fake-tailscale.ts";
-import { pylonInfoFile } from "../../probe/pylon-api.ts";
 import type { CheckpointId, ImageId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
 import type { DeclaredOutput, ServiceFact } from "../../protocol/observations.ts";
 import { connectProbe, type ProbeClient } from "../../protocol/client.ts";
@@ -42,11 +41,12 @@ import { newPylonRecord, nextCheckpoint, snapshot, tick, type PylonRecord } from
 import type { BackendPylon, Guest, VmBackend } from "../../backends/backend.ts";
 import { loginHosts } from "../../control/project.ts";
 import { renderOverlay } from "../../control/overlay.ts";
-import { type BootInputs, checkoutDir, type CloneRepo, type OverlayFile, type PreviewAssignment } from "../../protocol/spawn.ts";
+import { type BootInputs, type CloneRepo, type OverlayFile, type PreviewAssignment } from "../../protocol/spawn.ts";
 import type { ProjectId } from "../../ids.ts";
-import { sessionFacts, sessionsFile } from "../../probe/guest/sessions.ts";
+import { sessionFacts } from "../../probe/guest/sessions.ts";
 import type { SessionHarness } from "../../protocol/agent-kinds.ts";
 import { freePort } from "../../test-support/kit.ts";
+import { checkoutDir, pylonInfoFile, sessionsFile } from "../../guest-contract.ts";
 
 const execFileAsync = promisify(execFile);
 

@@ -14,8 +14,9 @@ import type { ServiceDecl } from "../services-file.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
 import { listenHostBridge } from "../host-bridge.ts";
-import { createPylonApi, pylonInfoFile } from "../probe/pylon-api.ts";
+import { createPylonApi } from "../probe/pylon-api.ts";
 import { freePort } from "../test-support/kit.ts";
+import { pylonInfoFile } from "../guest-contract.ts";
 
 const cli = fileURLToPath(new URL("../../images/pylon/nexus", import.meta.url));
 const pylonId = "pylon-t1" as PylonId;

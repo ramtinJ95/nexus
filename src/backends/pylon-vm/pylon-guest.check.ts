@@ -37,12 +37,13 @@ import { checkBackend, checkBoot } from "./pylon-vm-check-kit.ts";
 import { unstamped } from "../../pylon-vm/controller-log.ts";
 import { envelope } from "../../control/reconcile.ts";
 import { snapshot } from "../../control/tick.ts";
-import { herdrSession, sessionFacts, sessionsFile } from "../../probe/guest/sessions.ts";
+import { sessionFacts } from "../../probe/guest/sessions.ts";
 import type { SessionHarness } from "../../protocol/agent-kinds.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
 import { loginHosts } from "../../control/project.ts";
-import { type BootInputs, checkoutDir, type LiveSpec, type OverlayFile } from "../../protocol/spawn.ts";
+import { type BootInputs, type LiveSpec, type OverlayFile } from "../../protocol/spawn.ts";
 import { freePort } from "../../test-support/kit.ts";
+import { checkoutDir, herdrSession, sessionsFile } from "../../guest-contract.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
 if (assets === undefined || stateRoot === undefined) throw new Error("usage: node src/backends/pylon-vm/pylon-guest.check.ts <image dir in an artifact store> <state root>");

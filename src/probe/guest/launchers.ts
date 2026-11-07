@@ -7,11 +7,8 @@ import { randomUUID } from "node:crypto";
 import type { Guest } from "../../backends/backend.ts";
 import { defaultClaudeModel, type agentKinds, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
-
-export const home = "/home/user";
-export const callTimeoutMs = 10_000;
+import { callTimeoutMs, checkoutDir, claudeProjects, home, onClaudeTranscript } from "../../guest-contract.ts";
 
 export interface Launcher {
   /** Herdr's agent kind, which Herdr names after the agent's executable. */
@@ -112,10 +109,10 @@ export const claudeCode: Launcher = table["claude-code"];
 /**
  * Claude Code writes no transcript until its first prompt, and `--resume` of an ID without one exits, so
  * a session that was opened but never prompted would not come back. `--session-id` starts it fresh under
- * the same ID instead. The guest looks for the transcript under any project, whatever slug Claude gave the cwd.
+ * the same ID instead.
  */
 async function claudeResume(guest: Guest, id: string): Promise<{ args: readonly string[]; hasHistory: boolean }> {
-  const { exitCode, output } = await guest.exec(["sh", "-c", 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] && exit 0; done; exit 1', id, `${home}/.claude/projects`], { cwd: home, timeoutMs: callTimeoutMs });
+  const { exitCode, output } = await guest.exec(["sh", "-c", onClaudeTranscript(":", 1), id, claudeProjects], { cwd: home, timeoutMs: callTimeoutMs });
   if (exitCode === 0) return { args: ["--resume", id], hasHistory: true };
   if (exitCode === 1) return { args: ["--session-id", id], hasHistory: false };
   throw new Error(`looking for Claude Code transcript ${id} failed with exit ${exitCode}: ${output}`);

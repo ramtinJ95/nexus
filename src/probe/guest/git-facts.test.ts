@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { fakeGuest } from "../../backends/fake-guest.ts";
 import { gitFacts } from "./git-facts.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
 import { tempDir } from "../../test-support/kit.ts";
+import { checkoutDir } from "../../guest-contract.ts";
 
 const exec = promisify(execFile);
 const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };

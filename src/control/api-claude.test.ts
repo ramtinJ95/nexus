@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { claudeProjects, maxRecordBytes, type ClaudeConversation } from "./claude-transcript.ts";
+import { maxRecordBytes, type ClaudeConversation } from "./claude-transcript.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { processStream } from "../process-stream.ts";
 import { stoppedPylon, testObservation, until } from "../test-support/kit.ts";
 import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";
 import { node, claudeSession, fixture, withThread, localCheckout, pngBytes, withClaude, sent } from "../test-support/api-kit.ts";
+import { claudeProjects } from "../guest-contract.ts";
 
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 

@@ -43,8 +43,7 @@ import type { ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { checkoutDir } from "../protocol/spawn.ts";
-import { claudeProjects, transcriptStart, type ClaudeEntry } from "../control/claude-transcript.ts";
+import { transcriptStart, type ClaudeEntry } from "../control/claude-transcript.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { freePort, runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation, until } from "../test-support/kit.ts";
 import { call, CliError, follow } from "./transport.ts";
@@ -52,6 +51,7 @@ import type { Api } from "./kit.ts";
 import { answeredText, pressOf } from "./commands/release.ts";
 import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
+import { checkoutDir, claudeProjects } from "../guest-contract.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const node = "rj-firebat" as NodeName;

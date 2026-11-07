@@ -8,6 +8,7 @@ import type { OpenPipe } from "../pipe.ts";
 import { processStream } from "../process-stream.ts";
 import type { OverlayFile } from "../protocol/spawn.ts";
 import type { SessionRecord } from "../probe/guest/sessions.ts";
+import { checkoutDir } from "../guest-contract.ts";
 
 export type ExecReply = { exitCode: number | null; output: string; truncated?: boolean };
 
@@ -114,7 +115,7 @@ export function herdrError(code: string, message = code): ExecReply {
 }
 
 /** A Herdr PaneInfo with the fields Nexus reads. */
-export function herdrPane(paneId: string, workspaceId: string, agent: string | null, status: string, session: { kind: "id" | "path"; value: string } | null = null, cwd = "/home/user/workspace/repo") {
+export function herdrPane(paneId: string, workspaceId: string, agent: string | null, status: string, session: { kind: "id" | "path"; value: string } | null = null, cwd = checkoutDir) {
   return {
     pane_id: paneId, workspace_id: workspaceId, tab_id: `${workspaceId}:t1`, terminal_id: `term-${paneId}`, focused: false, revision: 1,
     agent, agent_status: status, cwd, foreground_cwd: cwd,

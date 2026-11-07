@@ -29,7 +29,8 @@ import type { PausedSession } from "../protocol/observations.ts";
 import { publicUrls } from "../public-urls.ts";
 import { diskBytes } from "../disk-space.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "../probe/guest/session-wake.ts";
-import { pausedSessionsIn, sessionsFile } from "../probe/guest/sessions.ts";
+import { pausedSessionsIn } from "../probe/guest/sessions.ts";
+import { sessionsFile } from "../guest-contract.ts";
 
 const encoded = (sessions: readonly PausedSession[] | null) => sessions === null ? "" : Buffer.from(JSON.stringify(sessions)).toString("base64url");
 const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {

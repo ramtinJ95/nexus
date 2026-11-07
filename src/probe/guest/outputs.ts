@@ -12,16 +12,13 @@ import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
 import { parseJson } from "../../parse.ts";
 import type { DeclaredOutput } from "../../protocol/observations.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
-
-export const outputsDir = "/home/user/.nexus/outputs";
+import { callTimeoutMs, checkoutDir, outputsDir } from "../../guest-contract.ts";
 
 type OutputDeclaration = { kind: "file"; path: string; title?: string } | { kind: "diff"; title?: string };
 
 /** A refusal the agent can act on, such as a missing file or a clean tree, rather than a failed guest. */
 export class OutputRefused extends Error {}
 
-const callTimeoutMs = 10_000;
 /**
  * The pylon VM backend returns at most 64 KiB of a command's output (src/pylon-vm/processes.ts), and the listing
  * is one command. The probe is the only writer, so it refuses an output that would take the listing past this.

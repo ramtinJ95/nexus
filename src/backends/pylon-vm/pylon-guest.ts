@@ -17,9 +17,10 @@ import { statusSchema } from "../../pylon-vm/contracts.ts";
 import { stamped } from "../../pylon-vm/controller-log.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { existsError, readLogTail } from "../../pylon-vm/storage.ts";
+import { asUser } from "../../guest-contract.ts";
 
-/** A login shell as `user`, in `cwd`. The fork runs guest commands as root. */
-export const asUser = (script: string, cwd: string) => `runuser -l user -c ${q(`cd ${q(cwd)} && ${script}`)}`;
+/** A login shell as `user`, in `cwd`, as one command string. The fork runs guest commands as root. */
+export const asUserIn = (script: string, cwd: string) => asUser(`cd ${q(cwd)} && ${script}`).map(q).join(" ");
 
 /** The instance's controller log, which `logs` without a service reads. The controller appends to it too. */
 export const controllerLog = (dir: string): PylonLog => (line) => appendFile(join(dir, "controller.log"), `${stamped(line)}\n`, { mode: 0o600 });
@@ -114,7 +115,7 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 			const deadline = Date.now() + timeoutMs;
 			// The fork waits at most 60 s per call, and a wait never kills the command.
 			const wait = () => Math.max(0, Math.min(60_000, deadline - Date.now()));
-			const cmd = asUser(argv.map(q).join(" "), cwd);
+			const cmd = asUserIn(argv.map(q).join(" "), cwd);
 			let reply = execReplySchema.parse(await run({ action: "exec", name, cmd, cwd: "/", timeoutMs: wait() }));
 			let output = reply.output;
 			while (reply.running) {
