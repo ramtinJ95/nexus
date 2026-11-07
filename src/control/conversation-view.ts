@@ -2,6 +2,8 @@
  * What a thread's conversation looks like on the wire, and the frames each client of its streams is sent. Nothing
  * here holds state beyond one client's frames.
  */
+import { createHash } from "node:crypto";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { ClaudeConversation, ClaudeEntry } from "./claude-transcript.ts";
 
@@ -12,6 +14,13 @@ export type AgentView = { kind: "harness"; view: ConversationView } | { kind: "c
 export function agentView(view: ConversationView | ClaudeConversation): AgentView {
   return "kind" in view ? { kind: "claude", view } : { kind: "harness", view };
 }
+
+/**
+ * A harness image part's hash, which the dashboard's image links carry and `GET /v1/threads/<id>/image` checks. Kept
+ * once per part, since a page renders the same committed parts again and again.
+ */
+const partHashes = new WeakMap<ImageContent, string>();
+export const partHash = (part: ImageContent) => partHashes.get(part) ?? partHashes.set(part, createHash("sha256").update(part.data).digest("hex")).get(part)!;
 
 /** What a stream follows: a harness conversation's watch, or a Claude worker's. */
 export interface Watch<V> {
