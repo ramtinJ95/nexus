@@ -14,7 +14,7 @@ import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { githubClient, githubRepo, type PrSnapshot } from "./github.ts";
 import { prWatcher, summaryOf } from "./pr-watch.ts";
 import { commentCap } from "./pr-watch-model.ts";
-import { prWatchPrefix } from "./agent-protocol.ts";
+import { senders } from "./agent-protocol.ts";
 import { threadQueue, waitOf } from "./queue.ts";
 import { agentInbox } from "./inbox.ts";
 import type { HarnessHost } from "./harness/host.ts";
@@ -69,7 +69,7 @@ test("links origin branches, shares reads, and only deliberate messages wake wit
   assert.equal(f.messages.length, 2);
   assert.match(f.messages[0]![1], /Check failed: build/);
   assert.equal(f.messages[0]![4], "pr-watch");
-  assert.ok(f.messages[0]![1].startsWith(prWatchPrefix));
+  assert.ok(f.messages[0]![1].startsWith(senders["pr-watch"].prefix));
   const thread = f.registry.thread(f.id)!;
   assert.equal(thread.lastHumanActivityAt, 1);
   assert.equal(thread.seenAt, 1000);
@@ -570,7 +570,7 @@ test("feedback reaches a Claude worker thread typed into its session once its py
   await watcher.poll();
   assert.equal(typed.length, 2);
   const command = typed[1] as Extract<PylonCommand, { kind: "send-claude" }>;
-  assert.ok(command.text.startsWith(prWatchPrefix));
+  assert.ok(command.text.startsWith(senders["pr-watch"].prefix));
   assert.match(command.text, /CHANGES_REQUESTED\): https:\/\/example.com\n  Use the cache$/, "line ends and tabs made typeable");
   assert.equal(f.registry.prWatch(claude)!.pending, null);
   assert.deepEqual(f.registry.claudeMessage(claude, pending.id), { state: "sent", result: { session: "c0ffee00-0000-4000-8000-000000000000", outcome: "sent", resumed: false } });

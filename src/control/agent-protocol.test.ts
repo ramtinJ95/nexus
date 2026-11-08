@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { latest, mint, tokenBlocks } from "./agent-protocol.ts";
+import { judgmentPrefix, latest, mint, planningPrefix, senders, tokenBlocks } from "./agent-protocol.ts";
 
 const schema = z.object({ token: z.string(), verdict: z.enum(["approve", "changes"]) });
 const fenced = (fence: string, body: string) => `\`\`\`${fence}\n${body}\n\`\`\``;
@@ -31,4 +31,9 @@ test("latest is the newest matching block, or null when none matches", () => {
   const replies = [fenced("nexus-review", JSON.stringify({ token: "t", verdict: "changes" })), fenced("nexus-review", JSON.stringify({ token: "t", verdict: "approve" }))];
   assert.deepEqual(latest(replies, "nexus-review", schema, "t"), { token: "t", verdict: "approve" });
   assert.equal(latest(replies, "nexus-review", schema, "other"), null);
+});
+
+test("each automated sender keeps its name and the prefix its messages start with", (t) => {
+  const each = (field: "name" | "prefix") => Object.fromEntries(Object.entries(senders).map(([s, v]) => [s, v[field]] as const).sort(([a], [b]) => a.localeCompare(b)));
+  t.assert.snapshot({ names: each("name"), prefixes: each("prefix"), judgment: judgmentPrefix, planning: planningPrefix });
 });

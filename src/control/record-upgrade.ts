@@ -4,7 +4,7 @@
  * The upgrade fills in what the older record lacks, caps its rounds and gives its findings priorities, as the read
  * before it did, so a control plane rolled back to an older release reads the upgraded record unchanged.
  */
-import { reviewPrefix } from "./agent-protocol.ts";
+import { senders } from "./agent-protocol.ts";
 import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
 import type { JobEnvelope } from "../protocol/jobs.ts";
 import { personOnly, type HoldCode } from "./holds.ts";
@@ -29,7 +29,7 @@ export function upgradeReview(record: Review): Review {
       ...phase, cause: phase.cause ?? (phase.label === undefined ? "unrecorded" : "rounds"),
       holds: phase.holds ?? phase.reasons.map((text) => ({ code: codeOfText(text), text })),
     } : phase,
-    asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
+    asked: record.asked ?? `${senders.review.prefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
     rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: decided({ ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) }) })
       .map((round) => round.secondVerdict == null ? round : { ...round, secondVerdict: decided(round.secondVerdict) })
       // A round of a review with a second reviewer that lacks its verdict has none, which never approves.

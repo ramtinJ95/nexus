@@ -27,7 +27,7 @@ import { fakeHarness } from "../test-support/fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import { tempDir, watch } from "../test-support/kit.ts";
 import { testPr, testPylon, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
-import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "./agent-protocol.ts";
+import { checkCaller, reviewerCaller, senders, verifyCaller } from "./agent-protocol.ts";
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./start-request.ts";
@@ -297,7 +297,7 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   const reviewer = f.review().reviewer;
   assert.equal(f.sent.length, 1);
   assert.equal(f.sent[0]!.to, reviewer);
-  assert.ok(f.sent[0]!.message.text.startsWith(reviewPrefix));
+  assert.ok(f.sent[0]!.message.text.startsWith(senders.review.prefix));
   assert.match(f.sent[0]!.message.text, new RegExp(`git checkout --detach ${head1}`));
   for (const name of Object.values(reservedNames)) assert.ok(f.sent[0]!.message.text.includes(name), `the reviewer is told that ${name} need the person`);
   assert.match(f.sent[0]!.message.text, /Not checked live: the cache under real traffic/, "the description reaches the reviewer");
@@ -751,7 +751,7 @@ test("a harness builder gets a Claude reviewer only where the project grants a C
   const review = await g.loop().start(g.builder, { land: null });
   assert.deepEqual(review.models, { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" });
   assert.equal(g.started[0]!.raw, true, "no /poteto-mode in front of the reviewer's request");
-  assert.ok(g.started[0]!.claude!.startsWith(reviewPrefix));
+  assert.ok(g.started[0]!.claude!.startsWith(senders.review.prefix));
   assert.equal(review.outbox, null, "a Claude reviewer's request is its first prompt");
 });
 
@@ -2182,7 +2182,7 @@ test("an approval with only P3 findings goes straight to the check, sending the 
   assert.equal(f.review().rounds.length, 1);
   const toBuilder = f.sent.filter((s) => s.to === f.builder).map((s) => s.message.text);
   assert.equal(toBuilder.length, 1);
-  assert.ok(toBuilder[0]!.startsWith(reviewPrefix));
+  assert.ok(toBuilder[0]!.startsWith(senders.review.prefix));
   assert.match(toBuilder[0]!, new RegExp(`approved pull request #7 \\(.*\\) at ${head1} in round 1`));
   assert.match(toBuilder[0]!, /N1 \(P3\) src\/cache\.ts:1: Name the constant/);
   assert.match(toBuilder[0]!, /Do not push to this pull request's branch/);

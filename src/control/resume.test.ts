@@ -5,7 +5,7 @@ import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { deadTurnResumer, resumeWaitsMs } from "./resume.ts";
-import { checkCaller, resumePrefix, reviewerCaller } from "./agent-protocol.ts";
+import { checkCaller, reviewerCaller, senders } from "./agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
@@ -90,7 +90,7 @@ test("a builder whose session ended three seconds into its turn is resumed once,
   await f.resumer.poll();
   assert.equal(f.typed.length, 1);
   assert.equal(f.typed[0]!.session, session);
-  assert.ok(f.typed[0]!.text.startsWith(resumePrefix));
+  assert.ok(f.typed[0]!.text.startsWith(senders.resume.prefix));
   const requestId = `resume:${id}:${died!.at}`;
   assert.equal(f.typed[0]!.requestId, requestId);
   assert.deepEqual(f.resumed(id), [{ turn: died!.at, count: 1, reason: died!.reason, requestId }]);

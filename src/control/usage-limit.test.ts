@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { testPylon, testRegistry, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
-import { usageLimitPrefix } from "./agent-protocol.ts";
+import { senders } from "./agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
@@ -52,7 +52,7 @@ test("a worker stopped on its usage limit is told to continue once, after the re
   await f.resumer.poll();
   assert.equal(f.typed.length, 1);
   assert.equal(f.typed[0]!.session, session);
-  assert.equal(f.typed[0]!.text, `${usageLimitPrefix} The usage limit reset. Continue where you stopped.`);
+  assert.equal(f.typed[0]!.text, `${senders["usage-limit"].prefix} The usage limit reset. Continue where you stopped.`);
   const requestId = `usage-limit:${session}:5000`;
   assert.deepEqual(f.continued().map((e) => e.payload), [{ session, stoppedAt: 5000, resetsAt, requestId }]);
   assert.notEqual(f.registry.claudeMessage(f.id, requestId), undefined);

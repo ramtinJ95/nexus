@@ -14,7 +14,7 @@ import { prWatcher } from "./pr-watch.ts";
 import { pushedBranches } from "./pr-watch-model.ts";
 import type { GitHub, PullRequest } from "./github.ts";
 import { ingest } from "./reconcile.ts";
-import { checkCaller, nudgePrefix, reviewerCaller } from "./agent-protocol.ts";
+import { checkCaller, reviewerCaller, senders } from "./agent-protocol.ts";
 import { turnGate } from "./drain.ts";
 import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
@@ -171,7 +171,7 @@ test("a builder whose turn ended without a pull request gets one nudge once its 
   await f.pass();
   const sent = f.nudges();
   assert.equal(sent.length, 1);
-  assert.ok(sent[0]!.text.startsWith(`${nudgePrefix}\n`));
+  assert.ok(sent[0]!.text.startsWith(`${senders.nudge.prefix}\n`));
   assert.ok(!sent[0]!.text.includes("\t"), "the text is typeable");
   assert.equal(sent[0]!.sender, "nudge");
   assert.equal(sent[0]!.requestId, `nudge:${id}:${turnEnd}`);
@@ -384,7 +384,7 @@ test("a Claude worker builder is nudged by typing into its session, and a person
   await f.pass();
   assert.equal(f.typed.length, 1);
   assert.equal(f.typed[0]!.session, session);
-  assert.ok(f.typed[0]!.text.startsWith(`${nudgePrefix}\n`));
+  assert.ok(f.typed[0]!.text.startsWith(`${senders.nudge.prefix}\n`));
   assert.equal(f.typed[0]!.requestId, `nudge:${id}:${f.registry.thread(id)!.lastReplyAt}`);
   // The nudge shows in the transcript as a prompt, which is not the person's.
   f.transcript(id, [{ kind: "prompt", at: f.now, text: f.typed[0]!.text, from: "person" }]);

@@ -24,7 +24,7 @@ import { proposalQuestion } from "../planning.ts";
 import { startKey } from "../threads.ts";
 import { checkoutDir, claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import { checkCaller, reviewPrefix, reviewerCaller, usageLimitPrefix, verifyCaller } from "../agent-protocol.ts";
+import { checkCaller, reviewerCaller, senders, verifyCaller } from "../agent-protocol.ts";
 import type { AgentCall } from "../agent-usage.ts";
 import { requestIds, type ImageId, type ItemId, type NodeName, type ProjectId, type PylonId, type ThreadId } from "../../ids.ts";
 import type { ItemRecord } from "../pipeline-store.ts";
@@ -285,7 +285,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .tool("Grep", { pattern: "usageCursor", path: "src/control" }, "src/control/usage-store.ts:104:    usageCursor(source, key) {\nsrc/control/usage-backfill.ts:88:  const cursor = registry.usageCursor(...)")
         .reply("The cursors exist but the backfill ignores them. Wiring them in.")
         .tool("Edit", { file_path: "/home/user/workspace/repo/src/control/usage-backfill.ts", old_string: "from: 0", new_string: "from: cursor?.position ?? 0" }, "The file has been updated.");
-      c.notice("error", `${usageLimitPrefix} Claude usage limit reached. Your limit will reset at 6pm (Europe/Stockholm).`, now() + 2 * hour);
+      c.notice("error", `${senders["usage-limit"].prefix} Claude usage limit reached. Your limit will reset at 6pm (Europe/Stockholm).`, now() + 2 * hour);
       claudeTranscript(d, t, c.entries);
     },
   },
@@ -350,7 +350,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
     key: "applepay-review", by: reviewerCaller, project: "storefront", title: "Review of #88: feat(checkout): Apple Pay via the Payment Request Button", ago: 5 * hour, worker: "harness", pylon: "running", replied: 10 * minute, seen: true,
     extra(d, t) {
       talk(d, t, harnessTalk(t.createdAt)
-        .person(`${reviewPrefix} Review round 2 of #88 at dddddddddddd.`)
+        .person(`${senders.review.prefix} Review round 2 of #88 at dddddddddddd.`)
         .bash("git diff main...HEAD --stat", " src/checkout/PaymentStep.tsx | 14 ++++++++++----\n 1 file changed, 10 insertions(+), 4 deletions(-)")
         .say("Round 2 is under review: F1's fallback is in place, and I am checking F2's test.").messages);
     },

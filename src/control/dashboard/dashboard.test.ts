@@ -26,7 +26,7 @@ import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } 
 import { imagePaths } from "./items.ts";
 import { liveFrames, liveStreams } from "./live-frames.ts";
 import { promptSenders, typeIntoClaude } from "../inbox.ts";
-import { usageLimitPrefix } from "../agent-protocol.ts";
+import { senders } from "../agent-protocol.ts";
 import { startHint, type HintPart } from "./start-hint.ts";
 import { agoText, clock } from "./elapsed.ts";
 import { imageTypes } from "../../image-types.ts";
@@ -2274,7 +2274,7 @@ test("PR outputs show GitHub metadata and automated entries are not labelled as 
 
 test("a Claude worker's prompt is Nexus's only when Nexus typed it, the usage limit's continue too, and one the person typed like Nexus's is theirs", async (t) => {
   const s = await seeded(t);
-  const continued = `${usageLimitPrefix} The usage limit reset. Continue where you stopped.`;
+  const continued = `${senders["usage-limit"].prefix} The usage limit reset. Continue where you stopped.`;
   const theirs = "[Nexus review] got this wrong, so leave the cache as it is.";
   const entries: ClaudeEntry[] = [{ kind: "prompt", at: 1, text: continued, from: "person" }, { kind: "prompt", at: 2, text: theirs, from: "person" }];
   const thread = await claudeThread(s, entries);

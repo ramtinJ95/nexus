@@ -1,0 +1,20 @@
+exports[`each automated sender keeps its name and the prefix its messages start with 1`] = `
+{
+  "names": {
+    "nudge": "Nexus nudge",
+    "pr-watch": "Nexus PR watch",
+    "resume": "Nexus resume",
+    "review": "Nexus review",
+    "usage-limit": "Nexus usage limit"
+  },
+  "prefixes": {
+    "nudge": "[Nexus nudge — automated, not a message from the person]",
+    "pr-watch": "[Nexus PR watch — automated, not a message from the person]",
+    "resume": "[Nexus resume — automated, not a message from the person]",
+    "review": "[Nexus review — automated, not a message from the person]",
+    "usage-limit": "[Nexus usage limit — automated, not a message from the person]"
+  },
+  "judgment": "[Nexus judgment — automated, not a message from the person]",
+  "planning": "[Nexus planning: automated, not a message from the person]"
+}
+`;
