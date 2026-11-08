@@ -19,8 +19,8 @@ export interface PreviewHit extends PreviewRoute { at: string; login: string | n
 export interface GatewayOptions {
   /** 0 picks a free port. A real probe keeps it fixed, because serve entries that proxy to it are the probe's (see serve.ts). */
   port: number;
-  /** The table to route by, as loaded from the routes file. It becomes PreviewGateway.routes. */
-  routes: Map<number, PreviewRoute>;
+  /** Where an https port routes. Only the preview stack in serve.ts holds the table it reads (startPreviews). An unmapped port gets 404. */
+  route(httpsPort: number): PreviewRoute | undefined;
   /** A browser gets a waking page for `unavailable`. A throw is a fault, which is logged and answered with 502. */
   origin(route: PreviewRoute): PreviewOrigin | { unavailable: string };
   /** Called on the first request for a route, then at most once per hitIntervalMs. */
@@ -31,8 +31,6 @@ export interface GatewayOptions {
 
 export interface PreviewGateway {
   readonly origin: `http://127.0.0.1:${number}`;
-  /** https port to route. Only the TailscaleServe that publishes the ports writes it. An unmapped port gets 404. */
-  readonly routes: Map<number, PreviewRoute>;
   close(): Promise<void>;
 }
 
@@ -52,7 +50,6 @@ const hopByHop = new Set(["connection", "keep-alive", "proxy-authenticate", "pro
 type Answer = { status: number; headers: OutgoingHttpHeaders; body: string };
 
 export async function startGateway(options: GatewayOptions): Promise<PreviewGateway> {
-  const { routes } = options;
   const log = options.log ?? console.error;
   const lastHit = new Map<string, number>();
   /** Upgraded sockets leave the HTTP server's bookkeeping, so closeAllConnections does not reach them. */
@@ -70,7 +67,7 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
   /** Either the gateway's own answer, or where to forward the request. */
   function resolve(req: IncomingMessage): Answer | { origin: URL; port: number } {
     const port = hostPort(req.headers.host);
-    const route = port === null ? undefined : routes.get(port);
+    const route = port === null ? undefined : options.route(port);
     if (port === null || route === undefined) return plain(404, `no preview is published on ${req.headers.host ?? "a request without Host"}`);
     const warm = req.headers[warmHeader];
     if (warm !== undefined) {
@@ -141,7 +138,6 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
 
   return {
     origin: `http://127.0.0.1:${address.port}`,
-    routes,
     async close() {
       const closed = new Promise<void>((resolve) => server.close(() => resolve()));
       server.closeAllConnections();

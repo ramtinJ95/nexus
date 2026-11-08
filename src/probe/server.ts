@@ -29,9 +29,9 @@ import type { Whois } from "../protocol/http.ts";
 import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
-import { rawResponse, startGateway } from "./gateway.ts";
+import { rawResponse } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
-import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
+import { startPreviews, type HttpsGet, type TailscaleCli } from "./serve.ts";
 import { serialQueue, singleFlight } from "../single-flight.ts";
 import type { NodeSecrets } from "./config.ts";
 import { createPylonStates } from "./pylon-facts.ts";
@@ -124,20 +124,19 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const journal = eventJournal(backend.eventJournal ?? ":memory:");
   const shutdown = new AbortController();
   const log = options.log ?? console.error;
-  const previews = options.previews === undefined ? null : {
-    ...options.previews,
-    gateway: await startGateway({
-      port: options.previews.gatewayPort,
-      routes: await readRoutes(options.previews.routesFile),
-      origin: ({ pylonId, service }) => backend.guest(pylonId).previewOrigin(service),
-      onHit: (hit) => emit({ type: "preview-hit", ...hit }),
-      log,
-    }),
-  };
+  const previews = options.previews === undefined ? null : await startPreviews({
+    port: options.previews.gatewayPort,
+    origin: ({ pylonId, service }) => backend.guest(pylonId).previewOrigin(service),
+    onHit: (hit) => emit({ type: "preview-hit", ...hit }),
+    log,
+    cli: options.previews.tailscale,
+    routesFile: options.previews.routesFile,
+    get: options.previews.get,
+  });
   /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
   const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
   const pylons = createPylonStates({ backend, log, redacted });
-  const serve = previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get });
+  const serve = previews ?? noPreviews;
   const deps: ProbeDeps = {
     backend,
     secrets: options.secrets,
@@ -174,11 +173,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     published: pylons.published,
     changed: () => void publishSnapshot(),
     ports: deps.ports,
-    async previewUrls() {
-      if (previews === null) return new Map();
-      const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin);
-      return new Map([...served].flatMap(([httpsPort, entry]) => entry.kind === "nexus" ? [[httpsPort, entry.url]] : []));
-    },
+    previewUrls: async () => previews === null ? new Map() : previews.urls(shutdown.signal),
   });
 
   const jobs = createJobTable({
@@ -306,7 +301,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       artifacts,
       jobs: retained,
       pylons: await Promise.all(listed.map(async (p) => afterShutdown(await pylons.observation(p), lastShutdown.get(p.pylonId)))),
-      previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
+      previewRoutes: previews?.routes() ?? [],
       grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
       ...backend.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
       heldSecrets,
@@ -617,13 +612,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     server.listen(options.port, options.host);
     await once(server, "listening");
   } catch (err) {
-    await previews?.gateway.close(); // its port is fixed, so a retry in this process needs it free
+    await previews?.close(); // its port is fixed, so a retry in this process needs it free
     throw err;
   }
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
   const bridge = await backend.hostBridge?.(api.answer).catch(async (err: unknown) => {
-    await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.gateway.close()]);
+    await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.close()]);
     throw err;
   });
   const listeningTimer = setInterval(() => void listeningPoll.join(), options.listeningPollMs ?? 10_000);
@@ -641,7 +636,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       await Promise.allSettled([...jobs.running.keys()]);
       // A spawn that woke a pylon drops its mark, which a restart right after must not read back.
       await recordSaves.run(async () => {});
-      await Promise.all([closed, previews?.gateway.close(), bridge?.close()]);
+      await Promise.all([closed, previews?.close(), bridge?.close()]);
       journal.close();
     },
   };

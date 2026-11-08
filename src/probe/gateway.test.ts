@@ -42,9 +42,9 @@ async function guestOrigin(t: import("node:test").TestContext) {
 async function setup(t: import("node:test").TestContext, origin: GatewayOptions["origin"]) {
   const hits: PreviewHit[] = [];
   const logged: string[] = [];
-  const gateway = await startGateway({ port: 0, routes: new Map(), origin, onHit: (hit) => hits.push(hit), log: (message) => logged.push(message) });
+  const routes = new Map<number, PreviewRoute>([[10001, { pylonId, service: "web" }]]);
+  const gateway = await startGateway({ port: 0, route: (port) => routes.get(port), origin, onHit: (hit) => hits.push(hit), log: (message) => logged.push(message) });
   t.after(() => gateway.close());
-  gateway.routes.set(10001, { pylonId, service: "web" });
   const gatewayPort = Number(new URL(gateway.origin).port);
   const call = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) =>
     new Promise<{ status: number; headers: IncomingMessage["headers"]; rawHeaders: string[]; body: string }>((resolve, reject) => {
@@ -56,7 +56,7 @@ async function setup(t: import("node:test").TestContext, origin: GatewayOptions[
       req.on("error", reject);
       req.end(init.body);
     });
-  return { gateway, gatewayPort, hits, logged, call };
+  return { gateway, routes, gatewayPort, hits, logged, call };
 }
 
 test("a request is forwarded by its Host port, with its body, the public Host and x-forwarded-* for https", async (t) => {
@@ -153,8 +153,8 @@ test("an unmapped port gets 404, and neither reaches a guest nor counts as a hit
 test("hits are reported once a minute per route, with the tailnet login", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2027-01-01T00:00:00Z") });
   const guest = await guestOrigin(t);
-  const { gateway, call, hits } = await setup(t, () => guest.origin);
-  gateway.routes.set(10002, { pylonId, service: "docs" });
+  const { routes, call, hits } = await setup(t, () => guest.origin);
+  routes.set(10002, { pylonId, service: "docs" });
   await call("/", { headers: { "tailscale-user-login": "someone@example.com" } });
   await call("/app.js");
   await call("/", { headers: { host: "infra-testbench.example.ts.net:10002" } });
@@ -261,5 +261,5 @@ test("a gateway whose port is taken fails to start with the bind error", async (
   await once(taken, "listening");
   t.after(() => taken.close());
   const port = (taken.address() as { port: number }).port;
-  await assert.rejects(startGateway({ port, routes: new Map(), origin: () => "http://127.0.0.1:1", onHit: () => {} }), { code: "EADDRINUSE" });
+  await assert.rejects(startGateway({ port, route: () => undefined, origin: () => "http://127.0.0.1:1", onHit: () => {} }), { code: "EADDRINUSE" });
 });
