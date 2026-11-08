@@ -22,6 +22,7 @@ import { projectStore } from "./project-store.ts";
 import { imageStore } from "./image-store.ts";
 import { openDb } from "./db.ts";
 import { threadStore, type ThreadParticipant } from "./thread-store.ts";
+import { placementMemory } from "./placement-model.ts";
 
 export type Registry = ReturnType<typeof openRegistry>;
 
@@ -30,7 +31,8 @@ export function openRegistry(path: string, clock = Date.now, log = (message: str
   const kernel = openDb(path);
   const participants: ThreadParticipant[] = [];
   const { saveObservation, saveNodeState, ...nodes } = nodeStore(kernel);
-  const { updateAttention, threadRecord, saveStartKey, start, archivedAt, recordSettle, ...core } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, participants);
+  const { holdReleased, ...placement } = placementMemory(clock);
+  const { updateAttention, threadRecord, saveStartKey, start, archivedAt, recordSettle, ...core } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, participants, holdReleased);
   const { appendEvent, setThreadStatus, threadStatus, events } = core;
   const { participant: reviewing, ...reviews } = reviewStore(kernel, { setThreadStatus, appendEvent, updateAttention, events });
   const { participant: asking, ...questions } = questionStore(kernel, clock, threadStatus, updateAttention);
@@ -44,6 +46,7 @@ export function openRegistry(path: string, clock = Date.now, log = (message: str
   return {
     close() { kernel.db.close(); },
     ...core,
+    ...placement,
     ...usage,
     ...reviews,
     ...questions,

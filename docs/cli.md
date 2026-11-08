@@ -566,9 +566,9 @@ A project's `defaultNode` may be `auto`, and then `start` without `--node` place
 
 `Thread.placement` records the choice, and is absent from a thread started before 0.20.0:
 
-<!-- types: src/control/thread-store.ts Placement Weighed Room -->
+<!-- types: src/control/placement-model.ts Placement Weighed Room -->
 ```ts
-// src/control/thread-store.ts
+// src/control/placement-model.ts
 /**
  * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
  * could run the pylon has left once it boots there, or why the node could not.

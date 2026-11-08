@@ -27,8 +27,9 @@ import { singleFlight } from "../single-flight.ts";
 import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";
 import { refusals, weighNodes } from "./placement.ts";
+import type { Weighed } from "./placement-model.ts";
 import { gib } from "../util/gib.ts";
-import type { StoredPylon, Thread, Weighed } from "./thread-store.ts";
+import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Registry } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
