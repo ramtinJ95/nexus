@@ -4,7 +4,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { cliDoc, declaration, generated, generatedDocs, marker } from "../scripts/docs-gen.ts";
 import { commands } from "./cli/commands/index.ts";
-import { usage } from "./cli/help.ts";
 import { minControlVersion } from "./cli/config.ts";
 import { openDb } from "./control/db.ts";
 import { reservedCases, reservedNames } from "./contract/reserved.ts";
@@ -88,9 +87,9 @@ const table = (file: string, first: string) => {
 };
 const ticked = (text: string) => [...text.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
 
-test("docs/cli.md's command table has a row for every command, with every flag its usage shows", () => {
+test("docs/cli.md's command table has a row for every command, with exactly the flags it parses", () => {
   const global = ["--json", "--url", "--socks"];
-  const flags = (text: string) => new Set([...text.matchAll(/--[a-z][a-z-]*/g)].map((match) => match[0]).filter((flag) => !global.includes(flag)));
+  const flags = (text: string) => [...text.matchAll(/--[a-z][a-z-]*/g)].map((match) => match[0]).filter((flag) => !global.includes(flag));
   const names = Object.keys(commands).sort((a, b) => b.length - a.length);
   const documented = new Map<string, Set<string>>();
   for (const [cell] of table(cliDoc, "Command")) {
@@ -100,12 +99,13 @@ test("docs/cli.md's command table has a row for every command, with every flag i
     assert.ok(name, `no command runs the row ${shown}`);
     documented.set(name, new Set([...documented.get(name) ?? [], ...flags(shown)]));
   }
-  const usageLines = (help: readonly string[]) => help.filter((line) => /^\s*(nexus |\[|\()/.test(line)).map((line) => line.trim().split(/\s{2,}/)[0]!).join(" ");
-  const missing = Object.entries(commands).flatMap(([name, command]) =>
-    documented.has(name) ? [...flags(usageLines(command.help))].filter((flag) => !documented.get(name)!.has(flag)).map((flag) => `${name} ${flag}`) : [name]);
-  assert.deepEqual(missing, []);
-  const unknown = [...documented].flatMap(([name, shown]) => [...shown].filter((flag) => !usage.includes(flag)).map((flag) => `${name} ${flag}`));
-  assert.deepEqual(unknown, []);
+  const wrong = Object.entries(commands).flatMap(([name, command]) => {
+    if (!documented.has(name)) return [`${name}: no row`];
+    const parsed = new Set(Object.keys(command.options ?? {}).map((option) => `--${option}`));
+    const shown = documented.get(name)!;
+    return [...[...parsed].filter((flag) => !shown.has(flag)).map((flag) => `${name}: ${flag} has no row`), ...[...shown].filter((flag) => !parsed.has(flag)).map((flag) => `${name}: ${flag} is not parsed`)];
+  });
+  assert.deepEqual(wrong, []);
 });
 
 test("docs/merge-policy.md's reserved-path table names every path and folder policy.ts reserves, and no src/ path it does not", () => {
