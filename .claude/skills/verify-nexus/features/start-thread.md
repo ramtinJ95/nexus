@@ -56,7 +56,7 @@ Preconditions:
 
 - A thread's `id` exists before its pylon does. `actualState` reads `absent` or `spawning` for the first few seconds, so poll rather than asserting the first `show`.
 - The scripted model treats a message that does not start with `bash: ` as plain text, so `start-cli-message` needs the prefix to produce a tool call.
-- The stack's pylons run `sleep infinity` under Docker and never clone. The Spoon-Knife URL only labels the project. A fresh pylon's checkout is the image's one-commit repo, not Spoon-Knife.
+- The stack's pylons run `sleep infinity` under Docker. A fresh pylon clones the image's one-commit repository, `/srv/verify.git`, which is the `spoon` project's URL, because the stack's containers reach no network.
 - A bare `[data-start=spoon]` matches both the overview's `New thread` and the sidebar's hidden `+`, so Playwright refuses it as ambiguous. Scope it to `#overview`.
 - `Start again` needs a failed pylon, which this recipe never makes, so it stays unverified.
 - Queued starts (`--after` and `start-queued`) need the control plane's GitHub token, which the stack does not configure, so only their refusal is verified here.

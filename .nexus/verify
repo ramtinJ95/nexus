@@ -23,7 +23,8 @@ if ! docker info >/dev/null 2>&1; then
   # In .verify, which git ignores, so the log stays with the evidence in the archived pylon.
   log=.verify/nexus/dockerd.log
   mkdir -p .verify/nexus
-  # The stack's pylons need no egress, so dockerd leaves the firewall alone and docker-proxy publishes their ports.
+  # The stack's pylons need no egress, since each clones the repository in its image, so dockerd leaves the firewall
+  # alone and docker-proxy publishes their ports.
   sudo dockerd --group "$(id -gn)" --iptables=false --init-path /usr/bin/tini-static > "$log" 2>&1 &
   i=0
   until docker info >/dev/null 2>&1; do

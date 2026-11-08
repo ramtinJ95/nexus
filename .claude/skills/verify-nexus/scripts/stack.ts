@@ -24,7 +24,6 @@ import { promisify } from "node:util";
 import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../../../../src/backends/docker-backend.ts";
 import { scriptedModel, scriptedModels } from "../../../../src/control/harness/test-fixture.ts";
-import { checkoutDir } from "../../../../images/pylon/nexus-contract.ts";
 import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import { nodeSecrets } from "../../../../src/probe/config.ts";
@@ -58,6 +57,8 @@ const log = (message: string) => console.error(`${new Date().toISOString()} ${me
 // An image that already holds the packages, herdr and user, which .nexus/verify makes from the verify pylon's own root,
 // because that pylon's allowlist reaches neither Docker Hub, Debian nor herdr.dev.
 const base = process.env.NEXUS_VERIFY_BASE;
+/** The repository in the stack's image that the project names and the dotfiles layer is pulled from. */
+const verifyRepo = "/srv/verify.git";
 
 async function buildImage() {
   const arch = await docker("info", "--format", "{{.Architecture}}");
@@ -76,11 +77,11 @@ async function buildImage() {
       "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl tini python3 git procps && rm -rf /var/lib/apt/lists/*",
       "RUN useradd --create-home --shell /bin/bash user",
     ] : [`FROM ${base}`],
-    `RUN install -d -o user -g user /home/user /home/user/workspace ${checkoutDir}`,
+    "RUN install -d -o user -g user /home/user /home/user/workspace",
     // Docker execs run as root, unlike a pylon's, so git must accept the checkout that `user` owns.
     "RUN git config --system --add safe.directory '*'",
-    // refs/nexus/base is what a pylon booted at, which a pylon-vm records on its first boot and the Docker backend never does.
-    `RUN git init --quiet --initial-branch=main ${checkoutDir} && printf '# verify-nexus\\n' > ${checkoutDir}/README.md && git -C ${checkoutDir} -c user.name=verify -c user.email=verify@invalid add README.md && git -C ${checkoutDir} -c user.name=verify -c user.email=verify@invalid commit --quiet -m init && git -C ${checkoutDir} update-ref refs/nexus/base HEAD`,
+    // The project's repository, which each pylon clones on its first boot, as the stack's containers reach no network.
+    `RUN git init --quiet --initial-branch=main /tmp/verify && printf '# verify-nexus\\n' > /tmp/verify/README.md && git -C /tmp/verify -c user.name=verify -c user.email=verify@invalid add README.md && git -C /tmp/verify -c user.name=verify -c user.email=verify@invalid commit --quiet -m init && git clone --quiet --bare /tmp/verify ${verifyRepo} && rm -rf /tmp/verify && chown -R user:user ${verifyRepo}`,
     ...base === undefined ? [
       "ARG HERDR_VERSION",
       'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
@@ -169,7 +170,7 @@ const controlPlane = await startControlPlane({
   self: { tailnetNodeId: controlPlaneId },
   nodes: [{ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: probeId }],
   callers: [laptopId],
-  dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+  dotfiles: { repo: verifyRepo, ref: "main" },
   harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
   tailscaledSocket: socket,
   previewPorts: { first: 10200, last: 10299 },
@@ -179,7 +180,7 @@ closers.push(() => controlPlane.close());
 
 // One project on the node, through the API.
 const project: Project = {
-  id: "spoon" as ProjectId, repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: node,
+  id: "spoon" as ProjectId, repoUrl: verifyRepo, defaultBranch: "main", defaultNode: node,
   resources: { cpus: 1, memoryGiB: 3, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 };
 await call("POST", "/v1/projects", project);

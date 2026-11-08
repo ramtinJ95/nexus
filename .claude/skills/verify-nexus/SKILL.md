@@ -14,12 +14,12 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
 `scripts/verify-nexus up` starts one process, `scripts/stack.ts`. It uses the same wiring as `src/checks/control/thread-on-node.ts`:
 
 - The real control plane comes from `startControlPlane`: the registry, the reconcile loop, the pi-durable harness, the API and the dashboard. It listens on `http://127.0.0.1:7470`.
-- A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/backends/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr, the pi-env daemon, the in-pylon CLI and a one-commit checkout. The checkout carries `refs/nexus/base` at that commit, which a pylon-vm records on its first boot and the Docker backend never does.
+- A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/backends/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr, the pi-env daemon, the in-pylon CLI and a one-commit bare repository at `/srv/verify.git`. Each pylon's first boot clones it into `/home/user/workspace/repo` and records `refs/nexus/base` at its commit, as a pylon-vm does.
 - Only the production boundaries are replaced:
   - tailscaled's whois is a fake LocalAPI socket. It names port 7480 as the probe and every other caller as the person's laptop, which the API allows and counts as a person, so the CLI and the dashboard may start and message threads. The probe's whois names every caller as the control plane.
   - The model is scripted (`src/control/harness/test-fixture.ts`). A message `bash: <command>` makes exactly one bash tool call in the pylon, then the answer `scripted answer after toolResult`. A message `stream: <n>` gets the answer `word0 word1 ...` of n words, written one word every 20 ms, so it streams as a real model's does. Any other message gets `scripted answer after user`.
   - `tailscale serve` is `src/probe/fake-tailscale.ts`, so the Mac's work tailnet is never touched.
-- Seed data, created through the API: image `img-0000000000aa` made current, node `verify-node`, and project `spoon` (Spoon-Knife on `main`, 1 CPU, 3 GiB, 1 GiB disk).
+- Seed data, created through the API: image `img-0000000000aa` made current, node `verify-node`, and project `spoon` (`/srv/verify.git` on `main`, 1 CPU, 3 GiB, 1 GiB disk).
 
 Isolation: one stack per machine. The control plane reaches probes only on port 7480, and containers keep the bridge port they booted with, so all four ports are fixed: 7470 API, 7480 probe, 7481 preview gateway, 7482 in-pylon CLI bridge. `up` refuses to start while any of them is taken or a previous run was not cleaned up. Never drive a stack this skill did not start. If `doctor` fails on a stack you did not start, stop and report it rather than killing it.
 
