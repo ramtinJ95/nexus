@@ -20,7 +20,10 @@ interface Asked<K extends string> {
   /** Chosen by the asker, so asking again with one ID asks nothing new. */
   id: string;
   text: string;
-  /** Two or more distinct labels, one of which is the answer, or none for a Claude worker's ask, which is answered through `choices`. */
+  /**
+   * Two or more distinct values, one of which the answer names, or none for a Claude worker's ask, which is answered
+   * through `choices`. The dashboard's cards.ts gives each its label, so a label reworded answers the same.
+   */
   options: readonly string[];
   /** A deployer question needs the right `nexus deploy` takes, since its answer may deploy. */
   answerer: "person" | "deployer";

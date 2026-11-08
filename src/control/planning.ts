@@ -29,8 +29,8 @@ import { isItemId, itemIdFrom, type ItemId, type ThreadId } from "../ids.ts";
 type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
 
 const planFence = "nexus-plan";
-const acceptOption = "accept";
-const rejectOption = "reject";
+/** A proposal question's options, which its answer names. The dashboard's cards.ts gives each its label. */
+export const proposalOptions = { accept: "accept", reject: "reject" } as const;
 
 const blockSchema = z.object({
   token: z.string(),
@@ -69,7 +69,7 @@ export function proposalQuestion(t: Thread, p: Proposal, siblings: readonly Prop
     return sibling === undefined ? `pipeline item ${ref}` : `"${sibling.title}", proposed above`;
   });
   return {
-    kind: "proposal", id: proposalId(t.id, p), thread: t.id, reserved: null, answerer: "person", askedAt, proposal: p, options: [acceptOption, rejectOption],
+    kind: "proposal", id: proposalId(t.id, p), thread: t.id, reserved: null, answerer: "person", askedAt, proposal: p, options: [proposalOptions.accept, proposalOptions.reject],
     text: `The planning thread proposes a pipeline item: ${p.title}
 
 ${p.brief}
@@ -91,7 +91,7 @@ The person's message follows.`;
 function answers(questions: readonly ProposalQuestion[]): string {
   return `${planningPrefix}
 The person answered your proposals:
-${questions.map((q) => q.answer!.option === acceptOption ? `- accepted "${q.proposal.title}" (key ${q.proposal.key}), now pipeline item ${proposalItem(q.id)}` : `- rejected "${q.proposal.title}" (key ${q.proposal.key})`).join("\n")}
+${questions.map((q) => q.answer!.option === proposalOptions.accept ? `- accepted "${q.proposal.title}" (key ${q.proposal.key}), now pipeline item ${proposalItem(q.id)}` : `- rejected "${q.proposal.title}" (key ${q.proposal.key})`).join("\n")}
 The person's message follows.`;
 }
 
@@ -126,7 +126,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
       const sibling = siblings.find((s) => s.proposal.key === ref);
       if (sibling === undefined) return ref as ItemId;
       if (sibling.answer === null) throw new Refusal("conflict", `"${q.proposal.title}" waits on "${sibling.proposal.title}", which is not answered yet. Accept that one first`);
-      if (sibling.answer.option !== acceptOption) throw new Refusal("conflict", `"${q.proposal.title}" waits on "${sibling.proposal.title}", which was rejected, so it cannot be added. Reject it too, and tell the planning thread what to change`);
+      if (sibling.answer.option !== proposalOptions.accept) throw new Refusal("conflict", `"${q.proposal.title}" waits on "${sibling.proposal.title}", which was rejected, so it cannot be added. Reject it too, and tell the planning thread what to change`);
       return proposalItem(sibling.id);
     });
   }
@@ -166,7 +166,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
      * at all, and a refusal leaves the question open.
      */
     answered(q: ProposalQuestion): ItemRecord | null {
-      if (q.answer?.option !== acceptOption) return null;
+      if (q.answer?.option !== proposalOptions.accept) return null;
       if (options.pipeline === null) throw new Refusal("conflict", "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
       const t = registry.thread(q.thread)!;
       return options.pipeline.add({ project: t.project, title: q.proposal.title }, q.proposal.brief, resolveAfter(q), q.answer.by, proposalItem(q.id));

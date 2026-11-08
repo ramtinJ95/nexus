@@ -12,9 +12,11 @@ import { holdRule } from "../holds.ts";
 import { reservedNames } from "../../contract/reserved.ts";
 import { landsOnItsOwn } from "../project.ts";
 import { holdsAt, landPress } from "../policy.ts";
-import { landOption } from "../../contract/reviews.ts";
-import { askingHolds, type AnswerRefusal, type ClaudeQuestion, type CleanupQuestion, type Question, type ThreadQuestion } from "../questions.ts";
-import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
+import type { holdOptions } from "../../contract/reviews.ts";
+import { askingHolds, type AnswerRefusal, type ClaudeQuestion, type CleanupQuestion, type HoldsQuestion, type JudgmentQuestion, type ProposalQuestion, type Question, type ThreadQuestion } from "../questions.ts";
+import { bytesText, itemKey, itemText, type cleanupOptions } from "../cleanup-model.ts";
+import type { judgmentOptions } from "../judgment.ts";
+import type { proposalOptions } from "../planning.ts";
 import { Html, html, ago, short } from "./view.ts";
 import type { LandRefusal, Context } from "./context.ts";
 import { prose } from "./markdown.ts";
@@ -30,6 +32,25 @@ const answerRefusals: Record<AnswerRefusal, (caller: TailnetNodeId) => string> =
   "not a deployer": (caller) => `This device cannot answer: the answer may deploy, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Answer it from a deployer, or add this node to deployers in the control plane's config.`,
 };
 const answerers: Record<Question["answerer"], string> = { person: "You answer.", deployer: "A deployer answers, as the answer may deploy." };
+
+/** An option's button: its label, and what pressing it asks the person to confirm, or null when it answers at once. */
+interface Offer<Q> { label: string; confirm: ((q: Q) => string) | null }
+/** Each option of a question of one kind, by the value its answer names, so a label reworded here answers the same. */
+type Offers<Q, Values> = Readonly<Record<Values extends readonly string[] ? Values[number] : Values[keyof Values] & string, Offer<Q>>>;
+const answering = (label: string): Offer<unknown> => ({ label, confirm: () => `Answer "${label}"? ${answerFinal}` });
+const offers = {
+  // Land on a question about holds is a Land press, so its confirmation says what it waives and merges.
+  holds: { Land: { label: "Land", confirm: (q) => `${q.text.split("\n")[0]} ${answerFinal}` }, "Leave it": answering("Leave it") } satisfies Offers<HoldsQuestion, typeof holdOptions>,
+  proposal: { accept: answering("accept"), reject: answering("reject") } satisfies Offers<ProposalQuestion, typeof proposalOptions>,
+  judgment: { Retry: answering("Retry"), "Retry on another node": answering("Retry on another node"), "Leave it failed": answering("Leave it failed") } satisfies Offers<JudgmentQuestion, typeof judgmentOptions>,
+  cleanup: {
+    Delete: { label: "Delete", confirm: (q) => `Delete ${q.cleanup.items.length === 1 ? "this item" : `these ${q.cleanup.items.length} items`} from ${q.node}? It cannot be undone.` },
+    Keep: { label: "Keep", confirm: null },
+  } satisfies Offers<CleanupQuestion, typeof cleanupOptions>,
+};
+/** The button of `option`, one of `q`'s options. */
+const offerOf = <Q extends Exclude<Question, ClaudeQuestion>>(q: Q, option: string): Offer<Q> =>
+  (offers[q.kind] as Readonly<Record<string, Offer<Q>>>)[option] ?? answering(option);
 
 /**
  * Above the questions, each judgment of the thread's failed pylon: what failed, the verdict and who gave it, and what
@@ -68,11 +89,12 @@ export function questionCard(c: Context, q: ThreadQuestion): Html {
 <p class="land-meta">Answered "${q.answer.option}" from ${q.answer.by}, ${ago(q.answer.at, c.now)}</p></section>`;
   }
   const refusal = c.answerRefusal(q);
-  // Land on a question about holds is a Land press, so its confirmation says what it waives and merges.
-  const confirm = (option: string) => q.kind === "holds" && option === landOption ? `${q.text.split("\n")[0]} ${answerFinal}` : `Answer "${option}"? ${answerFinal}`;
-  const buttons = q.options.map((option) => refusal === null
-    ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="${confirm(option)}">${option}</button>`
-    : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${option}</button>`);
+  const buttons = q.options.map((option) => {
+    const { label, confirm } = offerOf(q, option);
+    return refusal === null
+      ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}"${confirm !== null && html` data-confirm="${confirm(q)}"`}>${label}</button>`
+      : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${label}</button>`;
+  });
   return html`<section class="landing question" data-question="${q.id}" aria-label="${needLabels.question}">
 <div class="land-top"><h2>${needLabels.question}</h2>${q.kind === "holds" && q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
 <div class="question-text">${prose(q.text)}</div>
@@ -91,10 +113,12 @@ export function cleanupCard(c: Context, q: CleanupQuestion): Html {
   const table = html`<table class="ov cleanup-items"><thead><tr><th class="wide">What</th><th>Space</th></tr></thead>
 <tbody>${items.map((i) => html`<tr data-item="${itemKey(i)}"><td class="wide">${itemText(i)}</td><td>${bytesText(i.bytes)}</td></tr>`)}</tbody><tfoot><tr><td class="wide">Total</td><td>${bytesText(total)}</td></tr></tfoot></table>`;
   const refusal = c.answerRefusal(q);
-  const confirmText = `Delete ${items.length === 1 ? "this item" : `these ${items.length} items`} from ${q.node}? It cannot be undone.`;
-  const buttons = refusal === null
-    ? html`<button type="button" class="btn" data-action="answer" data-question="${q.id}" data-option="Delete" data-confirm="${confirmText}">Delete</button><button type="button" class="btn" data-action="answer" data-question="${q.id}" data-option="Keep">Keep</button>`
-    : html`<button type="button" class="btn" disabled>Delete</button><button type="button" class="btn" disabled>Keep</button>`;
+  const buttons = q.options.map((option) => {
+    const { label, confirm } = offerOf(q, option);
+    return refusal === null
+      ? html`<button type="button" class="btn" data-action="answer" data-question="${q.id}" data-option="${option}"${confirm !== null && html` data-confirm="${confirm(q)}"`}>${label}</button>`
+      : html`<button type="button" class="btn" disabled>${label}</button>`;
+  });
   return html`<section class="landing question cleanup" data-question="${q.id}" aria-label="Cleanup to confirm on ${q.node}">
 <div class="land-top"><h2>Delete what ${q.node} no longer needs?</h2><span class="land-meta">frees ${bytesText(total)}</span></div>
 ${table}

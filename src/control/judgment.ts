@@ -67,7 +67,8 @@ const answerSchema = z.object({ token: z.string(), answer: z.enum(answers), why:
 
 /** The brief's request ID and the question's ID. */
 const judgmentId = (failure: number) => `judgment:${failure}`;
-const labels = { retry: "Retry", move: "Retry on another node", leave: "Leave it failed" } as const;
+/** The question's options, which its answer names. The dashboard's cards.ts gives each its label. */
+export const judgmentOptions = { retry: "Retry", move: "Retry on another node", leave: "Leave it failed" } as const;
 
 function outcomeText(o: Outcome): string {
   const answered = o.kind !== "left" && o.on === "answer" ? ", as the person answered" : "";
@@ -345,13 +346,13 @@ export function judgmentPass(options: {
     const retry = retryRefusal(observed(pylon));
     const where = move(pylon);
     if (retry !== null && "refused" in where) return done(j, verdict, `neither a retry nor a move can run, so the failure is the person's: ${retry}; ${where.refused}`);
-    const choices = [...retry === null ? [labels.retry] : [], ..."to" in where ? [labels.move] : [], labels.leave];
+    const choices = [...retry === null ? [judgmentOptions.retry] : [], ..."to" in where ? [judgmentOptions.move] : [], judgmentOptions.leave];
     const text = [
       `The pylon failed on ${pylon.node}: ${j.failed.split("\n")[0]}`,
       `${verdict.by === "judgment" ? "Its judgment" : "Nexus"} leaves it to you: ${verdict.why}`,
-      ...retry === null ? [`- ${labels.retry}: Nexus clears the failure and boots the pylon again on ${pylon.node}.`] : [],
-      ..."to" in where ? [`- ${labels.move}: Nexus moves the pylon to ${where.to}, the other node with the most room, where it boots fresh and runs the project's setup again.`] : [],
-      `- ${labels.leave}: Nexus does nothing more. The thread shows the failure until it is retried or deleted.`,
+      ...retry === null ? [`- ${judgmentOptions.retry}: Nexus clears the failure and boots the pylon again on ${pylon.node}.`] : [],
+      ..."to" in where ? [`- ${judgmentOptions.move}: Nexus moves the pylon to ${where.to}, the other node with the most room, where it boots fresh and runs the project's setup again.`] : [],
+      `- ${judgmentOptions.leave}: Nexus does nothing more. The thread shows the failure until it is retried or deleted.`,
     ].join("\n\n");
     return {
       next: { ...j, phase: { kind: "asked", verdict } },
@@ -404,13 +405,13 @@ export function judgmentPass(options: {
     if (why === null && answer === null) return;
     carryOut(j, verdict, why, (pylon) => {
       switch (answer!.option) {
-        case labels.retry: {
+        case judgmentOptions.retry: {
           const refused = retryRefusal(observed(pylon));
-          return refused === null ? retried(j, verdict, pylon, "answer") : done(j, verdict, `the person answered ${labels.retry}, which cannot run: ${refused}`);
+          return refused === null ? retried(j, verdict, pylon, "answer") : done(j, verdict, `the person answered ${judgmentOptions.retry}, which cannot run: ${refused}`);
         }
-        case labels.move: {
+        case judgmentOptions.move: {
           const where = move(pylon);
-          return "to" in where ? moved(j, verdict, pylon, where, "answer") : done(j, verdict, `the person answered ${labels.move}, which cannot run: ${where.refused}`);
+          return "to" in where ? moved(j, verdict, pylon, where, "answer") : done(j, verdict, `the person answered ${judgmentOptions.move}, which cannot run: ${where.refused}`);
         }
         default: return done(j, verdict, "the person left it failed");
       }
