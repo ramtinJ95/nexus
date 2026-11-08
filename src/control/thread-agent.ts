@@ -48,7 +48,6 @@ export interface Agent<V> extends AgentRead {
   abort(t: Thread): Promise<void>;
   /** The snapshot ID of the latest turn, which the Changes view's turn base diffs against, or null before any. */
   latestTurn(t: Thread): Promise<string | null>;
-  /** What thread detail says of the agent. */
   detail(t: Thread): Pick<ThreadDetail, "claudeWorker" | "agent">;
   /** For a thread just deleted. */
   delete(t: Thread): Promise<void>;

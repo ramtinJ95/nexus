@@ -1,7 +1,4 @@
-/**
- * The health store: each change of `nexus doctor`'s checks that two passes in a row confirmed, with when the person saw
- * it in its record. Its table keeps the name `doctor_reports` from when it held daily reports.
- */
+/** The table keeps the name `doctor_reports` from when it held daily reports. */
 import { json, type Db, type Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
 import { checkKey, statuses, type HealthChange, type Status } from "./doctor-model.ts";

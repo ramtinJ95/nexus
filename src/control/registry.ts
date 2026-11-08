@@ -26,7 +26,6 @@ import { placementMemory } from "./placement-model.ts";
 
 export type Registry = ReturnType<typeof openRegistry>;
 
-/** Opens the file, creating it if needed, and applies any migrations it has not seen. */
 export function openRegistry(path: string, clock = Date.now, log = (message: string) => console.error(message)) {
   const kernel = openDb(path);
   const participants: ThreadParticipant[] = [];

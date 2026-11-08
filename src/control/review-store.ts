@@ -1,6 +1,6 @@
 /**
- * The review store: each builder's review, and every pull request a review started for. A save archives the threads it
- * names, appends its events and recomputes the builder's attention, in its transaction.
+ * A save archives the threads it names, appends its events and recomputes the builder's attention, in its
+ * transaction.
  */
 import { json, type Db, type Holding } from "./db.ts";
 import type { ThreadId } from "../ids.ts";

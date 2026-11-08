@@ -1,6 +1,5 @@
 /**
- * The question store: each question asked about a thread or a node, and the asks each thread's pylon last reported
- * waiting. A write recomputes a thread's attention, in its transaction. Its participant tells the thread core of an open
+ * A write recomputes a thread's attention, in its transaction. Its participant tells the thread core of an open
  * question, drops a closed thread's asks, withdraws an archived thread's open failure questions, and runs
  * `reconcileAsks` when a Claude worker, its transcript or its thread's status changes.
  */
@@ -113,7 +112,6 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
       });
     },
     questions: (thread: ThreadId): ThreadQuestion[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(thread).map((r) => json<ThreadQuestion>(r.record)),
-    /** The node's questions, in the order they were asked. */
     nodeQuestions: (node: NodeName): CleanupQuestion[] => sql("SELECT record FROM questions WHERE node = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(node).map((r) => json<CleanupQuestion>(r.record)),
     /** Every node's open questions, which wait on the person as a thread's do. */
     openNodeQuestions: (): CleanupQuestion[] => sql(`SELECT record FROM questions WHERE node IS NOT NULL AND ${openWhere} ORDER BY json_extract(record, '$.askedAt'), rowid`).all().map((r) => json<CleanupQuestion>(r.record)),

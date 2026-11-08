@@ -1,7 +1,3 @@
-/**
- * The image store: each recorded image, each template, the current image, the previous image and the latest image build
- * or rollout.
- */
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import type { ImageId, JobId, NodeName, ProjectId, TailnetNodeId, TemplateId } from "../ids.ts";
 import type { ImageManifest } from "../protocol/images.ts";

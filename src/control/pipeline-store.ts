@@ -1,6 +1,4 @@
-/**
- * The pipeline store: each pipeline item's record. An item's phase is derived, so it is not stored.
- */
+/** An item's phase is derived, so it is not stored. */
 import { json, type Db, type Holding } from "./db.ts";
 import type { ItemId, ProjectId } from "../ids.ts";
 import type { StartRequest } from "./start-request.ts";

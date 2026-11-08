@@ -31,7 +31,6 @@ export type ImageEntry = RecordedImage & { nodes: NodeName[] };
  */
 export interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
 
-/** The images newest build first. */
 export function imagesView(registry: ImageRolloutRegistry): ImagesView {
   const nodes = registry.nodes();
   const images = registry.images()

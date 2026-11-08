@@ -1,4 +1,3 @@
-/** The control plane's template policy: which template a thread boots from, and which artifacts are garbage. */
 import type { Checkout } from "../protocol/spawn.ts";
 import { canonicalSha256 } from "../util/canonical-sha256.ts";
 import { effectiveAllowedHosts, type Project, type RemoteProject } from "./project.ts";
@@ -32,8 +31,11 @@ export interface ProjectMirror {
   setupInputs(project: RemoteProject, ref: { branch: string } | { commit: string }, signal?: AbortSignal): Promise<SetupInputs | null>;
 }
 
-/** sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what it can install. */
-/** The disk size is in it because a template's disk is the pylon's, and a pylon's disk size is fixed once it exists. */
+/**
+ * sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what
+ * it can install. The disk size is in it because a template's disk is the pylon's, and a pylon's disk size is fixed
+ * once it exists.
+ */
 export function setupHashOf(project: Project, inputs: SetupInputs): string {
   return canonicalSha256({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project), diskGiB: project.resources.diskGiB });
 }

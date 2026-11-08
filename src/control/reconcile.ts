@@ -179,20 +179,17 @@ function bootSource(input: PlanInput): PylonSource {
 const planRules: readonly Rule[] = [
   // 1. Nothing moves to another node on its own, because the disk lives there.
   (i) => i.nodeOnline ? null : wait("node-offline"),
-  // 2.
   (i) => i.inFlight?.state === "running" ? wait("in-flight") : null,
   // 3. Delete ignores the attempt budget. A pylon removed by hand is absent but may still have previews published.
   (i) => i.desired !== "deleted" ? null : i.observed === "absent" && !i.previewsRouted ? done : submit({ kind: "delete", pylonId: i.pylonId }),
   // A wake for reading retries no failure. Its own go to the usage hold, which gives up on the read (PlanStep).
   ({ desired, attempts: { last } }) => desired === "reading" && last !== null ? wait("backoff") : null,
-  // 4.
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(last.code, `last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
   ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(last.code, `gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
   ({ attempts: { count, last } }, now) => last !== null && now < last.at + backoffMs(count) ? wait("backoff") : null,
   // A failed job or interrupted retry can leave a live controller running, unavailable or stuck stopping.
   (i) => i.retrying && i.observed !== "absent" && ["running", "booting", "stopping"].includes(i.observed.phase)
     ? submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint, retry: true }) : null,
-  // 5.
   ({ observed: o }) => o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || o.phase === "deleting") ? wait("transitioning") : null,
   // A sealed boot's transcripts are read-only and its user's processes were killed, so it runs no work: it pauses, and
   // the spawn after boots the disk again, without the seal.

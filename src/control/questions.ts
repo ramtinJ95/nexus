@@ -60,7 +60,6 @@ export type QuestionKind = Question["kind"];
 export type QuestionOf<K extends QuestionKind> = Extract<Question, { kind: K }>;
 /** A question as its asker hands it over, before any answer. */
 export type Unanswered<Q extends Question = Question> = Q extends unknown ? Omit<Q, "answer"> : never;
-/** Whether the question still waits for its answer. */
 export const isOpen = (q: Pick<Question, "answer" | "withdrawn">) => q.answer === null && q.withdrawn === undefined;
 
 /** The review a holds question is about, the head and base it was asked at, and the holds it names, each of which the person may waive. */

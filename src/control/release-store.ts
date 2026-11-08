@@ -1,7 +1,3 @@
-/**
- * The release store: the desired release, the deploy drain, each node's release report, and the releases each node's
- * deployer last said it holds.
- */
 import { json, jsonOrNull, type Db, type Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
 import type { NodeName } from "../ids.ts";

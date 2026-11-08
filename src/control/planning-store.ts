@@ -1,6 +1,4 @@
-/**
- * The planning store: each planning thread's record. The registry composes it, so its members are the registry's.
- */
+/** The registry composes it, so its members are the registry's. */
 import { json, type Db, type Holding } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
 

@@ -1,4 +1,3 @@
-/** The filter of `GET /v1/usage`, and the periods the dashboard offers. src/contract/usage.ts holds the report. */
 import type { ProjectId, ThreadId } from "../ids.ts";
 import { breakdowns, type Breakdown } from "../contract/usage.ts";
 import { Refusal } from "./refusal.ts";

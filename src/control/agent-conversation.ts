@@ -54,7 +54,6 @@ function claudeConversation(registry: AgentConversationRegistry, thread: ThreadI
   };
 }
 
-/** The agent's replies, oldest first. */
 export const repliesOf = (c: Conversation): string[] => c.messages.flatMap((m) => m.role === "assistant" ? [m.text] : []);
 /** Whether the person wrote to the thread after its first reply. */
 export function personWrote(c: Conversation): boolean {

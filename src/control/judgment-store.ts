@@ -1,4 +1,3 @@
-/** The judgment store: each failure's judgment, and the event judgments began at. */
 import { json, type Db, type Holding } from "./db.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 

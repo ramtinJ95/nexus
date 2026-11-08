@@ -52,7 +52,6 @@ export interface ThreadDetail {
   outputs: readonly Output[];
   prWatch: { enabled: boolean; stopped: boolean; error: string | null };
   pullRequests: readonly WatchedPr[];
-  /** The thread's latest review as a builder, or null. */
   review: Review | null;
   /** What the person's Land press does to `review` now, and the holds it reads, or null without a review. A control plane older than 0.71.0 sends none. */
   reviewView?: ReviewView | null;
@@ -81,7 +80,6 @@ export interface ThreadSaid {
   /** A paused session's state. */
   paused: string;
   prWatch: string;
-  /** The review's line, then its reviewers', round's and live check's notes. */
   review: readonly string[] | null;
 }
 

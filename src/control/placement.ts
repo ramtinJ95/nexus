@@ -97,7 +97,7 @@ const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => h
 /**
  * Releases the holds on `node` while the rest of its work leaves it short of memory: committed past its size,
  * or with less free than the headroom a start keeps, so a held pylon pauses for a start or a wake that took its room.
- * The soonest to end goes first. Returns the threads whose holds it released.
+ * The soonest to end goes first.
  */
 export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releaseHold">, node: NodeName): ThreadId[] {
   const record = registry.nodes().find((n) => n.name === node);

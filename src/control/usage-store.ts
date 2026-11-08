@@ -1,7 +1,3 @@
-/**
- * The usage store: each recorded call, their sums per day, how far each source was read, when counting began, the
- * backfill's run and threads, and the one pylon the run or an archive's settle holds to read whole.
- */
 import type { Db, Holding, Row } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import { roleOf } from "./agent-protocol.ts";
@@ -217,7 +213,6 @@ export function usageStore(db: Db, threads: {
       endUsageBackfill("stopped", now);
       return usageBackfill();
     },
-    /** A running run has read every thread it listed. */
     finishUsageBackfill(now: number) { endUsageBackfill("done", now); },
     /** Why a running run waits before its next pylon, or null when it does not. */
     waitUsageBackfill(waiting: string | null) {
@@ -252,7 +247,6 @@ export function usageStore(db: Db, threads: {
       if (hold?.thread !== thread || hold.phase !== "reading" || threadRecord(thread)?.status !== "archived") return;
       finishUsageHold(hold, `the pylon did not boot: ${failure.code}: ${failure.message}`, Date.now());
     },
-    /** The holder lets go of the pylon it holds, once it is paused. */
     releaseUsageHold(hold: Pick<UsageHold, "by">) {
       if (hold.by === "run") sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run();
       else settle = null;

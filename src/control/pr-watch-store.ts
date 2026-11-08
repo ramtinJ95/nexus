@@ -1,6 +1,4 @@
-/**
- * The PR watch store: each thread's PR watch. A save tells the event log what changed, in its transaction.
- */
+/** A save tells the event log what changed, in its transaction. */
 import type { Db, Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
 import type { ThreadId } from "../ids.ts";

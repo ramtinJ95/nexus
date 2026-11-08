@@ -198,7 +198,6 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
       });
     },
     claudeResume,
-    /** Replaces the worker's resume record, or with null deletes it. */
     saveClaudeResume(thread: ThreadId, resume: ClaudeResume | null) {
       transaction(() => {
         sql("UPDATE claude_workers SET resume = ? WHERE thread = ?").run(resume === null ? null : JSON.stringify(resume), thread);

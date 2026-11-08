@@ -1,9 +1,6 @@
 /**
- * The thread core: each thread, its pylon, sessions, previews, outputs and jobs, the event log, each session's turn and
- * order, its attention, each start's request ID, the harness conversations aborted, when each archived thread was
- * archived and whether its usage is settled, when the newest backup the control plane has seen began, and the pylons
- * whose disk that settle deletes. It makes the Claude worker's store (claude-worker.ts) and serves it. The features
- * with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
+ * The thread core. It makes the Claude worker's store (claude-worker.ts) and serves it. The features with per-thread
+ * state of their own take part through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention, type Need } from "./attention.ts";
 import { previewFailed } from "./plain-wording.ts";
@@ -407,8 +404,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     updateAttention,
     threadRecord,
     saveStartKey,
-    /** The registry runs it once the participants are registered, since the recompute asks them. */
-    /** `readFailed` is handed each failed wake for reading the upgrade takes off a pylon's attempts, for the usage hold to give up on. */
+    /**
+     * The registry runs it once the participants are registered, since the recompute asks them. `readFailed` is handed
+     * each failed wake for reading the upgrade takes off a pylon's attempts, for the usage hold to give up on.
+     */
     start(readFailed: (thread: ThreadId, failure: FailedAttempt) => void) {
       upgradePylons(readFailed);
       pruneSessions();
@@ -740,7 +739,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       ];
     },
 
-    /** The latest job the node reported for a pylon or an artifact. */
     job(subject: Subject): JobStatus | undefined {
       const row = sql("SELECT status FROM jobs WHERE subject = ?").get(subject) as Row | undefined;
       return row && json<JobStatus>(row.status);
