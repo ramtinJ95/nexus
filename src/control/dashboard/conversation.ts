@@ -5,9 +5,8 @@ import type { Thread, ThreadAgent } from "../thread-store.ts";
 import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { AgentView } from "../../contract/threads.ts";
 import { isOpen } from "../questions.ts";
-import { clock } from "./elapsed.ts";
 import { dialogWaits, freshVm, limitText, parkedText } from "../wording.ts";
-import { Html, html, act, dot, icon, unseen, ago, grows, type Tone } from "./view.ts";
+import { Html, html, act, dot, icon, unseen, ago, grows, growing, since, type Tone } from "./view.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item, type ToolItem, type AskItem, type UserItem } from "./items.ts";
 import { shotsView, stepsView } from "./tools.ts";
@@ -63,7 +62,7 @@ export function stateBar(t: Thread, run: Run, now: number): Html {
   const [label, detail, end] = (() => {
     switch (run.kind) {
       case "idle": return [html`Idle`, html`${run.repliedAt !== null && html`replied ${ago(run.repliedAt, now)}`}${run.paused && html`${run.repliedAt !== null && " · "}the pylon is paused, and a message wakes it`}`, html``];
-      case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, run.claude ? interrupt : abort];
+      case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`${since(run.since, now)} · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, run.claude ? interrupt : abort];
       case "waiting": return [html`Waiting for you`, html`${run.why}`, open && run.inTerminal && terminal];
       case "parked": return [html`Stuck`, html`${parkedText(run.tasks)}. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry"${act("retry")} data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
     }
@@ -140,7 +139,7 @@ export function blockView(block: Block, now: number): Html {
       return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     }
     case "agent": return block.streaming
-      ? html`<div class="msg agent streaming"><div class="text" data-grow>${grows(prose(block.text, html`<span class="caret" aria-hidden="true"></span>`))}</div></div>`
+      ? html`<div class="msg agent streaming"><div class="text"${growing}>${grows(prose(block.text, html`<span class="caret" aria-hidden="true"></span>`))}</div></div>`
       : html`<div class="msg agent"><div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
     case "note": return html`<p class="note">${block.text}</p>`;

@@ -9,7 +9,7 @@ import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { limitText } from "../wording.ts";
 import { agoText, clock } from "./elapsed.ts";
-import type { Action } from "./contract.ts";
+import { grow, type Action } from "./contract.ts";
 
 interface Page { status: number; headers: Record<string, string>; body: string }
 
@@ -115,10 +115,13 @@ export function ago(at: number, now: number): Html {
   return html`<time datetime="${iso}" title="${iso}" data-ago>${agoText(at, now)}</time>`;
 }
 
+/** A run clock from `at`, which client.js ticks. contract.ts `unticked` reads this markup. */
+export const since = (at: number, now: number) => html`<time data-since="${at}">${clock(now - at)}</time>`;
+
 /** How long a thread's running turn has worked, which client.js ticks, or null when no turn runs. */
 export function workingFor(t: Thread, now: number): Html | null {
   if (!t.working) return null;
-  return t.workingSince === undefined ? html`working` : html`working <time data-since="${t.workingSince}">${clock(now - t.workingSince)}</time>`;
+  return t.workingSince === undefined ? html`working` : html`working ${since(t.workingSince, now)}`;
 }
 
 /** A `dataset`'s entries as the attributes that set them. */
@@ -128,8 +131,6 @@ export const act = (action: Action) => html` data-action="${action}"`;
 
 export const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
 
-/**
- * The inside of a `data-grow` element, which grows in place while the run streams. Every string in a page is
- * escaped, so no text can forge the comments that bound it.
- */
-export const grows = (inside: Part) => html`<!--grow-->${inside}<!--/grow-->`;
+/** The attribute and the inside of an element that grows in place while the run streams, as contract.ts `grow` says. */
+export const growing = new Html(` ${grow.attr}`);
+export const grows = (inside: Part) => html`${new Html(grow.open)}${inside}${new Html(grow.close)}`;

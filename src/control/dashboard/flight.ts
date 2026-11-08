@@ -8,10 +8,10 @@ import type { QueuedThread } from "../../contract/threads.ts";
 import type { Project } from "../project.ts";
 import type { PipelineItem } from "../pipeline.ts";
 import { needKind, needLabels, roundOf } from "../wording.ts";
-import { Html, html, act, dot, icon, ago, state, actualBadge, threadState, dims, type Part, type Tone } from "./view.ts";
+import { Html, html, act, since, dot, icon, ago, state, actualBadge, threadState, dims, type Part, type Tone } from "./view.ts";
 import type { Context, HomeView, Latest, Peek } from "./context.ts";
 import type { HeldWork } from "../work.ts";
-import { clock, span } from "./elapsed.ts";
+import { span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
 import { deployedForMs, lifeOfItem, phaseTone, lifeOfThread, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
 import { lifeTrack } from "./timeline.ts";
@@ -34,7 +34,7 @@ const threadLine = (c: Context, t: Thread): Line => {
   const r = c.row(t);
   return {
     key: t.id, title: t.title, project: t.project, life: lifeOfThread(c, t.id), state: threadState(r, c.now), dim: dims(r), order: -lastActive(t),
-    when: t.working && t.workingSince !== undefined ? html`<time data-since="${t.workingSince}">${clock(c.now - t.workingSince)}</time>` : span(lastActive(t), c.now) ?? "now",
+    when: t.working && t.workingSince !== undefined ? since(t.workingSince, c.now) : span(lastActive(t), c.now) ?? "now",
   };
 };
 const queuedLine = (c: Context, q: QueuedThread): Line => ({ key: q.id, title: q.title, project: q.project, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued", dim: false, order: 0 });

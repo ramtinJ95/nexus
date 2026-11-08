@@ -5,6 +5,7 @@ import { atEnd, endFollower } from "./scroll.js";
 import { request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
+import { grow, unticked } from "./contract.ts";
 
 export const main = document.querySelector("main");
 export const pollMs = Number(main?.dataset.pollMs);
@@ -29,8 +30,7 @@ export function tick() {
 
 // What the server last sent for each region. Comparing against it rather than the live DOM means a tool the
 // reader opened or the ticking run clock is not a change, so an unchanged region is never swapped.
-const comparable = (html) => html.replace(/(<time data-since="\d+">)[^<]*/g, "$1");
-const served = new Map([...document.querySelectorAll("[data-live]")].map((el) => [el.id, comparable(el.innerHTML)]));
+const served = new Map([...document.querySelectorAll("[data-live]")].map((el) => [el.id, unticked(el.innerHTML)]));
 // The folds the reader opened or closed. The rest follow the server, so a fold that opened for a running step
 // closes once the step is done.
 export const toggled = new Map();
@@ -80,7 +80,7 @@ export function afterSwap(settle) { settlers.push(settle); }
  * closed, and their place in the conversation survive the swap.
  */
 export function swap(regions) {
-  const changed = regions.map(([el, html]) => [el, html, comparable(html)]).filter(([el, , key]) => el !== null && served.get(el.id) !== key);
+  const changed = regions.map(([el, html]) => [el, html, unticked(html)]).filter(([el, , key]) => el !== null && served.get(el.id) !== key);
   if (changed.length === 0) return;
   const focused = changed.some(([el]) => el.contains(document.activeElement)) ? focusKey(document.activeElement) : null;
   const kept = keepers.map((keep) => keep(changed.map(([el]) => el)));
@@ -122,7 +122,7 @@ export function follow(url) {
       fresh.innerHTML = frame.convo;
       swap([[convo, fresh.innerHTML]]);
     } else if (frame.grow !== undefined) {
-      const slots = convo.querySelectorAll("[data-grow]");
+      const slots = convo.querySelectorAll(grow.slots);
       const restoreScroll = anchor();
       for (const [i, inside] of frame.grow) {
         const slot = slots[i];
@@ -169,7 +169,7 @@ async function refresh() {
     const followed = streaming() || frames !== seen || named !== undefined;
     swap([...next.querySelectorAll("[data-live]")].filter((fresh) => !(followed && fresh.id === "convo")).map((fresh) => [document.getElementById(fresh.id), fresh.innerHTML]));
     // A stream owns its patch indices. Certify its rendered snapshot without replacing it under those patches.
-    if (freshConvo && (named !== undefined ? named === shows : !followed || served.get("convo") === comparable(freshConvo.innerHTML))) {
+    if (freshConvo && (named !== undefined ? named === shows : !followed || served.get("convo") === unticked(freshConvo.innerHTML))) {
       document.getElementById("convo").dataset.renderedReplyAt = freshConvo.dataset.renderedReplyAt ?? "";
     }
     follow(next.getElementById("convo")?.dataset.stream);
