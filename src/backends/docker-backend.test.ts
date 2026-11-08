@@ -14,7 +14,9 @@ import { GuestServices } from "../pylon-vm/services.ts";
 import { checkedIn } from "../pylon-vm/guest.ts";
 import type { PylonId } from "../ids.ts";
 import { freePort } from "../test-support/kit.ts";
-import { checkoutDir, servicesFile } from "../../images/pylon/nexus-contract.ts";
+import { checkoutDir, servicesFile, workspaceDir } from "../../images/pylon/nexus-contract.ts";
+import { bootHooks, diskSetup, resumeCommands } from "./pylon-boot.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 
 type Reply = { stdout?: string; stderr?: string; code?: number };
 const execFileAsync = promisify(execFile);
@@ -22,7 +24,8 @@ const execFileAsync = promisify(execFile);
 /**
  * A `docker` first on PATH that logs each argv and answers from `replies`, keyed by the longest leading run of its
  * arguments joined by spaces. Its `exec` runs the command on this host instead, with the container's checkout and
- * other directories under `root`, so a container's files are the test's.
+ * other directories under `root`, so a container's files are the test's. The boot policy's commands run as user through
+ * runuser, which only root may call, so those are only logged, and one that names nexus-fails exits 3.
  */
 async function fakeDocker(t: TestContext, replies: Record<string, Reply> = {}) {
   const bin = await realpath(await mkdtemp(join(tmpdir(), "nexus-fake-docker-")));
@@ -38,11 +41,10 @@ const argv = process.argv.slice(2);
 appendFileSync(${JSON.stringify(join(bin, "calls"))}, JSON.stringify(argv) + "\\n");
 if (argv[0] === "exec") {
   let i = 1, cwd = ${JSON.stringify(bin)};
-  for (; argv[i].startsWith("--"); i++) if (argv[i] === "--workdir") cwd = argv[++i]; else if (argv[i] === "--env") i++;
-  const remap = (arg) => arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))}).replaceAll("/var/lib/pi-sandbox", ${JSON.stringify(join(root, "pi-sandbox"))})
-    .replaceAll("/var/lib/nexus", ${JSON.stringify(join(root, "var"))}).replaceAll("/home/user/.nexus", ${JSON.stringify(join(root, "nexus"))})
-    .replaceAll("/proc/1/fd/1", ${JSON.stringify(join(root, "container.log"))});
-  const [program, ...args] = argv.slice(i + 1).map(remap);
+  for (; argv[i].startsWith("--"); i++) if (argv[i] === "--workdir") cwd = remap(argv[++i]); else if (argv[i] === "--env") i++;
+  const command = argv.slice(i + 1);
+  if (command[0] === "sh" && command[1] === "-lc" && /^('runuser'|chown )/.test(command[2])) process.exit(command[2].includes("nexus-fails") ? 3 : 0);
+  const [program, ...args] = command.map(remap);
   const child = spawn(program, args, { cwd, stdio: "inherit" });
   process.on("SIGTERM", () => { child.kill("SIGKILL"); process.exit(143); });
   child.on("exit", (code) => process.exit(code ?? 1));
@@ -53,6 +55,11 @@ if (argv[0] === "exec") {
   process.stdout.write(reply.stdout ?? "");
   process.stderr.write(reply.stderr ?? "");
   process.exitCode = reply.code ?? 0;
+}
+function remap(arg) {
+  return arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll(${JSON.stringify(workspaceDir)}, ${JSON.stringify(join(root, "workspace"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))}).replaceAll("/var/lib/pi-sandbox", ${JSON.stringify(join(root, "pi-sandbox"))})
+    .replaceAll("/var/lib/nexus", ${JSON.stringify(join(root, "var"))}).replaceAll("/home/user/.nexus", ${JSON.stringify(join(root, "nexus"))})
+    .replaceAll("/proc/1/fd/1", ${JSON.stringify(join(root, "container.log"))});
 }
 `, { mode: 0o755 });
   const path = process.env.PATH;
@@ -253,6 +260,52 @@ test("a boot clears the pid files, starts the relay and ensures the services; a 
     const adHoc = (await again.guest(pylon).startService("adhoc", { command: "sleep 1000", health: "process" })).map(({ port: _port, ...fact }) => fact);
     assert.deepEqual(adHoc, [{ name: "adhoc", state: "ready", declared: false, wantsPreview: false }]);
   } finally {
+    for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(30_000));
+  }
+});
+
+test("a boot runs the boot policy in the container: the hooks on every boot, a new container's setup, and a disk's resume in the background; a failed setup removes the container", async (t) => {
+  const docker = await fakeDocker(t, { images: { stdout: "nexus-test\n" } });
+  t.after(() => execFileAsync("pkill", ["-f", join(docker.root, "pi-sandbox")]).catch(() => undefined));
+  t.after(() => rm(join(tmpdir(), "nexus-docker-services", pylon), { recursive: true, force: true }));
+  const boot: BootInputs & { source: { kind: "fresh" } } = {
+    pylonId: pylon, image: "img-test00000000", source: { kind: "fresh", preSetup: "make" }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
+    network: { allowedHosts: [], secrets: [] }, repo: { kind: "clone", url: "https://example.com/r.git", checkout: { branch: "main", commit: "c0ffee" } },
+    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, gitIdentity: { name: "Example Person", email: "person@example.com" },
+  };
+  const live = { previews: [], overlay: [] };
+  /** The boot policy's commands the container ran since `from` calls, with each background resume as `resume` and its commands. */
+  const policy = async (from: number) => (await docker.calls()).slice(from).filter((argv) => argv[0] === "exec").flatMap((argv) => {
+    if (argv.includes("--detach")) return [["resume", ...argv.slice(argv.indexOf("sh") + 4)]];
+    const lc = argv.indexOf("-lc");
+    return lc > 0 && /^('runuser'|chown )/.test(argv[lc + 1]!) ? [[argv[lc + 1]!]] : [];
+  });
+  const backends: ReturnType<typeof createDockerBackend>[] = [];
+  const probe = () => { const b = createDockerBackend({ images }); backends.push(b); return b; };
+  try {
+    await probe().ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    assert.deepEqual(await policy(0), [...bootHooks(boot), ...diskSetup(boot).commands].map((command) => [command]), "a new container runs the hooks, then its setup, and no resume");
+
+    let from = (await docker.calls()).length;
+    const stopped = { stdout: JSON.stringify([{ Id: "c1", State: { Status: "exited", StartedAt: "2026-10-27T00:00:00Z", ExitCode: 0 }, Config: { Labels: { "nexus.pylon": pylon } } }]) };
+    await docker.answer({ images: { stdout: "nexus-test\n" }, ps: { stdout: "c1\n" }, "container inspect c1": stopped });
+    await probe().ensureRunning(boot, live, AbortSignal.timeout(30_000), false);
+    assert.deepEqual(await policy(from), [...bootHooks(boot).map((command) => [command]), ["resume", ...resumeCommands]], "a boot from the container's disk runs the hooks and the resume, and no setup");
+
+    from = (await docker.calls()).length;
+    await docker.answer({ images: { stdout: "nexus-test\n" }, ps: { stdout: "c1\n" }, "container inspect c1": running("c1", { "nexus.pylon": pylon }) });
+    await probe().ensureRunning(boot, live, AbortSignal.timeout(30_000), false);
+    assert.deepEqual(await policy(from), [], "a running container runs no boot policy");
+
+    from = (await docker.calls()).length;
+    await docker.answer({ images: { stdout: "nexus-test\n" }, "ps -a -q --filter name=^pylon-a$": { stdout: "c9\n" } });
+    const failing = { ...boot, source: { kind: "fresh" as const, preSetup: "nexus-fails" } };
+    await assert.rejects(probe().ensureRunning(failing, live, AbortSignal.timeout(30_000)), { code: "setup-failed", message: "pylon-a: Setup exited 3. Read the container log. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh" });
+    const calls = (await docker.calls()).slice(from);
+    assert.deepEqual(await policy(from), [...bootHooks(failing), ...diskSetup(failing).commands.slice(0, 3)].map((command) => [command]), "setup stops at the command that failed");
+    assert.ok(calls.some((argv) => argv.join(" ") === "rm --force c9"), "the container is removed");
+  } finally {
+    await docker.answer({});
     for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(30_000));
   }
 });
