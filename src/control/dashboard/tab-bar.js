@@ -1,13 +1,12 @@
 import { el, end, main, scroller } from "./page.js";
 import { keptForTab, storageKeys } from "./contract.ts";
 import { badge, thread } from "./checkout.js";
-import { fileView, readDiff } from "./file-view.js";
-import { showTerminal } from "./terminal-tab.js";
 
 // The tabs beside the conversation: the terminal, and one per changed file the reader opened, kept for the tab's
 // session. `activeTab` is the open file's path, `terminalTab` for the terminal, `timelineTab` for the timeline, or null
 // for the conversation.
 export const tabsBar = document.getElementById("tabs");
+export const fileView = document.getElementById("file-view");
 const termView = document.getElementById("term-view");
 export const terminalTab = Symbol("terminal");
 const timelineTab = Symbol("timeline");
@@ -17,6 +16,8 @@ const tabsKey = storageKeys.tabs(thread);
 const maxTabs = 8;
 export let openTabs = JSON.parse(keptForTab.read(tabsKey) ?? "[]");
 export let activeTab = null;
+/** What showing a file's tab and the terminal's tab does. file-view.js and terminal-tab.js fill these in, as they import this module. */
+export const tabShows = { file: null, terminal: null };
 
 function saveTabs() {
   keptForTab.write(tabsKey, JSON.stringify(openTabs));
@@ -66,8 +67,8 @@ export function showTab(path) {
   if (termView !== null) termView.hidden = path !== terminalTab;
   if (path === null) end.settle();
   renderTabs();
-  if (typeof path === "string") void readDiff(path);
-  if (path === terminalTab) void showTerminal();
+  if (typeof path === "string") void tabShows.file(path);
+  if (path === terminalTab) void tabShows.terminal();
 }
 
 export function openFile(file) {
@@ -89,7 +90,7 @@ function closeTab(path) {
 export function refreshTabs(files) {
   openTabs = openTabs.map((tab) => files.find((f) => f.path === tab.path) ?? tab);
   renderTabs();
-  if (typeof activeTab === "string") void readDiff(activeTab);
+  if (typeof activeTab === "string") void tabShows.file(activeTab);
 }
 
 // The fixed tabs, and the timeline's and the track's links to the conversation or to a step of the timeline.

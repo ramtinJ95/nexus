@@ -2,8 +2,7 @@ import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place,
 import { el, present, showError } from "./page.js";
 import { kept, storageKeys } from "./contract.ts";
 import { thread } from "./checkout.js";
-import { activeTab, showTab } from "./tab-bar.js";
-import { fileView } from "./file-view.js";
+import { activeTab, fileView, showTab } from "./tab-bar.js";
 
 // The review: notes on rows of the open diff, kept per thread until they go to the composer and are sent, or are
 // discarded.

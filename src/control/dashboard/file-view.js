@@ -5,10 +5,9 @@ import { bases } from "./checkout-text.js";
 import { kept, narrow, storageKeys } from "./contract.ts";
 import { badge, canRead, checkout, counts, factsNow, thread, unreadable } from "./checkout.js";
 import { readChanges } from "./changes-tree.js";
-import { openTabs } from "./tab-bar.js";
+import { fileView, openTabs, tabShows } from "./tab-bar.js";
 import { annotate, reviewBox } from "./review-notes.js";
 
-export const fileView = document.getElementById("file-view");
 let diffLayout = kept.read(storageKeys.diffLayout) === "split" ? "split" : "unified";
 /** A window as narrow as a phone's, which draws unified, as split leaves each side too few characters to read. */
 const phone = matchMedia(narrow);
@@ -102,3 +101,4 @@ export async function readDiff(path) {
     fileView.replaceChildren(head, el("p", { className: "error fv-note", textContent: err.message }));
   }
 }
+tabShows.file = readDiff;

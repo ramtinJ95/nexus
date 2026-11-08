@@ -2,7 +2,7 @@ import { request } from "./request.js";
 import { pylonRoutes } from "../../contract/pylon.ts";
 import { afterSwap } from "./page.js";
 import { factsNow, thread } from "./checkout.js";
-import { activeTab, showTab, tabsBar, terminalTab } from "./tab-bar.js";
+import { activeTab, showTab, tabShows, tabsBar, terminalTab } from "./tab-bar.js";
 
 /** The Terminal tab shows while the thread is open, so an archive hides it and an unarchive brings it back. */
 function terminalFollows() {
@@ -62,3 +62,4 @@ export async function showTerminal() {
   again.onclick = () => { void showTerminal(); };
   opened?.focus();
 }
+tabShows.terminal = showTerminal;

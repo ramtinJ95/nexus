@@ -11,6 +11,8 @@ import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { canRead, changesPane, checkout, factsNow } from "./checkout.js";
 import { changesUnreadable, readChanges } from "./changes-tree.js";
 import { activeTab, renderTabs, showTab, tabsBar, terminalTab } from "./tab-bar.js";
+import "./file-view.js";
+import "./terminal-tab.js";
 import "./composer.js";
 import "./actions.js";
 import { startRows } from "./rows.js";
