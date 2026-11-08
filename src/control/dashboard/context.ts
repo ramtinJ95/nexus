@@ -1,38 +1,62 @@
 /** What a render of the dashboard reads: the context of one render, what waits on the person, and each page's own view the route reads for it. */
-import type { NodeName, TailnetNodeId } from "../../ids.ts";
+import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
-import type { Registry } from "../registry.ts";
 import type { Thread, ThreadAgent } from "../thread-store.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Project } from "../project.ts";
-import type { PipelineItem } from "../pipeline.ts";
+import type { ItemPhase, PipelineItem, Step } from "../pipeline.ts";
 import type { Role } from "../work-model.ts";
-import type { UsageTotals } from "../../contract/usage.ts";
+import type { UsageReport, UsageTotals } from "../../contract/usage.ts";
 import type { Item } from "./items.ts";
 import type { Review } from "../review-model.ts";
-import type { AnswerRefusal, Question } from "../questions.ts";
+import type { AnswerRefusal, CleanupQuestion, Question } from "../questions.ts";
 import type { AgentView, QueuedThread } from "../../contract/threads.ts";
 import type { InboxNeed } from "../work.ts";
+import type { HealthChange } from "../doctor-model.ts";
+import type { NodeHealth } from "../../protocol/client.ts";
+import type { ReleaseView } from "../../protocol/deploy.ts";
+import type { NodePylons } from "../placement.ts";
+import type { HealthSample } from "../node-metrics.ts";
+import type { Period } from "../usage.ts";
 
 export type LandRefusal = "no review loop" | "not a deployer";
 
-/** What every part of a page reads. `now` is read once, so every text of a render agrees on the time. */
+/**
+ * What every part of a page reads, read once per render however many parts show it. `now` is read once, so every
+ * text of a render agrees on the time.
+ */
 export interface Context {
-  registry: Registry; row(thread: Thread): ThreadRow; deploys(review: Review): boolean; now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null;
+  now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null;
+  deploys(review: Review): boolean;
   answerRefusal(question: Question): AnswerRefusal | null;
-  /** Every thread, oldest first, and a project's, read once per render however many parts show them. */
-  threads(): readonly Thread[];
+  projects: readonly Project[];
+  nodes: readonly NodeRecord[];
+  /** The image a new pylon boots, or null before one is current. */
+  image: string | null;
+  /** Each health check's latest state, and every change kept, newest first. */
+  health: { states: readonly HealthChange[]; changes: readonly HealthChange[] };
+  /** Every thread, oldest first. */
+  threads: readonly Thread[];
   threadsIn(project: string): readonly Thread[];
-  /** Every review, read once per render, as each thread's role reads them. */
-  reviews(): readonly Review[];
   /** A project's threads that wait in the queue, in the order they were queued. */
   queuedIn(project: string): readonly QueuedThread[];
   /** What waits on the person, which the sidebar and the phone's tab count and the home page lists. */
-  needs(): readonly InboxNeed[];
+  needs: readonly InboxNeed[];
+  /** Every review, read only by a render that shows what a reviewer, check or live check thread serves. */
+  reviews(): readonly Review[];
+  /** The list's row of a thread, read only for the threads a render shows, so the closed ones a fold hides cost nothing. */
+  row(thread: Thread): ThreadRow;
+  thread(id: ThreadId): Thread | undefined;
+  /** A thread's or a queued thread's title, or its ID once neither is known. */
+  title(id: ThreadId): string;
+  /** Where a started or queued thread is in the pipeline. */
+  stage(id: ThreadId): { phase: ItemPhase; at: Step };
+  /** The review of the builder thread `id`. */
+  review(id: ThreadId): Review | null;
 }
 
-/** What the home page reads beside the context: every project, the nodes that are offline, and a thread's role. */
-export interface HomeView { projects: readonly Project[]; offline: ReadonlySet<NodeName>; role(thread: Thread): Role }
+/** What the home page reads beside the context: the nodes that are offline, a thread's role, and the pipeline's items in the order they were added. */
+export interface HomeView { offline: ReadonlySet<NodeName>; role(thread: Thread): Role; items: readonly PipelineItem[] }
 
 /** A fold's page: the projects it lists, the nodes that are offline, and for the closed fold the queued threads cancelled or deleted before they started, newest first. */
 export interface FoldView { projects: readonly Project[]; offline: ReadonlySet<NodeName>; cancelled: readonly QueuedThread[] }
@@ -49,9 +73,35 @@ export type Peek =
 /**
  * A thread's page, read after its conversation so its facts are no older than the conversation. `view` is null for a
  * deleted thread, `renderedReplyAt` is the reply the conversation is known to hold, `nudged` is whether Nexus stopped
- * nudging it for the person, and `lands` whether its project lands its reviews on its own.
+ * nudging it for the person, `lands` whether its project lands its reviews on its own, `queuedAfter` the threads
+ * it waited on in the queue, or null when it started at once, and `item` the pipeline item it started for.
  */
 export interface ThreadView {
   d: ThreadDetail; row: ThreadRow; node: NodeRecord; role: Role; agent: ThreadAgent; usage: UsageTotals;
   view: AgentView | Error | null; items: readonly Item[]; renderedReplyAt: number | null; nudged: boolean; lands: boolean;
+  queuedAfter: readonly ThreadId[] | null; item: PipelineItem | undefined;
 }
+
+/** What a node's card shows of its load, memory and disk, or why it shows none. */
+export type NodeReading =
+  | { kind: "read"; cpus: number; load: number | null; memory: { totalGiB: number; availableGiB: number } | null; disk: { totalGiB: number; freeGiB: number } }
+  | { kind: "failed"; error: string }
+  | { kind: "refused" }
+  | { kind: "stale" };
+
+/**
+ * The Cluster page with the node `name` picked. Each node has its card's reading, its pylons' tallies, or null before
+ * its first observation, and its cleanup questions. The picked node has what its probe read of its host now or why it
+ * could not, its newest recorded sample, and the thread of each of its pylons with whether that thread is a builder.
+ */
+export interface ClusterView {
+  name: NodeName;
+  release: ReleaseView;
+  nodes: readonly { node: NodeRecord; reading: NodeReading; pylons: NodePylons | null; cleanups: readonly CleanupQuestion[] }[];
+  health: NodeHealth | Error;
+  sample: HealthSample | null;
+  pylonThreads: ReadonlyMap<string, { thread: ThreadId; builder: boolean }>;
+}
+
+/** The Usage page: the period and project picked, and what `GET /v1/usage` reports for them. */
+export interface UsageView { period: Period; project: ProjectId | null; report: UsageReport }

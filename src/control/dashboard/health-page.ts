@@ -15,11 +15,11 @@ const at = (iso: string) => html`<time datetime="${iso}">${utc(Date.parse(iso))}
  * marks seen once the person looks at it.
  */
 export function healthPage(c: Context, latest: DoctorReport | null): Html {
-  const view = healthView(latest, c.registry.healthStates());
+  const view = healthView(latest, c.health.states);
   const open = new Map(view.problems.map((p) => [checkKey(p), p]));
   const shown = latest?.checks ?? view.problems;
   const groups = [...Map.groupBy(shown, (check) => check.node ?? "Control plane")];
-  const changes = c.registry.healthChanges();
+  const { changes } = c.health;
   const status = worst(view.problems);
   return layout(c, {
     title: "Health",

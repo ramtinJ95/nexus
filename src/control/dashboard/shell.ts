@@ -97,7 +97,6 @@ export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
   return q.blocked ? ["blocked", "bad"] : ["queued", "idle"];
 }
 
-export const threadTitle = (c: Context, id: ThreadId) => c.registry.thread(id)?.title ?? c.registry.queuedThread(id)?.title ?? id;
 export const quietLabel = (threads: readonly Thread[]) => `${threads.length} quiet for over ${quietAfterMs / 3_600_000} hours`;
 export function closedLabel(threads: readonly Thread[]): string {
   const deleted = threads.filter((t) => t.status === "deleted").length;
@@ -110,7 +109,7 @@ export const foldCap = 100;
 export const foldHref = (kind: "quiet" | "closed", project: string, page = 1) => `/threads/${kind}?project=${encodeURIComponent(project)}${page > 1 ? `&page=${page}` : ""}`;
 
 function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
-  const projects = c.registry.projects();
+  const { projects } = c;
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
   const row = (t: Thread) => {
     const r = c.row(t);
@@ -125,7 +124,7 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
-<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs().length || ""}</span></a>${([["cluster", "Cluster", "server"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
+<nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs.length || ""}</span></a>${([["cluster", "Cluster", "server"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
@@ -149,10 +148,10 @@ export const statusTone: Record<Status, Tone> = { ok: "ok", warn: "busy", fail: 
 
 /** The Health page's link, which counts each open problem the person has not seen there. */
 function healthLink(c: Context, open: boolean): Html {
-  const problems = c.registry.healthStates().filter((s) => s.status !== "ok");
+  const problems = c.health.states.filter((s) => s.status !== "ok");
   const unseen = problems.filter((p) => p.seenAt === null).length;
   const title = problems.length === 0 ? problemsText(0) : `${problemsText(problems.length)}, ${unseen} not seen`;
-  return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}" data-change="${Math.max(0, ...c.registry.healthChanges().map((h) => h.id))}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
+  return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}" data-change="${Math.max(0, ...c.health.changes.map((h) => h.id))}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
 }
 
 /**
@@ -161,9 +160,7 @@ function healthLink(c: Context, open: boolean): Html {
  * picked, so the form never sends them, and makes the title required for the Nexus agent.
  */
 function startDialog(c: Context, start: Shell["start"]): Html {
-  const projects = c.registry.projects();
-  const nodes = c.registry.nodes();
-  const image = c.registry.currentImage();
+  const { projects, nodes, image } = c;
   const chosen = projects.find((p) => p.id === start?.project) ?? projects[0];
   return html`<dialog id="start-dialog" class="modal" aria-labelledby="start-h"${start !== undefined && " data-autoopen"}>
 <header><h2 id="start-h">Start a thread</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>
@@ -223,7 +220,7 @@ export const newProjectButton = html`<a class="btn btn-primary" href="/projects/
  * Nodes come from the control plane's config and change only with a restart, so the dialog is not refreshed with the page.
  */
 function projectDialog(c: Context, open: boolean): Html {
-  const nodes = c.registry.nodes();
+  const { nodes } = c;
   const { cpus, memoryGiB, diskGiB } = defaultProjectResources;
   return html`<dialog id="project-dialog" class="modal" aria-labelledby="project-h"${open && " data-autoopen"}>
 <header><h2 id="project-h">New project</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></header>

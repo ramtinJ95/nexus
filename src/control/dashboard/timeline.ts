@@ -5,16 +5,15 @@
  */
 import type { ThreadDetail } from "../wire.ts";
 import { isOpen } from "../questions.ts";
-import type { ThreadId } from "../../ids.ts";
 import { isOpenStatus, keptPastDay } from "../reconcile.ts";
 import { blocks, findingsOf, reviewerApproved, type Review, type Round, type Verdict } from "../review-model.ts";
 import { diskGoes, keptPast, limitText, needKind, needLabels, plannerGaveUp, reviewersNote, reviewLine } from "../wording.ts";
 import { Html, html, ago, short, dot, icon, type Part, type Tone } from "./view.ts";
-import type { Context } from "./context.ts";
+import type { Context, ThreadView } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item } from "./items.ts";
 import { clock } from "./elapsed.ts";
-import { landingTrack, pipelineItems, stageLabel, stepStates, type Life, type StepState } from "./lifecycle.ts";
+import { landingTrack, stageLabel, stepStates, type Life, type StepState } from "./lifecycle.ts";
 import { steps, type Step } from "../pipeline.ts";
 
 interface Turn { from: string; text: string; at: number; queued: boolean; tools: number; failed: number; reply: string | null; took: string | null; running: boolean }
@@ -88,22 +87,19 @@ function landingView(c: Context, r: Review): Html | false {
 }
 
 /** The thread's brief: its item's, its Claude worker's prompt, or the first message it was sent. */
-function briefOf(c: Context, d: ThreadDetail, turns: readonly Turn[], items: readonly Item[]): { text: string | null; item: string | null } {
-  const item = pipelineItems(c).find((i) => i.thread === d.thread.id);
-  const agent = c.registry.agent(d.thread);
+function briefOf({ agent, items, item }: ThreadView, turns: readonly Turn[]): { text: string | null; item: string | null } {
   const first = items.find((i) => i.kind === "user");
   const text = item?.brief ?? (agent.kind === "claude" ? agent.worker.prompt : null) ?? (first?.kind === "user" ? first.text : null) ?? (turns[0]?.text || null);
   return { text, item: item?.id ?? null };
 }
 
-export function timeline(c: Context, d: ThreadDetail, items: readonly Item[], life: Life): Html {
+export function timeline(c: Context, page: ThreadView, life: Life): Html {
+  const { d, agent, queuedAfter } = page;
   const t = d.thread;
   const states = stepStates(life);
-  const turns = turnsOf(items);
-  const brief = briefOf(c, d, turns, items);
+  const turns = turnsOf(page.items);
+  const brief = briefOf(page, turns);
   const r = d.review;
-  const agent = c.registry.agent(t);
-  const queued = c.registry.queuedThread(t.id as ThreadId);
   const held = life.stage === "held" && html`<div class="tl-hold"><p class="tl-hold-h">Held for you${life.needs.length > 0 && html`: ${[...new Set(life.needs.map((n) => needLabels[needKind(n)]))].join(", ")}`}</p><p>${life.why.replace(/\.$/, "")}.</p><p class="dim">The card under the timeline is what moves it on.</p></div>`;
   const heldAt = (s: Step) => life.at === s && held;
   const asked = d.questions.filter((q) => q.kind !== "ask" || q.answer !== null);
@@ -114,7 +110,7 @@ export function timeline(c: Context, d: ThreadDetail, items: readonly Item[], li
     planned: html`${brief.text === null ? html`<p class="empty">It started without a brief.</p>` : html`<div class="tl-brief">${prose(brief.text)}</div>`}
 <p class="tl-meta">${brief.item !== null && html`Item <a class="link" href="/?peek=${brief.item}"><code>${brief.item}</code></a> on the pipeline · `}Started by ${t.startedBy} · ${agent.kind === "claude" ? `Claude Code${agent.worker.model !== null ? `, ${agent.worker.model}` : ""}` : agent.kind === "harness" ? "Nexus agent" : "no agent"}${d.planning && " · planning thread"}</p>
 ${heldAt("planned")}`,
-    queued: html`<p class="tl-meta">${queued === undefined ? "Started at once, with nothing ahead of it in the queue." : html`Queued after ${queued.after.length === 0 ? "nothing" : queued.after.map((id, i) => html`${i > 0 && ", "}<a class="link" href="/threads/${id}">${c.registry.thread(id)?.title ?? id}</a>`)}.`} Its pylon runs on <a class="link" href="/nodes/${encodeURIComponent(d.pylon.node)}">${d.pylon.node}</a> with ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk.</p>${heldAt("queued")}`,
+    queued: html`<p class="tl-meta">${queuedAfter === null ? "Started at once, with nothing ahead of it in the queue." : html`Queued after ${queuedAfter.length === 0 ? "nothing" : queuedAfter.map((id, i) => html`${i > 0 && ", "}<a class="link" href="/threads/${id}">${c.thread(id)?.title ?? id}</a>`)}.`} Its pylon runs on <a class="link" href="/nodes/${encodeURIComponent(d.pylon.node)}">${d.pylon.node}</a> with ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk.</p>${heldAt("queued")}`,
     building: html`${turnsList(turns, c.now)}
 ${t.working && html`<p class="tl-event tl-work">${dot("work")}<span>Its agent is working${t.workingSince !== undefined && html` for <time data-since="${t.workingSince}">${clock(c.now - t.workingSince)}</time>`}.</span></p>`}
 ${t.usageLimit !== undefined && html`<p class="tl-event tl-bad">${dot("bad")}<span>It ${limitText(t, c.now)}, ${ago(t.usageLimit.stoppedAt, c.now)}.</span></p>`}
