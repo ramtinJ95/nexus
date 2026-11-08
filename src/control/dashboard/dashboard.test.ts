@@ -2737,6 +2737,22 @@ test("the Cluster page asks only the picked node's probe, and shows each other n
   assert.deepEqual(asked, [node], "only the picked node's probe is asked");
 });
 
+test("a node card says why it has no reading: its probe failed, or the caller may not read a node's health", async (t) => {
+  const unused = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")) };
+  const tower = "tower" as NodeName;
+  const probes = new Map([node, tower].map((name) => [name, { ...unused, health: () => Promise.reject(new Error(`${name} is unreachable`)) }] as const));
+  const s = await seeded(t, { ...landingOptions(), probes });
+  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  const load = (page: string, name: string) => /<dt>Load<\/dt><dd>[\s\S]*?<span class="meter-words">([\s\S]*?)<\/span><\/dd>/.exec(page.split(`data-node="${name}"`)[1]!)![1]!;
+  const failed = (await s.call("GET", `/nodes/${node}`)).text;
+  assert.equal(load(failed, node), `<span class="dim" title="${node} is unreachable">not read</span>`, "a failed read names its error");
+  assert.equal(load(failed, tower), `<span class="dim">no reading in 5 minutes</span>`);
+  s.callAs(phone);
+  const refused = (await s.call("GET", `/nodes/${node}`)).text;
+  assert.match(refused, /<p class="error" role="alert">caller may not read a node&#39;s health/, "the picked node says the read was refused");
+  assert.equal(load(refused, tower), `<span class="dim" title="Only a deployer reads a node&#39;s health">not read</span>`, "another node's card says only a deployer reads it");
+});
+
 test("a queued thread's preview says once what it waits for", async (t) => {
   const s = await seeded(t);
   const first = await s.start("acme", "Fix checkout");
