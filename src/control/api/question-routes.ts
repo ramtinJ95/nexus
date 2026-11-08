@@ -2,7 +2,6 @@
  * Answering the questions about a thread, a Claude worker's AskUserQuestion and a review's holds included, and those
  * about a node.
  */
-import { z } from "zod";
 import type { Pipeline } from "../pipeline.ts";
 import type { Planning } from "../planning.ts";
 import type { CleanupPass } from "../cleanup.ts";
@@ -11,11 +10,11 @@ import type { TailnetNodeId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "../questions.ts";
-import { ok, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { refusalOf } from "./access.ts";
+import { questionRoutes as routes } from "../../contract/reviews.ts";
+import { answerSchema } from "../../contract/reviews-parse.ts";
 
-/** An ask is answered with a choice per question it asks, and any other question with one of its options. */
-const answerSchema = z.union([z.strictObject({ option: z.string() }), z.strictObject({ choices: z.array(z.unknown()) })]);
 const answeredConflict = (q: Question) => new HttpError(409, `question ${q.id} was answered ${JSON.stringify(q.answer!.option)} by ${q.answer!.by}`);
 const answerRefusals: Record<AnswerRefusal, string> = {
   "not a person": "only a person's device may, never infrastructure nodes or pylons",
@@ -65,9 +64,9 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
   }
 
   return [
-    ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, { role: "allowed", why: "each question says who may answer it, which refusalOf checks" }, async ([, id], r) => {
+    on(routes.answer, { role: "allowed", why: "each question says who may answer it, which refusalOf checks" }, async ({ question: id }, r) => {
       const body = parse(answerSchema, await r.body());
-      const question = registry.question(id!);
+      const question = registry.question(id);
       if (question === null) throw new HttpError(404, `no question ${id}`);
       if (question.withdrawn !== undefined) throw new HttpError(409, `question ${question.id} was withdrawn when its thread was archived`);
       const refused = refusalOf(r.roles, question);
@@ -87,6 +86,6 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
       // The deletes take as long as the node's disk does, so the answer does not wait for them.
       if (answered.cleanup !== undefined) void options.cleanup?.poll();
       return ok(answered);
-    }],
+    }),
   ];
 }

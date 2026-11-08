@@ -1,47 +1,16 @@
 /**
  * Adding, listing and editing projects.
  */
-import { z } from "zod";
-import type { NodeName, ProjectId } from "../../ids.ts";
+import type { ProjectId } from "../../ids.ts";
 import type { Pipeline } from "../pipeline.ts";
 import { HttpError } from "../http-error.ts";
-import { chatgptTokenGrant, secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
-import { gitIdentitySchema } from "../../protocol/spawn.ts";
-import { gitUrl, type AutoReviewMode, type Project } from "../project.ts";
-import { editedRules, standingRulesLimit } from "../standing-rules.ts";
-import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import type { AutoReviewMode, Project } from "../project.ts";
+import { editedRules } from "../standing-rules.ts";
+import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, demand, landing } from "./access.ts";
-import { resourcesSchema } from "../../contract/threads-parse.ts";
+import { projectRoutes as routes } from "../../contract/projects.ts";
+import { projectAddSchema, projectEditSchema, projectSchema } from "../../contract/projects-parse.ts";
 
-const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
-const host = z.string().min(1);
-export const projectSchema = z.strictObject({
-  id: name.transform((id) => id as ProjectId),
-  repoUrl: gitUrl.nullable(),
-  defaultBranch: z.string().min(1),
-  defaultNode: z.string().min(1).transform((node) => node as NodeName | "auto"),
-  resources: resourcesSchema,
-  allowedHosts: z.array(host),
-  secrets: z.array(z.strictObject({ name: z.string().regex(secretNamePattern), hosts: z.array(z.string().regex(secretHostPattern)).min(1) }))
-    .refine((grants) => new Set(grants.map((grant) => grant.name)).size === grants.length, "duplicate secret names: list all of a secret's hosts in one grant")
-    .refine((grants) => !grants.some((grant) => grant.name === chatgptTokenGrant.name), `${chatgptTokenGrant.name} comes with the chatgpt login: add the login instead`),
-  logins: z.array(z.enum(["claude", "chatgpt"])),
-  preSetup: z.string().nullable(),
-  gitIdentity: gitIdentitySchema.nullable().optional(),
-});
-const rulesText = z.string().trim().min(1).max(standingRulesLimit).refine((text) => !text.includes("\0"), "standing rules cannot hold a NUL character, which no Claude prompt can");
-/** A caller gives standing rules as their text, and Nexus counts their revisions. */
-const projectAddSchema = projectSchema.extend({ standingRules: rulesText.optional() });
-const secondReviewSchema = z.union([
-  z.strictObject({ always: z.literal(true) }),
-  z.strictObject({ always: z.literal(false), lines: z.int().positive().nullable(), reserved: z.boolean() }).refine((rule) => rule.lines !== null || rule.reserved, "a second reviewer's rule names a size of change, reserved paths, or always"),
-]);
-/** Only an edit sets `autoReview`, and the API records its caller in it, so a project's add cannot name someone else. */
-const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true })
-  .extend({
-    resources: resourcesSchema.partial(), autoReview: z.union([z.strictObject({ mode: z.enum(["review", "land", "yolo"]) }), z.strictObject({ land: z.boolean() })]).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
-    standingRules: rulesText.nullable(), secondReview: secondReviewSchema.nullable(),
-  }).partial();
 
 export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null | undefined }): readonly RouteEntry[] {
   const { registry } = kit;
@@ -61,7 +30,7 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
   }
 
   return [
-    ["PATCH", /^\/v1\/projects\/([^/]+)$/, { role: "person", action: "edit a project" }, async ([, id], r) => {
+    on(routes.edit, { role: "person", action: "edit a project" }, async ({ project: id }, r) => {
       const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
       // A CLI older than modes sends `land`.
       const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
@@ -79,8 +48,8 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
       if (pipeline !== undefined) void options.pipeline?.poll();
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
-    }],
-    ["GET", /^\/v1\/projects$/, anyAllowed, () => ok(registry.projects())],
-    ["POST", /^\/v1\/projects$/, { role: "allowed", why: "adding a project changes no thread, pylon or project there is" }, async (_, r) => created(createProject(await r.body()))],
+    }),
+    on(routes.list, anyAllowed, () => ok(registry.projects())),
+    on(routes.add, { role: "allowed", why: "adding a project changes no thread, pylon or project there is" }, async (_, r) => created(createProject(await r.body()))),
   ];
 }

@@ -6,8 +6,9 @@ import type { NodeName } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { foldPylons, seriesLabel, type MetricSeries, type NodeMetrics, type Series } from "../node-metrics.ts";
 import { nodeSummary } from "../placement.ts";
-import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
+import { ok, on, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, type Policy } from "./access.ts";
+import { nodeRoutes as routes } from "../../contract/reports.ts";
 
 /** A node's health says what runs on it, so only a deployer reads it. */
 export const readHealth = { role: "deployer", action: "read a node's health" } satisfies Policy;
@@ -41,9 +42,9 @@ export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<
   }
 
   return [
-    ["GET", /^\/v1\/nodes$/, anyAllowed, () => ok(registry.nodes().map((record) => nodeSummary(registry, record)))],
-    ["GET", /^\/v1\/nodes\/([^/]+)\/health$/, readHealth, async ([, name]) => ok(await nodeHealth(name as NodeName))],
+    on(routes.list, anyAllowed, () => ok(registry.nodes().map((record) => nodeSummary(registry, record)))),
+    on(routes.health, readHealth, async ({ node }) => ok(await nodeHealth(node as NodeName))),
     // History holds what a node's health held, so it takes the same right.
-    ["GET", /^\/v1\/nodes\/([^/]+)\/metrics$/, { role: "deployer", action: "read a node's metrics" }, ([, name], r) => ok(nodeMetrics(name as NodeName, r.query))],
+    on(routes.metrics, { role: "deployer", action: "read a node's metrics" }, ({ node }, r) => ok(nodeMetrics(node as NodeName, r.query))),
   ];
 }

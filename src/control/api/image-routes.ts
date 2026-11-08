@@ -1,25 +1,16 @@
 /**
  * Recording, building, rolling out and rolling back the pylon image.
  */
-import { z } from "zod";
 import { HttpError } from "../http-error.ts";
 import { imagesView, type ImageRollout } from "../image-rollout.ts";
 import type { ImageOperation } from "../image-store.ts";
-import { type ImageId, isImageId, type NodeName } from "../../ids.ts";
-import { pinsSchema, type ImageManifest } from "../../protocol/images.ts";
-import { ok, created, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
+import type { ImageId } from "../../ids.ts";
+import type { ImageManifest } from "../../protocol/images.ts";
+import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, type Policy } from "./access.ts";
+import { imageRoutes as routes } from "../../contract/release.ts";
+import { imageSchema, noFields, rolloutSchema } from "../../contract/release-parse.ts";
 
-const imageSchema = z.strictObject({
-  id: z.custom<ImageId>(isImageId, "must be an image ID"),
-  gondolinBuildId: z.string().min(1),
-  pins: pinsSchema,
-  builtOn: z.string().min(1).transform((node) => node as NodeName),
-  builtAt: z.string().min(1),
-  sha256: z.string().regex(/^[0-9a-f]{64}$/),
-});
-const rolloutSchema = z.strictObject({ image: imageSchema.shape.id });
-const noFields = z.strictObject({});
 /** An image becomes what every new pylon boots, so building and rolling one out takes the same right as `nexus deploy`. */
 const roll = { role: "deployer", action: "build, roll out or roll back an image" } satisfies Policy;
 
@@ -36,29 +27,29 @@ export function imageRoutes(kit: ApiKit, options: { images?: ImageRollout | unde
     if (options.images === undefined) throw new HttpError(409, "image builds are not configured");
     return options.images;
   }
-  const started = (operation: ImageOperation): Reply => ({ status: operation.state === "running" ? 202 : 200, body: operation });
+  const started = (operation: ImageOperation) => ({ status: operation.state === "running" ? 202 : 200, body: operation });
 
   return [
-    ["GET", /^\/v1\/images$/, anyAllowed, () => ok(imagesView(registry))],
-    ["POST", /^\/v1\/images$/, { role: "allowed", why: "recording an image boots nothing until a deployer rolls it out" }, async (_, r) => created(recordImage(await r.body()))],
-    ["GET", /^\/v1\/images\/current$/, anyAllowed, () => {
+    on(routes.list, anyAllowed, () => ok(imagesView(registry))),
+    on(routes.record, { role: "allowed", why: "recording an image boots nothing until a deployer rolls it out" }, async (_, r) => created(recordImage(await r.body()))),
+    on(routes.current, anyAllowed, () => {
       const view = imagesView(registry);
       const entry = (id: ImageId | null) => view.images.find((image) => image.id === id) ?? null;
       return ok({ current: entry(view.current), previous: entry(view.previous) });
-    }],
-    ["POST", /^\/v1\/images\/build$/, roll, async (_, r) => {
+    }),
+    on(routes.build, roll, async (_, r) => {
       const images = imageRollout();
       parse(noFields, await r.body({}));
       return started(await images.build(r.caller));
-    }],
-    ["POST", /^\/v1\/images\/rollout$/, roll, async (_, r) => {
+    }),
+    on(routes.rollout, roll, async (_, r) => {
       const images = imageRollout();
       return started(images.rollout(parse(rolloutSchema, await r.body()).image, r.caller));
-    }],
-    ["POST", /^\/v1\/images\/rollback$/, roll, async (_, r) => {
+    }),
+    on(routes.rollback, roll, async (_, r) => {
       const images = imageRollout();
       parse(noFields, await r.body({}));
       return started(images.rollback(r.caller));
-    }],
+    }),
   ];
 }
