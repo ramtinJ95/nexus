@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { parseReleaseCommit, releaseCommitFile } from "../node-layout.ts";
 
@@ -13,3 +14,14 @@ export const runningCommit: string | null = (() => {
     return null;
   }
 })();
+
+/**
+ * Answers GET /v1/health with `body()` when it comes from this host, before any caller check, as the deployer on the node
+ * reads `commit` there to see the release it started. Returns whether it answered.
+ */
+export function answerLocalHealth(req: IncomingMessage, res: ServerResponse, body: () => { commit: string | null }): boolean {
+  const { remoteAddress, localAddress } = req.socket;
+  if (req.method !== "GET" || req.url !== "/v1/health" || remoteAddress === undefined || remoteAddress !== localAddress) return false;
+  res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body()));
+  return true;
+}
