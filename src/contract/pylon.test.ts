@@ -79,6 +79,15 @@ test("the events query decodes on the server to what the client gave", () => {
   assert.deepEqual(streamRoutes.events.query!.decode(new URLSearchParams("follow=1")), { since: undefined, thread: undefined, project: undefined, kinds: [], follow: false });
 });
 
+test("a call takes the query the client gives, not the raw parameters the server checks", () => {
+  // @ts-expect-error a base is one of the three
+  assert.equal(callOf(pylonRoutes.changes, { thread: "th-1", query: { base: "bad" } }).path, "/v1/threads/th-1/changes?base=bad");
+  // @ts-expect-error an image's source is one of its three kinds
+  assert.equal(callOf(pylonRoutes.image, { thread: "th-1", query: { source: "garbage" } }).path, "/v1/threads/th-1/image?source=garbage");
+  // @ts-expect-error follow is true or absent
+  assert.equal(callOf(streamRoutes.events, { query: { follow: false } }).path, "/v1/events");
+});
+
 test("every change status has a letter, and the bases are the three the checkout reads", () => {
   assert.deepEqual(Object.keys(statusLetters), [...changeStatuses]);
   assert.deepEqual([...changesBases], ["start", "head", "turn"]);

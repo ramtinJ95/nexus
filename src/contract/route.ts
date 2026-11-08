@@ -39,7 +39,7 @@ export interface ApiRoute<M extends Method = Method, P extends string = string, 
 }
 export type ReplyOf<R> = R extends ApiRoute<Method, string, infer Reply> ? Reply : never;
 export type BodyOf<R> = R extends ApiRoute<Method, string, unknown, infer Body> ? Body : never;
-export type QueryOf<R> = R extends ApiRoute<Method, string, unknown, unknown, infer Q> ? Q : never;
+export type QueryOf<R> = R extends ApiRoute<Method, string, unknown, unknown, infer Q, unknown> ? Q : never;
 export type RawQueryOf<R> = R extends ApiRoute<Method, string, unknown, unknown, unknown, infer Raw> ? Raw : never;
 
 /** A route that answers `Reply` and takes `Body`, which is undefined for a route that takes none. */
