@@ -119,7 +119,7 @@ export function foldPage(c: Context, kind: "quiet" | "closed", project: Project 
   return layout(c, {
     title: foldNames[kind],
     main: html`<header class="bar">${menu}<div class="crumb"><a class="crumb-p" href="/">Threads</a><span class="sep" aria-hidden="true">/</span><h1>${foldNames[kind]}</h1></div></header>
-<div class="scroll"><div class="page">${(project === null ? c.registry.projects() : [project]).map((p) => {
+<div class="scroll"><div class="page" id="fold-list" data-live>${(project === null ? c.registry.projects() : [project]).map((p) => {
   const threads = threadsOf(c, p.id)[kind];
   const queued = cancelled.filter((q) => q.project === p.id);
   const older = threads.length > page * foldCap || queued.length > page * foldCap;
