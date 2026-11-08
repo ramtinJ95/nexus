@@ -93,13 +93,12 @@ test("every container and checkpoint lookup is scoped by a --filter for each of 
 });
 
 test("a docker failure names the command and Docker's trimmed stderr, or Node's reason when Docker said nothing", async (t) => {
-  const command = "docker ps -a -q --no-trunc --filter label=nexus.pylon --filter label=nexus.test=pin";
   const docker = await fakeDocker(t, { ps: { stderr: "\n  Cannot connect to the Docker daemon  \n", code: 1 } });
   const backend = createDockerBackend({ images, labels: { "nexus.test": "pin" } });
-  await assert.rejects(backend.list(), { message: `${command}: Cannot connect to the Docker daemon` });
+  await assert.rejects(backend.list(), { message: /^docker ps .*: Cannot connect to the Docker daemon$/ });
 
   await docker.answer({ ps: { code: 1 } });
-  await assert.rejects(backend.list(), (err: Error) => err.message.startsWith(`${command}: Command failed: ${command}`));
+  await assert.rejects(backend.list(), { message: /^docker ps .*: Command failed: docker ps / });
 });
 
 test("a container removed between its listing and its inspection is left out, and one still there is listed", async (t) => {

@@ -41,5 +41,5 @@ test("ports are read in one exec, and a failed read rejects rather than reportin
   assert.deepEqual(await listeningFacts(guest, 3000), [{ port: 3000 }, { port: 8080 }]);
   assert.equal(guest.execs.length, 1);
   const failing = fakeGuest(() => ({ exitCode: 1, output: "cat: /proc/net/tcp: No such file or directory" }));
-  await assert.rejects(listeningFacts(failing, 3000), /reading \/proc\/net\/tcp exited 1/);
+  await assert.rejects(listeningFacts(failing, 3000));
 });

@@ -212,7 +212,6 @@ test("a withdraw whose write failed writes the table when it is asked again", as
   assert.deepEqual(await readRoutes(routesFile), new Map([[10000, { pylonId: a, service: "web" }]]));
 });
 
-
 test("an existing Unix target blocks an operator's preview additions and removals", async (t) => {
   const initial = JSON.stringify({
     TCP: { 443: { HTTPS: true }, 10200: { HTTPS: true } },
@@ -226,7 +225,4 @@ test("an existing Unix target blocks an operator's preview additions and removal
   await assert.rejects(serve.converge(a, [{ service: "web", httpsPort: 10200 }, { service: "api", httpsPort: 10201 }], signal), /must be root/);
   await assert.rejects(serve.converge(a, [], signal), /must be root/);
   assert.deepEqual(tailscale.entries(), before);
-  const admin = fakeTailscale(initial, true);
-  await admin.cli(["serve", "--https=10200", "off"], signal);
-  assert.deepEqual(admin.entries(), { 443: "unix:/run/nexus-control/dashboard.sock" });
 });

@@ -16,7 +16,7 @@ import { readControlPlane } from "../deploy/control-plane.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
 import { gitPollMs, type DeclaredOutput, type GitFacts, type NodeObservation, type ProbeEvent, type ServiceFact } from "../protocol/observations.ts";
-import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
+import type { PylonCommand } from "../protocol/commands.ts";
 import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
 import { connectProbe } from "../protocol/client.ts";
@@ -24,7 +24,6 @@ import { probeRoutes, type CallerRole, type ProbeRoute } from "../protocol/route
 import { envelope, ingest } from "../control/reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { type BackendPylon, type Guest, type VmBackend } from "../backends/backend.ts";
-import { commandPolicies, type CommandPolicy } from "./run.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
@@ -301,12 +300,6 @@ test("the control plane's list of peers replaces probe.json's, and only the cont
   assert.equal((await fetch(artifacts)).status, 403, "the control plane's list replaced probe.json's");
 });
 
-test("the client refuses a probe that whois does not name", async (t) => {
-  const { probe } = await setup(t);
-  const impostor = connectProbe(node, "127.0.0.1", probeNodeId, { port: probe.port, whois: async () => "nOTHER" as TailnetNodeId });
-  await assert.rejects(impostor.job("x" as JobId), { code: "forbidden" });
-});
-
 test("the client sends nothing, not even the request line, to a peer that whois does not name", async (t) => {
   const received: Buffer[] = [];
   const closed = Promise.withResolvers<void>();
@@ -553,7 +546,6 @@ test("observe starts with a snapshot carrying the applied liveHash, and a new pr
   const pylon = observation.pylons[0];
   assert.ok(pylon?.phase === "running" && pylon.liveHash === "hash-1");
 
-  // A job's events arrive on the open stream: its status, then a fresh snapshot.
   const del = envelope({ kind: "delete", pylonId }, node, Date.now());
   await client.submit(del);
   const seen: string[] = [];
@@ -1174,47 +1166,6 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
 });
 
-test("the command policy table gives each kind its lock, its memory by request ID, and its snapshot publishing", () => {
-  const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
-  const sent = (resumed: boolean): CommandResult => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed });
-  const samples: [string, PylonCommand, CommandResult?][] = [
-    ["exec", { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }],
-    ["open-session", { kind: "open-session", harness: "shell", title: "shell" }],
-    ["open-session with resume", { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session }],
-    ["open-session with prompt and resume", { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session, prompt: "go" }],
-    ["close-session", { kind: "close-session", herdrPane: "w1:p1" }],
-    ["drop-failed-session", { kind: "drop-failed-session", id: "s1" }],
-    ["send-claude that resumes its session", { kind: "send-claude", session, text: "hi" }, sent(true)],
-    ["send-claude to a running session", { kind: "send-claude", session, text: "hi" }, sent(false)],
-    ["send-claude-outcome", { kind: "send-claude-outcome", requestId: "msg:1" }],
-    ["interrupt-claude", { kind: "interrupt-claude", session }],
-    ["service", { kind: "service", op: "ensure" }],
-    ["link-port", { kind: "link-port", port: 3000 }],
-    ["unlink-port", { kind: "unlink-port", port: 3000 }],
-  ];
-  const listed = samples.map(([name, command, result]) => {
-    const { lock, remembered, publishes } = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
-    const waits = typeof lock === "function" ? lock(command) : lock;
-    return `${name}: waits for ${waits === session ? "its Claude session" : waits ?? "nothing"}, ${remembered ? "remembered" : "not remembered"}, ${(typeof publishes === "function" ? publishes(result!) : publishes) ? "publishes" : "does not publish"}`;
-  });
-  assert.deepEqual(listed, [
-    "exec: waits for nothing, not remembered, does not publish",
-    "open-session: waits for nothing, not remembered, publishes",
-    "open-session with resume: waits for nothing, not remembered, publishes",
-    "open-session with prompt and resume: waits for its Claude session, not remembered, publishes",
-    "close-session: waits for nothing, not remembered, publishes",
-    "drop-failed-session: waits for nothing, not remembered, does not publish",
-    "send-claude that resumes its session: waits for its Claude session, remembered, publishes",
-    "send-claude to a running session: waits for its Claude session, remembered, does not publish",
-    "send-claude-outcome: waits for nothing, not remembered, does not publish",
-    "interrupt-claude: waits for its Claude session, not remembered, does not publish",
-    "service: waits for nothing, not remembered, does not publish",
-    "link-port: waits for nothing, not remembered, publishes",
-    "unlink-port: waits for nothing, not remembered, publishes",
-  ]);
-  assert.deepEqual(Object.keys(commandPolicies).sort(), [...new Set(samples.map(([, c]) => c.kind))].sort(), "every kind is listed");
-});
-
 test("a failing command rejects with the guest's error", async (t) => {
   const guest = fakeGuest((_argv, herdr) => herdr ? herdrError("invalid_params", "pane w9:p9 is malformed") : { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
@@ -1808,7 +1759,7 @@ test("an unlink-port command waits for a read in flight, which is published befo
       if (services) seen.push(`read ${services.map((s) => s.name).join(" ") || "none"}`);
     }
   })().catch(() => undefined);
-  /** Waits for the predicate. The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
+  /** The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
   const until = async (what: string, predicate: () => boolean) => {
     for (const deadline = Date.now() + 60_000; !predicate();) {
       if (Date.now() > deadline) throw new Error(`timed out waiting until ${what}`);

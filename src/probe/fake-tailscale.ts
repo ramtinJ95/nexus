@@ -13,7 +13,7 @@ interface ServeConfig {
   Web?: Record<string, { Handlers: Record<string, { Proxy?: string; Path?: string }> }>;
 }
 
-export function fakeTailscale(initial = "{}", localAdmin = false) {
+export function fakeTailscale(initial = "{}") {
   let config = JSON.parse(initial) as ServeConfig;
   const changes: string[] = [];
   const failing = new Set<string>();
@@ -37,7 +37,7 @@ export function fakeTailscale(initial = "{}", localAdmin = false) {
     } else {
       throw new Error(`the fake tailscale does not know: tailscale ${line}`);
     }
-    if (!localAdmin && Object.values(config.Web ?? {}).some((web) => Object.values(web.Handlers).some((handler) => handler.Path !== undefined || handler.Proxy?.startsWith("unix:")))) {
+    if (Object.values(config.Web ?? {}).some((web) => Object.values(web.Handlers).some((handler) => handler.Path !== undefined || handler.Proxy?.startsWith("unix:")))) {
       config = previous;
       throw new Error("must be root, or be an operator and able to run 'sudo tailscale' to serve a path or Unix socket");
     }
