@@ -97,12 +97,13 @@ export interface HarnessHost {
 }
 
 /** The methods that start a turn, which a deploy's drain refuses and counts while they enter. */
-export const turnStarting = ["startThread", "send", "retry", "startJudgment", "sendJudgment"] as const satisfies readonly (keyof HarnessHost)[];
+export const turnStarting = ["startThread", "send", "retry", "startJudgment", "sendJudgment"] as const satisfies readonly AsyncMethod[];
+type AsyncMethod = { [K in keyof HarnessHost]: HarnessHost[K] extends (...args: never[]) => Promise<unknown> ? K : never }[keyof HarnessHost];
 
 export function gateTurns(host: HarnessHost, gate: Pick<TurnGate, "run">): HarnessHost {
   const gated = { ...host };
   for (const method of turnStarting) {
-    const start = host[method] as (...args: unknown[]) => Promise<unknown>;
+    const start = (host[method] as (...args: unknown[]) => Promise<unknown>).bind(host);
     Object.assign(gated, { [method]: (...args: unknown[]) => gate.run(() => start(...args)) });
   }
   return gated;
