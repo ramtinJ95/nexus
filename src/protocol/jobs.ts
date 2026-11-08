@@ -21,15 +21,6 @@ import {
 } from "../ids.ts";
 import { imageId, nodeNameSchema, objectAs, pylonIdField, sha256, templateId } from "./fields.ts";
 
-export type Job =
-  | { kind: "spawn"; pylonId: PylonId; boot: BootInputs; live: LiveSpec; liveHash: LiveHash; relaunch?: false }
-  | { kind: "pause"; pylonId: PylonId; checkpoint: CheckpointId; retry?: boolean }
-  | { kind: "delete"; pylonId: PylonId }
-  | { kind: "build-image"; image: ImageId; recipe: ImageRecipe }
-  | { kind: "build-template"; template: TemplateId; inputs: TemplateBuildInputs }
-  | { kind: "fetch-artifact"; artifact: ArtifactId; from: NodeName; sha256: string }
-  | { kind: "drop-artifact"; artifact: PortableArtifactId };
-
 /**
  * spawn means "make this pylon run and look like `live`". It is Amp's spawn plus wake plus "re-apply the
  * live spec". If the VM already runs, `boot` is ignored and only `live` is applied (previews published,
@@ -43,6 +34,15 @@ export type Job =
  * checkpoint, which the stopped pylon's observation reports. delete removes the VM, its checkpoint,
  * and its previews. Deleting an absent pylon succeeds.
  */
+export type Job =
+  | { kind: "spawn"; pylonId: PylonId; boot: BootInputs; live: LiveSpec; liveHash: LiveHash; relaunch?: false }
+  | { kind: "pause"; pylonId: PylonId; checkpoint: CheckpointId; retry?: boolean }
+  | { kind: "delete"; pylonId: PylonId }
+  | { kind: "build-image"; image: ImageId; recipe: ImageRecipe }
+  | { kind: "build-template"; template: TemplateId; inputs: TemplateBuildInputs }
+  | { kind: "fetch-artifact"; artifact: ArtifactId; from: NodeName; sha256: string }
+  | { kind: "drop-artifact"; artifact: PortableArtifactId };
+
 export const jobDeadlineMs: { readonly [K in Job["kind"]]: number } = {
   spawn: 5 * 60_000,
   pause: 5 * 60_000,

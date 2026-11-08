@@ -13,10 +13,8 @@ export function checkBackend(imageDir: string, stateRoot: string, options: Parti
   return { backend, image: basename(imageDir) as ImageId };
 }
 
-/** A pylon with no previews and no overlay. */
 export const emptyLive: LiveSpec = { previews: [], overlay: [] };
 
-/** A pylon with 2 CPUs and an 8 GiB disk that clones a pinned commit of octocat/Hello-World. */
 export function checkBoot(pylonId: PylonId, image: ImageId, source: BootInputs["source"], { memoryGiB, allowedHosts = ["github.com"], dotfiles = { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" } }: {
   memoryGiB: number;
   allowedHosts?: readonly string[];

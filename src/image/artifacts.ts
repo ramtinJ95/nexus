@@ -1,9 +1,4 @@
 /**
- * A node's store of images and templates: one immutable directory <root>/<id>/ per artifact, holding the files
- * its archive carries and its manifest. The root is the same path on every node, so a template's qcow2 backing
- * file, its image's rootfs, resolves after a copy. Gondolin also rebases a disk whose image moved when it boots
- * it (S7). Checkpoints are not here: each lives in its pylon's instance and never leaves its node.
- *
  * Streamed copies between the nodes broke off in S7, so a copy is verified before anything uses it. import
  * stages the whole stream in a file, checks its sha256 against the manifest, and only then unpacks it and
  * renames it in. A crash leaves only <id>.partial, <id>.partial.archive or .<id>.dropping, and only while

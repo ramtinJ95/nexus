@@ -7,8 +7,7 @@
  * rename). A CheckpointId names that disk as the pause that wrote it, in a sidecar file in the instance
  * directory that list() reads back. ensurePaused writes the ID as `pausing` before it stops the VM and
  * moves it to `checkpoint` after, so a probe that dies between the two still reports a stopped disk under
- * the pause that wrote it. A resume boots whatever disk the instance holds. Checkpoints therefore exist
- * only on their own node, one per pylon.
+ * the pause that wrote it. A resume boots whatever disk the instance holds.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { chmod, readdir, readFile, rm } from "node:fs/promises";
@@ -47,7 +46,7 @@ export interface PylonVmBackendOptions {
    */
   stateRoot: string;
   /**
-   * The artifact store (artifacts.ts), at the same path on every node. Each image is <artifacts>/<image ID>/, a
+   * The artifact store. Each image is <artifacts>/<image ID>/, a
    * Gondolin asset directory with its image.json, and each template is <artifacts>/<template ID>/.
    */
   artifacts: string;

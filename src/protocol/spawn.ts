@@ -10,7 +10,6 @@ export const gitIdentitySchema = z.strictObject({
 });
 export type GitIdentity = z.infer<typeof gitIdentitySchema>;
 
-/** The CPUs, memory and disk a pylon boots with. */
 export interface PylonResources { cpus: number; memoryGiB: number; diskGiB: number }
 
 /**

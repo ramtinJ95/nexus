@@ -1,17 +1,12 @@
 /**
- * Template image contract: the base pylon image, project templates, and how both reach nodes.
- *
- * Everything a node stores is an immutable, content-named artifact. The control plane decides what gets
- * built, where, and which node fetches what. Probes only build, serve, fetch and drop on command.
- * Dependencies run one way: a checkpoint or template depends on its image, never the reverse.
+ * The control plane decides what gets built, where, and which node fetches what. Probes only build, serve,
+ * fetch and drop on command.
  */
 import { z } from "zod";
 import type { PylonResources } from "./spawn.ts";
 import { canonicalSha256 } from "../util/canonical-sha256.ts";
 import { compare } from "../util/compare.ts";
 import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
-
-// The base image.
 
 /**
  * Lives in this repo under images/pylon/ and is sent inline in the build-image job:
@@ -115,10 +110,6 @@ export interface ImageManifest {
   sha256: string; // of the sparse archive peers fetch, artifactArchive in src/image/artifacts.ts
 }
 
-// buildImage, which runs on the image build node, lives in src/image/build.ts.
-
-// Project templates.
-
 /**
  * A template is keyed on what changes setup's result. Unlike Amp, editing .nexus/setup produces a new
  * key, because with one user the edit is the moment the change should take effect. Like Amp, a template
@@ -151,5 +142,5 @@ export interface TemplateManifest {
   builtAt: string;
   sha256: string; // of the archive peers fetch, artifactArchive in src/image/artifacts.ts
 }
-/** What a peer sends ahead of an artifact's archive. A checkpoint has none, because it never leaves its node. */
+/** What a peer sends ahead of an artifact's archive. */
 export type ArtifactManifest = ImageManifest | TemplateManifest;

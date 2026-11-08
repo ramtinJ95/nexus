@@ -65,7 +65,6 @@ export interface VmBackend {
   processes(): Promise<readonly { pylonId: PylonId; pid: number }[] | null>;
 }
 
-/** What every backend reports of a pylon, whatever its VM's state. */
 interface BackendPylonBase {
   pylonId: PylonId;
   checkpoint: CheckpointId | null; // the checkpoint the current disk was last written as
@@ -77,7 +76,6 @@ interface BackendPylonBase {
   holds?: Pick<BootInputs["resources"], "cpus" | "memoryGiB" | "diskGiB">;
 }
 
-/** A pylon's VM state, with what each state carries. */
 export type BackendVm =
   | { vm: "running"; bootedAt: string; notAnswering?: GuestNotAnswering }
   /**
@@ -115,20 +113,19 @@ export interface Guest {
   previewOrigin(service: string): PreviewOrigin | { unavailable: string };
 }
 
-/** A plain-HTTP loopback origin. */
 export type PreviewOrigin = `http://127.0.0.1:${number}`;
 
 /**
  * Immutable directories under /var/lib/nexus/artifacts/<id>/ with a manifest, at the same path on every
- * node, because checkpoints and templates are qcow2 overlays whose backing file is the image's rootfs.
- * Only images and templates move between nodes (src/image/artifacts.ts). A checkpoint holds the pylon's Claude and pi
- * logins and stays in its pylon's instance on its own node.
+ * node, because checkpoints and templates are qcow2 overlays whose backing file is the image's rootfs, so a
+ * template's backing file resolves after a copy. Gondolin also rebases a disk whose image moved when it boots it
+ * (S7). Only images and templates move between nodes (src/image/artifacts.ts). A checkpoint holds the pylon's
+ * Claude and pi logins and stays in its pylon's instance on its own node.
  */
 export interface ArtifactStore {
   /** The images and templates this node holds. The probe adds its stopped pylons' checkpoints. */
   list(): Promise<readonly PortableArtifactId[]>;
   has(id: PortableArtifactId): Promise<boolean>;
-  /** The manifest of an image or template this node holds, or null. */
   manifest(id: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** The sparse archive a peer's GET /v1/artifacts/{id} streams, and the manifest whose sha256 it hashes to. */
   export(id: PortableArtifactId): Promise<{ manifest: ArtifactManifest; stream: Readable }>;
@@ -140,33 +137,8 @@ export interface ArtifactStore {
   bytes(id: PortableArtifactId): Promise<number | null>;
 }
 
-/** Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env. */
-/** `names` lists the secrets the node holds, which its probe reports. Values never leave the node. */
-export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
-
-// The pylon VM backend, createPylonVmBackend, lives in src/backends/pylon-vm/pylon-vm-backend.ts.
-
 /**
- * It drives src/pylon-vm/, a hard fork of pi-sandbox (MIT) that Nexus owns and does not track upstream.
- * src/pylon-vm/FORK.md names the upstream commit and every edit. pi-sandbox stays the reference to compare
- * against. Kept from it: the detached controller per instance, the checkpoint written to disk.next.qcow2 and
- * renamed, template prepare and copy, the services supervisor and the port linking behind previews.
- *
- * Done: config is a typed object, and a fresh boot clones and runs preSetup and `.nexus/setup` as `user`.
- * Secrets reach createHttpHooks from the probe's SecretSource, never from the instance record, and are never
- * written into the guest, though a granted host that echoes one back shows it to the guest (change 1).
- * Network policy, secrets and resources are inputs to every start, and only the image and the disk size are
- * fixed at create (change 2). Git over SSH is terminated on the host. Every boot writes the overlay and pulls
- * the dotfiles, every boot after the first runs `.nexus/resume`, and every spawn rewrites the overlay.
- * A template is the fork's prepare published into the artifact store (src/backends/pylon-vm/pylon-vm-templates.ts). A pylon booted
- * from one copies its disk in, and its first boot checks out the pylon's own commit and runs `.nexus/resume`.
- * Images and templates move between nodes as verified ArtifactStore archives (src/image/artifacts.ts).
- * Requests to http://nexus.pylon go to the probe's Unix socket with the instance name attached (change 4).
- * Still to change in the fork:
- * 3. A service's PUBLIC_URL is the URL the probe assigned, not a localhost preview.
- * 5. Instance export and import, for moving a paused pylon's checkpoint to another node.
- * 6. The session relaunch from ~/.nexus/sessions.json.
- * The image needs pi-sandbox's `sandboxssh` helper for `shell` and streams, and openssh-client for git over SSH.
+ * Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env.
+ * `names` lists the secrets the node holds, which its probe reports. Values never leave the node.
  */
-
-// The Docker test double, createDockerBackend, lives in docker-backend.ts.
+export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
