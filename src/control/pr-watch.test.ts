@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { openRegistry } from "./registry.ts";
-import { testPr, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
+import { testPr, testPylon, testRegistry, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { desiredPhase, ingest } from "./reconcile.ts";
 import { fakeGuest } from "../backends/fake-guest.ts";
 import { gitFacts } from "../probe/guest/git-facts.ts";
@@ -30,7 +30,7 @@ function fixture(path = ":memory:") {
     const thread = testThread({ id: id as ThreadId, title: "test", project: project.id, conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
     registry.createThread(thread, pylon, claude ? "/poteto-mode fix it" : undefined);
-    if (claude) registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, "c0ffee00-0000-4000-8000-000000000000");
+    if (claude) claudeWorkerAt(registry, thread.id, "started", { session: "c0ffee00-0000-4000-8000-000000000000" });
     if (output !== null) registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: output });
     return thread.id;
   }

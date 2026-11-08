@@ -9,7 +9,7 @@ import { openRegistry, type Registry } from "./registry.ts";
 import type { StoredPylon } from "./thread-store.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
 import { reviewPrefix } from "./agent-protocol.ts";
-import { seedRegistry, testPylon, testProject, testRegistry, testReview, testThread } from "../test-support/registry-kit.ts";
+import { seedRegistry, testPylon, testProject, testRegistry, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 import { migrations } from "./schema.ts";
 import type { QueuedRecord } from "./queue-store.ts";
@@ -39,12 +39,12 @@ const dir = await tempDir("nexus-registry-");
 const tempDb = () => join(dir, `${randomUUID()}.db`);
 const capacity = testCapacity({ committedMemoryGiB: 8, diskFreeGiB: 400 });
 
-function seed(registry: Registry) {
+function seed(registry: Registry, claudePrompt?: string) {
   seedRegistry(registry, { project });
-  registry.createThread(thread, pylon);
+  registry.createThread(thread, pylon, claudePrompt);
   return registry;
 }
-const seeded = (t: TestContext, path: string, clock?: () => number) => seed(testRegistry(t, path, clock));
+const seeded = (t: TestContext, path: string, clock?: () => number, claudePrompt?: string) => seed(testRegistry(t, path, clock), claudePrompt);
 
 test("records survive closing and reopening the file", async (t) => {
   const path = tempDb();
@@ -282,9 +282,9 @@ test("a registry from a newer control plane is refused", async (t) => {
 });
 
 /** Another thread's pylon on `on`, for tests that need neighbours. */
-function addPylon(registry: ReturnType<typeof openRegistry>, id: string, on: NodeName = node): PylonId {
+function addPylon(registry: ReturnType<typeof openRegistry>, id: string, on: NodeName = node, claudePrompt?: string): PylonId {
   const other = `pylon-${id}` as PylonId;
-  registry.createThread({ ...thread, id: id as ThreadId, pylonId: other }, { ...pylon, thread: id, pylonId: other, node: on, boot: { ...pylon.boot, pylonId: other } });
+  registry.createThread({ ...thread, id: id as ThreadId, pylonId: other }, { ...pylon, thread: id, pylonId: other, node: on, boot: { ...pylon.boot, pylonId: other } }, claudePrompt);
   return other;
 }
 const ports = { first: 10200, last: 10209 };
@@ -1123,10 +1123,8 @@ test("a background command still running at the cap, such as a dev server, ends 
 
 test("only the stalled worker's launch session restores normal reply and seen attention", (t) => {
   const path = tempDb();
-  const first = seed(openRegistry(path));
-  first.setClaudeWorker(threadId, "hello", "starting", undefined, "launch-session");
-  first.setClaudeWorker(threadId, "hello", "stalled", "Choose the text style");
-  first.appendEvent("thread.failed", threadId, { message: "Choose the text style" });
+  const first = seed(openRegistry(path), "hello");
+  claudeWorkerAt(first, threadId, "stalled", { session: "launch-session", message: "Choose the text style" });
   first.close();
   const registry = testRegistry(t, path);
   let sequence = 0;
@@ -1275,8 +1273,8 @@ test("a Claude worker's messages answer their resends, and its transcript and me
 });
 
 test("a Claude worker whose transcript ends on a usage limit is limited until a turn starts or a prompt follows, whichever arrives first", (t) => {
-  const registry = seeded(t, tempDb());
-  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
+  const registry = seeded(t, tempDb(), undefined, "hello");
+  claudeWorkerAt(registry, threadId, "started", { session: "s1" });
   let sequence = 0;
   let offset = 0;
   const report = (kind: "session.turn-started" | "session.turn-ended", at: number) => registry.reportSession(node, { sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind, session: "s1", at } });
@@ -1315,8 +1313,8 @@ test("a Claude worker whose transcript ends on a usage limit is limited until a 
 });
 
 test("a read that ends on a usage limit ends the turn that ran into it, though Claude Code reported no end, and not a later turn", (t) => {
-  const registry = seeded(t, tempDb());
-  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
+  const registry = seeded(t, tempDb(), undefined, "hello");
+  claudeWorkerAt(registry, threadId, "started", { session: "s1" });
   let sequence = 0;
   let offset = 0;
   const report = (at: number) => registry.reportSession(node, { sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind: "session.turn-started", session: "s1", at } });
@@ -1338,7 +1336,7 @@ test("a read that ends on a usage limit ends the turn that ran into it, though C
 
 /** A Claude worker on session s1 whose transcript reads and pylon reports of waiting asks the test makes, as the reader would. */
 function claudeAsking(registry: ReturnType<typeof seeded>) {
-  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s1");
+  claudeWorkerAt(registry, threadId, "started", { session: "s1" });
   let offset = 0;
   return {
     waiting: (...asks: WaitingAsk[]) => registry.setWaitingAsks(threadId, asks),
@@ -1352,7 +1350,8 @@ const askCall = (id: string, at: number): ClaudeEntry => ({ kind: "tool", at, id
 const answered = (id: string, at: number): ClaudeEntry => ({ kind: "result", at, toolUseId: id, output: 'User has answered your questions: "Which drink?"="Tea".', isError: false });
 
 test("a Claude worker's AskUserQuestion is a question while its pylon reports the dialog waiting, though the transcript holds no call yet, and is withdrawn once a report leaves it out or the transcript holds its result", (t) => {
-  const registry = seeded(t, tempDb());
+  const path = tempDb();
+  const registry = seeded(t, path, undefined, "hello");
   const { waiting, append, asks } = claudeAsking(registry);
   append({ kind: "prompt", at: 40, text: "Make me a drink", from: "person" });
   assert.equal(waiting(waitingAsk("t1", 50)), true);
@@ -1374,12 +1373,16 @@ test("a Claude worker's AskUserQuestion is a question while its pylon reports th
 
   waiting(waitingAsk("t3", 80), waitingAsk("t4", 81, "person-session"));
   assert.deepEqual(asks(), [["ask-t3", null]], "another Claude's ask in the pylon, such as the person's own, asks nothing");
-  registry.setClaudeWorker(threadId, "hello", "started", undefined, "s2");
+  // A worker's session changes under no launch Nexus sends now, so the test writes it, and moves the worker to have it reconciled.
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE claude_workers SET session = 's2' WHERE thread = ?").run(threadId);
+  raw.close();
+  registry.moveClaudeWorker(threadId, { to: "started" });
   assert.deepEqual(asks(), [], "the worker started again on another session");
 });
 
 test("an answered ask stays answered whatever the pylon reports, and a withdrawn one is not asked again before the next report", (t) => {
-  const registry = seeded(t, tempDb());
+  const registry = seeded(t, tempDb(), undefined, "hello");
   const { waiting, append, asks } = claudeAsking(registry);
   waiting(waitingAsk("t1", 50));
   registry.answerQuestion(registry.question("ask-t1")!, { option: "Drink: Tea", by: "nLAPTOP" as TailnetNodeId, at: 55, choices: [{ picked: ["Tea"] }] });
@@ -1399,7 +1402,7 @@ test("an answered ask stays answered whatever the pylon reports, and a withdrawn
 });
 
 test("archiving or deleting a Claude worker's thread withdraws its asks, and a report that lands after asks nothing", (t) => {
-  const registry = seeded(t, tempDb());
+  const registry = seeded(t, tempDb(), undefined, "hello");
   const { waiting, asks } = claudeAsking(registry);
   for (const status of ["archived", "deleted"] as const) {
     waiting(waitingAsk("t1", 50));
@@ -1614,6 +1617,35 @@ test("a pylon's failure is the thread.failed event its pylon appended, until a r
   assert.ok(registry.failure(threadId)!.event > first.event, "the same reason after a retry is a new failure");
 });
 
+test("a pylon's failure is found by its event's cause, not its message, so a Claude worker failure with the same text is not it", (t) => {
+  const registry = seeded(t, tempDb(), undefined, "hello");
+  const reason = "pylon is broken: the controller exited";
+  registry.savePylon({ ...pylon, failed: reason });
+  const failure = registry.failure(threadId)!;
+  claudeWorkerAt(registry, threadId, "failed", { message: reason });
+  assert.deepEqual(registry.events("0", { kinds: ["thread.failed"] }).map((e) => e.payload), [{ message: reason, cause: "pylon" }, { message: reason, cause: "claude-worker" }]);
+  assert.deepEqual(registry.failure(threadId), failure);
+});
+
+test("an older control plane's thread.failed, which names no cause, is the pylon's failure once the registry opens again", () => {
+  const path = tempDb();
+  const first = seed(openRegistry(path));
+  first.savePylon({ ...pylon, failed: "pylon is broken: the controller exited" });
+  first.appendEvent("thread.failed", threadId, { message: "something else failed" });
+  first.close();
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE events SET payload = json_remove(payload, '$.cause') WHERE kind = 'thread.failed'").run();
+  raw.close();
+  const registry = openRegistry(path);
+  try {
+    const events = registry.events("0", { kinds: ["thread.failed"] });
+    assert.deepEqual(events.map((e) => e.payload), [{ message: "pylon is broken: the controller exited", cause: "pylon" }, { message: "something else failed" }]);
+    assert.equal(registry.failure(threadId)?.event, Number(events[0]!.id));
+  } finally {
+    registry.close();
+  }
+});
+
 test("a judgment is saved only over the record as it was read, with what it does in the same transaction", (t) => {
   const registry = seeded(t, tempDb());
   const judgment = {
@@ -1694,7 +1726,7 @@ function sessionFactThreads(registry: ReturnType<typeof seeded>) {
     sequence: ++sequence, pylon: `pylon-${id}` as PylonId, time: 1000 + sequence, event: { kind, session: "s1", at, ...(message === undefined ? {} : { message }) },
   });
   const limited = (id: string) => {
-    registry.setClaudeWorker(id as ThreadId, "hello", "started", undefined, "s1");
+    claudeWorkerAt(registry, id as ThreadId, "started", { session: "s1" });
     report(id, "session.turn-started", 40);
     registry.appendClaudeRead(id as ThreadId, { session: "s1", from: transcriptStart, cursor: cursorAt(10), reset: false, readAt: 10, entries: [
       { kind: "prompt", at: 40, text: "go", from: "person" }, { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } },
@@ -1708,9 +1740,9 @@ function sessionFactThreads(registry: ReturnType<typeof seeded>) {
   report("th-waiting", "session.waiting", 10, "a dev server still runs");
   addPylon(registry, "th-waiting-bare");
   report("th-waiting-bare", "session.waiting", 10);
-  addPylon(registry, "th-limited");
+  addPylon(registry, "th-limited", node, "hello");
   limited("th-limited");
-  addPylon(registry, "th-resumed");
+  addPylon(registry, "th-resumed", node, "hello");
   limited("th-resumed");
   report("th-resumed", "session.turn-started", 58);
   report("th-resumed", "session.turn-ended", 59);
@@ -1833,8 +1865,8 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
 test("a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()", (t) => {
   const registry = seeded(t, tempDb());
   const stopped = (id: string, after: number) => {
-    addPylon(registry, id);
-    registry.setClaudeWorker(id as ThreadId, "hello", "started", undefined, "s1");
+    addPylon(registry, id, node, "hello");
+    claudeWorkerAt(registry, id as ThreadId, "started", { session: "s1" });
     const bookkeeping = Array.from({ length: after }, (_, i): ClaudeEntry => ({ kind: "turn", at: 60 + i, durationMs: 1 }));
     registry.appendClaudeRead(id as ThreadId, { session: "s1", from: transcriptStart, cursor: cursorAt(10), reset: false, readAt: 10, entries: [
       ...Array.from({ length: 30 }, (_, i) => reply(i)), { kind: "notice", at: 50, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } }, ...bookkeeping,

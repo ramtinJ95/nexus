@@ -5,7 +5,7 @@ import { cpSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { testPr, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
+import { testPr, testPylon, testRegistry, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { agentInbox, type Inbox } from "./inbox.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { builderNudger } from "./nudge.ts";
@@ -101,7 +101,7 @@ function fixture(t: import("node:test").TestContext) {
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: `https://github.com/${repo}.git`, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: `https://github.com/${repo}.git`, ref: "main" } } });
     if (options.claude) {
       registry.createThread(thread, pylon, "build the cache", "claude-opus-5-5");
-      registry.setClaudeWorker(thread.id, "build the cache", "started", undefined, session);
+      claudeWorkerAt(registry, thread.id, "started", { session });
       claudes.add(thread.id);
       claudeSeq.set(thread.id, 0);
       transcript(thread.id, [{ kind: "prompt", at: 1, text: "build the cache", from: "person" }]);

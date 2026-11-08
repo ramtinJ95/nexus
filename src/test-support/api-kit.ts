@@ -1,4 +1,5 @@
 /** The API wired as the control plane wires it, over a fake harness and probe, for the API, dashboard and CLI suites. */
+import { claudeWorkerAt } from "./registry-kit.ts";
 import type { DeploymentOptions } from "../control/api/release-routes.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -302,7 +303,7 @@ export async function withClaude(t: import("node:test").TestContext) {
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
   const thread = started.body as Thread;
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, claudeSession);
+  claudeWorkerAt(s.registry, thread.id, "started", { session: claudeSession });
   const projects = await tempDir("nexus-claude-projects-", t);
   await mkdir(join(projects, "-home-user-workspace-repo"));
   // The asks the pylon's hook reports waiting, which a test sets.

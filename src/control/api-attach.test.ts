@@ -1,4 +1,5 @@
 /** The attach route, which carries a terminal over a WebSocket. */
+import { claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -137,7 +138,7 @@ test("a Claude worker's attach lands in the pane of its Claude session, one that
   const s = await withThread(t, { attachTiming: fastAttach });
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
   const claude = { ...s, thread: started.body as Thread };
-  s.registry.setClaudeWorker(claude.thread.id, "/poteto-mode fix it", "started", undefined, claudeSession);
+  claudeWorkerAt(s.registry, claude.thread.id, "started", { session: claudeSession });
   const session = (herdrPane: string, harness: "shell" | "claude-code", harnessSessionId: string | null) => ({ id: herdrPane, state: "running" as const, herdrPane, harness, harnessSessionId, status: "idle" as const, title: "x", message: null });
   observeRunning(claude, {});
   s.registry.apply({ record: "sessions", pylonId: claude.thread.pylonId, sessions: [session("w1:p1", "shell", null), session("w2:p1", "claude-code", "another-session"), session("w3:p1", "claude-code", claudeSession)] });

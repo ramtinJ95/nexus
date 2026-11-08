@@ -1,4 +1,5 @@
 import { test, type TestContext } from "node:test";
+import { claudeWorkerAt } from "../test-support/registry-kit.ts";
 import assert from "node:assert/strict";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadRow } from "./wire.ts";
@@ -10,8 +11,8 @@ const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
 const image = testImage();
 
-/** A thread whose Claude worker runs in session `builder`, and a reporter of its pylon's session events. */
-async function claudeThread(t: TestContext) {
+/** A Claude worker thread whose launch opened session builder, and started it unless `failed` says why it failed. */
+async function claudeThread(t: TestContext, failed?: string) {
   const s = await testApi(t, { allowed: new Set([laptop]), probes: new Map() });
   assert.equal((await s.call("POST", "/v1/projects", {
     id: "acme", repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
@@ -19,10 +20,10 @@ async function claudeThread(t: TestContext) {
   })).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   s.registry.setCurrentImage(image.id as ImageId);
-  const res = await s.call("POST", "/v1/threads", { project: "acme", title: "Fix checkout" });
+  const res = await s.call("POST", "/v1/threads", { project: "acme", title: "Fix checkout", claude: "Fix checkout" });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   const thread = res.body as Thread;
-  s.registry.setClaudeWorker(thread.id, "Fix checkout", "started", undefined, "builder");
+  claudeWorkerAt(s.registry, thread.id, failed === undefined ? "started" : "failed", { session: "builder", ...failed === undefined ? {} : { message: failed } });
   let sequence = 0;
   const report = (kind: "session.turn-started" | "session.turn-ended" | "session.ended", session: string) =>
     s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session, at: Date.now() + sequence } });
@@ -68,8 +69,7 @@ test("a new session in the worker's pane after /clear replies when its turn ends
 });
 
 test("a Claude run by hand after a failed launch replies when its turn ends", async (t) => {
-  const { report, row, registry, thread } = await claudeThread(t);
-  registry.setClaudeWorker(thread.id, "Fix checkout", "failed", "claude exited", "builder");
+  const { report, row, registry, thread } = await claudeThread(t, "claude exited");
   report("session.turn-started", "by-hand");
   report("session.turn-ended", "by-hand");
   assert.notEqual((await row()).lastReplyAt, null);

@@ -8,7 +8,7 @@ import type { QueuedThread } from "../../contract/threads.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadDetail } from "../wire.ts";
 import { detailText } from "../../cli/thread-text.ts";
-import { addThread, observeNode, testPr, testReview } from "../../test-support/registry-kit.ts";
+import { addThread, observeNode, testPr, testReview, claudeWorkerAt } from "../../test-support/registry-kit.ts";
 import { personPhase, type Review } from "../review-model.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { HoldsQuestion } from "../questions.ts";
@@ -652,9 +652,9 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   s.registry.reportSession(node, { sequence: 1, pylon: dialog.pylonId, time: now, event: { kind: "session.waiting", session: "s1", at: now, message: "Claude needs your permission to use Bash" } });
   s.registry.recordReply(dialog.id, now);
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "beta", title: "Port the CLI", claude: "port it" })).text) as Thread;
-  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete: executable missing");
+  claudeWorkerAt(s.registry, failed.id, "failed", { message: "Claude launch did not complete: executable missing" });
   const limited = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Write the docs", claude: "write them" })).text) as Thread;
-  s.registry.setClaudeWorker(limited.id, "write them", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, limited.id, "started", { session: "s1" });
   const resetsAt = now + 3_600_000;
   assert.ok(s.registry.appendClaudeRead(limited.id, { session: "s1", from: transcriptStart, entries: [{ kind: "notice", at: Date.now(), tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: now }));
   const replied = await s.start("acme", "Answer a reply");
@@ -698,7 +698,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
   const asked = await s.start("acme", "Rebuild the image");
   s.registry.askQuestion({ kind: "judgment", id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "beta", title: "Port the CLI", claude: "port it" })).text) as Thread;
-  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete: executable missing");
+  claudeWorkerAt(s.registry, failed.id, "failed", { message: "Claude launch did not complete: executable missing" });
   const approved = await s.start("acme", "Name the TTL");
   s.registry.saveReview(approvedReview(approved.id, { kind: "approved" }, { id: "rv-8", reviewer: "th-reviewer-8" as ThreadId, pr: { repo: "acme/nexus", number: 8, url: "https://github.com/acme/nexus/pull/8", title: "TTL", branch: "ttl" } }));
   s.registry.savePrWatch(approved.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 8, title: "TTL", state: "closed" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
@@ -887,8 +887,8 @@ test("every source of a thread's decision has a card on its page with the action
 
 test("a Claude worker Nexus stopped resuming has a card on its page and in Needs you that says why and writes to it", async (t) => {
   const s = await seeded(t, landingOptions());
-  const th = await s.start("acme", "Kept dying");
-  s.registry.setClaudeWorker(th.id, "fix it", "started", undefined, "s1");
+  const th = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Kept dying", claude: "fix it" })).text) as Thread;
+  claudeWorkerAt(s.registry, th.id, "started", { session: "s1" });
   const why = "Its turn died 4 times in a row (last: API Error: Request timed out.), so Nexus stopped resuming it.";
   s.registry.saveClaudeResume(th.id, { state: "person", turn: Date.now(), count: 3, why });
   const page = (await s.call("GET", `/threads/${th.id}`)).text;
@@ -923,7 +923,7 @@ test("acting on a card through the route its button calls takes the card off the
   const asked = await s.start("acme", "Rebuild the image");
   s.registry.askQuestion({ kind: "judgment", id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
-  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
+  claudeWorkerAt(s.registry, failed.id, "failed", { message: "Claude launch did not complete" });
   assert.equal(needsCount((await s.call("GET", "/")).text), "3");
 
   assert.equal((await s.call("POST", "/v1/questions/qn-image/answer", { option: "Not now" })).status, 200);
@@ -940,7 +940,7 @@ test("acting on a card through the route its button calls takes the card off the
 test("every page links Needs you with its count in the sidebar, and on a phone from its bar, and no page's title counts it", async (t) => {
   const s = await seeded(t);
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
-  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
+  claudeWorkerAt(s.registry, failed.id, "failed", { message: "Claude launch did not complete" });
   for (const path of ["/", "/usage", "/cluster", `/threads/${failed.id}`, "/threads/th-000000000000"]) {
     const page = (await s.call("GET", path)).text;
     assert.match(page, /<a class="side-link" href="\/#needs-you">[\s\S]*?Needs you<span class="side-count" id="needs-count" data-live>1<\/span><\/a>/, path);
@@ -1127,7 +1127,7 @@ test("the thread page shows a paused session as resuming on wake, or on unarchiv
 test("the thread page's sessions open, show in the terminal and close from the page, but not the Claude worker's own, and an archived thread's do none", async (t) => {
   const s = await seeded(t);
   const worker = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
-  s.registry.setClaudeWorker(worker.id, "port it", "started", undefined, "5f0c");
+  claudeWorkerAt(s.registry, worker.id, "started", { session: "5f0c" });
   s.observe(worker);
   s.registry.apply({ record: "sessions", pylonId: worker.pylonId, sessions: [
     { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "5f0c", title: "Port the CLI", status: "working", message: null },
@@ -1960,7 +1960,7 @@ async function claudeThread(s: Awaited<ReturnType<typeof seeded>>, entries: Clau
   const res = await s.call("POST", "/v1/threads", { project: "acme", title: "Count lines", claude: "count the lines" });
   assert.equal(res.status, 201, res.text);
   const thread = JSON.parse(res.text) as Thread;
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt }));
   return thread;
 }
@@ -2292,8 +2292,7 @@ test("a failed Claude worker's dashboard agrees with its registry event and API 
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "worker", claude: "fix it", model: "custom-model" });
   const id = JSON.parse(started.text).id;
   const message = "Claude launch did not complete: executable missing";
-  s.registry.setClaudeWorker(id, "fix it", "failed", message);
-  s.registry.appendEvent("thread.failed", id, { message });
+  claudeWorkerAt(s.registry, id, "failed", { message });
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${id}`)).text);
   assert.deepEqual(detail.claudeWorker, { state: "failed", model: "custom-model", message });
   assert.equal(detail.attention, "failed");
@@ -2307,7 +2306,7 @@ test("a failed Claude worker's dashboard agrees with its registry event and API 
 test("a Claude worker stopped on its usage limit shows the stop and when the limit resets", async (t) => {
   const s = await seeded(t);
   const id = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "worker", claude: "fix it" })).text).id;
-  s.registry.setClaudeWorker(id, "fix it", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, id, "started", { session: "s1" });
   const resetsAt = Date.now() + 3_600_000;
   const entries: ClaudeEntry[] = [{ kind: "notice", at: Date.now(), tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }];
   assert.ok(s.registry.appendClaudeRead(id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: Date.now() }));
@@ -2683,7 +2682,7 @@ test("the sidebar's Needs you count, the phone's tab and the list count the same
   s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
   assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "Greet by name", message: "Build it.", after: [] })).status, 201);
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
-  s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
+  claudeWorkerAt(s.registry, failed.id, "failed", { message: "Claude launch did not complete" });
   const page = (await s.call("GET", "/")).text;
   const list = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
   assert.deepEqual([...list.matchAll(/<article class="need need-(\w+)"/g)].map((m) => m[1]), ["thread", "held"]);

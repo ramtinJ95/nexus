@@ -1,7 +1,6 @@
 /**
- * The launch of a Claude worker thread's session, moved along before each tick of its pylon. A worker is pending
- * until its pylon runs, starting from when the launch is first sent until the probe answers, and then started,
- * stalled when the launch did not reach a turn, or failed.
+ * The launch of a Claude worker thread's session, moved along before each tick of its pylon through the worker's
+ * states (claude-worker.ts).
  *
  * A launch is fenced under its session before it is sent, so a launch sent again, after a lost probe or a control
  * plane restart, names the same session and the probe finishes that one instead of submitting the task twice.
@@ -15,9 +14,10 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { listsRunning } from "./locator.ts";
 import type { Registry } from "./registry.ts";
-import type { ClaudeWorker, Thread } from "./thread-store.ts";
+import type { ClaudeWorker } from "./claude-worker.ts";
+import type { Thread } from "./thread-store.ts";
 
-type ClaudeLaunchRegistry = Pick<Registry, "appendEvent" | "claudeWorker" | "sealedBoot" | "setClaudeWorker">;
+type ClaudeLaunchRegistry = Pick<Registry, "claudeWorker" | "moveClaudeWorker" | "sealedBoot">;
 
 /** The node's probe and its observe link. */
 export interface LaunchLink {
@@ -41,29 +41,22 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
     // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
     // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
     if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
-      const message = "Claude launch was interrupted; attach to check before starting another session";
-      registry.setClaudeWorker(thread.id, worker.prompt, "failed", message);
-      registry.appendEvent("thread.failed", thread.id, { message });
+      registry.moveClaudeWorker(thread.id, { to: "failed", message: "Claude launch was interrupted; attach to check before starting another session" });
     } else if ((worker?.state === "pending" || worker?.state === "starting") && thread.status === "active" && running) {
       const session = worker.state === "starting" ? worker.session! : randomUUID();
-      registry.setClaudeWorker(thread.id, worker.prompt, "starting", undefined, session);
+      registry.moveClaudeWorker(thread.id, { to: "starting", session });
       return send(thread, worker, session, pylonId, link);
     }
     return "tick";
   }
 
   async function send(thread: Thread, worker: ClaudeWorker, session: string, pylonId: PylonId, link: LaunchLink): Promise<"tick" | "skip"> {
-    // Neither a worker its session's turn started meanwhile nor a launch a shutdown cut off has failed.
-    const unfinished = (state: "stalled" | "failed", why: string) => {
-      if (registry.claudeWorker(thread.id)?.state === "started" || shutdown.aborted) return false;
-      const message = `Claude launch did not complete; attach to check before starting another session: ${why}`;
-      registry.setClaudeWorker(thread.id, worker.prompt, state, message);
-      registry.appendEvent("thread.failed", thread.id, { message });
-      return true;
-    };
+    // A launch a shutdown cut off has not failed.
+    const unfinished = (to: "stalled" | "failed", why: string) =>
+      !shutdown.aborted && registry.moveClaudeWorker(thread.id, { to, message: `Claude launch did not complete; attach to check before starting another session: ${why}` });
     try {
       const { stalled } = await launchClaude(link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
-      if (stalled === undefined) registry.setClaudeWorker(thread.id, worker.prompt, "started");
+      if (stalled === undefined) registry.moveClaudeWorker(thread.id, { to: "started" });
       else unfinished("stalled", stalled);
     } catch (err) {
       if (!unfinished("failed", (err as Error).message)) return "skip";

@@ -1,13 +1,14 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { appendFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { queryObjects } from "node:v8";
 import { claudeConversations } from "./claude-conversation.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import { addThread, observeNode, seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
+import { addThread, observeNode, seedRegistry, testRegistry, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import type { ClaudeEntry } from "./claude-transcript.ts";
 import { maxEntries } from "../contract/streams.ts";
 import { processStream } from "../process-stream.ts";
@@ -30,7 +31,7 @@ function openOnline(t: Pick<TestContext, "after">): Registry {
 
 function claudeThread(registry: Registry): Thread {
   const { id, pylonId } = addThread(registry, { node, boot: { image }, claudePrompt: "hello" });
-  registry.setClaudeWorker(id, "hello", "started", undefined, session);
+  claudeWorkerAt(registry, id, "started", { session });
   const pylons = [...registry.node(node)?.observation?.pylons ?? [], runningPylon(pylonId, { liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null } })];
   observeNode(registry, { node, probeBootId: "boot-1", artifacts: [image], pylons });
   return registry.thread(id)!;
@@ -123,7 +124,8 @@ test("a deleted thread's reader goes once its last read and its last watch end, 
 });
 
 test("a watched thread's view, which reads on from the last one, holds what the registry stores as reads append, drop, replace or change session", async (t) => {
-  const registry = openOnline(t);
+  const path = join(dir, `${randomUUID()}.db`);
+  const registry = seedRegistry(testRegistry(t, path), { nodes: [node] });
   const thread = claudeThread(registry);
   const projects = await mkdtemp(join(dir, "projects-"));
   await mkdir(join(projects, "-home-user-workspace-repo"));
@@ -158,7 +160,10 @@ test("a watched thread's view, which reads on from the last one, holds what the 
   assert.deepEqual(many, stored());
   assert.deepEqual([many.dropped, texts(many)[0]], [2, "R0"], "a read past the most kept drops the oldest");
   await writeFile(file("another-session"), lines("E"));
-  registry.setClaudeWorker(thread.id, "hello", "started", undefined, "another-session");
+  // A worker's session changes under no launch Nexus sends now, so the test writes it.
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE claude_workers SET session = 'another-session' WHERE thread = ?").run(thread.id);
+  raw.close();
   assert.deepEqual(texts(await shown()), ["E"], "another session's transcript");
   await watch.stop();
   await appendFile(file("another-session"), lines("F"));
