@@ -47,7 +47,7 @@ const shipsFrom = (path: string, ...folders: string[]) => folders.some((f) => pa
 /** Words a change to the allowlist, its hosts or the guest's network names, and a quoted host name, such as an entry in loginHosts, but not a file's. */
 const egressWords = /host|allow|egress|network|\bnet\b|dns|proxy|firewall|tls|\bip|socks|ssh|secret|grant|login|bridge|hook|intercept|portal|publicUrl|\bport|["'`][a-z0-9.-]+\.(?!(json|[cm]?[jt]s|md|log|sock|sh|txt|ya?ml|html|css|py|pid|conf|service|timer|env|lock|gz|img|qcow2)["'`])[a-z]{2,}["'`]/i;
 const modeWords = /chmod|chown|umask|0o[0-7]{3}/;
-const authWords = new RegExp(`whois|caller|allowed|person|deployer|mayLand|canDeploy|isPerson|isReporter|admit|access|trust|peer|identity|auth|token|bearer|40[13]|control.?(plane|node)|tailnet|login|join|refuse|secret|redact|\\bopen:|${modeWords.source}`, "i");
+const authWords = new RegExp(`whois|caller|allowed|person|deployer|roleOf|demand|mayLand|isPerson|isReporter|admit|access|trust|peer|identity|auth|token|bearer|40[13]|control.?(plane|node)|tailnet|login|join|refuse|secret|redact|\\bopen:|${modeWords.source}`, "i");
 
 /**
  * Nexus paths that may touch a reserved case, each a file whose every change might, or code whose patch names what the
