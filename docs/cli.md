@@ -214,7 +214,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `backedUpAt` | optional number | On an archived thread only: when the newest backup the control plane has seen verify began, in milliseconds. Its disk waits for one that began after `usageSettledAt` |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
 
-`ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null, and since 0.60.0 `notAnswering` while its guest gives no answer to its guest commands), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, `questions` (every question the thread asked, answered or not, as [Questions](#questions) describes), `judgments` (every judgment of its failed pylon, as [Failure judgments](#failure-judgments) describes), `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`) and since 0.64.0 `resume`, Nexus resuming its turns that died, or null.
+`ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null, and since 0.60.0 `notAnswering` while its guest gives no answer to its guest commands), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, since 0.71.0 `reviewView` (what a Land press does to `review` now, described below, or null) and `keptPastDay` (why an archived thread's disk is kept past its 24 hours, or null, as plain `show` prints it), `questions` (every question the thread asked, answered or not, as [Questions](#questions) describes), `judgments` (every judgment of its failed pylon, as [Failure judgments](#failure-judgments) describes), `attach`, `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`) and since 0.64.0 `resume`, Nexus resuming its turns that died, or null.
 
 ### Attention and shared seen state
 
@@ -383,6 +383,7 @@ PR-watch feedback is forwarded only for GitHub `author_association` values `OWNE
 ```ts
 interface ReleaseView {
   desired: { commit: string; requestedBy: string; requestedAt: number } | null;
+  controlNode: string | null;  // the node the control plane runs on, null when it does not know; since 0.71.0
   nodes: Array<{
     node: string;
     role: "control" | "probe";
@@ -562,6 +563,23 @@ interface ModelFailure { count: number; last: string; retryAt: number }
 Since 0.48.0 a turn that ends because the agent's model failed is not a turn without an answer. A harness thread's turn failed when its last assistant message stopped with `stopReason: "error"`, and a Claude worker's when the newest entry of its transcript, bookkeeping and info notices aside, is an error notice, which is how Claude Code records an API call that failed for good. Such a turn costs no reminder. The phase records the failure as `failing`, and at `retryAt` the loop sends `asked`, the last message, again under a new request ID and the same token, so the round goes on where it was. It waits 2, 5, 10 and then 20 minutes after the first to fourth failures in a row, and a fifth ends the review for the person with the reason `The reviewer's model failed 5 times in a row (last: <error>), in round <n>. Run nexus review again once the provider recovers.`, or the builder's. A turn that ends without the answer and without a failure ends the run of failures and gets a reminder as before. An answer ends the run too, though the builder's push may still be awaited. While `failing` is set the review line of `show` and the dashboard ends with `the reviewer's model is failing (<count> in a row, last: <error>), retrying at <HH:MM> UTC`, or the builder's. A review stored before 0.48.0 has no `asked`, and reads one that asks the agent to carry out Nexus's last request again.
 
 `Verdict` and `Answer` are in [`src/control/review-model.ts`](../src/control/review-model.ts). Each of a verdict's findings has a `priority` of `"P0"` to `"P3"`, as [the merge policy](merge-policy.md) defines them, in place of the `severity` before 0.24.0. A stored finding with `severity` reads `"serious"` as `"P1"` and `"minor"` as `"P3"`. Only P0 to P2 findings block, and the builder answers only those. A verdict's `verdict` is `"approve"` exactly when none of its findings is P0 to P2, whatever the reviewer wrote.
+
+Since 0.71.0 `ThreadDetail.reviewView` says what the merge policy makes of `review` now, so a client shows it without running the policy. It is null when `review` is:
+
+```ts
+interface ReviewView {
+  id: string;        // the review's
+  head: string;      // the latest round's head, which a Land press names
+  ended: boolean;
+  holds: Array<{ code: string; text: string; holdsAgain: boolean; waivable: boolean; why: string }>;
+  // What a Land press does now: stuck on holds no press gets past, or lands past the holds it waives, asking the
+  // reviewer first for its quote of what could not be checked live when `quotes` is true.
+  press: { kind: "stuck"; holds: Array<{ code: string; text: string }> }
+       | { kind: "lands"; waives: Array<{ code: string; text: string }>; quotes: boolean };
+  // The review's open question about its holds, which Land answers to waive them, at the head it was asked at.
+  question: { id: string; head: string; holds: Array<{ code: string; text: string }> } | null;
+}
+```
 
 `label` is the pull request's `needs human review` label. Only a review whose rounds ran out has one: the reviewer still requested changes after the last round, the builder pushed fixes after the last round, `.nexus/check` failed after the last round, the head moved after the last round's approval, or the branch conflicts with its base after the last round. A review that went to the person for any other reason has none.
 
