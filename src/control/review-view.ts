@@ -4,7 +4,7 @@
  */
 import { holdRule, type Hold, type HoldRule } from "./holds.ts";
 import { holdsAt, landPress, type LandPress } from "./policy.ts";
-import { isOpen, type Question } from "./questions.ts";
+import { askingHolds, type Question } from "./questions.ts";
 import { ended, type Review } from "./review-model.ts";
 
 export interface ReviewView {
@@ -23,13 +23,13 @@ export interface ReviewView {
 }
 
 export function reviewView(review: Review, questions: readonly Question[]): ReviewView {
-  const asking = questions.find((q) => isOpen(q) && q.holds?.review === review.id);
+  const asking = askingHolds(questions, review.id);
   return {
     id: review.id,
     head: review.rounds.at(-1)!.head,
     ended: ended(review),
     holds: holdsAt(review).map((h) => ({ ...h, ...holdRule(h.code) })),
     press: landPress(review),
-    question: asking?.holds === undefined ? null : { id: asking.id, head: asking.holds.head, holds: asking.holds.holds },
+    question: asking === undefined ? null : { id: asking.id, head: asking.holds.head, holds: asking.holds.holds },
   };
 }

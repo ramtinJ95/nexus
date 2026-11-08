@@ -11,6 +11,7 @@ import { detailText } from "../../cli/thread-text.ts";
 import { addThread, observeNode, testPr, testReview } from "../../test-support/registry-kit.ts";
 import { personPhase, type Review } from "../review-model.ts";
 import type { ReviewLoop } from "../review.ts";
+import type { HoldsQuestion } from "../questions.ts";
 import type { Judgment } from "../judgment-store.ts";
 import type { AgentCall } from "../agent-usage.ts";
 import type { ImageId, JobId, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../../ids.ts";
@@ -416,10 +417,11 @@ test("a held landing whose live check passed says so with its output, and the re
 const questionsOf = (page: string) => /<div id="questions" data-live>([\s\S]*?)<\/div>\n<div id="nudge"/.exec(page)![1]!;
 
 test("an open question is a card with a button per option, disabled with the reason for a device that may not answer, and an answered question is one line", async (t) => {
-  const s = await seeded(t, landingOptions());
+  const answerHolds = (q: HoldsQuestion, option: string, by: TailnetNodeId) => s.registry.answerQuestion(q, { option, by, at: Date.now() });
+  const s = await seeded(t, { ...landingOptions(), reviews: { ...landingOptions().reviews, answerHolds } as never as ReviewLoop });
   const fix = await s.start("acme", "Fix checkout");
   assert.equal(questionsOf((await s.call("GET", `/threads/${fix.id}`)).text), "", "a thread that asked nothing shows no question region");
-  s.registry.askQuestion({ id: "qn-image", thread: fix.id, text: "Rebuild the pylon image?\n\nIt changes the **base layer**.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "holds", id: "qn-image", thread: fix.id, text: "Rebuild the pylon image?\n\nIt changes the **base layer**.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: Date.now(), holds: { review: "rv-1", head: "h", base: null, holds: [] } });
 
   const card = questionsOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.match(card, /<section class="landing question" data-question="qn-image"/);
@@ -452,7 +454,7 @@ test("an archived thread's withdrawn failure question and its attention read the
   const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
   s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "setup exited 128: fatal: 'origin/feat/gone' is not a commit" });
-  s.registry.askQuestion({ id: "judgment:7", thread: fix.id, failure: 7, text: "The pylon failed on rj-firebat.", options: ["Retry", "Leave it failed"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "judgment:7", thread: fix.id, failure: 7, text: "The pylon failed on rj-firebat.", options: ["Retry", "Leave it failed"], reserved: null, answerer: "person", askedAt: Date.now() });
   assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
 
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail;
@@ -512,7 +514,7 @@ test("an answered AskUserQuestion leaves the dock and shows in the conversation 
   const s = await seeded(t);
   const thread = await claudeThread(s, [askCall("toolu_1", 2)]);
   s.registry.setWaitingAsks(thread.id, [waitingAsk("toolu_1", 2)]);
-  s.registry.answerQuestion("ask-toolu_1", { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.now(), choices: [{ picked: ["Tea"], notes: "no rush" }, { picked: ["Milk"], own: "Oat cream" }] });
+  s.registry.answerQuestion(s.registry.question("ask-toolu_1")!, { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.now(), choices: [{ picked: ["Tea"], notes: "no rush" }, { picked: ["Milk"], own: "Oat cream" }] });
   const terminal = 'User has answered your questions: "Which drink?"="Coffee", "What goes in it?"="Sugar".';
   assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from: { ...transcriptStart, offset: 1 }, readAt: Date.now(), reset: false, cursor: { ...transcriptStart, offset: 2 }, entries: [
     { kind: "result", at: 3, toolUseId: "toolu_1", output: 'User has answered your questions: "Which drink?"="Tea".', isError: false },
@@ -642,7 +644,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }, { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } }));
   s.registry.savePrWatch(held.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 7, title: "Cache", checks: "pending", summary: "Caches the thread list between polls." }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const asked = await s.start("acme", "Rebuild the image");
-  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const claude = await claudeThread(s, [{ kind: "prompt", at: now, text: "Make me a drink", from: "person" }]);
   s.registry.setWaitingAsks(claude.id, [waitingAsk("toolu_1", Date.now())]);
   const dialog = await s.start("acme", "Run the migration");
@@ -694,7 +696,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
   s.registry.savePrWatch(held.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 7, title: "Cache", summary: "Caches the thread list." }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   s.fake.transcript(held.id).messages.push({ role: "user", content: "Cache the list", timestamp: 0 }, assistant([{ type: "text", text: "Opened #7.\n\n```ts\nconst ttl = 5;\n```\n\nIt waits for you to land." }]));
   const asked = await s.start("acme", "Rebuild the image");
-  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "beta", title: "Port the CLI", claude: "port it" })).text) as Thread;
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete: executable missing");
   const approved = await s.start("acme", "Name the TTL");
@@ -759,7 +761,7 @@ test("a thread with several cards says where its work is once, on its first card
   const s = await seeded(t, landingOptions());
   const held = await s.start("acme", "Cache the list");
   s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
-  s.registry.askQuestion({ id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   s.fake.transcript(held.id).messages.push({ role: "user", content: "Cache the list", timestamp: 0 }, assistant([{ type: "text", text: "Opened #7." }]));
   const { cards } = needsOf((await s.call("GET", `/?peek=${held.id}`)).text);
   assert.deepEqual(cards.map((c) => c.kind), ["review", "question"]);
@@ -772,7 +774,7 @@ test("a thread with several cards says where its work is once, on its first card
 test("a thread's card the person picked keeps the mark and the strip across a poll, and a review card without the strip still links its pull request", async (t) => {
   const s = await seeded(t, landingOptions());
   const held = await s.start("acme", "Cache the list");
-  s.registry.askQuestion({ id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() - 60_000 });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-ttl", thread: held.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() - 60_000, failure: 0 });
   s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "reserved-path:auth", text: "Always needs the person." }), { land: { requestedBy: laptop } }));
   s.fake.transcript(held.id).messages.push({ role: "user", content: "Cache the list", timestamp: 0 }, assistant([{ type: "text", text: "Opened #7." }]));
   const pr = /<a class="link" href="https:\/\/github\.com\/acme\/nexus\/pull\/7" [^>]*>#7<\/a>/;
@@ -793,7 +795,7 @@ test("a card's strip links the thread's open pull request once its review ended"
   const thread = await s.start("acme", "Cache the list");
   s.registry.saveReview(approvedReview(thread.id, { kind: "landed", commit: head }));
   s.registry.savePrWatch(thread.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 8, title: "TTL" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
-  s.registry.askQuestion({ id: "qn-ttl", thread: thread.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-ttl", thread: thread.id, text: "Expire after 5 minutes?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const strip = /<p class="need-facts">([\s\S]*?)<\/p>/.exec(needsOf((await s.call("GET", "/")).text).cards.find((c) => c.thread === thread.id)!.html)![1]!;
   assert.match(strip, /href="https:\/\/github\.com\/acme\/nexus\/pull\/8" [^>]*>#8<\/a><\/span>/, "the open #8, without the ended review's round");
   assert.doesNotMatch(strip, /#7/);
@@ -838,7 +840,7 @@ test("every source of a thread's decision has a card on its page with the action
   const nudged = await s.start("acme", "Stopped short");
   s.registry.saveNudge(nudged.id, { state: "person", turn: Date.now() });
   const asked = await s.start("acme", "Rebuild the image");
-  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
 
   const sources = [silent, merged, undeployed, held, nudged, asked];
   const inbox = (await s.call("GET", "/")).text;
@@ -904,7 +906,7 @@ test("a held review waits from when it was held, not from when its review last m
   const held = await s.start("acme", "Cache the list");
   s.registry.saveReview(approvedReview(held.id, { kind: "reviewing" }, { since: Date.now() - 3_600_000 }));
   const asked = await s.start("acme", "Rebuild the image");
-  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() - 1 });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() - 1, failure: 0 });
   const review = approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { since: Date.now() - 3_600_000 });
   s.registry.saveReview(review);
   s.registry.saveReview({ ...review, phase: { ...review.phase, label: { state: "added" } } as Review["phase"] });
@@ -919,7 +921,7 @@ test("acting on a card through the route its button calls takes the card off the
   const held = await s.start("acme", "Cache the list");
   s.registry.saveReview(approvedReview(held.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } }));
   const asked = await s.start("acme", "Rebuild the image");
-  s.registry.askQuestion({ id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-image", thread: asked.id, text: "Rebuild the pylon image?", options: ["Rebuild", "Not now"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
   s.registry.setClaudeWorker(failed.id, "port it", "failed", "Claude launch did not complete");
   assert.equal(needsCount((await s.call("GET", "/")).text), "3");
@@ -1537,7 +1539,7 @@ test("the state bar says the agent waits for the person while a question is open
   };
   assert.deepEqual(await bar(), { state: "idle", text: `Idle nexus attach ${fix.id} Copy`, send: "followUp" });
 
-  s.registry.askQuestion({ id: "qn-ship", thread: fix.id, text: "Ship it?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-ship", thread: fix.id, text: "Ship it?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   assert.deepEqual(await bar(), { state: "waiting", text: `Waiting for you A question waits for your answer, above. nexus attach ${fix.id} Copy`, send: "followUp" });
 
   // A question that does not stop the run, as a planning thread's, leaves a run that works working.
@@ -1545,7 +1547,7 @@ test("the state bar says the agent waits for the person while a question is open
   assert.equal((await bar()).state, "working");
   assert.equal((await bar()).send, "steer");
   s.fake.transcript(fix.id).docs["pi.live"] = {};
-  s.registry.answerQuestion("qn-ship", { option: "Yes", by: laptop, at: Date.now() });
+  s.registry.answerQuestion(s.registry.question("qn-ship")!, { option: "Yes", by: laptop, at: Date.now() });
 
   s.registry.reportSession(node, { sequence: 1, pylon: fix.pylonId, time: Date.now(), event: { kind: "session.waiting", session: "s1", at: Date.now(), message: "Claude needs your permission to use Bash" } });
   const html = (await s.call("GET", `/threads/${fix.id}`)).text;
@@ -2652,7 +2654,7 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.doesNotMatch(await peek(thread), /data-action="(approve|cancel)-item"/, "an item that is a thread has no item actions");
   assert.doesNotMatch(await peek("it-000000000000"), /class="peek"/, "an unknown key previews nothing");
   assert.match(await peek(a.id), /class="peek"/, "an item that became a thread previews as it");
-  s.registry.askQuestion({ id: "qn-greet", thread, text: "Greet in Welsh too?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-greet", thread, text: "Greet in Welsh too?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   assert.doesNotMatch(await peek(a.id), /class="peek"/, "until that thread waits on the person, whose card says so instead");
 });
 
@@ -3028,7 +3030,7 @@ test("a review that asks about its holds has one card in Needs you, the question
   const review = approvedReview(fix.id, personPhase("policy", { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } });
   s.registry.saveReview(review);
   s.registry.replaceQuestions(fix.id, "holds-", {
-    id: "holds-rv-1-a", thread: fix.id, text: `Land pull request #7, "Cache", at ${head.slice(0, 12)}, waiving changes to login or auth?\n- ${reserved}`, options: ["Land", "Leave it"],
+    kind: "holds", id: "holds-rv-1-a", thread: fix.id, text: `Land pull request #7, "Cache", at ${head.slice(0, 12)}, waiving changes to login or auth?\n- ${reserved}`, options: ["Land", "Leave it"],
     reserved: "auth", answerer: "deployer", askedAt: Date.now(), holds: { review: review.id, head, base: "main", holds: [{ code: "reserved-path:auth", text: reserved }] },
   });
   const page = (await s.call("GET", "/")).text;

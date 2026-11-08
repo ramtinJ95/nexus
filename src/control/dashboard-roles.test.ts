@@ -100,7 +100,7 @@ test("a reviewer, check or verify thread's page says in one line whose pull requ
 
 test("a reviewer waiting on the person has its role line on its Needs you card, with no builder track, and says when it quotes", async (t) => {
   const { s, builder, reviewer, review } = await reviewed(t);
-  s.registry.askQuestion({ id: "qn-review", thread: reviewer.id, text: "Run the migration?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now() });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-review", thread: reviewer.id, text: "Run the migration?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const card = (await s.page(`/?peek=${reviewer.id}`)).split('id="needs-you"')[1]!.split(`data-thread="${reviewer.id}"`)[1]!.split("</article>")[0]!;
   assert.doesNotMatch(card, /class="life"/, "no builder track on its card");
   assert.match(textOf(card), /Reviewer of PR #7 for Cache the totals running the checks/);

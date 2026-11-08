@@ -180,7 +180,7 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
   async function pullAsks(id: ThreadId, r: Reader, pylonId: PylonId, probe: Pick<ProbeClient, "stream">) {
     const t = registry.thread(id);
     if (t === undefined) return;
-    const open = registry.questions(id).some((q) => q.ask !== undefined && q.answer === null);
+    const open = registry.questions(id).some((q) => q.kind === "ask" && q.answer === null);
     if (!open && !((r.asksDue || !r.storedNone) && (t.sessionTurnRunning === true || t.sessionWaiting === true))) return;
     r.asksDue = false;
     let asks: WaitingAsk[];

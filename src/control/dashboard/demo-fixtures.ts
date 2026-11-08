@@ -273,7 +273,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         reply: "The node was swapping at the time: 7.8 of 8 GiB swap used. Retrying elsewhere is safest, but infra-testbench is near its memory limit too.",
         phase: { kind: "asked", verdict: { answer: "person", why: "neither node has room for a 4 GiB pylon without overcommitting", by: "judgment" } },
       }, null);
-      d.registry.askQuestion({ id: `judgment:${failure}`, thread: t.id, text: "The pylon failed on rj-firebat while the node was swapping. Retry it there, move it to infra-testbench, or leave it failed?", options: ["Retry on rj-firebat", "Move to infra-testbench", "Leave it failed"], reserved: null, answerer: "person", askedAt: now() - 30 * minute });
+      d.registry.askQuestion({ kind: "judgment", id: `judgment:${failure}`, thread: t.id, failure, text: "The pylon failed on rj-firebat while the node was swapping. Retry it there, move it to infra-testbench, or leave it failed?", options: ["Retry on rj-firebat", "Move to infra-testbench", "Leave it failed"], reserved: null, answerer: "person", askedAt: now() - 30 * minute });
     },
   },
   {
@@ -666,7 +666,7 @@ function seedNodeExtras(d: Demo) {
   d.registry.reportRelease({ node: testbench, role: "probe", commit: "4209370e1c2b5d1a9f0e3b7c6d8a2e4f1b3c5d7e", target: current, state: "waiting-for-idle", reason: "2 pylons have running turns", observedAt: now() - 2 * minute });
   const gib = 1024 ** 3;
   d.registry.askQuestion({
-    id: "cleanup:infra-testbench:1", node: testbench, reserved: null, answerer: "deployer", askedAt: now() - 3 * hour, options: ["Delete", "Keep"],
+    kind: "cleanup", id: "cleanup:infra-testbench:1", node: testbench, reserved: null, answerer: "deployer", askedAt: now() - 3 * hour, options: ["Delete", "Keep"],
     text: "infra-testbench has 33 GiB free for pylons. These are unused: delete them to free 61.4 GiB?",
     cleanup: { outcomes: {}, items: [
       { kind: "image", id: "img-3c1d9e2f0a4b" as ImageId, bytes: Math.round(14.2 * gib) },

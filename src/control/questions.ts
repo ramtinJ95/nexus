@@ -1,9 +1,11 @@
 /**
  * A question the control plane asks the person about a thread or a node, answered on its card on the dashboard. A
- * thread's attention is `decision` while one of its questions is open. The planning pass asks one per item a planning
- * thread proposes (planning.ts), a Claude worker's AskUserQuestion call is one while its pylon's hook reports that its
- * dialog waits (the registry's asks), the review loop asks one about the holds at a review's head that the person may
- * waive (review.ts), and the cleanup pass asks one per node about what it could delete (cleanup.ts).
+ * thread's attention is `decision` while one of its questions is open. Each question is of a kind: the planning pass
+ * asks a proposal one per item a planning thread proposes (planning.ts), a Claude worker's AskUserQuestion call is an
+ * ask one while its pylon's hook reports that its dialog waits (the registry's asks), the review loop asks a holds one
+ * about the holds at a review's head that the person may waive (review.ts), the judgment of a failed pylon asks a
+ * judgment one when it leaves the failure to the person (judgment.ts), and the cleanup pass asks a cleanup one per node
+ * about what it could delete (cleanup.ts).
  */
 import { z } from "zod";
 import type { AskAnswer } from "../../images/pylon/nexus-contract.ts";
@@ -13,61 +15,57 @@ import type { Hold } from "./holds.ts";
 import type { ReservedCase } from "../contract/reserved.ts";
 import type { Cleanup } from "./cleanup-model.ts";
 
-/** What every question has, whatever its subject. */
-interface Asked {
+/** What every question has, whatever its kind. */
+interface Asked<K extends string> {
+  kind: K;
   /** Chosen by the asker, so asking again with one ID asks nothing new. */
   id: string;
   text: string;
   /** Two or more distinct labels, one of which is the answer, or none for a Claude worker's ask, which is answered through `choices`. */
   options: readonly string[];
-  /** The merge policy's reserved case the question is, or null for one it does not reserve. */
-  reserved: ReservedCase | null;
   /** A deployer question needs the right `nexus deploy` takes, since its answer may deploy. */
   answerer: "person" | "deployer";
   askedAt: number;
   /** An ask's answer holds a choice per asked question, and `option` sums them up in one line. */
   answer: { option: string; by: TailnetNodeId; at: number; choices?: readonly Choice[] } | null;
-}
-
-/** A question about a thread, whose attention it holds while it is open. */
-export interface ThreadQuestion extends Asked {
-  thread: ThreadId;
-  node?: never;
-  /** The item a planning thread proposed, which an answer to accept adds to the pipeline. */
-  proposal?: Proposal;
-  /** The Claude worker's AskUserQuestion call the question is. */
-  ask?: ClaudeAsk;
-  /** The holds at the head of the thread's review that answering Land waives, as a Land press there does. */
-  holds?: HeldQuestion;
-  /** The thread.failed event of the failure a failure judgment asks about. Archiving the thread withdraws the question while it is open. */
-  failure?: number;
   /** Set once the question closed unanswered, as an archive closes an open failure question. It takes no answer after. */
   withdrawn?: { by: "archive"; at: number };
-  cleanup?: never;
 }
 
-/** A question about a node: what the node could delete, which an answer to accept deletes. */
-export interface NodeQuestion extends Asked {
-  node: NodeName;
-  thread?: never;
-  proposal?: never;
-  ask?: never;
-  holds?: never;
-  failure?: never;
-  withdrawn?: never;
-  cleanup: Cleanup;
-}
+/** The merge policy reserves only what a holds question asks about. An older CLI's `nexus show` reads `reserved` on every question. */
+interface Unreserved { reserved: null }
 
-/** Its subject is the thread or the node it names, and never both. */
-export type Question = ThreadQuestion | NodeQuestion;
-export type Unanswered = Omit<ThreadQuestion, "answer"> | Omit<NodeQuestion, "answer">;
-export const isNodeQuestion = (q: Question): q is NodeQuestion => q.node !== undefined;
+/** An item a planning thread proposed, which an answer to accept adds to the pipeline. */
+export interface ProposalQuestion extends Asked<"proposal">, Unreserved { thread: ThreadId; proposal: Proposal }
+/** A Claude worker's AskUserQuestion call. */
+export interface ClaudeQuestion extends Asked<"ask">, Unreserved { thread: ThreadId; ask: ClaudeAsk }
+/** The holds at the head of the thread's review that answering Land waives, as a Land press there does. */
+export interface HoldsQuestion extends Asked<"holds"> {
+  thread: ThreadId;
+  holds: HeldQuestion;
+  /** The merge policy's reserved case the holds are, or null for holds it does not reserve. */
+  reserved: ReservedCase | null;
+}
+/** What to do about a failure of the thread's pylon, the thread.failed event `failure`. Archiving the thread withdraws it while it is open. */
+export interface JudgmentQuestion extends Asked<"judgment">, Unreserved { thread: ThreadId; failure: number }
+/** What a node could delete, which an answer to accept deletes. */
+export interface CleanupQuestion extends Asked<"cleanup">, Unreserved { node: NodeName; cleanup: Cleanup }
+
+/** A question about a thread, whose attention it holds while it is open. */
+export type ThreadQuestion = ProposalQuestion | ClaudeQuestion | HoldsQuestion | JudgmentQuestion;
+export type Question = ThreadQuestion | CleanupQuestion;
+export type QuestionKind = Question["kind"];
+export type QuestionOf<K extends QuestionKind> = Extract<Question, { kind: K }>;
+/** A question as its asker hands it over, before any answer. */
+export type Unanswered<Q extends Question = Question> = Q extends unknown ? Omit<Q, "answer"> : never;
 /** Whether the question still waits for its answer. */
 export const isOpen = (q: Pick<Question, "answer" | "withdrawn">) => q.answer === null && q.withdrawn === undefined;
 
 /** The review a holds question is about, the head and base it was asked at, and the holds it names, each of which the person may waive. */
 export interface HeldQuestion { review: string; head: string; base: string | null; holds: readonly Hold[] }
-export const holdOptions = ["Land", "Leave it"] as const;
+/** The open question about the review's holds. The review loop asks at most one per thread at a time. */
+export const askingHolds = (questions: readonly Question[], review: string): HoldsQuestion | undefined =>
+  questions.find((q): q is HoldsQuestion => q.kind === "holds" && isOpen(q) && q.holds.review === review);
 
 /**
  * One item of a planning thread's block, as Question.proposal holds it. `block` is 12 hex characters, a hash of the
@@ -133,9 +131,9 @@ export function reportedAsks(output: string): WaitingAsk[] {
 export const askQuestionId = (toolUseId: string) => `ask-${toolUseId}`;
 
 /** The question an ask is. Each line of its text is one asked question. */
-export function askRecord(thread: ThreadId, ask: ClaudeAsk, askedAt: number): Omit<ThreadQuestion, "answer"> {
+export function askRecord(thread: ThreadId, ask: ClaudeAsk, askedAt: number): Unanswered<ClaudeQuestion> {
   return {
-    id: askQuestionId(ask.toolUseId), thread, text: ask.questions.map((q) => `${q.header}: ${q.question}`).join("\n"), options: [], reserved: null,
+    kind: "ask", id: askQuestionId(ask.toolUseId), thread, text: ask.questions.map((q) => `${q.header}: ${q.question}`).join("\n"), options: [], reserved: null,
     answerer: "person", askedAt, ask,
   };
 }

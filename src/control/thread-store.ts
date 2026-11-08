@@ -501,7 +501,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   function needs(thread: ThreadId): Need[] {
     const resume = claudeResume(thread);
     const all = [...participants.flatMap((p) => p.needs?.(thread) ?? []), ...resume?.state === "person" ? [{ kind: "resume" as const, why: resume.why, since: resume.turn }] : []];
-    return all.filter((n) => n.kind !== "review" || !all.some((q) => q.kind === "question" && q.question.holds?.review === n.review));
+    return all.filter((n) => n.kind !== "review" || !all.some((q) => q.kind === "question" && q.question.kind === "holds" && q.question.holds.review === n.review));
   }
 
   function claudeResume(thread: ThreadId): ClaudeResume | null {

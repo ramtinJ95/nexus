@@ -32,7 +32,7 @@ export function runOf(d: ThreadDetail, view: AgentView | null, items: readonly I
   const open = d.questions.filter(isOpen);
   // Attention ranks a reply above a wait, so the session's own state says whether a dialog waits in the terminal.
   const terminal = d.thread.sessionWaiting === true;
-  if (terminal || open.some((q) => q.ask !== undefined) || (!busy && (open.length > 0 || d.thread.usageLimit !== undefined))) {
+  if (terminal || open.some((q) => q.kind === "ask") || (!busy && (open.length > 0 || d.thread.usageLimit !== undefined))) {
     const why = terminal ? `${dialogWaits(d.thread)}.`
       : open.length > 0 ? `${open.length === 1 ? "A question waits" : `${open.length} questions wait`} for your answer, above.`
       : `${limitText(d.thread, now)}.`;

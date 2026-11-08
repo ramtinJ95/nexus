@@ -38,7 +38,7 @@ test("the asks a pylon reports waiting are each one Claude's answer can key, non
 
 test("an ask's question is named by its call, with a line per asked question, and is answered through choices", () => {
   assert.deepEqual(askRecord("th-1" as ThreadId, ask, 5), {
-    id: "ask-toolu_1", thread: "th-1", text: "Drink: Which drink?\nExtras: What goes in it?", options: [], reserved: null, answerer: "person", askedAt: 5, ask,
+    kind: "ask", id: "ask-toolu_1", thread: "th-1", text: "Drink: Which drink?\nExtras: What goes in it?", options: [], reserved: null, answerer: "person", askedAt: 5, ask,
   });
 });
 

@@ -74,6 +74,7 @@ exit 0
   "reviewView": null,
   "questions": [
     {
+      "kind": "ask",
       "id": "ask-toolu_0002",
       "thread": "th-retention",
       "text": "Raw: How long should raw samples be kept before they are downsampled?\nMax: Which series should keep a max as well as a mean?",

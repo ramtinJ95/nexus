@@ -11,6 +11,7 @@ import { agentReader } from "./agent-conversation.ts";
 import { threadServices } from "./thread-services.ts";
 import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
 import { tempDir, testImage } from "../test-support/kit.ts";
+import type { ProposalQuestion } from "./questions.ts";
 
 const node = "rj-firebat" as NodeName;
 const image = testImage({ id: "img-000000000000", sha256: "0".repeat(64) });
@@ -122,7 +123,7 @@ test("a message the harness did not take leaves the guide and the answers for th
 
   f.reply(thread, block(f.registry.planning(thread.id)!.token, [a]));
   await f.plans.poll();
-  f.registry.answerQuestion(f.registry.questions(thread.id)[0]!.id, { option: "reject", by: laptop, at: 1 });
+  f.registry.answerQuestion(f.registry.questions(thread.id)[0] as ProposalQuestion, { option: "reject", by: laptop, at: 1 });
   assert.match(f.plans.compose(thread, "msg:4", "Why?"), /rejected "A" \(key a\)/);
   assert.match(f.plans.compose(thread, "msg:5", "Why?"), /rejected "A" \(key a\)/, "msg:4 was not taken, so msg:5 tells it");
   f.plans.sent(thread, "msg:5");
@@ -134,9 +135,9 @@ test("an item waits on a pipeline item named by its ID even when a later proposa
   const thread = await f.planner();
   f.reply(thread, block(f.registry.planning(thread.id)!.token, [{ ...a, after: ["it-0123456789ab"] }, { key: "it-0123456789ab", title: "Later", brief: "Build later.", after: ["a"] }]));
   await f.plans.poll();
-  const [qa] = f.registry.questions(thread.id);
+  const [qa] = f.registry.questions(thread.id) as ProposalQuestion[];
   assert.match(qa!.text, /It waits on pipeline item it-0123456789ab\./);
-  assert.throws(() => f.registry.answerQuestion(qa!.id, { option: "accept", by: laptop, at: 1 }, f.plans.answered), (err: { kind?: string; message: string }) => err.kind === "missing" && /no item it-0123456789ab/.test(err.message));
+  assert.throws(() => f.registry.answerQuestion(qa!, { option: "accept", by: laptop, at: 1 }, f.plans.answered), (err: { kind?: string; message: string }) => err.kind === "missing" && /no item it-0123456789ab/.test(err.message));
 });
 
 test("cards asked in one millisecond list block by block in the order the blocks were written, and each block's by index", async (t) => {
@@ -161,7 +162,7 @@ test("an accepted proposal adds the item named from its question once, and one a
   f.reply(thread, block(f.registry.planning(thread.id)!.token, [a, b]));
   await f.plans.poll();
   const [qa, qb] = f.registry.questions(thread.id);
-  const answer = (id: string, option: string) => f.registry.answerQuestion(id, { option, by: laptop, at: 1 }, f.plans.answered);
+  const answer = (id: string, option: string) => f.registry.answerQuestion(f.registry.question(id) as ProposalQuestion, { option, by: laptop, at: 1 }, f.plans.answered);
   answer(qa!.id, "reject");
   assert.throws(() => answer(qb!.id, "accept"), (err: { kind?: string; message: string }) => err.kind === "conflict" && /which was rejected, so it cannot be added/.test(err.message));
   assert.equal(f.registry.question(qb!.id)!.answer, null, "the refused answer is not recorded");

@@ -125,7 +125,7 @@ test("an item is held for the person by its review, its thread's attention, a bl
   assert.equal(phase(r, a), "held: its review ended for the person: the rounds ran out");
   f.review(tb!, { kind: "approved" });
   assert.equal(phase(r, b), `held: PR #9 is approved, and lands once the person runs nexus land ${tb}`);
-  r.askQuestion({ id: "q1", thread: tc!, text: "Rebuild the image?", options: ["yes", "no"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1 });
+  r.askQuestion({ kind: "holds", id: "q1", thread: tc!, text: "Rebuild the image?", options: ["yes", "no"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1, holds: { review: "rv-1", head: "h", base: null, holds: [] } });
   assert.equal(phase(r, c), "held: its thread needs the person's decision");
   f.links(td!, f.pr(4, "closed"));
   assert.equal(phase(r, d), "held: PR #4 closed without merging");
@@ -136,7 +136,7 @@ test("an item is held for the person by its review, its thread's attention, a bl
   assert.equal(phase(r, e), "held: its thread is parked", "a thread stuck where only the person moves it holds its item, as its card says");
   r.recordParked(te, false);
   f.review(te, { kind: "landed", commit: "c".repeat(40) });
-  r.askQuestion({ id: "q2", thread: te, text: "Clean up the branch?", options: ["yes", "no"], reserved: null, answerer: "person", askedAt: 1 });
+  r.askQuestion({ kind: "judgment", id: "q2", thread: te, text: "Clean up the branch?", options: ["yes", "no"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
   assert.equal(phase(r, e), "held: its thread needs the person's decision", "a question holds an item whatever its review says");
 
   const after = f.add("After D", [d]);
@@ -229,7 +229,7 @@ test("an item whose review asks about its holds holds only itself: it is held, a
   const ta = thread(r, a);
   f.review(ta, { kind: "reviewing" });
   r.askQuestion({
-    id: "holds-r-a-1", thread: ta, text: "Land pull request #9?", options: ["Land", "Leave it"], reserved: "auth", answerer: "deployer", askedAt: 1,
+    kind: "holds", id: "holds-r-a-1", thread: ta, text: "Land pull request #9?", options: ["Land", "Leave it"], reserved: "auth", answerer: "deployer", askedAt: 1,
     holds: { review: `r-${ta}`, head: "h", base: "main", holds: [{ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }] },
   });
   assert.equal(r.attention(ta), "decision");

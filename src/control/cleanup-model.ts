@@ -21,7 +21,8 @@ export type Candidate = { [K in CleanupItem["kind"]]: Omit<Extract<CleanupItem, 
 export interface Cleanup { items: readonly CleanupItem[]; outcomes: Readonly<Record<string, DeleteOutcome>> }
 
 /** The question's options. Delete deletes every item, and Keep deletes none. */
-export const cleanupOptions = ["Delete", "Keep"] as const;
+export const deleteOption = "Delete";
+export const cleanupOptions = [deleteOption, "Keep"] as const;
 
 export const itemKey = (item: Candidate): string => item.kind === "release" ? `release-${item.name}` : item.id;
 
@@ -113,7 +114,7 @@ export function grew(candidates: readonly Candidate[], asked: readonly { cleanup
 
 /** The items the person agreed to delete that no delete has reported on yet. */
 export const undeleted = (q: { cleanup: Cleanup; answer: { option: string } | null }): CleanupItem[] =>
-  q.answer?.option === "Delete" ? q.cleanup.items.filter((i) => q.cleanup.outcomes[itemKey(i)] === undefined) : [];
+  q.answer?.option === deleteOption ? q.cleanup.items.filter((i) => q.cleanup.outcomes[itemKey(i)] === undefined) : [];
 
 export const freedBytes = (cleanup: Cleanup): number =>
   Object.values(cleanup.outcomes).reduce((sum, o) => sum + (o.state === "deleted" ? o.bytes : 0), 0);
@@ -123,7 +124,7 @@ export const freedBytes = (cleanup: Cleanup): number =>
  * many items it found in use and kept, and how many still wait for the node. Null for a node that never deleted.
  */
 export function lastCleanup(asked: readonly { cleanup: Cleanup; answer: { option: string; at: number } | null }[]) {
-  const q = asked.findLast((q) => q.answer?.option === "Delete");
+  const q = asked.findLast((q) => q.answer?.option === deleteOption);
   if (q === undefined) return null;
   const states = q.cleanup.items.map((i) => q.cleanup.outcomes[itemKey(i)]?.state);
   return { at: q.answer!.at, freed: freedBytes(q.cleanup), skipped: states.filter((s) => s === "skipped").length, waiting: states.filter((s) => s === undefined).length };
@@ -155,6 +156,7 @@ export const cleanupQuestionId = (node: NodeName, items: readonly CleanupItem[],
 export function cleanupQuestion(node: NodeName, items: readonly CleanupItem[], askedAt: number) {
   const total = items.reduce((sum, i) => sum + i.bytes, 0);
   return {
+    kind: "cleanup" as const,
     id: cleanupQuestionId(node, items, askedAt),
     node,
     text: `${node} holds ${items.length === 1 ? "one thing" : `${items.length} things`} nothing needs any more, which ${items.length === 1 ? "takes" : "take"} ${bytesText(total)}. Delete ${items.length === 1 ? "it" : "them"}?\n\n${items.map((i) => `- ${itemText(i)}, ${bytesText(i.bytes)}`).join("\n")}`,

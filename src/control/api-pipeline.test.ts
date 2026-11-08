@@ -9,6 +9,7 @@ import type { QueuedThread } from "../contract/threads.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ImageId, PylonId, TailnetNodeId } from "../ids.ts";
 import { node, laptop, phone, project, image, testApi, withImage, deployment, withQueue } from "../test-support/api-kit.ts";
+import type { ProposalQuestion } from "./questions.ts";
 
 test("an item is added to a project the pipeline runs for, becomes a queued thread behind the items it is after, and only a person adds, approves or cancels one", async (t) => {
   const s = await testApi(t, { pipeline: true, deployment });
@@ -182,8 +183,8 @@ test("a planning thread's proposals become cards only a person answers, an accep
   s.registry.recordReply(id, Date.now());
   await s.plans!.poll();
   const detail = async () => (await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail;
-  const [a, b] = (await detail()).questions;
-  assert.deepEqual([a!.proposal?.title, b!.proposal?.title], ["A: archive what landed", "B: nudge a stalled builder"]);
+  const [a, b] = (await detail()).questions as ProposalQuestion[];
+  assert.deepEqual([a!.proposal.title, b!.proposal.title], ["A: archive what landed", "B: nudge a stalled builder"]);
   assert.ok(a!.text.includes("Archive the builder once its review lands."), "the card shows the brief in full");
   assert.equal((await detail()).attention, "decision");
   assert.deepEqual([s.registry.items().length, s.registry.queuedThreads().length], [0, 0], "nothing the thread wrote adds or starts work, though the project's items start on their own");

@@ -1,7 +1,9 @@
 200 application/json
 {
+  "kind": "judgment",
   "id": "judgment:23",
   "thread": "th-cert",
+  "failure": 23,
   "text": "The pylon failed on rj-firebat while the node was swapping. Retry it there, move it to infra-testbench, or leave it failed?",
   "options": [
     "Retry on rj-firebat",

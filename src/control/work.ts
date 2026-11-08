@@ -1,7 +1,7 @@
 /** What waits on the person: the inbox, which lists each thread's needs beside what else stops a thread or holds work. */
 import type { ThreadId } from "../ids.ts";
 import { itemView, threadStage, type PipelineItem } from "./pipeline.ts";
-import type { NodeQuestion } from "./questions.ts";
+import type { CleanupQuestion } from "./questions.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
@@ -10,7 +10,7 @@ import { personNeeds } from "./work-model.ts";
 
 export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread; d: ThreadDetail };
 /** A thread's card, a node's cleanup question with its Cluster card, or work its pipeline phase holds for the person that no card acts on. */
-export type InboxNeed = ThreadNeed | { kind: "cleanup"; question: NodeQuestion; since: number } | { kind: "held"; work: HeldWork; since: number };
+export type InboxNeed = ThreadNeed | { kind: "cleanup"; question: CleanupQuestion; since: number } | { kind: "held"; work: HeldWork; since: number };
 
 interface Work {
   registry: Registry; now: number; threads(): readonly Thread[]; queuedIn(project: string): readonly QueuedThread[];

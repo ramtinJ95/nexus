@@ -9,17 +9,33 @@ import type { ReviewLoop } from "../review.ts";
 import type { TailnetNodeId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
-import { askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "../questions.ts";
+import { askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeQuestion, type Question, type QuestionKind, type QuestionOf } from "../questions.ts";
 import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { refusalOf } from "./access.ts";
 import { questionRoutes as routes } from "../../contract/reviews.ts";
 import { answerSchema } from "../../contract/reviews-parse.ts";
+import type { z } from "zod";
 
 const answeredConflict = (q: Question) => new HttpError(409, `question ${q.id} was answered ${JSON.stringify(q.answer!.option)} by ${q.answer!.by}`);
 const answerRefusals: Record<AnswerRefusal, string> = {
   "not a person": "only a person's device may, never infrastructure nodes or pylons",
   "not a deployer": "its answer may deploy, so only deployers may",
 };
+
+type Body = z.output<typeof answerSchema>;
+/** How a question of each kind takes the caller's answer, and what follows it. */
+type Answering = { [K in QuestionKind]: (question: QuestionOf<K>, body: Body, caller: TailnetNodeId) => Question | Promise<Question> };
+
+function optionOf(question: Question, body: Body): string {
+  if (!("option" in body)) throw new HttpError(400, `question ${question.id} is answered with {"option": "<one of its options>"}`);
+  if (!question.options.includes(body.option)) throw new HttpError(400, `${JSON.stringify(body.option)} is not an option of question ${question.id}, which are ${question.options.map((o) => JSON.stringify(o)).join(", ")}`);
+  return body.option;
+}
+
+function answeredWith<Q extends Question>(answered: Q, option: string): Q {
+  if (answered.answer!.option !== option) throw answeredConflict(answered);
+  return answered;
+}
 
 export function questionRoutes(kit: ApiKit, options: { planning?: Planning | null | undefined; pipeline?: Pipeline | null | undefined; cleanup?: CleanupPass | undefined; reviews?: ReviewLoop | null | undefined }): readonly RouteEntry[] {
   const { execInPylon, registry, claude } = kit;
@@ -30,7 +46,7 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
    * again, so a retry after a lost reply is safe. When nobody waits any more, as after the terminal answered or the
    * turn ended, the question is withdrawn.
    */
-  async function answerAsk(question: Question & { ask: ClaudeAsk }, choices: Choice[], caller: TailnetNodeId): Promise<Question> {
+  async function answerAsk(question: ClaudeQuestion, choices: Choice[], caller: TailnetNodeId): Promise<Question> {
     const same = (q: Question) => JSON.stringify(q.answer?.choices) === JSON.stringify(choices);
     if (question.answer !== null) {
       if (same(question)) return question;
@@ -58,10 +74,36 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
     // question, and the answer is still its.
     const { answer: _, ...asked } = question;
     registry.askQuestion(asked);
-    const answered = registry.answerQuestion(question.id, { option: choicesSummary(question.ask, choices), by: caller, at: Date.now(), choices });
+    const answered = registry.answerQuestion(question, { option: choicesSummary(question.ask, choices), by: caller, at: Date.now(), choices });
     if (!same(answered)) throw answeredConflict(answered);
     return answered;
   }
+
+  const record = <Q extends Question>(question: Q, option: string, caller: TailnetNodeId, then?: (answered: Q) => void) =>
+    answeredWith(registry.answerQuestion(question, { option, by: caller, at: Date.now() }, then), option);
+  const answering: Answering = {
+    ask: (question, body, caller) => {
+      if (!("choices" in body)) throw new HttpError(400, `question ${question.id} is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks`);
+      return answerAsk(question, parse(choicesSchema(question.ask), body.choices), caller);
+    },
+    holds: (question, body, caller) => {
+      const option = optionOf(question, body);
+      if (!options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
+      return answeredWith(options.reviews.answerHolds(question, option, caller), option);
+    },
+    proposal: async (question, body, caller) => {
+      const answered = record(question, optionOf(question, body), caller, options.planning?.answered);
+      await options.pipeline?.poll();
+      return answered;
+    },
+    judgment: (question, body, caller) => record(question, optionOf(question, body), caller),
+    cleanup: (question, body, caller) => {
+      const answered = record(question, optionOf(question, body), caller);
+      // The deletes take as long as the node's disk does, so the answer does not wait for them.
+      void options.cleanup?.poll();
+      return answered;
+    },
+  };
 
   return [
     on(routes.answer, { role: "allowed", why: "each question says who may answer it, which refusalOf checks" }, async ({ question: id }, r) => {
@@ -71,21 +113,8 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
       if (question.withdrawn !== undefined) throw new HttpError(409, `question ${question.id} was withdrawn when its thread was archived`);
       const refused = refusalOf(r.roles, question);
       if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]}`);
-      if (question.ask !== undefined) {
-        if (!("choices" in body)) throw new HttpError(400, `question ${question.id} is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks`);
-        return ok(await answerAsk({ ...question, ask: question.ask }, parse(choicesSchema(question.ask), body.choices), r.caller));
-      }
-      if (!("option" in body)) throw new HttpError(400, `question ${question.id} is answered with {"option": "<one of its options>"}`);
-      const { option } = body;
-      if (!question.options.includes(option)) throw new HttpError(400, `${JSON.stringify(option)} is not an option of question ${question.id}, which are ${question.options.map((o) => JSON.stringify(o)).join(", ")}`);
-      if (question.holds !== undefined && !options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
-      const answered = question.holds !== undefined ? options.reviews!.answerHolds({ ...question, holds: question.holds }, option, r.caller)
-        : registry.answerQuestion(question.id, { option, by: r.caller, at: Date.now() }, options.planning?.answered);
-      if (answered.answer!.option !== option) throw answeredConflict(answered);
-      if (answered.proposal !== undefined) await options.pipeline?.poll();
-      // The deletes take as long as the node's disk does, so the answer does not wait for them.
-      if (answered.cleanup !== undefined) void options.cleanup?.poll();
-      return ok(answered);
+      const answer = answering[question.kind] as (question: Question, body: Body, caller: TailnetNodeId) => Question | Promise<Question>;
+      return ok(await answer(question, body, r.caller));
     }),
   ];
 }

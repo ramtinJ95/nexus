@@ -7,11 +7,14 @@
 import { json, jsonOrNull, type Db, type Holding } from "./db.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
-import { askQuestionId, askRecord, isNodeQuestion, isOpen, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
+import { askQuestionId, askRecord, isOpen, type CleanupQuestion, type HoldsQuestion, type Question, type QuestionOf, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Need } from "./attention.ts";
 
 export const holding = { tables: { questions: { record: "id" }, waiting_asks: {} } } as const satisfies Holding;
+
+/** isOpen, as SQL. */
+const openWhere = "json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL";
 
 export function questionStore(db: Db, clock: () => number, threadStatus: (id: ThreadId) => ThreadStatus | undefined, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql } = db;
@@ -38,38 +41,39 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
     for (const question of open) {
       changes += Number(sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, thread, JSON.stringify({ ...question, answer: null })).changes);
     }
-    changes += Number(sql(`DELETE FROM questions WHERE thread = ? AND json_extract(record, '$.ask') IS NOT NULL AND json_extract(record, '$.answer') IS NULL
+    changes += Number(sql(`DELETE FROM questions WHERE thread = ? AND json_extract(record, '$.kind') = 'ask' AND ${openWhere}
       AND id NOT IN (SELECT value FROM json_each(?))`).run(thread, JSON.stringify(open.map((q) => q.id))).changes);
     return changes > 0;
   }
 
-  const needs = (thread: ThreadId): Need[] => sql(`SELECT record FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL
+  const needs = (thread: ThreadId): Need[] => sql(`SELECT record FROM questions WHERE thread = ? AND ${openWhere}
     ORDER BY json_extract(record, '$.askedAt'), rowid`).all(thread).map((r) => { const question = json<ThreadQuestion>(r.record); return { kind: "question", question, since: question.askedAt }; });
   /** An archived thread's failure needs nothing more from the person, so its open question is withdrawn and kept. */
   function closed(thread: ThreadId) {
     sql("DELETE FROM waiting_asks WHERE thread = ?").run(thread);
     if (threadStatus(thread) !== "archived") return;
-    sql(`UPDATE questions SET record = json_set(record, '$.withdrawn', json(?)) WHERE thread = ? AND json_extract(record, '$.failure') IS NOT NULL
-      AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL`).run(JSON.stringify({ by: "archive", at: clock() }), thread);
+    sql(`UPDATE questions SET record = json_set(record, '$.withdrawn', json(?)) WHERE thread = ? AND json_extract(record, '$.kind') = 'judgment' AND ${openWhere}`).run(JSON.stringify({ by: "archive", at: clock() }), thread);
   }
 
   return {
     participant: { needs, closed, reconcile: reconcileAsks },
     /** Stores the question unless one with its ID exists, and answers the stored one either way. */
-    askQuestion<Q extends Unanswered>(question: Q): Q extends Omit<NodeQuestion, "answer"> ? NodeQuestion : ThreadQuestion {
+    askQuestion<Q extends Unanswered>(question: Q): QuestionOf<Q["kind"]> {
       return transaction(() => {
-        sql("INSERT OR IGNORE INTO questions (id, thread, node, record) VALUES (?, ?, ?, ?)").run(question.id, question.thread ?? null, question.node ?? null, JSON.stringify({ ...question, answer: null }));
-        if (question.thread !== undefined) updateAttention(question.thread);
-        return questionRecord(question.id)! as never;
+        const subject = question.kind === "cleanup" ? { thread: null, node: question.node } : { thread: question.thread, node: null };
+        sql("INSERT OR IGNORE INTO questions (id, thread, node, record) VALUES (?, ?, ?, ?)").run(question.id, subject.thread, subject.node, JSON.stringify({ ...question, answer: null }));
+        if (subject.thread !== null) updateAttention(subject.thread);
+        // Asking again under an ID answers the stored question, which is of the same kind, since the ID names it.
+        return questionRecord(question.id)! as QuestionOf<Q["kind"]>;
       });
     },
     /**
      * Asks `question` in place of each of the thread's unanswered questions whose ID starts with `prefix`, or with null
      * drops them all, so an answer to one the asker replaced finds no question. Answers whether anything changed.
      */
-    replaceQuestions(thread: ThreadId, prefix: string, question: Omit<ThreadQuestion, "answer"> | null): boolean {
+    replaceQuestions(thread: ThreadId, prefix: string, question: Unanswered<HoldsQuestion> | null): boolean {
       return transaction(() => {
-        let changes = Number(sql(`DELETE FROM questions WHERE thread = ? AND substr(id, 1, ?) = ? AND id IS NOT ? AND json_extract(record, '$.answer') IS NULL`)
+        let changes = Number(sql(`DELETE FROM questions WHERE thread = ? AND substr(id, 1, ?) = ? AND id IS NOT ? AND ${openWhere}`)
           .run(thread, prefix.length, prefix, question?.id ?? null).changes);
         if (question !== null) changes += Number(sql("INSERT OR IGNORE INTO questions (id, thread, record) VALUES (?, ?, ?)").run(question.id, thread, JSON.stringify({ ...question, answer: null })).changes);
         if (changes > 0) updateAttention(thread);
@@ -77,8 +81,7 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
       });
     },
     /** The threads with an open question whose ID starts with `prefix`. */
-    threadsAsking: (prefix: string): ThreadId[] => sql(`SELECT DISTINCT thread FROM questions WHERE thread IS NOT NULL AND substr(id, 1, ?) = ?
-      AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL`).all(prefix.length, prefix).map((r) => r.thread as ThreadId),
+    threadsAsking: (prefix: string): ThreadId[] => sql(`SELECT DISTINCT thread FROM questions WHERE thread IS NOT NULL AND substr(id, 1, ?) = ? AND ${openWhere}`).all(prefix.length, prefix).map((r) => r.thread as ThreadId),
     question: (id: string): Question | null => questionRecord(id),
     /**
      * Stores the asks the thread's pylon reports waiting, in place of its last report, and asks or withdraws its Claude
@@ -111,14 +114,14 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
     },
     questions: (thread: ThreadId): ThreadQuestion[] => sql("SELECT record FROM questions WHERE thread = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(thread).map((r) => json<ThreadQuestion>(r.record)),
     /** The node's questions, in the order they were asked. */
-    nodeQuestions: (node: NodeName): NodeQuestion[] => sql("SELECT record FROM questions WHERE node = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(node).map((r) => json<NodeQuestion>(r.record)),
+    nodeQuestions: (node: NodeName): CleanupQuestion[] => sql("SELECT record FROM questions WHERE node = ? ORDER BY json_extract(record, '$.askedAt'), rowid").all(node).map((r) => json<CleanupQuestion>(r.record)),
     /** Every node's open questions, which wait on the person as a thread's do. */
-    openNodeQuestions: (): NodeQuestion[] => sql("SELECT record FROM questions WHERE node IS NOT NULL AND json_extract(record, '$.answer') IS NULL ORDER BY json_extract(record, '$.askedAt'), rowid").all().map((r) => json<NodeQuestion>(r.record)),
+    openNodeQuestions: (): CleanupQuestion[] => sql(`SELECT record FROM questions WHERE node IS NOT NULL AND ${openWhere} ORDER BY json_extract(record, '$.askedAt'), rowid`).all().map((r) => json<CleanupQuestion>(r.record)),
     /** Records what each delete of an answered cleanup did, beside what earlier deletes reported. The first report of an item stands. */
-    recordCleanup(id: string, outcomes: Readonly<Record<string, DeleteOutcome>>): NodeQuestion {
+    recordCleanup(id: string, outcomes: Readonly<Record<string, DeleteOutcome>>): CleanupQuestion {
       return transaction(() => {
         const stored = questionRecord(id);
-        if (stored === null || !isNodeQuestion(stored)) throw new Error(`no node question ${id}`);
+        if (stored?.kind !== "cleanup") throw new Error(`no node question ${id}`);
         const recorded = { ...stored, cleanup: { ...stored.cleanup, outcomes: { ...outcomes, ...stored.cleanup.outcomes } } };
         sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(recorded), id);
         return recorded;
@@ -129,15 +132,16 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
      * unanswered, as this returns. `then` runs in the same transaction once the answer is recorded, and a throw from it
      * records nothing.
      */
-    answerQuestion(id: string, answer: NonNullable<Question["answer"]>, then?: (answered: Question) => void): Question {
+    answerQuestion<Q extends Question>(question: Q, answer: NonNullable<Question["answer"]>, then?: (answered: Q) => void): Q {
       return transaction(() => {
-        const stored = questionRecord(id);
-        if (stored === null) throw new Error(`no question ${id}`);
+        // An ID's question keeps its kind, so the stored one is of the kind of the one the caller read.
+        const stored = questionRecord(question.id) as Q | null;
+        if (stored === null) throw new Error(`no question ${question.id}`);
         if (!isOpen(stored)) return stored;
         const answered = { ...stored, answer };
-        sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(answered), id);
+        sql("UPDATE questions SET record = ? WHERE id = ?").run(JSON.stringify(answered), question.id);
         then?.(answered);
-        if (answered.thread !== undefined) updateAttention(answered.thread);
+        if (answered.kind !== "cleanup") updateAttention(answered.thread);
         return answered;
       });
     },

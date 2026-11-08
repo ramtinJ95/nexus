@@ -1530,13 +1530,13 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
 test("show prints each question with its options, its reserved case, and who must answer it or how it was answered", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Image"]);
-  s.registry.askQuestion({ id: "qn-image", thread: thread.id, text: "Rebuild the pylon image?\nIt changes the base layer.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1 });
-  s.registry.askQuestion({ id: "qn-brief", thread: thread.id, text: "Start the next brief?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 2 });
+  s.registry.askQuestion({ kind: "holds", id: "qn-image", thread: thread.id, text: "Rebuild the pylon image?\nIt changes the base layer.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1, holds: { review: "rv-1", head: "h", base: null, holds: [] } });
+  s.registry.askQuestion({ kind: "judgment", id: "qn-brief", thread: thread.id, text: "Start the next brief?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 2, failure: 0 });
   const shown = await s.nexus(["show", thread.id]);
   assert.equal(shown.code, 0, shown.stderr);
   assert.match(shown.stdout, /^attention: decision$/m);
   assert.match(shown.stdout, /^question qn-image: Rebuild the pylon image\?\n {2}options: "Rebuild", "Not now"\n {2}reserved: pylon image rebuilds\n {2}needs a deployer\nquestion qn-brief: Start the next brief\?\n {2}options: "Yes", "No"\n {2}needs you$/m);
-  s.registry.answerQuestion("qn-brief", { option: "Yes", by: laptop, at: Date.UTC(2026, 9, 28, 9) });
+  s.registry.answerQuestion(s.registry.question("qn-brief")!, { option: "Yes", by: laptop, at: Date.UTC(2026, 9, 28, 9) });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^question qn-brief: Start the next brief\?\n {2}options: "Yes", "No"\n {2}answered "Yes" by nLAPTOP at 2026-10-28T09:00:00.000Z$/m);
   assert.deepEqual((await s.json(["show", thread.id])).questions.map((q: { id: string }) => q.id), ["qn-image", "qn-brief"]);
 });
@@ -1549,9 +1549,9 @@ test("show prints a Claude worker's ask with a line per question it asks, and th
     { question: "Which drink?", header: "Drink", multiSelect: false, options: [option("Tea"), option("Coffee")] },
     { question: "What goes in it?", header: "Extras", multiSelect: true, options: [option("Milk"), option("Sugar")] },
   ];
-  s.registry.askQuestion({ id: "ask-toolu_1", thread: thread.id, text: "Drink: Which drink?\nExtras: What goes in it?", options: [], reserved: null, answerer: "person", askedAt: 1, ask: { session: "s1", toolUseId: "toolu_1", questions } });
+  s.registry.askQuestion({ kind: "ask", id: "ask-toolu_1", thread: thread.id, text: "Drink: Which drink?\nExtras: What goes in it?", options: [], reserved: null, answerer: "person", askedAt: 1, ask: { session: "s1", toolUseId: "toolu_1", questions } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^question ask-toolu_1: Drink: Which drink\?\n {2}Extras: What goes in it\?\n {2}needs you$/m);
-  s.registry.answerQuestion("ask-toolu_1", { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.UTC(2026, 9, 28, 9), choices: [{ picked: ["Tea"] }, { picked: ["Milk"], own: "Oat cream" }] });
+  s.registry.answerQuestion(s.registry.question("ask-toolu_1")!, { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.UTC(2026, 9, 28, 9), choices: [{ picked: ["Tea"] }, { picked: ["Milk"], own: "Oat cream" }] });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^question ask-toolu_1: Drink: Which drink\?\n {2}Extras: What goes in it\?\n {2}answered "Drink: Tea; Extras: Milk, Oat cream" by nLAPTOP at 2026-10-28T09:00:00.000Z$/m);
 });
 
@@ -1774,7 +1774,7 @@ test("land --waive shows the head and every hold it waives, and sends them only 
 test("land --waive answers the review's question about its holds, once the person confirmed the holds it names, while the review still runs too", async () => {
   const egress = "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts.";
   const review = testReview({ phase: { kind: "reviewing" }, rounds: [{ head: approvedRound.head, verdict: null, check: null, answers: null }] });
-  const question: Question = { id: "holds-rv-1-a", thread: "th-builder" as ThreadId, text: "Land?", options: ["Land", "Leave it"], reserved: "egress", answerer: "deployer", askedAt: 1, answer: null,
+  const question: Question = { kind: "holds", id: "holds-rv-1-a", thread: "th-builder" as ThreadId, text: "Land?", options: ["Land", "Leave it"], reserved: "egress", answerer: "deployer", askedAt: 1, answer: null,
     holds: { review: review.id, head: approvedRound.head, base: "main", holds: [{ code: "reserved-path:egress", text: egress }] } };
   const api = (async () => ({ review, reviewView: reviewView(review, [question]), questions: [question] })) as Api;
   const yes = confirmingTerminal("yes");

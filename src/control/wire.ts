@@ -11,7 +11,7 @@ import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ClaudeResume, ClaudeSent, Output, Preview, Session, Thread } from "./thread-store.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { WatchedPr } from "./pr-watch-store.ts";
-import type { Question } from "./questions.ts";
+import type { ThreadQuestion } from "./questions.ts";
 import type { JudgmentView } from "./judgment.ts";
 import type { NodePylons } from "./placement.ts";
 import type { Review } from "./review-model.ts";
@@ -58,7 +58,7 @@ export interface ThreadDetail {
   /** Why the archived thread's disk is kept past its 24 hours, or null. A control plane older than 0.71.0 sends none. */
   keptPastDay?: string | null;
   /** Every question the thread asked, answered or not, in the order they were asked. */
-  questions: readonly Question[];
+  questions: readonly ThreadQuestion[];
   /** Every judgment of the thread's failed pylon, oldest failure first. */
   judgments: readonly JudgmentView[];
   /** A planning thread's proposals become questions, and the items the person accepts. */

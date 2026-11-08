@@ -21,11 +21,11 @@ test("the migration keeps every thread question as it was, in its order, answere
   const before = openRegistry(path);
   seedRegistry(before);
   before.createThread(thread, testPylon(thread));
-  const ask = { thread: thread.id, options: ["Yes", "No"], reserved: null, answerer: "person" as const, askedAt: 5 };
-  before.askQuestion({ ...ask, id: "qn-b", text: "First?" });
-  before.askQuestion({ ...ask, id: "qn-a", text: "Second?", reserved: "image-rebuild", answerer: "deployer" });
-  before.askQuestion({ ...ask, id: "qn-c", text: "Third?", askedAt: 4 });
-  before.answerQuestion("qn-c", { option: "No", by: "nLAPTOP" as TailnetNodeId, at: 6 });
+  const ask = { thread: thread.id, options: ["Yes", "No"], answerer: "person" as const, askedAt: 5 };
+  before.askQuestion({ kind: "judgment", ...ask, id: "qn-b", text: "First?", failure: 0, reserved: null });
+  before.askQuestion({ kind: "holds", ...ask, id: "qn-a", text: "Second?", reserved: "image-rebuild", answerer: "deployer", holds: { review: "rv-1", head: "h", base: null, holds: [] } });
+  before.askQuestion({ kind: "judgment", ...ask, id: "qn-c", text: "Third?", askedAt: 4, failure: 0, reserved: null });
+  before.answerQuestion(before.question("qn-c")!, { option: "No", by: "nLAPTOP" as TailnetNodeId, at: 6 });
   const questions = before.questions(thread.id);
   before.close();
   rewindTo(path, versionBefore(migration));
@@ -58,7 +58,7 @@ test("a node question round-trips with its items and outcomes, holds no thread's
   assert.equal(registry.attention(thread.id), null, "a node question is no thread's decision");
 
   const answer = { option: "Delete", by: "nLAPTOP" as TailnetNodeId, at: 8 };
-  registry.answerQuestion(stored.id, answer);
+  registry.answerQuestion(stored, answer);
   registry.recordCleanup(stored.id, { "tpl-0000000000a1": { state: "deleted", bytes: 2048 } });
   registry.recordCleanup(stored.id, { "tpl-0000000000a1": { state: "gone" }, [`release-${"a".repeat(40)}`]: { state: "skipped", reason: "process 7 runs from it" } });
   registry.close();
