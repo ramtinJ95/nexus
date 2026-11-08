@@ -22,7 +22,7 @@ import { liveHashOf } from "../protocol/spawn.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
-import { retryRefusal } from "./reconcile.ts";
+import { isOpenStatus, openStatuses, retryRefusal } from "./reconcile.ts";
 import { singleFlight } from "../single-flight.ts";
 import { pylonLive } from "./live.ts";
 import { observedPylon } from "./observed.ts";
@@ -195,7 +195,7 @@ export function judgmentPass(options: {
 
   /** A builder whose project the pipeline runs for, which a person started and has not archived. */
   function judged(t: Thread): boolean {
-    return roleOf(t.startedBy) === "builder" && (t.status === "active" || t.status === "idle") && registry.project(t.project)?.pipeline != null;
+    return roleOf(t.startedBy) === "builder" && isOpenStatus(t.status) && registry.project(t.project)?.pipeline != null;
   }
 
   /** Only a node that holds nothing of the pylon lets it go, since Nexus has no job that moves a disk or a preview. */
@@ -213,7 +213,7 @@ export function judgmentPass(options: {
   /** Why the failure needs nothing more from Nexus, or null while its pylon still holds it. */
   function settled(j: Judgment): string | null {
     const t = registry.thread(j.thread)!;
-    if (t.status === "archived" || t.status === "deleted") return `the thread is ${t.status}`;
+    if (!isOpenStatus(t.status)) return `the thread is ${t.status}`;
     if (registry.pylon(t.pylonId)?.failed == null) return "the pylon was retried before Nexus acted";
     // A retry clears `failed`, and a later failure, even with the same reason, appends a newer event.
     const current = registry.failure(t.id)?.event;
@@ -278,7 +278,7 @@ export function judgmentPass(options: {
 
   async function judging(j: Judgment, phase: Extract<Phase, { kind: "judging" }>) {
     const t = registry.thread(j.thread)!;
-    if (t.status === "archived" || t.status === "deleted") {
+    if (!isOpenStatus(t.status)) {
       return decided(j, { ...j, phase: { kind: "acting", verdict: rule(`the thread was ${t.status} before the judgment answered`) } });
     }
     if (j.conversation === null) {
@@ -428,7 +428,7 @@ export function judgmentPass(options: {
 
   async function pass() {
     // A judgment of a thread archived or deleted since it started still steps, to its end.
-    const startable = new Set(registry.storedThreads({ status: ["active", "idle"] }).map((t) => t.id));
+    const startable = new Set(registry.storedThreads({ status: openStatuses }).map((t) => t.id));
     const ids = new Set([...registry.unfinishedJudgments().map((j) => j.thread), ...startable]);
     for (const id of ids) {
       try {

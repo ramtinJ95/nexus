@@ -14,6 +14,7 @@ import { lowDisk } from "../disk-space.ts";
 import type { Registry } from "./registry.ts";
 import type { CleanupQuestion } from "./questions.ts";
 import { artifactKept, bytesText, cleanupCandidates, cleanupDue, cleanupQuestion, grew, itemKey, undeleted, type CleanupItem, type NodeFacts } from "./cleanup-model.ts";
+import { isOpenStatus } from "./reconcile.ts";
 
 type CleanupRegistry = Pick<Registry, "askQuestion" | "currentImage" | "imageOperation" | "node" | "nodeQuestions" | "nodes" | "previousImage" | "projects" | "pylonsWithThreadsOn"
   | "recordCleanup" | "releaseInventory" | "saveReleaseInventory" | "templates">;
@@ -33,7 +34,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
       operated: registry.imageOperation()?.image ?? null,
       boots: registry.pylonsWithThreadsOn(node).flatMap(({ pylon, thread }) => {
         const listed = record?.observation?.pylons.some((p) => p.pylonId === pylon.pylonId) ?? false;
-        const starting = !listed && (thread.status === "active" || thread.status === "idle");
+        const starting = !listed && isOpenStatus(thread.status);
         if (!listed && !starting) return [];
         return [{ pylon: pylon.pylonId, image: pylon.boot.image, template: starting && pylon.firstBoot.kind === "template" ? pylon.firstBoot.template : null }];
       }),

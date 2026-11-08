@@ -22,6 +22,7 @@ import { sendWithStandingRules } from "./standing-rules.ts";
 import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
+import { isOpenStatus } from "./reconcile.ts";
 
 type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
@@ -57,7 +58,7 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const review = registry.review(id);
   const where = prLocationOf(registry, id);
   if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
-  if (t.status === "archived" || t.status === "deleted") return blocked(id, `is ${t.status} and its pull request did not merge`);
+  if (!isOpenStatus(t.status)) return blocked(id, `is ${t.status} and its pull request did not merge`);
   if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
   if (where.kind === "closed") return blocked(id, `PR #${where.number} closed without merging`);
   return where.kind === "open" ? waiting(id, `PR #${where.number} is open`) : waiting(id, "has no pull request yet");
@@ -106,7 +107,7 @@ export function threadQueue(options: {
     const record = registry.queuedThread(id);
     if (record?.status !== "started" || record.firstMessage !== "pending" || record.message === null) return;
     const t = registry.thread(id);
-    if (t === undefined || t.status === "archived" || t.status === "deleted") return;
+    if (!isOpenStatus(t?.status)) return;
     await deliverDurable({ id: requestIds.queued(id), text: record.message }, async (m) => {
       await sendWithStandingRules(registry, id, m.id, m.text, (text) => send(id, text, m.id));
       return "delivered";

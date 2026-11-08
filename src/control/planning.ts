@@ -26,6 +26,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { isItemId, itemIdFrom, type ItemId, type ThreadId } from "../ids.ts";
 import { notConfigured } from "./not-configured.ts";
+import { isOpenStatus } from "./reconcile.ts";
 
 type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
 
@@ -106,7 +107,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
     for (const { thread } of registry.planningThreads()) {
       const t = registry.thread(thread);
       const read = registry.planning(thread)!.read;
-      if (t === undefined || t.status === "archived" || t.status === "deleted" || t.working || t.lastReplyAt === null || t.lastReplyAt <= read) continue;
+      if (!isOpenStatus(t?.status) || t.working || t.lastReplyAt === null || t.lastReplyAt <= read) continue;
       const through = t.lastReplyAt;
       try {
         for (const block of planBlocks(await replies(t), registry.planning(thread)!.token)) {

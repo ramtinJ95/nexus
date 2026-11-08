@@ -7,6 +7,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail, ThreadNeed } from "./wire.ts";
 import { personNeeds } from "./work-model.ts";
+import { isOpenStatus } from "./reconcile.ts";
 
 export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread; d: ThreadDetail };
 /** A thread's card, a node's cleanup question with its Cluster card, or work its pipeline phase holds for the person that no card acts on. */
@@ -37,7 +38,7 @@ export function needsOf(w: Work, detail: (thread: Thread) => ThreadDetail): Inbo
   const held = [
     ...w.registry.items().map((i) => itemView(w.registry, i, w.now)).filter((item) => item.thread === null && item.phase.kind === "held").map((item): InboxNeed => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
     ...w.registry.projects().flatMap((p) => w.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): InboxNeed => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
-    ...w.threads().filter((t) => (t.status === "active" || t.status === "idle") && !carded.has(t.id) && holds(t.id)).map((thread): InboxNeed => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
+    ...w.threads().filter((t) => isOpenStatus(t.status) && !carded.has(t.id) && holds(t.id)).map((thread): InboxNeed => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
   ].sort((a, b) => a.since - b.since);
   return [...cards, ...held];
 }

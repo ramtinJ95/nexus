@@ -6,7 +6,7 @@ import type { ThreadId } from "../ids.ts";
 import { roleOf } from "./agent-protocol.ts";
 import type { Attention, Need } from "./attention.ts";
 import { prLocation, watchedPrs, type PrLocation } from "./pr-watch-model.ts";
-import { archivedDiskMs, settleStuck } from "./reconcile.ts";
+import { archivedDiskMs, isOpenStatus, settleStuck } from "./reconcile.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 
@@ -41,7 +41,7 @@ export type PersonNeed = Need | { kind: "disk"; since: number } | { kind: "threa
  */
 export function personNeeds(registry: Pick<Registry, "attention" | "needs">, t: Thread, now: number): PersonNeed[] {
   if (t.status === "archived") return settleStuck(t, now) ? [{ kind: "disk", since: t.archivedAt! + archivedDiskMs }] : [];
-  if (t.status !== "active" && t.status !== "idle") return [];
+  if (!isOpenStatus(t.status)) return [];
   const attention = registry.attention(t.id);
   const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
   const own: PersonNeed[] = [...registry.needs(t.id)];

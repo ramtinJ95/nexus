@@ -2,7 +2,7 @@ import type { BootInputs } from "../protocol/spawn.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { diskRefusal } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
-import { desiredPhase, wantsToRun } from "./reconcile.ts";
+import { desiredPhase, isOpenStatus, wantsToRun } from "./reconcile.ts";
 import { Refusal } from "./refusal.ts";
 import { gib } from "../util/gib.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
@@ -247,7 +247,7 @@ export function nodePylons(registry: PlacementRegistry, node: NodeRecord): NodeP
       continue;
     }
     const { pylon: p, status } = found;
-    const tally = tallies[!isUp(seen) && (status === "archived" || status === "deleted") ? "archived"
+    const tally = tallies[!isUp(seen) && !isOpenStatus(status) ? "archived"
       : crashed(seen) ? "crashed" : isUp(seen) ? "up" : "paused"];
     tally.pylons += 1;
     tally.cpus += p.boot.resources.cpus;

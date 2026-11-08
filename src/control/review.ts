@@ -49,6 +49,7 @@ import { deliverDurable } from "./durable-message.ts";
 import type { StartRequest } from "./start-request.ts";
 import { servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
+import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
 type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "planning" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
 
@@ -771,7 +772,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const held = r.phase.kind === "needs-person" && r.merged === null;
     if (held || r.phase.kind === "approved") {
       const status = registry.thread(r.builder)?.status;
-      if (status === "archived" || status === "deleted") return end(r, { kind: "cancelled", who: "builder", status });
+      if (status !== undefined && !isOpenStatus(status)) return end(r, { kind: "cancelled", who: "builder", status });
       // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself whether the PR is still
       // open, as often as the watch would, and about a held review's head. One that stopped at approval leaves its head
       // to the landing, which reads GitHub before it merges.
@@ -817,7 +818,7 @@ export function reviewLoop(deps: ReviewDeps) {
     for (const [who, t] of [["builder", builder], ["reviewer", reviewer]] as const) {
       if (landing || t?.status === "active") continue;
       // The loop archives a review's threads only once it can no longer use them, so here the person did.
-      if (t?.status === "archived" || t?.status === "deleted") return end(r, { kind: "cancelled", who, status: t.status });
+      if (t !== undefined && !isOpenStatus(t.status)) return end(r, { kind: "cancelled", who, status: t.status });
       return toPerson(r, "thread", `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
     // A second reviewer gone is no approval, so the review waits on the person, who can start it again.
@@ -854,7 +855,7 @@ export function reviewLoop(deps: ReviewDeps) {
    * builder for the person, a reviewer for a later pass.
    */
   const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.thread(id))
-    .filter((t): t is Thread => t !== undefined && !t.working && t.status !== "archived" && t.status !== "deleted");
+    .filter((t): t is Thread => t !== undefined && !t.working && isOpenStatus(t.status));
 
   /**
    * Whether `r` may still use its reviewer: while it runs, or while it waits at approval or for the person, unmerged, in
@@ -881,7 +882,7 @@ export function reviewLoop(deps: ReviewDeps) {
     if (beginning === 0) {
       // A second reviewer is never asked to quote, so a review that waits at an approval does not use it.
       const using = new Set(reviews.filter(usesReviewer).flatMap((r) => ended(r) ? [r.reviewer] : reviewersOf(r)));
-      const left = registry.storedThreads({ status: ["active", "idle"], startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
+      const left = registry.storedThreads({ status: openStatuses, startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
       for (const t of finished(...left.map((t) => t.id))) {
         registry.setThreadStatus(t.id, "archived");
         deps.wake(t);

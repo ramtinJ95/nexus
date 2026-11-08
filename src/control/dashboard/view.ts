@@ -1,6 +1,6 @@
 /** The view kit every dashboard page renders with: safe markup and the page's headers, icons, tones and badges. */
 import { createHash } from "node:crypto";
-import type { ActualState, DesiredPhase } from "../reconcile.ts";
+import { isOpenStatus, type ActualState, type DesiredPhase } from "../reconcile.ts";
 import type { HerdrStatus } from "../../protocol/observations.ts";
 import type { ThreadRow } from "../wire.ts";
 import { needsPerson, type Attention } from "../attention.ts";
@@ -99,13 +99,13 @@ export function threadState(t: ThreadRow, now: number): [label: string, tone: To
   if (attention === "limited") return [limitText(t, now), attentionTone.limited];
   if (attention === "waiting") return [t.sessionWaitingMessage ?? attentionLabels.waiting, attentionTone.waiting];
   if (attention !== null) return [attentionLabels[attention], attentionTone[attention]];
-  if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
+  if (!isOpenStatus(t.status)) return [t.status, "muted"];
   return actualBadge[pylon.actualState];
 }
 
 /** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
 export const dims = (t: ThreadRow, active?: ThreadId) =>
-  t.id !== active && (t.status === "active" || t.status === "idle") && !needsPerson(t.attention);
+  t.id !== active && isOpenStatus(t.status) && !needsPerson(t.attention);
 
 /** "5 min ago", which client.js ticks with the same format. */
 export function ago(at: number, now: number): Html {

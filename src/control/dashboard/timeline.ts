@@ -6,7 +6,7 @@
 import type { ThreadDetail } from "../wire.ts";
 import { isOpen } from "../questions.ts";
 import type { ThreadId } from "../../ids.ts";
-import { keptPastDay } from "../reconcile.ts";
+import { isOpenStatus, keptPastDay } from "../reconcile.ts";
 import { blocks, findingsOf, reviewerApproved, type Review, type Round, type Verdict } from "../review-model.ts";
 import { diskGoes, keptPast, limitText, needKind, needLabels, plannerGaveUp, reviewersNote, reviewLine } from "../wording.ts";
 import { Html, html, ago, short, dot, icon, type Part, type Tone } from "./view.ts";
@@ -141,7 +141,7 @@ ${heldAt("landing")}`,
     review: r === null ? null : ago(r.startedAt, c.now), landing: null, deployed: null,
   };
   const label: Record<Step, string> = { planned: "Brief", queued: "Queued", building: "Building", review: "Pull request and review", landing: "Landing", deployed: "Deployed" };
-  const closed = t.status === "archived" || t.status === "deleted";
+  const closed = !isOpenStatus(t.status);
   // A pylon its node does not list has no disk left to keep.
   const kept = d.pylon.actualState === "absent" ? null : keptPastDay(t, c.now);
   return html`<ol class="tl">${steps.map((s) => step(s, label[s], states[s], when[s], body[s]))}

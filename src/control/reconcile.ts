@@ -23,6 +23,9 @@ import { requiredArtifacts, type BootInputs, type LiveSpec, type PylonSource } f
 import { harnessNamed, type SessionHarness } from "../protocol/agent-kinds.ts";
 
 export type ThreadStatus = "active" | "idle" | "archived" | "deleted";
+export const openStatuses = ["active", "idle"] as const satisfies readonly ThreadStatus[];
+/** A thread that does not exist is not open. */
+export const isOpenStatus = (status: ThreadStatus | undefined): status is (typeof openStatuses)[number] => status === "active" || status === "idle";
 /** `reading` runs an archived thread's pylon for the usage backfill without bringing its sessions back. */
 export type DesiredPhase = "running" | "reading" | "paused" | "deleted";
 

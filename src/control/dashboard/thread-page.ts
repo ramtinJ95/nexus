@@ -2,7 +2,7 @@
  * Renders a thread's page and a queued thread's page: the conversation, the inspector and the pylon's
  * facts and sessions.
  */
-import { desiredPhase } from "../reconcile.ts";
+import { desiredPhase, isOpenStatus } from "../reconcile.ts";
 import { linkedPort } from "../../services-file.ts";
 import { harnessNamed, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
@@ -59,7 +59,7 @@ export function threadPage(c: Context, { d, row, node, role, agent, usage, view,
   const run = runOf(d, read, items, c.now);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
-  const open = t.status === "active" || t.status === "idle";
+  const open = isOpenStatus(t.status);
   const life = role === "builder" ? lifeOfThread(c, t.id) : null;
   const bar = threadBar(t, headState(d, row, run, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
@@ -113,7 +113,7 @@ function termView(t: Thread): Html {
  */
 function headState(d: ThreadDetail, row: ThreadRow, run: Run, now: number): readonly [string, Tone] {
   const own = threadState(row, now);
-  const open = d.thread.status === "active" || d.thread.status === "idle";
+  const open = isOpenStatus(d.thread.status);
   if (!open || d.pylon.actualState !== "running" || (d.attention !== null && d.attention !== "working")) return own;
   return run.kind === "working" ? [attentionLabels.working, attentionTone.working] : run.kind === "idle" ? ["agent idle", "idle"] : own;
 }
@@ -231,7 +231,7 @@ function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number, usage: U
   const unpublished = d.ports?.filter((l) => l.preview === null) ?? null;
   const host = (url: string) => url.replace(/^https:\/\//, "").replace(/\/$/, "");
   // Only a linked port's preview can be unpublished. A service's preview is part of its declaration.
-  const open = t.status === "active" || t.status === "idle";
+  const open = isOpenStatus(t.status);
   return html`<div class="ipane" id="pane-previews">
 <section aria-labelledby="previews-h"><h2 id="previews-h">Previews ${count(d.previews.length)}</h2>
 ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul class="list">${d.previews.map((p) => {

@@ -9,7 +9,7 @@ import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
 import { Refusal } from "./refusal.ts";
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
-import { desiredPhase, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
+import { desiredPhase, isOpenStatus, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import { pylonEventSchema, type HerdrStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
@@ -339,7 +339,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       sql("UPDATE threads SET status = ? WHERE id = ?").run(status, id);
       if (status === "archived") sql("INSERT INTO thread_archives (thread, archived_at) VALUES (?, ?) ON CONFLICT(thread) DO NOTHING").run(id, clock());
       else sql("DELETE FROM thread_archives WHERE thread = ?").run(id);
-      if (status === "archived" || status === "deleted") {
+      if (!isOpenStatus(status)) {
         // The thread's pylon pauses, so no turn of it runs and no dialog waits.
         sql("DELETE FROM session_activity WHERE thread = ?").run(id);
         for (const p of participants) p.closed?.(id);
@@ -527,7 +527,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         pruneSessions();
         const session = event.session ?? "default";
         const status = threadStatus(thread);
-        if (status === "archived" || status === "deleted") return;
+        if (status !== undefined && !isOpenStatus(status)) return;
         const at = event.at ?? report.time;
         const previous = sql("SELECT at, kind, event_ids FROM session_order WHERE thread = ? AND session = ?").get(thread, session);
         const previousIds = previous?.event_ids == null ? [] : json<string[]>(previous.event_ids);
