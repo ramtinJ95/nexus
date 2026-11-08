@@ -2,7 +2,7 @@ import type { BootInputs } from "../protocol/spawn.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { diskRefusal } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
-import { desiredPhase } from "./reconcile.ts";
+import { desiredPhase, wantsToRun } from "./reconcile.ts";
 import { Refusal } from "./refusal.ts";
 import { gib } from "../util/gib.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
@@ -10,6 +10,11 @@ import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { StoredPylon } from "./thread-store.ts";
 import type { Placement, Room, Weighed } from "./placement-model.ts";
+
+/** A controller that exited or failed to boot the VM leaves it down, holding only its disk. */
+const crashed = (p: PylonObservation) => p.phase === "broken" && p.cause === "controller";
+/** The VM holds its CPUs and memory. */
+const isUp = (p: PylonObservation) => p.phase !== "stopped" && !crashed(p);
 
 type PlacementRegistry = Pick<Registry, "nodes" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved">;
 type WeighingRegistry = PlacementRegistry & Pick<Registry, "latestHealthSample">;
@@ -80,8 +85,8 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
 }
 
 /**
- * The pylons on `node` that run only because a review holds them up for its findings. Their room is other work's to
- * take: placement counts it as free, and `freeHeldRoom` pauses them once the node needs it.
+ * The pylons on `node` that run only because a hold (`awaitedUntil`) keeps them up. Their room is other work's to take:
+ * placement counts it as free, and `freeHeldRoom` pauses them once the node needs it.
  */
 function heldOnly(registry: PlacementRegistry, node: NodeName, now: number) {
   return registry.pylonsWithThreadsOn(node).filter(({ pylon, thread: { awaitedUntil, ...unheld } }) => pylon.failed === null && awaitedUntil !== undefined
@@ -90,7 +95,7 @@ function heldOnly(registry: PlacementRegistry, node: NodeName, now: number) {
 const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => heldOnly(registry, node, now).reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
 
 /**
- * Releases the review holds on `node` while the rest of its work leaves it short of memory: committed past its size,
+ * Releases the holds on `node` while the rest of its work leaves it short of memory: committed past its size,
  * or with less free than the headroom a start keeps, so a held pylon pauses for a start or a wake that took its room.
  * The soonest to end goes first. Returns the threads whose holds it released.
  */
@@ -104,8 +109,8 @@ export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releas
   const { left, pending } = roomLeft(registry, node, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 });
   const free = freeMemory(registry, node, o, o.capacity, now);
   // A pylon still up that is to pause, as one whose hold went on an earlier pass, gives its room back soon.
-  const up = new Set(o.pylons.filter((p) => p.phase !== "stopped" && !(p.phase === "broken" && p.cause === "controller")).map((p) => p.pylonId));
-  const pausing = registry.pylonsWithThreadsOn(node).filter(({ pylon, thread }) => up.has(pylon.pylonId) && !["running", "reading"].includes(desiredPhase(thread, now)))
+  const up = new Set(o.pylons.filter(isUp).map((p) => p.pylonId));
+  const pausing = registry.pylonsWithThreadsOn(node).filter(({ pylon, thread }) => up.has(pylon.pylonId) && !wantsToRun(thread, now))
     .reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
   let short = Math.max(-left.memoryGiB, free === null ? 0 : memoryHeadroomGiB - (free.availableGiB - free.untouchedGiB - pending.memoryGiB)) - pausing;
   const released: ThreadId[] = [];
@@ -152,8 +157,7 @@ function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservati
   let untouchedGiB = 0;
   for (const pylon of placed) {
     const p = seen.get(pylon.pylonId);
-    const up = p !== undefined && p.phase !== "stopped" && !(p.phase === "broken" && p.cause === "controller");
-    if (!up || uncounted(pylon, p).memoryGiB > 0) continue;
+    if (p === undefined || !isUp(p) || uncounted(pylon, p).memoryGiB > 0) continue;
     const size = pylon.boot.resources.memoryGiB;
     const held = resident.get(pylon.pylonId);
     placedUpGiB += size;
@@ -192,7 +196,7 @@ export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObs
   const now = Date.now();
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
   const pending = [...registry.pylonsWithThreadsOn(node)
-    .filter(({ pylon, thread }) => pylon.failed === null && ["running", "reading"].includes(desiredPhase(thread, now)))
+    .filter(({ pylon, thread }) => pylon.failed === null && wantsToRun(thread, now))
     .map(({ pylon }) => uncounted(pylon, seen.get(pylon.pylonId))), ...registry.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
   const left: Room = {
@@ -211,7 +215,7 @@ export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObs
 export function uncounted(p: StoredPylon, seen: PylonObservation | undefined): Room {
   const { cpus, memoryGiB, diskGiB } = p.boot.resources;
   if (seen === undefined) return { cpus, memoryGiB, diskGiB };
-  const reboots = seen.phase === "stopped" || (seen.phase === "broken" && seen.cause === "controller" && p.retrying);
+  const reboots = seen.phase === "stopped" || (crashed(seen) && p.retrying);
   return reboots ? { cpus, memoryGiB, diskGiB: 0 } : { cpus: 0, memoryGiB: 0, diskGiB: 0 };
 }
 
@@ -243,9 +247,8 @@ export function nodePylons(registry: PlacementRegistry, node: NodeRecord): NodeP
       continue;
     }
     const { pylon: p, status } = found;
-    const crashed = seen.phase === "broken" && seen.cause === "controller";
-    const tally = tallies[(crashed || seen.phase === "stopped") && (status === "archived" || status === "deleted") ? "archived"
-      : crashed ? "crashed" : seen.phase !== "stopped" ? "up" : "paused"];
+    const tally = tallies[!isUp(seen) && (status === "archived" || status === "deleted") ? "archived"
+      : crashed(seen) ? "crashed" : isUp(seen) ? "up" : "paused"];
     tally.pylons += 1;
     tally.cpus += p.boot.resources.cpus;
     tally.memoryGiB += p.boot.resources.memoryGiB;

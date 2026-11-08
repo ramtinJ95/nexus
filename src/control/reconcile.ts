@@ -107,6 +107,9 @@ export function desiredPhase(a: ActivityFacts & ArchiveFacts, now: number): Desi
   return busy ? "running" : "paused";
 }
 
+/** The pylon is to be up: running, or booted to read an archived thread's usage. */
+export const wantsToRun = (a: ActivityFacts & ArchiveFacts, now: number) => ["running", "reading"].includes(desiredPhase(a, now));
+
 export interface PlanInput {
   pylonId: PylonId;
   node: NodeName;
