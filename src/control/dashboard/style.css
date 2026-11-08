@@ -1136,7 +1136,8 @@ meter:-moz-meter-sub-sub-optimum::-moz-meter-bar { background: var(--bad); }
   .seg, .two { grid-template-columns: 1fr; }
 }
 
-.attention-toast { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; gap: 16px; padding: 16px; background: #252830; color: white; border: 1px solid #777; border-radius: 8px; }
+.toast-stack { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; max-width: calc(100vw - 48px); }
+.attention-toast { display: flex; gap: 16px; padding: 16px; background: #252830; color: white; border: 1px solid #777; border-radius: 8px; }
 .attention-toast a { color: #9dcaff; }
 .ov-sub { margin: 14px 0 6px; font: 500 12px var(--sans); color: var(--text-3); }
 .ov-wait { display: block; overflow: hidden; text-overflow: ellipsis; }

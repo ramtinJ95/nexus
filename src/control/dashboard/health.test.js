@@ -95,6 +95,7 @@ test("notices that arrive together stack as separate toasts, and dismissing one 
   class Node {
     constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parent = null; this.className = ""; }
     append(...kids) { for (const kid of kids) { if (typeof kid === "string") continue; kid.remove(); kid.parent = this; this.children.push(kid); } }
+    appendChild(kid) { this.append(kid); return kid; }
     remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
     all() { return this.children.flatMap((c) => [c, ...c.all()]); }
     querySelector(selector) { return this.all().find((c) => c.className.split(" ").includes(selector.slice(1))) ?? null; }
