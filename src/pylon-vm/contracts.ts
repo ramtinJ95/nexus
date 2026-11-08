@@ -316,6 +316,14 @@ type Frozen<T> = T extends readonly (infer U)[] ? readonly Frozen<U>[] : T exten
 /** An action as `run` takes it, before its defaults. `run` never changes it, so readonly arrays pass. */
 export type ActionInput = Frozen<z.input<typeof actionSchema>>;
 export type Reply<A extends Action["action"]> = z.infer<(typeof actions)[A]["reply"]>;
+/**
+ * The shapes of Gondolin's placeholders for a secret, which the guest sees in place of its value (network.ts), in each
+ * of its modes: `shared`, its default, a marker the boot's secrets share followed by the secret's name, and `unique`.
+ */
+export const secretPlaceholderShapes = {
+	shared: /\b[0-9a-f]{48}(?=\.[a-z0-9_-]+)/,
+	unique: /(GONDOLIN_SECRET_)[0-9a-f]{16,}/,
+};
 /** The label naming the image an instance or template build was created from. */
 export const imageLabel = "nexus.image";
 /**
