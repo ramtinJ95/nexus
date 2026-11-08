@@ -4,8 +4,8 @@
  * match the base's, which catches type-only edits that esbuild erases, and esbuild's whitespace-minified output must
  * match too, which a parser rather than this lexer reads. The lexer reads a `/` right after `)` as division, so a
  * regex there, as in `if (x) /a/.test(s)`, could hide a type edit after it. A shell script, a .sh file or one whose
- * first line is a `sh` or `bash` shebang, must match with its blank lines and whole-line `#` comments dropped, which
- * holds only while no heredoc or multi-line string has such a line. `node scripts/comment-only.ts [base] [path...]`
+ * first line is a `sh` or `bash` shebang, must match with its whole-line `#` comments dropped, which holds only while
+ * no heredoc or multi-line string has such a line. `node scripts/comment-only.ts [base] [path...]`
  * checks the diff under the paths, and fails on a file added, deleted or renamed.
  */
 import { execFileSync } from "node:child_process";
@@ -93,11 +93,11 @@ function code(source: string): string {
 }
 
 const isShell = (path: string, source: string) => path.endsWith(".sh") || /^#!.*\b(ba)?sh\b/.test(source);
+// A line after a trailing `\` continues a command, so a comment there stays in the comparison.
 const shell = (source: string) =>
   source
     .split("\n")
-    .filter((line, at) => line.trim() !== "" && (at === 0 || !/^\s*#/.test(line)))
-    .map((line) => line.trimEnd())
+    .filter((line, at, lines) => at === 0 || !/^\s*#/.test(line) || lines[at - 1]!.endsWith("\\"))
     .join("\n");
 
 const firstDifference = (a: string, b: string) => {
