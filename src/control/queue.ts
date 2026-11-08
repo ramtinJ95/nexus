@@ -18,7 +18,6 @@ import { checkStart, resourcesOf } from "./threads.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { QueuedThread, Wait } from "../contract/threads.ts";
-import { sendWithStandingRules } from "./standing-rules.ts";
 import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
@@ -84,7 +83,7 @@ const statusName = (status: QueuedRecord["status"]) => status === "archived" ? "
 export const refusedRetryMs = 10 * 60_000;
 
 export function threadQueue(options: {
-  registry: QueueRegistry & Pick<Registry, "standingRulesCarried" | "standingRulesOf">;
+  registry: QueueRegistry & Pick<Registry, "sendWithStandingRules">;
   startThread: (request: StartRequest, caller: string, id?: ThreadId) => Promise<Thread>;
   /** A human message, the harness's followUp. A repeated request ID answers with the first submission. */
   send: (thread: ThreadId, text: string, requestId: string) => Promise<unknown>;
@@ -109,7 +108,7 @@ export function threadQueue(options: {
     const t = registry.thread(id);
     if (!isOpenStatus(t?.status)) return;
     await deliverDurable({ id: requestIds.queued(id), text: record.message }, async (m) => {
-      await sendWithStandingRules(registry, id, m.id, m.text, (text) => send(id, text, m.id));
+      await registry.sendWithStandingRules(id, m.id, m.text, (text) => send(id, text, m.id));
       return "delivered";
     }, () => registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" }));
   }

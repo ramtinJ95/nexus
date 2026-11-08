@@ -9,7 +9,6 @@ import { queuedView } from "../queue.ts";
 import { feature, type Features } from "../features.ts";
 import { isOpenStatus, retryRefusal } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
-import { sendWithStandingRules } from "../standing-rules.ts";
 import { ok, created, noContent, parse, on, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
 import { threadRoutes as routes, type QueuedThread } from "../../contract/threads.ts";
@@ -99,7 +98,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
       plans?.begin(t);
       if (message !== undefined && isOpenStatus(t.status)) {
         const requestId = requestIds.brief(t.id);
-        await sendWithStandingRules(registry, t.id, requestId, message, (brief) => harness.send(t.id, plans?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => plans?.sent(t, requestId), (err: Error) => {
+        await registry.sendWithStandingRules(t.id, requestId, message, (brief) => harness.send(t.id, plans?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => plans?.sent(t, requestId), (err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
           throw err instanceof Refusal ? new Refusal(err.kind, why) : new Error(why);
         });

@@ -23,12 +23,11 @@ import { claudeFrames } from "../contract/streams.ts";
 import { Refusal } from "./refusal.ts";
 import { typeIntoClaude } from "./inbox.ts";
 import type { Planning } from "./planning.ts";
-import { sendWithStandingRules } from "./standing-rules.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Sent, ThreadDetail } from "./wire.ts";
 
-type ThreadAgentRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeMessage" | "claudeMessageSenders" | "claudeWorker" | "latestClaudeTurn" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage" | "standingRulesCarried" | "standingRulesOf">;
+type ThreadAgentRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeMessage" | "claudeMessageSenders" | "claudeWorker" | "latestClaudeTurn" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "sendWithStandingRules" | "setClaudeMessage">;
 
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */
 export interface AgentMessage { text: string; requestId: string; mode: "followUp" | "steer" }
@@ -89,7 +88,7 @@ export function threadAgents(options: {
         registry.recordActivity(t.id, { human: Date.now() });
         wake(t);
         // A builder started without a first message gets its rules with the first one the person sends.
-        const submission = await sendWithStandingRules(registry, t.id, message.requestId, message.text,
+        const submission = await registry.sendWithStandingRules(t.id, message.requestId, message.text,
           (text) => harness.send(t.id, planning?.compose(t, message.requestId, text) ?? text, message.requestId, message.mode));
         planning?.sent(t, message.requestId);
         return { submission: submission.id };

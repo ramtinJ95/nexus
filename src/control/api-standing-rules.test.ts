@@ -9,6 +9,7 @@ import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import type { ImageId, ProjectId, ThreadId } from "../ids.ts";
 import { node, project, image, observeNode, testApi, withImage, withQueue } from "../test-support/api-kit.ts";
+import { seedRegistry, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 
 const rules = "- Run npm test before you push.\n- Keep commits small.";
 const section = (text: string) => `\n\n## Standing rules for this project\n\n${text}`;
@@ -286,4 +287,19 @@ test("which starts carry standing rules: a person's builder and queued starts do
     const id = await start();
     assert.equal(s.registry.standingRulesOf(id) !== null, carries, name);
   }
+});
+
+test("each registry orders its own sends: one waiting to carry the rules holds up no send to the same thread ID in another registry", async (t) => {
+  const [a, b] = [testRegistry(t), testRegistry(t)].map((registry) => {
+    seedRegistry(registry);
+    const thread = testThread();
+    registry.createThread({ ...thread, standingRules: { revision: 1, text: rules, carriedBy: null } }, testPylon(thread));
+    return { registry, id: thread.id };
+  });
+  let release!: () => void;
+  const held = a!.registry.sendWithStandingRules(a!.id, "msg:a", "Hello.", () => new Promise<void>((resolve) => { release = resolve; }));
+  const sent = await b!.registry.sendWithStandingRules(b!.id, "msg:b", "Hello.", async (text) => text);
+  assert.equal(sent, `Hello.${section(rules)}`);
+  release();
+  await held;
 });
