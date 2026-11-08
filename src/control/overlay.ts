@@ -8,7 +8,7 @@ import { shellQuote } from "../shell.ts";
 import { chatgptTokenGrant, githubTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
 import type { GitIdentity, OverlayFile, RepoInit } from "../protocol/spawn.ts";
 import type { LoginKind } from "./project.ts";
-import { checkoutDir, pylonGuideFile, pylonInfoFile } from "../guest-contract.ts";
+import { checkoutDir, nexusApi, pylonGuideFile, pylonInfoFile, type PylonInfo } from "../guest-contract.ts";
 
 export interface PylonOverlay {
   gitIdentity?: GitIdentity | undefined;
@@ -50,7 +50,7 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
     NEXUS_NODE: overlay.node,
     NEXUS_API: nexusApi,
   };
-  const info = {
+  const info: PylonInfo = {
     pylonId: overlay.pylonId,
     threadId: overlay.threadId,
     project: overlay.project,
@@ -67,9 +67,6 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
     { path: pylonGuideFile, mode: 0o644, owner: "user", content: pylonGuide(overlay) },
   ];
 }
-
-/** What NEXUS_API is set to. See PylonApiRequest. */
-export const nexusApi = "http://nexus.pylon";
 
 function pylonGuide(o: PylonOverlay): string {
   const list = (items: readonly string[]): string => items.map((item) => `- ${item}\n`).join("");

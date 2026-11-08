@@ -28,11 +28,34 @@ export const piEnv = "/usr/local/libexec/nexus/pi-env";
 export const nexusKvm = "/usr/local/libexec/nexus/nexus-kvm";
 export const nexusTurn = "/usr/local/bin/nexus-turn.ts";
 
+/** The host the guest's NEXUS_API names. Each backend's host bridge answers it on the node, so it needs no allowlist entry or DNS name. */
+export const bridgeHost = "nexus.pylon";
+export const nexusApi = `http://${bridgeHost}`;
+/** The one path under NEXUS_API. Each call POSTs a PylonApiRequest (src/probe/pylon-api.ts). */
+export const bridgeRequestPath = "/v1/request";
+
+export const servicesActions = ["ensure", "list", "restart", "stop"] as const;
+/** The fork returns at most this many lines of a service's log. */
+export const maxServiceLogLines = 500;
+
 export const sessionKinds = ["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"] as const;
 export const maxSessionLength = 200;
 export const maxEventMessageLength = 2048;
 /** Set by the pylon's outbox on each event, and kept when it sends the event again. */
 export const eventIdPattern = /^[0-9a-z-]{1,64}$/;
+
+/** What the control plane writes to pylonInfoFile, and `nexus info` prints. */
+export interface PylonInfo {
+  pylonId: string;
+  threadId: string;
+  project: string;
+  node: string;
+  api: string;
+  allowedHosts: readonly string[];
+  previews: readonly { service: string; url: string }[];
+  logins: readonly ("claude" | "chatgpt")[];
+  dotfiles: { repo: string; ref: string };
+}
 
 /** How long one ordinary guest exec may take. */
 export const callTimeoutMs = 10_000;

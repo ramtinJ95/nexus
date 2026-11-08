@@ -13,14 +13,14 @@ import type { Guest } from "../backends/backend.ts";
 import type { HostBridgeAnswer } from "../host-bridge.ts";
 import type { PortLinks } from "./run.ts";
 import { addOutput, listOutputs, OutputRefused } from "./guest/outputs.ts";
-import { serviceDecl, serviceName, type ServiceDecl, type ServiceName } from "../services-file.ts";
+import { serviceDecl, serviceName, type ParsesTo, type ServiceDecl, type ServiceName } from "../services-file.ts";
 import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
 import { pylonEventSchema, type DeclaredOutput, type PylonEvent, type ServiceFact } from "../protocol/observations.ts";
 import { parseJson } from "../parse.ts";
-import { callTimeoutMs, pylonInfoFile } from "../guest-contract.ts";
+import { callTimeoutMs, maxServiceLogLines, pylonInfoFile, servicesActions, type PylonInfo, type sessionKinds } from "../guest-contract.ts";
 
-export const pylonInfoSchema = z.strictObject({
+const pylonInfoSchema = z.strictObject({
   pylonId: z.string(),
   threadId: z.string(),
   project: z.string(),
@@ -31,22 +31,15 @@ export const pylonInfoSchema = z.strictObject({
   logins: z.array(z.enum(["claude", "chatgpt"])),
   dotfiles: z.strictObject({ repo: z.string(), ref: z.string() }),
 });
-export type PylonInfo = z.infer<typeof pylonInfoSchema>;
+true satisfies ParsesTo<typeof pylonInfoSchema, PylonInfo>;
 
 /** A service with the preview URL tailscale serves for it, or null while it has none. */
 export type ServiceView = ServiceFact & { url: string | null };
 
-// In-pylon commands. The `nexus` CLI in the image calls the probe at NEXUS_API.
-
-/**
- * NEXUS_API is http://nexus.pylon. Gondolin's onRequest hook answers that host from the probe on the node
- * (pi-sandbox change 4), so the call never leaves the machine and needs no tailnet route. The probe knows
- * which pylon is calling from the VM the request came through, so the guest holds no token.
- */
 export type PylonApiRequest =
-  | ({ op: "event" } & PylonEvent)
+  | { op: "event"; kind: typeof sessionKinds[number]; at?: number; session?: string; message?: string; id?: string }
   | { op: "info" }
-  | { op: "services"; action: "ensure" | "list" | "restart" | "stop"; name?: ServiceName }
+  | { op: "services"; action: typeof servicesActions[number]; name?: ServiceName }
   | { op: "service-logs"; name: ServiceName; lines: number }
   | { op: "service-start"; name: ServiceName; decl: ServiceDecl } // ad hoc. Rejects declared names
   | { op: "preview"; port: number; title?: string }
@@ -102,9 +95,8 @@ class Refused extends Error {}
 const requestSchema = z.discriminatedUnion("op", [
   pylonEventSchema.extend({ op: z.literal("event") }),
   z.strictObject({ op: z.literal("info") }),
-  z.strictObject({ op: z.literal("services"), action: z.enum(["ensure", "list", "restart", "stop"]), name: serviceName.optional() }),
-  // The fork returns at most 500 lines.
-  z.strictObject({ op: z.literal("service-logs"), name: serviceName, lines: z.int().min(1).max(500) }),
+  z.strictObject({ op: z.literal("services"), action: z.enum(servicesActions), name: serviceName.optional() }),
+  z.strictObject({ op: z.literal("service-logs"), name: serviceName, lines: z.int().min(1).max(maxServiceLogLines) }),
   z.strictObject({ op: z.literal("service-start"), name: serviceName, decl: serviceDecl }),
   z.strictObject({ op: z.literal("preview"), port: z.int().min(1).max(65535), title: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal("unpreview"), port: z.int().min(1).max(65535) }),
@@ -118,6 +110,7 @@ const requestSchema = z.discriminatedUnion("op", [
   }),
   z.strictObject({ op: z.literal("output-list") }),
 ]);
+true satisfies ParsesTo<typeof requestSchema, PylonApiRequest>;
 
 function parseRequest(body: string): PylonApiRequest {
   try {

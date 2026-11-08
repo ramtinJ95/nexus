@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { docker, label, labelFilters } from "./docker-cli.ts";
 import { listenHostBridge, type HostBridge } from "../host-bridge.ts";
 import type { PylonId } from "../ids.ts";
+import { bridgeRequestPath } from "../guest-contract.ts";
 
 /** `docker run` arguments for a new container: its token, its NEXUS_API, and the host name NEXUS_API uses. */
 export function dockerBridgeRunArgs(port: number): string[] {
@@ -29,8 +30,8 @@ export function dockerBridgeRunArgs(port: number): string[] {
 export function dockerHostBridge(port: number, labels: Readonly<Record<string, string>> = {}): HostBridge {
   const scope = labelFilters(labels);
   return listenHostBridge({ host: process.platform === "darwin" ? "127.0.0.1" : "0.0.0.0", port }, async (req) => {
-    const token = /^\/([0-9a-f]{32})\/v1\/request$/.exec(req.url ?? "")?.[1];
-    if (token === undefined) return null;
+    const [, token, path] = /^\/([0-9a-f]{32})(\/.*)$/.exec(req.url ?? "") ?? [];
+    if (token === undefined || path !== bridgeRequestPath) return null;
     const stdout = await docker(["ps", "--filter", `label=${label.bridgeToken}=${token}`, ...scope, "--format", `{{.Label "${label.pylon}"}}`]);
     const pylons = stdout.split("\n").filter((line) => line !== "");
     return pylons.length === 1 ? pylons[0] as PylonId : null;

@@ -4,12 +4,12 @@ import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nexusApi } from "../control/overlay.ts";
 import type { PylonId } from "../ids.ts";
 import type { HostBridgeAnswer } from "../host-bridge.ts";
 import { pylonVmHostBridge } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import type { BootSpec } from "./contracts.ts";
-import { bridgeHost, hostBridgeHook, hostBridgeSocket } from "./host-bridge.ts";
+import { hostBridgeHook, hostBridgeSocket } from "./host-bridge.ts";
+import { bridgeHost, nexusApi } from "../guest-contract.ts";
 import { networkOptions } from "./network.ts";
 
 /** A probe-side bridge on a fresh state root that records every call and answers each with its body echoed. */
