@@ -23,7 +23,7 @@ import { planningPrefix } from "../control/agent-protocol.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { ThreadDetail } from "../control/wire.ts";
-import { detailText } from "./thread-text.ts";
+import { detailText, reviewText } from "./thread-text.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
 import { reviewView } from "../control/review-view.ts";
 import { reviewSaid } from "../control/wording.ts";
@@ -312,6 +312,23 @@ test("show says a pylon's guest is not answering, since when and what to do, and
   assert.deepEqual(guest(await s.json(["show", id])), [
     `guest: not answering since 3m ago, as its last 5 guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${id}\` and \`nexus unarchive ${id}\` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and \`nexus retry-pylon ${id}\` resumes its last saved disk, losing the changes since, so push or copy what you can first`,
   ]);
+});
+
+test("show of a control plane older than 0.72.0, which serves no said, prints its review as its ID with what it needs from the person, and a paused session as paused", async (t) => {
+  const s = await setup(t);
+  const { id } = await s.json(["start", "--project", "acme", "--title", "Old control"]);
+  const detail: ThreadDetail = await s.json(["show", id]);
+  s.registry.apply({ record: "sessions", pylonId: detail.thread.pylonId, sessions: [
+    { id: "w1:p1", state: "paused", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
+  ] });
+  const { said: _said, ...older }: ThreadDetail = await s.json(["show", id]);
+  const pending = "The pull request's GitHub checks are pending.";
+  const review = testReview({ builder: id, phase: personPhase("policy", { code: "github-checks", text: pending }), waiver: { head: "1".repeat(40), holds: ["Changes to auth."], codes: ["reserved-path:auth"], by: laptop, at: 0, change: null } });
+  const shown = detailText({ ...older, review }).split("\n");
+  assert.ok(shown.includes('session: claude-code "review" in pane w1:p1, paused'), "a paused session reads paused, without the wording of how it resumes");
+  assert.deepEqual(shown.slice(shown.indexOf("review rv-1")), ["review rv-1", `needs you: ${pending}`, `waived by ${laptop} at ${"1".repeat(40)}, 1970-01-01T00:00:00.000Z:`, "  Changes to auth."], "the review shows as its ID, then its holds and waiver");
+  assert.ok(!shown.some((line) => line.startsWith("PR watch:")), "and no PR watch line");
+  assert.equal(reviewText(review, undefined).split("\n")[0], "review rv-1", "a review route's reply without said also shows as its ID");
 });
 
 test("show says an archived thread's usage is unread when its pylon could not be read, before and after its disk goes", async (t) => {
