@@ -130,6 +130,7 @@
     "src/probe/guest/sessions.check.ts: reserved-path:auth",
     "src/probe/guest/sessions.ts: reserved-path:auth",
     "src/probe/host.ts: reserved-path:auth",
+    "src/probe/jobs.ts: reserved-path:auth",
     "src/probe/main.ts: reserved-path:auth",
     "src/probe/pylon-api.ts: reserved-path:auth",
     "src/probe/pylon-facts.ts: reserved-path:auth",

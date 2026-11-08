@@ -1,4 +1,4 @@
-/** The probe's job runner and command runner: they turn protocol jobs and commands into VmBackend and session calls. */
+/** The probe's job runner, with each job kind's hooks, and command runner: they turn protocol jobs and commands into VmBackend and session calls. */
 import { isPortableArtifactId, type NodeName, type PortableArtifactId, type PylonId } from "../ids.ts";
 import { JobFailure, type Job } from "../protocol/jobs.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
@@ -9,6 +9,7 @@ import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSe
 import { type SecretSource, type VmBackend } from "../backends/backend.ts";
 import { refuseShortDisk } from "../disk-space.ts";
 import { checkoutDir } from "../guest-contract.ts";
+import type { PylonStates } from "./pylon-facts.ts";
 
 /** Linking or unlinking a pylon's port together with its preview route, so no snapshot read overlaps either. */
 export interface PortLinks {
@@ -36,8 +37,8 @@ export interface TailscaleServe {
 }
 
 /**
- * One switch, and no other logic. The probe keeps the liveHash of each successful spawn for its
- * observations. Backend errors become JobFailure with the closest code, and deadline aborts "deadline".
+ * One switch, and no other logic: what a job changes in the probe's memory is its kind's jobHooks entry. Backend
+ * errors become JobFailure with the closest code, and deadline aborts "deadline".
  */
 export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Promise<void> {
   try {
@@ -94,6 +95,59 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
     throw new JobFailure("backend", err instanceof Error ? err.message : String(err));
   }
 }
+
+/** What a successful job changes beyond the backend, besides the snapshot the probe then publishes. */
+export interface JobEffects {
+  pylons: PylonStates;
+  /** The pylon API's published previews changed. */
+  republished(): void;
+  /** The pylon no longer needs the wake the node's last shutdown marked it for. */
+  forgetShutdown(pylonId: PylonId): void;
+}
+
+type JobKind = Job["kind"];
+
+/** What the probe does around runJob for one kind of job. */
+export interface JobHooks<K extends JobKind> {
+  /** A drain aborts it rather than wait for it. */
+  drainAborts: boolean;
+  /** Runs as the job starts, and returns what runs once it succeeds. */
+  started(job: Extract<Job, { kind: K }>, effects: JobEffects): () => void;
+}
+
+const noEffects = { drainAborts: false, started: () => () => {} };
+
+export const jobHooks: { readonly [K in JobKind]: JobHooks<K> } = {
+  // A drain stops a boot rather than wait for it, as it pauses the pylon next.
+  "spawn": {
+    drainAborts: true,
+    started(job, { pylons, republished, forgetShutdown }) {
+      const seen = pylons.spawnStarted(job.pylonId);
+      return () => {
+        if (pylons.spawnSucceeded(job, seen)) republished();
+        forgetShutdown(job.pylonId);
+      };
+    },
+  },
+  "pause": {
+    drainAborts: false,
+    started(job, { pylons }) {
+      pylons.runEnded(job.pylonId);
+      return () => {};
+    },
+  },
+  "delete": {
+    drainAborts: false,
+    started(job, { pylons, forgetShutdown }) {
+      pylons.forget(job.pylonId);
+      return () => forgetShutdown(job.pylonId);
+    },
+  },
+  "build-image": noEffects,
+  "build-template": noEffects,
+  "fetch-artifact": noEffects,
+  "drop-artifact": noEffects,
+};
 
 type CommandKind = PylonCommand["kind"];
 
