@@ -4,6 +4,9 @@
  */
 import { filledPath, type ParamsOf } from "../util/route-path.ts";
 
+/** How long the API's server keeps an idle connection open. A client lets go of a pooled one before then. */
+export const apiKeepAliveMs = 5_000;
+
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** A query's format, which the client encodes and the server decodes. `encode` answers "" or "?" and the parameters. */
