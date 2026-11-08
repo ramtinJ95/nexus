@@ -91,23 +91,31 @@ A second reviewer never approves by failing. One that gives no verdict Nexus can
 
 Answering Land to the review's question, pressing Land on the dashboard, or confirming `nexus land --waive` in a terminal, is how the person waives a hold. `nexus land` without the flag never waives one, so an agent that drives the CLI does not waive a hold by accident. A project in yolo mode answers for the person, as [Yolo landing](#yolo-landing) says.
 
-| Hold | The person may waive it | Why |
-|---|---|---|
-| A reserved case the reviewer named | Yes | The policy reserves it for the person, and pressing Land is the person confirming it. |
-| A reserved path of a Nexus pull request | Yes | The same, for the paths that might touch a reserved case. |
-| A change to `.nexus/check` | Yes | Accepting a new check is the person's call. |
-| A change to `.nexus/verify` | Yes | Accepting a new live check is the person's call. |
-| No second reviewer could run where the project asks for one | Yes | Landing on one reviewer's approval is the person's call. |
-| A Claude reviewer's approval | No | A Claude reviewer's verdict is read from its pylon, where code the pull request runs could write a forged one. The findings and reserved cases the person would be waiving come from that same verdict, so a waiver would accept what a forger chose to show. Only a harness reviewer's approval lands, or the person merges on GitHub. |
-| A deployer no longer asking for the landing, or a project that no longer lands on its own | No | The landing needs a deployer who asked for it. |
-| An open P0 to P2 finding, or one the builder left unanswered | No | Findings block until they are fixed or rejected with a reason. |
-| `.nexus/check` failed or did not run at the head | No | Only a passing check at the approved head lands. |
-| The live check failed or did not run at the head | No | A repository with a `.nexus/verify` lands only once its live check passed at the approved head. |
-| Failing or pending GitHub checks | No | They hold every landing until they pass. |
-| A head that moved after the approval, or a merge at another head | No | Only the approved commit lands. |
-| A branch that conflicts | No | It cannot merge. When it is the only hold the waiver does not cover, the builder rebases. A rebase that leaves the change as it was, on the same base, keeps the approval and the waiver, and the checks run again. Any other needs a new review and a new waiver. |
-| A pull request that is not open | No | It cannot merge. |
-| A reviewer on the builder's own model, or no statement of what was not checked live | No | These are the policy's other conditions, which an agent can meet. The first holds every landing of the review, so a press cannot land it. The second clears once the description says what could not be checked live and a Land press has the reviewer quote it. |
+Each hold has a code, `HoldCode` in [the CLI reference](cli.md#reviews-and-landing). The table below is each code's rule in `src/control/holds.ts`, which `node scripts/docs-gen.ts` writes. `loop` is a reason of the review loop's own, such as a deployer no longer asking for the landing, a project that no longer lands on its own, or a deploy that failed. Where one hold alone holds a landing, the loop acts on it itself when the table names a remedy: it asks the builder to rebase a conflicting branch onto its base, and asks the reviewer to quote the description again, as a Land press does.
+
+<!-- holds -->
+| Hold | A waiver names it | The person may waive it | It meets every landing of the head again | The loop's own remedy | Why, as the Land card tells the person |
+|---|---|---|---|---|---|
+| `reserved:<case>` | the case's name, such as changes to secrets | Yes | Yes |  | The policy reserves this for you, and pressing Land here is you waiving it. |
+| `reserved-path:<case>` | the case's name, such as changes to secrets | Yes | Yes |  | The policy reserves this for you, and pressing Land here is you waiving it. |
+| `check-changed` | a change to .nexus/check | Yes | Yes |  | Accepting a new .nexus/check is yours, and pressing Land here is you accepting it. |
+| `verify-changed` | a change to .nexus/verify | Yes | Yes |  | Accepting a new .nexus/verify is yours, and pressing Land here is you accepting it. |
+| `no-second-reviewer` | a review without its second reviewer | Yes | Yes |  | Landing on one reviewer's approval where the project asks for two is yours to accept, and pressing Land here is you accepting it. |
+| `claude-approved` |  | No | Yes |  | Nothing here stands in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon. |
+| `not-approved` |  | No | No |  | Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves. |
+| `open-findings` |  | No | No |  | Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves. |
+| `unanswered` |  | No | No |  | Every P0 to P2 finding needs the builder's fix or its reason to reject. |
+| `check-failed` |  | No | No |  | Only a .nexus/check that passed at the approved head lands. |
+| `live-failed` |  | No | No |  | A repository with a .nexus/verify lands only once its live check passed at the approved head. |
+| `github-checks` |  | No | No |  | Failing or pending GitHub checks hold every landing until they pass. |
+| `not-approved-head` |  | No | No |  | Only the commit the reviewer approved lands. |
+| `conflict` |  | No | No | rebase | A branch that conflicts with its base cannot merge. |
+| `pr-not-open` |  | No | No |  | Only an open pull request lands. |
+| `same-model` |  | No | Yes |  | The policy needs a reviewer on another model than the builder's. |
+| `not-checked-live` |  | No | No | quote | A live check that passed at this commit clears it, or a description that says what could not be checked live: add that section to the pull request's description, then press Land, and Nexus asks the reviewer to quote it at this commit. |
+| `stale-head` |  | No | No |  | Only what the policy reserves for you can be waived. |
+| `waiver-not-carried` |  | No | No |  | Your Land was for the change at an earlier commit, so the holds it waived are yours to look at again here. |
+| `loop` |  | No | No |  | Only what the policy reserves for you can be waived. |
 
 The Land card on the dashboard marks each hold "you may waive" or not, with the reason. While the review's question about these holds is open, the card sends the person to it. Otherwise, when every hold that would meet the landing again is one the person may waive, its Land button waives them, as after a Leave it. Its confirmation names the pull request, the commit and that it waives the holds the policy reserves for the person, and the button sends that commit and those holds. The caller must still be a deployer, and each named hold must be one the review has at that commit. The landing then checks every condition again, as `nexus land` does, with the named holds met at that commit and nothing else. The review records the waiver, who waived which holds at which commit, `nexus show` prints it, and the event stream gets a `review.waived` event.
 
@@ -117,7 +125,7 @@ A waiver names each hold by the text the person saw, and the control plane recor
 
 `nexus project edit <id> --auto-review yolo`, or the dashboard's Auto review switch on the project, turns on yolo landing: the project reviews and lands its builders' pull requests on its own, as `land` does, and the review loop also answers each review's holds question with Land, in the person's place, so a batch keeps landing while no one watches. It answers for the caller who turned it on, who must be a deployer, as `land` needs, and again on every answer. The loop answers in the same pass that asks, once that pass has saved its steps, through the same code a Land answer takes: the waiver names the holds the question named, at its head, and records the project whose setting gave it, so `nexus show` prints `waived by <caller>, by project <id>'s yolo setting`, and the `review.waived` event carries `yolo`. It answers only a review asked to land, by its project or with `--land`, so a review the person started without `--land` still stops at approval.
 
-The setting waives only what the person may waive, which the table below lists, every reserved case among them, data-deleting migrations and changes to auth included. Everything else still holds every landing: open findings, a failed or missing check, a reviewer that has not approved, a Claude reviewer's approval, failing GitHub checks. A waiver lasts for the head it names, as any waiver does, so a new push asks again and the setting answers again. Switching the project back to `land` or `review` answers nothing from the next pass on, and a question already answered stays answered. A landing the project asked for stays the project's when the setting answers it, so under `land` it goes on, and under `review` or off it holds for the person. A landing a deployer asked for with `--land` becomes `enabledBy`'s, as the same press by them on the dashboard would. The setting has no expiry and covers the whole project, not one batch.
+The setting waives only what the person may waive, which [What the person may waive](#what-the-person-may-waive) lists, every reserved case among them, data-deleting migrations and changes to auth included. Everything else still holds every landing: open findings, a failed or missing check, a reviewer that has not approved, a Claude reviewer's approval, failing GitHub checks. A waiver lasts for the head it names, as any waiver does, so a new push asks again and the setting answers again. Switching the project back to `land` or `review` answers nothing from the next pass on, and a question already answered stays answered. A landing the project asked for stays the project's when the setting answers it, so under `land` it goes on, and under `review` or off it holds for the person. A landing a deployer asked for with `--land` becomes `enabledBy`'s, as the same press by them on the dashboard would. The setting has no expiry and covers the whole project, not one batch.
 
 ## Known limits of waivers
 
