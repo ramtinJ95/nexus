@@ -25,7 +25,7 @@ export function duration(ms: number): string {
   return hours <= 48 || hours % 24 !== 0 ? counted(hours, "hour") : counted(hours / 24, "day");
 }
 
-export const firstLine = (text: string) => text.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
+const firstLine = (text: string) => text.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
 
 const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLimitText(t.usageLimit ?? { resetsAt: null }, now);
 
