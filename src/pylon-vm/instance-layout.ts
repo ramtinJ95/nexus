@@ -20,7 +20,10 @@ export const stagingDirectory = (root: string, kind: Kind, name: string): string
 export const tombstoneDirectory = (root: string, kind: Kind, name: string): string => join(root, kind, `.${name}.deleting`);
 export const isTombstone = (name: string): boolean => name.startsWith(".") && name.endsWith(".deleting");
 export const stateRootOf = (dir: string): string => dirname(dirname(dir));
-/** The controller's TMPDIR. */
+/**
+ * The controller's TMPDIR. Short, because the instance directory's path would push Gondolin's socket paths past their limit. It lives as long as
+ * the controller of `dir`: a launch makes it, and the controller removes it before it gives up its controller.pid.
+ */
 export const scratchDirectory = (root: string, dir: string): string =>
 	join(stateFiles(root).scratch, createHash("sha256").update(dir).digest("hex").slice(0, 12));
 

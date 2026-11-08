@@ -211,10 +211,6 @@ async function published(file: string): Promise<boolean> {
 	const identity = await readIdentity(file);
 	return identity !== null && (await alive(identity));
 }
-/**
- * Short, because the instance directory's path would push Gondolin's socket paths past their limit. It lives as long as
- * the controller of `dir`: a launch makes it, and the controller removes it before it gives up its controller.pid.
- */
 /** How long a scratch directory no controller owns is kept, measured from the last entry made or removed in it. */
 export const scratchSweepAgeMs = 60 * 60_000;
 /**
