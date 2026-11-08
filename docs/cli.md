@@ -237,59 +237,78 @@ It is the value the thread's latest `attention.changed` event carries. An unread
 
 Reply timestamps also serve as reply identities: each recorded reply is at least one millisecond greater than both the preceding reply and the current seen marker. This preserves strict unread ordering for events in the same millisecond or after a clock correction. A client must use the returned timestamp, not reconstruct it from its own clock. Reply notifications compare this identity and working transitions as well as attention, so a follow-up can notify even while attention stays `"reply"`.
 
+Each TypeScript block on this page is the declarations it shows, copied with their TSDoc from the source file named above them by [`scripts/docs-gen.ts`](../scripts/docs-gen.ts). An ID type such as `ThreadId`, `PylonId` or `NodeName` is a string in JSON.
+
 The sessions, previews and ports in `ThreadDetail` have these shapes:
 
+<!-- types: src/control/thread-store.ts Session src/protocol/observations.ts HerdrStatus src/contract/pylon.ts OpenedSession src/control/thread-store.ts Preview src/control/wire.ts ListeningPort src/contract/pylon.ts Listing changesBases ChangesBase ChangesBaseAt changeStatuses ChangeStatus ChangedFile Changes Diff -->
 ```ts
-type Session = {
-  pylon: string;                       // the pylon's ID
-  id: string;                          // what session close takes: herdrPane, or failed-<hash> for a failed session in no pane
-  harness: "claude-code" | "pi" | "shell";  // an agent Nexus does not start, such as one run by hand, reads as shell
-  harnessSessionId: string | null;     // the Claude Code session ID or the pi session file, which a wake resumes
-  status: "working" | "idle" | "blocked" | "done" | "unknown";  // Herdr's, when last read running. unknown if never
-  title: string | null;                // the session's title, its Herdr workspace's label. null when last observed by a probe from before 0.5.0
-} & (
-  | { state: "running"; herdrPane: string; message: null }         // open in its pane
-  | { state: "paused"; herdrPane: string | null; message: null }   // its pylon is paused, and its wake brings it back. herdrPane is the pane it had. Never set once the pylon runs
-  | { state: "failed"; herdrPane: string | null; message: string } // the last wake did not bring it back, and message says why. The next wake tries again.
-);                                     // herdrPane is the pane it left behind, such as a shell its agent would not start in, or null
-type OpenedSession = { herdrPane: string; harness: "claude-code" | "pi" | "shell"; title: string };  // what session open prints
-type Preview = {
-  pylon: string;      // the pylon's ID
-  service: string;    // the service it previews: a declared or ad hoc service, or port-<port> for a linked port
-  httpsPort: number;  // the https port on the pylon's node, fixed for the thread's life
-  ready: boolean;     // the node publishes it and warmed its URL, and the running pylon's node does not report its service starting, stopped or failed, or its port unrouted
-  failed: string | null; // why it cannot answer: the pylon's node last reported its service failed, or its port without a route into the pylon. Null otherwise, and while the pylon is not running
-  url: string;        // https://<node's MagicDNS name>:<httpsPort>/. Use it as it is rather than building it
-};
-type ListeningPort = {
-  port: number;              // a TCP port that a preview can reach in the pylon
-  service: string | null;    // the service that owns the port, or null for a process no service runs
-  preview: Preview | null;   // that service's preview, or null while it has none
-};
-type Listing = {
-  path: string;   // relative to the checkout. "" for the checkout itself
-  entries: { name: string; kind: "file" | "dir" | "symlink" | "other"; size: number | null }[];  // size for a file only
-  truncated: boolean;
-};
-type Base = { kind: "start" | "head" | "turn"; commit: string | null };
-// start: what the pylon booted at; head: HEAD; turn: the snapshot before the latest reply.
-// commit is null for an empty-tree start/head; turn always names its hidden snapshot commit.
-type Changes = {
-  base: Base;
-  files: {
-    path: string;
-    oldPath: string | null;   // for a rename
-    status: "added" | "modified" | "deleted" | "renamed" | "copied" | "typechange";
-    additions: number | null; // lines. null for a binary file
-    deletions: number | null;
-  }[];
-  truncated: boolean;
-};
-type Diff = { base: Base; diff: string; truncated: boolean };
-// In ThreadDetail:
-//   sessions: Session[]               every Herdr pane in the pylon and every failed session, as its node last reported them, or what its wake brings back while it is paused
-//   previews: Preview[]               every preview of the thread, served or not, listening or not
-//   ports: ListeningPort[] | null     in port order. [] while the pylon is not running. null while its node could not read them
+// src/control/thread-store.ts
+/**
+ * A session of a pylon. `id` names it, and is what closes it: its Herdr pane, or `failed-` and a hash for a failed
+ * session in no pane. A `paused` session comes back when its pylon wakes. A `failed` one did not come back from the
+ * last wake, `message` says why, and the next wake tries it again. A paused session's `herdrPane` is the pane it had,
+ * and a failed one's the pane it left behind, such as a shell its agent would not start in. `harness` is `shell` for an
+ * agent Nexus did not start, such as one run by hand. `harnessSessionId` is the Claude Code session ID or the pi
+ * session file, which a wake resumes. `status` is the Herdr status it had when last read running, `unknown` if never.
+ * `title` is its Herdr workspace's label, null for a session last observed from a probe that did not report titles.
+ */
+type Session = { pylon: PylonId; id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null; status: HerdrStatus } & (
+  | { state: "running"; herdrPane: string; message: null }
+  | { state: "paused"; herdrPane: string | null; message: null }
+  | { state: "failed"; herdrPane: string | null; message: string });
+// src/protocol/observations.ts
+/** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
+type HerdrStatus = "working" | "idle" | "blocked" | "done" | "unknown";
+// src/contract/pylon.ts
+/** A session the route opened, which `nexus session open` prints. Its observed state shows in ThreadDetail.sessions. */
+interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
+// src/control/thread-store.ts
+/**
+ * `url` is what the data model calls a preview's URL, on its node's tailnet name. `failed` says why the preview
+ * cannot answer while its node's last observation reports its service failed or its port without a route into the
+ * pylon, and null otherwise. `ready` is true once the node publishes the URL, unless the running pylon's last read
+ * reports the service starting, stopped or failed, or its port unrouted, whose URL answers 502 or 404 though the node
+ * may publish it. A service the read does not list, such as a port linked since, is ready once published. `service` is
+ * a declared or ad hoc service, or `port-<port>` for a linked port. `httpsPort` is the https port on the pylon's node,
+ * fixed for the thread's life, and `url` is `https://<node's MagicDNS name>:<httpsPort>/`, which a client uses as it is.
+ */
+interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean; failed: string | null; url: string }
+// src/control/wire.ts
+/**
+ * A TCP port in the pylon that a preview can reach. `service` is the service the port belongs to: declared, ad hoc, or
+ * `port-<port>` once it is linked, and null for a process no service runs. `preview` is
+ * that service's preview, or null while it has none, which `POST /v1/threads/<id>/previews` gives it.
+ */
+interface ListeningPort { port: number; service: string | null; preview: Preview | null }
+// src/contract/pylon.ts
+/** A directory's entries, sorted by name, with a size for a file only. `path` is relative to the checkout, and empty for the checkout itself. */
+interface Listing { path: string; entries: { name: string; kind: "file" | "dir" | "symlink" | "other"; size: number | null }[]; truncated: boolean }
+/**
+ * What the Changes view and the diff are read against: `start` is what the pylon booted at, which its first boot
+ * records as refs/nexus/base, `head` the last commit, and `turn` where the latest turn began, the hidden snapshot
+ * commit taken before the latest reply.
+ */
+const changesBases = ["start", "head", "turn"] as const;
+type ChangesBase = (typeof changesBases)[number];
+interface ChangesBaseAt {
+  kind: ChangesBase;
+  /** Null where the base is the empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. */
+  commit: string | null;
+}
+const changeStatuses = ["added", "modified", "deleted", "renamed", "copied", "typechange"] as const;
+type ChangeStatus = (typeof changeStatuses)[number];
+interface ChangedFile {
+  path: string;
+  /** The path before a rename. */
+  oldPath: string | null;
+  status: ChangeStatus;
+  /** Lines, null for a binary file. */
+  additions: number | null;
+  deletions: number | null;
+}
+interface Changes { base: ChangesBaseAt; files: ChangedFile[]; truncated: boolean }
+interface Diff { base: ChangesBaseAt; diff: string; truncated: boolean }
 ```
 
 The control plane also serves `POST /v1/images`, which records the manifest of an image built outside it, such as a local stack's Docker image. The CLI leaves it out.
@@ -318,20 +337,49 @@ The conversation streams from `GET /v1/threads/<thread>/events`, as server-sent 
 
 `src/contract/watch.ts` holds these types, with `state` as `ThreadStateEvent` and `live` as `RunLiveEvent`.
 
+<!-- types: src/contract/watch.ts RenderedEntry RenderedClaudeEntry WatchEvent ThreadStateEvent RunLiveEvent -->
 ```ts
-type RenderedEntry = { entry: EntryRecord; text: string };
-type RenderedClaudeEntry = { entry: ClaudeEntry; text: string };
+// src/contract/watch.ts
+/** An entry with the CLI's plain rendering of its messages. */
+interface RenderedEntry { entry: EntryRecord; text: string }
+/** A Claude worker's transcript entry with the CLI's plain rendering of it. */
+interface RenderedClaudeEntry { entry: ClaudeEntry; text: string }
 type WatchEvent =
   | { type: "reset"; thread: string; entries: RenderedEntry[] }
-  | { type: "entry"; thread: string; entry: EntryRecord; text: string }
+  | { type: "entry"; thread: string } & RenderedEntry
   | { type: "claude-reset"; thread: string; session: string | null; dropped: number; entries: RenderedClaudeEntry[] }
-  | { type: "claude-entry"; thread: string; entry: ClaudeEntry; text: string }
-  | { type: "state"; thread: string; status: "active" | "idle" | "archived" | "deleted";
-      run: "idle" | "working" | "parked"; parkedTasks: number; queued: number;
-      pylon: ActualState; failed: string | null; ports: ListeningPort[] | null }
-  | { type: "live"; thread: string; queued: string[]; tools: { callId: string; output: string }[];
-      partial: string | null; retry: string | null }
+  | { type: "claude-entry"; thread: string } & RenderedClaudeEntry
+  | ThreadStateEvent
+  | RunLiveEvent
   | { type: "error"; thread: string; kind: "unreachable" | "failed"; message: string };
+/** What watch reports of a thread, as one event whenever any of it changes. */
+interface ThreadStateEvent {
+  type: "state";
+  thread: string;
+  status: Thread["status"];
+  /** Parked when a task hit the restart limit and holds the run until `nexus retry`. */
+  run: "idle" | "working" | "parked";
+  parkedTasks: number;
+  /** Messages waiting for the current run to finish. */
+  queued: number;
+  pylon: ActualState;
+  failed: string | null;
+  /** ThreadDetail's ports. */
+  ports: ThreadDetail["ports"];
+}
+/** What watch reports of the run in flight, as one event whenever any of it changes. */
+interface RunLiveEvent {
+  type: "live";
+  thread: string;
+  /** The text of each message waiting for the current run to finish. */
+  queued: string[];
+  /** The output so far of each tool call still running, by the toolCall's id in the entries. */
+  tools: { callId: string; output: string }[];
+  /** The answer streaming now, its text parts joined. */
+  partial: string | null;
+  /** The error of a model request waiting to be retried. */
+  retry: string | null;
+}
 ```
 
 The stream follows these rules:
@@ -352,22 +400,32 @@ The stream follows these rules:
 
 `nexus show` includes linked PR outputs, their metadata and one PR-watch status line. No token configured means `PR watch: off`, both here and in the dashboard's Pylon outputs. Reading this information does not wake a pylon.
 
-`ThreadDetail` adds:
+`ThreadDetail` adds `prWatch: { enabled: boolean; stopped: boolean; error: string | null }` and `pullRequests`, a `WatchedPr` for each linked PR:
 
+<!-- types: src/control/github.ts PullRequest src/control/pr-watch-store.ts WatchedPr -->
 ```ts
-prWatch: { enabled: boolean; stopped: boolean; error: string | null };
-pullRequests: {
-  repo: string;                       // owner/repository
+// src/control/github.ts
+interface PullRequest {
+  /** owner/repository. */
+  repo: string;
   number: number;
   title: string;
   url: string;
   state: "open" | "merged" | "closed";
   checks: "pending" | "passing" | "failed" | "none";
-  review: string;                     // currently none, approved, changes_requested
-  conflict: boolean | null;          // null until GitHub knows
-  head?: string;                     // the head commit at the PR watch's last read
-  summary?: string;                  // the description's first paragraph at that read, for the dashboard
-}[];
+  /** GitHub's review decision: currently none, approved or changes_requested. */
+  review: string;
+  /** Null until GitHub knows. */
+  conflict: boolean | null;
+}
+// src/control/pr-watch-store.ts
+/** A PR as the PR watch last read it. `url` is empty until its first read. */
+interface WatchedPr extends PullRequest {
+  /** The head commit at that read, which the review loop compares with the head it reviewed. */
+  head?: string;
+  /** The opening of the PR's description at that read, for the dashboard's card of a held review. */
+  summary?: string;
+}
 ```
 
 `enabled` means a control-plane token is configured; `stopped` means the durable ten-comment-only-wake cap was reached, not that the thread is archived. `error` reports a retryable read or delivery failure. Archived/deleted threads retain their last snapshots without polling, except that the merge state of a thread a queued thread waits for is still read, as [Queued threads](#queued-threads) describes. Terminal PRs retain their last check/review summary. A closed PR rediscovered as open resumes watching with its existing cursor, without replaying old feedback or resetting the comment-wake cap. `outputs` also includes `{ thread, kind: "pull-request", ref: <PR URL> }` for each link. `events --follow --kind pull-request.linked` prints each link as the watch saves it, once per pull request, with its `repo`, `number`, `url`, `title` and `state`. `events --kind pull-request.error` prints each time a thread's watch `error` goes from none to set, with that retry notice as `error` and never GitHub's or the transport's own text, and `pull-request.error-cleared` each time it goes back to none. A failed read of the merge state of a thread a queued thread waits for is that thread's `error` too, until a read of it succeeds.
@@ -380,21 +438,31 @@ PR-watch feedback is forwarded only for GitHub `author_association` values `OWNE
 
 `deploy` accepts `main` or a full lower-case 40-character commit. The control plane resolves main, records the authenticated caller and time, and returns the same `ReleaseView` that `release` reads:
 
+<!-- types: src/protocol/deploy.ts ReleaseView DesiredRelease ReleaseReport Role reportStates -->
 ```ts
+// src/protocol/deploy.ts
+/** What the control plane answers, which has already turned a stale report into a pending one. */
 interface ReleaseView {
-  desired: { commit: string; requestedBy: string; requestedAt: number } | null;
-  controlNode: string | null;  // the node the control plane runs on, null when it does not know; since 0.71.0
-  nodes: Array<{
-    node: string;
-    role: "control" | "probe";
-    commit: string | null;   // the release behind the role's current link
-    target: string | null;   // the attempted desired release
-    state: "pending" | "waiting-for-control" | "waiting-for-idle" |
-           "installing" | "healthy" | "rolled-back" | "failed";
-    reason: string | null;
-    observedAt: number;     // control-plane receipt time, milliseconds since epoch; 0 before first report
-  }>;
+  desired: DesiredRelease | null;
+  /** The node the control plane runs on, or null when it does not know. */
+  controlNode?: string | null;
+  nodes: ReleaseReport[];
 }
+interface DesiredRelease { commit: string; requestedBy: string; requestedAt: number }
+interface ReleaseReport {
+  node: string;
+  role: Role;
+  /** The release behind the role's current link. */
+  commit: string | null;
+  /** The desired release it attempted. */
+  target: string | null;
+  state: (typeof reportStates)[number];
+  reason: string | null;
+  /** When the control plane received the report, in Unix milliseconds, or 0 before the first. */
+  observedAt: number;
+}
+type Role = "control" | "probe";
+const reportStates = ["pending", "waiting-for-control", "waiting-for-idle", "installing", "healthy", "rolled-back", "failed"] as const;
 ```
 
 Missing or 90-second-old reports are pending with a reason; a probe-only node has no control row. CLI `--wait` polls every second for up to 30 minutes. Every configured component must report healthy at the full desired commit, freshly. Transient connection failures during control restart are retried. A rollback, terminal failure or deadline exits 1 with the component reasons; supersession by another release exits 5. Caller refusal is 3, invalid syntax is 64, and other transport/HTTP failures use the existing exit-code contract. Without `--wait`, success means the desired release was recorded, not deployed. `--json` prints one ReleaseView on success and the normal CLI error contract on failure.
@@ -407,33 +475,59 @@ The `image` commands build the pylon image and make it current, as [the deploy g
 
 The control plane runs one image operation at a time. It is stored in the registry and advanced every 2 seconds, so it carries on across a control plane restart:
 
+<!-- types: src/control/image-store.ts ImageOperation ImageStep Outcome src/control/image-rollout.ts ImagesView ImageEntry src/control/image-store.ts RecordedImage src/protocol/images.ts ImageManifest -->
 ```ts
-type ImageOperation = (
-  | { kind: "build"; release: string | null }   // the release whose recipe the build sent, which it records
-  | { kind: "rollout" }
-) & {
-  image: string;             // img-<12 hex> as `nexus image build` makes it; POST /v1/images takes any img-<1 to 40 lowercase letters or digits>
-  requestedBy: string;       // the caller's stable tailnet node ID
-  requestedAt: number;       // Unix milliseconds
-  steps: Array<{
-    node: string;
-    state: "pending" | "running" | "done" | "failed" | "skipped";
-    job: { id: string; notAfter: string } | null;   // the probe job last sent for this step
-    reason: string | null;   // why it failed or was skipped, or "recorded already" for a build that needed no job
-  }>;
-} & ({ state: "running" } | { state: "done"; finishedAt: number } | { state: "failed"; finishedAt: number; reason: string });
-
-interface ImagesView {
-  current: string | null;
-  previous: string | null;   // the image current before the last rollout, which rollback makes current again
-  images: ImageEntry[];      // newest build first
-  operation: ImageOperation | null;   // the running operation, or the last one
+// src/control/image-store.ts
+/**
+ * A build has one step, on the image build node, and keeps the release whose recipe it sent, which a control plane
+ * deployed while it runs must not record in its place. A rollout has one step per registry node.
+ */
+type ImageOperation = ({ kind: "build"; release: string | null } | { kind: "rollout" }) & {
+  /** `img-` and 12 hex as `nexus image build` makes it. POST /v1/images takes `img-` and 1 to 40 lowercase letters or digits. */
+  image: ImageId;
+  /** The caller's stable tailnet node ID. */
+  requestedBy: TailnetNodeId;
+  /** Unix milliseconds. */
+  requestedAt: number;
+  steps: readonly ImageStep[];
+} & Outcome;
+/** One node's part of an image operation. */
+interface ImageStep {
+  node: NodeName;
+  /**
+   * done: the node's observation lists the image. skipped: the node was offline when the rollout began, so it fetches
+   * the image on first use (planPylon's missing-artifact rule).
+   */
+  state: "pending" | "running" | "done" | "failed" | "skipped";
+  /** The job last sent for this step, saved before it is sent, so a restarted control plane asks the probe about it. */
+  job: { id: JobId; notAfter: string } | null;
+  /** Why it failed or was skipped, or "recorded already" for a build that needed no job. */
+  reason: string | null;
 }
-interface ImageEntry {
-  id: string; gondolinBuildId: string; pins: object; sha256: string;
-  builtOn: string; builtAt: string;   // ISO 8601
-  release: string | null;    // the control plane release whose recipe it was built from, null when recorded by hand
-  nodes: string[];           // the nodes whose last observation lists it
+type Outcome = { state: "running" } | { state: "done"; finishedAt: number } | { state: "failed"; finishedAt: number; reason: string };
+// src/control/image-rollout.ts
+/**
+ * `previous` is the image current before the last rollout, which rollback makes current again. `images` are newest
+ * build first, and `operation` is the running operation, or the last one.
+ */
+interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
+/** A recorded image, and the registry nodes whose last observation lists it, online or not. */
+type ImageEntry = RecordedImage & { nodes: NodeName[] };
+// src/control/image-store.ts
+/**
+ * An image's manifest and `release`, the full commit of the control plane release whose recipe built it. Null when that is
+ * unknown, as for a build from a dev checkout or an image recorded through POST /v1/images.
+ */
+type RecordedImage = ImageManifest & { release: string | null };
+// src/protocol/images.ts
+interface ImageManifest {
+  id: ImageId;
+  gondolinBuildId: string;
+  pins: ImageRecipe["pins"];
+  builtOn: NodeName;
+  /** ISO 8601. */
+  builtAt: string;
+  sha256: string; // of the sparse archive peers fetch, artifactArchive in src/image/artifacts.ts
 }
 ```
 
@@ -449,10 +543,13 @@ Without `--wait`, success means the operation started. `--wait` polls `GET /v1/i
 
 `Thread.setup` records the path, and is absent from a thread started before 0.23.0:
 
+<!-- types: src/control/templates.ts ThreadSetup -->
 ```ts
+// src/control/templates.ts
+/** How a thread's pylon got its setup, decided once when the thread starts. */
 type ThreadSetup =
-  | { how: "template"; template: TemplateId; builtAt: number; commit: string } // commit: the full ID the pylon checks out
-  | { how: "fresh"; reason: string; building?: TemplateId }; // building: the template this start found or asked for
+  | { how: "template"; template: TemplateId; builtAt: number; commit: string } // commit: the full ID the pylon checks out over the template
+  | { how: "fresh"; reason: string; building?: TemplateId }; // building: the build this start asked for or found running, for the next thread
 ```
 
 Plain `show` prints it after the placement line, such as `setup: from template tpl-3f2a9c1b0d4e, built 2h ago, then checked out 91ce5419faae`, or `setup: fresh boot runs .nexus/setup, because no template of this setup is on rj-firebat yet; tpl-3f2a9c1b0d4e builds for the next thread`. When a template's build failed, the reason ends in its log, of which plain `show` prints the first line and `--json` all.
@@ -465,11 +562,18 @@ A project's `defaultNode` may be `auto`, and then `start` without `--node` place
 
 `Thread.placement` records the choice, and is absent from a thread started before 0.20.0:
 
+<!-- types: src/control/thread-store.ts Placement Weighed Room -->
 ```ts
+// src/control/thread-store.ts
+/**
+ * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
+ * could run the pylon has left once it boots there, or why the node could not.
+ */
 type Placement =
   | { how: "default" | "named"; node: NodeName }
-  | { how: "auto"; node: NodeName; weighed: Array<{ node: NodeName; left: Room } | { node: NodeName; refused: string }> };
-/** What the node would have had left after the pylon. CPUs may be below zero. */
+  | { how: "auto"; node: NodeName; weighed: readonly Weighed[] };
+type Weighed = { node: NodeName; left: Room } | { node: NodeName; refused: string };
+/** Uncommitted CPUs and memory, and free disk. CPUs may go below zero, because VMs share a node's CPUs. */
 interface Room { cpus: number; memoryGiB: number; diskGiB: number }
 ```
 
@@ -479,15 +583,19 @@ Plain `show` prints it after the pylon and size lines, such as `placement: rj-fi
 
 Committed CPUs and memory count every VM on the node whose controller is alive: running and booting pylons, check and reviewer threads, and orphaned VMs that the registry has not placed there. `NodeSummary.overcommitted` is true when the probe's committed memory exceeds the node's memory, and false for a node never observed or whose probe predates the count. `NodeSummary.pylons` sorts the pylons in the node's latest observation by what they hold, and is null for a node never observed:
 
+<!-- types: src/control/placement.ts Tally NodePylons -->
 ```ts
+// src/control/placement.ts
 interface Tally { pylons: number; cpus: number; memoryGiB: number }
-interface NodePylons {
-  up: Tally;       // every phase but stopped, and broken but for a controller that exited: holds its CPUs and memory
-  paused: Tally;   // stopped, thread not archived or deleted: a wake needs its CPUs and memory back
-  archived: Tally; // stopped or crashed, thread archived or deleted: holds only its disk, and boots only once the thread is unarchived
-  crashed: Tally;  // broken because its controller exited or failed to boot the VM, thread not archived or deleted: holds only its disk, and a retry needs its CPUs and memory back
-  orphaned: PylonId[]; // in the observation but not placed on this node by the registry, so its resources are unknown
-}
+/**
+ * The pylons in a node's latest observation, by what they hold. One that is up, in any phase but stopped, or broken by
+ * anything but a controller that exited, holds its CPUs and memory, and a paused one, stopped with its thread not
+ * archived or deleted, needs them back to wake. A crashed one, broken because its controller exited or failed to boot the VM, holds only
+ * its disk, and needs its CPUs and memory back for a retry. An archived one, paused or crashed with its thread archived
+ * or deleted, holds only its disk and boots only once the thread is unarchived. An orphaned VM is one the registry has
+ * not placed on the node, whose CPUs and memory the control plane does not know.
+ */
+interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[] }
 ```
 
 A tally's CPUs and memory are what each pylon's boot asked for. Plain `nodes` prints the classes that have pylons on a line under the node, such as `  pylons: 5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry, 1 orphaned (pylon-x)`.
@@ -522,41 +630,170 @@ Since 0.45.0 `review --cancel` ends the thread's running review, and prints it. 
 
 `ThreadDetail.review` is the thread's latest review as a builder, or null:
 
+<!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun HoldCause ModelFailure -->
 ```ts
-interface Review {
-  id: string;                         // rv-<8 hex>
-  expect: string;                     // the token the awaited answer echoes
-  sent: number;                       // messages sent, which number their request IDs
-  builder: string; reviewer: string;  // thread IDs
+// src/control/review-model.ts
+/**
+ * The review's own conversation is with the builder and the first reviewer, since only one of them owes an answer at
+ * a time, and its outbox names which one its message is for.
+ */
+interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
+  /** `rv-` and 8 hex, part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
+  id: string;
+  /** How many messages the review has sent, which numbers their request IDs. */
+  sent: number;
+  builder: ThreadId;
+  reviewer: ThreadId;
   pr: { repo: string; number: number; url: string; title: string; branch: string };
   models: { builder: string; reviewer: string };
-  reviewerKind: "harness" | "claude";   // only a harness reviewer's approval lands
-  maxRounds: number;                  // 1 to 5
-  land: { requestedBy: string; fromProject?: true; head?: string; base?: string | null } | null;  // fromProject: the project's autoReview asked, and is read again at each landing; head and base, since 0.65.0: a Land answer gave it while the review ran, for that head against that base and a rebase that keeps its change only
-  auto: boolean;                      // started on its own when the PR watch first linked the PR
-  merged: string | null;              // the merge commit once merged
-  waiver: { head: string; holds: string[]; codes?: HoldCode[]; by: string; at: number; change?: Change | null; from?: string; yolo?: string } | null;  // since 0.28.0, codes, change and from additive; yolo since 0.67.0, the project whose yolo setting gave it
-  rounds: { head: string; base?: string; verdict: Verdict | null; check: { passed: boolean; output: string } | null; live?: { kind: "absent" } | { kind: "ran"; thread: string; passed: boolean; output: string }; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string }; quotedFrom?: string }[];  // base, carried and quotedFrom additive
-  phase: { kind: "reviewing"; failing?: ModelFailure; check?: { startedAt: number; thread: string | null; unrunnable?: string; refused?: string } }  // failing since 0.48.0, check additive
-    | { kind: "fixing"; failing?: ModelFailure }
-    | { kind: "quoting"; asked: string | null; failing?: ModelFailure }  // since 0.59.0
-    | { kind: "approved" }
-    | { kind: "merging"; authorized: string | null; waiting?: string }  // waiting since 0.47.0
-    | { kind: "checking"; startedAt: number; thread: string | null }
-    | { kind: "verifying"; startedAt: number; thread: string | null; refused?: string }  // since 0.38.0
-    | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
-    | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
-    | { kind: "landed"; commit: string }
-    | { kind: "needs-person"; reasons: string[]; holds: Hold[]; label?: Label; unreviewed?: string }
-    | { kind: "merged" | "closed" }
-    | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
-    | { kind: "cancelled"; who: "person"; by: string };  // since 0.45.0
-  outbox: { to: "builder" | "reviewer"; id: string; text: string; attempted: number | null } | null;
-  asked: string;                      // the last message sent, since 0.48.0
-  since: number; nudges: number; startedAt: number;
+  /**
+   * A harness reviewer's verdict comes from the control plane's agent loop. A Claude reviewer's is read from its
+   * transcript in its pylon, where code it runs could write, so its approval never lands without the person.
+   */
+  reviewerKind: "harness" | "claude";
+  /** Absent when the project's rule gave the review no second reviewer. */
+  second?: SecondReviewer;
+  /** The builder's brief, its first message, cut as the description is, which each reviewer's first request carries. */
+  brief?: string | null;
+  /** 1 to 5. */
+  maxRounds: number;
+  /** Who asked for the PR to land once approved, or null to stop at approval. */
+  land: LandRequest | null;
+  /** Started on its own when the PR watch first linked the PR, as the project asks. */
+  auto: boolean;
+  rounds: Round[];
+  /** The merge commit once the PR merged, so a later land never merges or deploys it again. */
+  merged: string | null;
+  waiver: Waiver | null;
+  phase: Phase;
+  startedAt: number;
 }
-
-// The awaited agent's last `count` turns in a row ended because its model failed, the latest with the error `last`.
+/**
+ * The loop's side of a conversation with an agent it awaits answers from. `expect` is the token the awaited answer must
+ * echo, and `asked` the text of the last message sent, which a turn that ended on a model failure gets again. `since`
+ * is when the agent was last sent something, and `nudges` how many reminders in a row it has had. `outbox` is the next
+ * message, and a send of it that went through before a crash still dates the wait from its `attempted`, and a reply
+ * that came meanwhile is read.
+ */
+interface Talk<O extends Outbox = Outbox> { expect: string; asked: string; since: number; nudges: number; outbox: O | null }
+/** A message saved before it is sent. `attempted` is when its first send began, saved before it. */
+interface Outbox { id: string; text: string; attempted: number | null }
+/**
+ * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on another model than the
+ * builder's and the first reviewer's, in `thread`, with its own conversation. `starting` until its thread starts,
+ * tried since `since` and last at `tried`, which failed for `why`. `none` when no such model could run or its thread
+ * did not start in time, for `why`, which holds the landing for the person.
+ */
+type SecondReviewer =
+  | ({ kind: "claude"; rule: string; thread: ThreadId; model: string; failing?: ModelFailure } & Talk)
+  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null }
+  | { kind: "none"; rule: string; why: string };
+/**
+ * A request to land a review's PR once approved: the person's; the project's setting's, which each landing reads again
+ * and lands for whoever it names; or the person's Land answer to a question about holds while the review ran, which is
+ * for the change at `head` against `base` alone. Each is saved as its fields alone, as older control planes read it.
+ */
+type LandRequest =
+  | { requestedBy: string; fromProject?: never; head?: never }
+  | { requestedBy: string; fromProject: true; head?: never }
+  | { requestedBy: string; head: string; base: string | null; fromProject?: never };
+/**
+ * A round is one review of `head`. `verdict` is the reviewer's, and `secondVerdict` the second reviewer's on a round
+ * with that seat (`seatsOf`), without either seeing the other's. `check` is the repository's checks at `head`, run
+ * while the reviewer reads it. `live` is the live check at `head`, recorded once the checks pass, and unset until a live
+ * check gave a verdict or found no `.nexus/verify`. `conflict` is the base that `head` conflicted with when the landing
+ * tried to merge it, which the builder rebases onto.
+ * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
+ * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a
+ * round whose verdict is the reviewer's approval of head `from`, carried to `head` because the change at both is the
+ * same, so no reviewer round ran for it and it counts against no limit. With `held`, in a review whose rounds ran out,
+ * it carries whatever verdict it was held with, and its hold. Its checks run as any round's do, since the base under
+ * the change moved. `quotedFrom` is the digest of the description the reviewer last quoted from when a landing asked it
+ * again, so a landing asks again only once the description changed since.
+ * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
+ * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
+ * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the
+ * loop's next pass while it waits at approval, and from its landing otherwise.
+ */
+interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; heldAt?: HeldAt }
+/**
+ * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
+ * instead. `ran` when the script gave its verdict in verify pylon `thread`.
+ */
+type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: boolean; output: string };
+/** The holds a round's head alone decides, read from the PR's files against `base`. */
+interface HeldAt { base: string; holds: Hold[] }
+/**
+ * The person's waiver of holds the policy reserves for them, for this review at `head`: `holds` as the person saw
+ * them, and `codes`, which the landing matches. `change` is the change at the head they pressed Land at, null until
+ * the landing reads it, and `from` that head once the waiver carried to a later head with the same change. It lasts
+ * for the landing it started, and a later land replaces it. `yolo` is the project whose yolo setting gave it for `by`.
+ */
+interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: string; at: number; change: Change | null; from?: string; yolo?: ProjectId }
+type Phase =
+  /**
+   * The reviewer has the round's request and owes its verdict. `check` is the repository's checks at the round's head,
+   * run beside it unless the round has their result already, as `checking`'s are. `unrunnable` is the output of a check
+   * the pylon could not run, which goes to the person once the reviewer approves. `refused` is why no node had room for
+   * the check, which then runs in `checking` once the reviewer approves.
+   */
+  | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string; refused?: string } }
+  /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
+  | { kind: "fixing"; failing?: ModelFailure }
+  /** The repository's checks run at the approved head, in a check thread thrown away afterwards. */
+  | { kind: "checking" } & GateRun
+  /**
+   * The live check runs at the approved head, in a verify pylon archived afterwards. `refused` is why no node could take
+   * the verify pylon yet, which the loop tries again.
+   */
+  | { kind: "verifying"; refused?: string } & GateRun
+  /**
+   * A landing at an approved head with no live check needs the reviewer's quote, from the description as it is now,
+   * of what could not be checked live, as after the person's Land press. `asked` is the digest of the description the
+   * request carries, once it is saved to send, and null before. The landing's checks follow.
+   */
+  | { kind: "quoting"; asked: string | null; failing?: ModelFailure }
+  | { kind: "approved" }
+  /**
+   * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
+   * merged at it is this review's own merge, and any other merge is someone else's. `waiting` is why a review that
+   * deploys has not authorized its merge yet: another landing that deploys is under way, a deploy drains the control
+   * plane, or the desired release is not healthy everywhere.
+   */
+  | { kind: "merging"; authorized: string | null; waiting?: string }
+  /** `requested` once the desired release is set. `previous` is the release to roll back to, null if there was none. */
+  | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
+  /** The deploy of `commit` failed for `why`, and the fleet goes back to `previous`, the desired release once `requested`. */
+  | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
+  /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
+  | { kind: "landed"; commit: string }
+  /**
+   * Ended, for the person to decide. `cause` is which part of the loop held it. `holds` say exactly which condition
+   * failed or which reserved case applies, each with the code that decides its rule. `reasons` are their texts, which
+   * nothing here reads: they stay on the record and in the API for older control planes and CLIs, which read them.
+   * `unreviewed` is a head the PR moved to after the last round, which no round of this review reviews.
+   */
+  | { kind: "needs-person"; cause: HoldCause; reasons: string[]; holds: Hold[]; label?: Label; unreviewed?: string }
+  /** The PR merged or closed outside a review that does not land it, so nothing was left to review. */
+  | { kind: "merged" }
+  | { kind: "closed" }
+  /** The person archived or deleted one of the review's threads, or, as `by`, cancelled the review itself. */
+  | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
+  | { kind: "cancelled"; who: "person"; by: string };
+/** A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. */
+interface GateRun { startedAt: number; thread: ThreadId | null }
+/**
+ * Why a review is held: its `rounds` ran out; a `gate` failed where it failed before, or the builder answered it
+ * without a push; the check or live check gave `no-verdict`; an `agent` gave no answer the loop could read; the merge
+ * `policy` holds it, or GitHub would not merge; the PR closed or merged `outside` the review; a `thread` of it is not
+ * active; or its `deploy` or rollback failed. A record saved before causes is `unrecorded`, unless its label says its
+ * rounds ran out.
+ */
+type HoldCause = "rounds" | "gate" | "no-verdict" | "agent" | "policy" | "outside" | "thread" | "deploy" | "unrecorded";
+/**
+ * The agent's last `count` turns in a row ended because its model failed, the latest with the error `last`. The loop
+ * sends its request again at `retryAt`.
+ */
 interface ModelFailure { count: number; last: string; retryAt: number }
 ```
 
@@ -566,43 +803,85 @@ Since 0.48.0 a turn that ends because the agent's model failed is not a turn wit
 
 Since 0.71.0 `ThreadDetail.reviewView` says what the merge policy makes of `review` now, so a client shows it without running the policy. It is null when `review` is null. `question` may have been asked at an earlier head than `head`, between a push and the loop's next pass, and Land on it is refused then, so a client that offers it compares the two:
 
+<!-- types: src/control/review-view.ts ReviewView src/control/holds.ts HoldRule src/control/policy.ts LandPress -->
 ```ts
+// src/control/review-view.ts
 interface ReviewView {
-  id: string;        // the review's
-  head: string;      // the latest round's head, which a Land press names
+  id: string;
+  /** The latest round's head, which a Land press names. */
+  head: string;
   ended: boolean;
-  holds: Array<{ code: string; text: string; holdsAgain: boolean; waivable: boolean; why: string }>;
-  // What a Land press does now: stuck on holds no press gets past, or lands past the holds it waives, asking the
-  // reviewer first for its quote of what could not be checked live when `quotes` is true.
-  press: { kind: "stuck"; holds: Array<{ code: string; text: string }> }
-       | { kind: "lands"; waives: Array<{ code: string; text: string }>; quotes: boolean };
-  // The review's open question about its holds, which Land answers to waive them, at the head it was asked at.
-  question: { id: string; head: string; holds: Array<{ code: string; text: string }> } | null;
+  /** The holds on the review now, each with whether it meets every landing of the head again and whether the person may waive it. */
+  holds: readonly (Hold & HoldRule)[];
+  press: LandPress;
+  /**
+   * The review's open question about its holds, which the person answers Land to waive them, at the head it was asked
+   * at. Between a push and the loop's next pass that head is older than `head`, and Land on it is refused.
+   */
+  question: { id: string; head: string; holds: readonly Hold[] } | null;
 }
+// src/control/holds.ts
+/** Whether a hold meets every landing of the same approved head again, and whether the person may waive it, and why. */
+interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
+// src/control/policy.ts
+/**
+ * What the person's Land press does now, the one rule the land route and the dashboard both follow. It is `stuck` on
+ * the holds that meet every landing of the approved head again and that the person may not waive, which no press gets
+ * past. Otherwise it lands past the holds it `waives`, and `quotes` first when no live check ran and the landing needs
+ * the reviewer's quote of what could not be checked live, which only a description the reviewer reads again can give.
+ * `early` is what the head alone decides, read from its change before the loop recorded it, so the person can answer
+ * while the reviewer and the check run.
+ */
+type LandPress = { kind: "stuck"; holds: Hold[] } | { kind: "lands"; waives: Hold[]; quotes: boolean };
 ```
 
 `label` is the pull request's `needs human review` label. Only a review whose rounds ran out has one: the reviewer still requested changes after the last round, the builder pushed fixes after the last round, `.nexus/check` failed after the last round, the head moved after the last round's approval, or the branch conflicts with its base after the last round. A review that went to the person for any other reason has none.
 
 `unreviewed` is a head the pull request moved to after the review's last round, which no round of it reviewed. A held review whose head moved gets it once no round is left, or when the loop had already given up on it with changes the reviewer requested, and its reasons then name that head. A review whose rounds ran out gets none for a head whose change is its last round's on the same base: its latest round's verdict carries to that head, and its reasons stay as they were. Such a review offers nothing to land, so `land` refuses it. A held review that would land as it is, one held after an approval only for a failed check, a failed live check or a conflict the builder did not answer with a push, while it has rounds left and no label, and one that stopped at approval, get a new round on the new head instead, and `show` prints `a new round reviews <head>, since the pull request's head moved from <head> after its approval` under the review line while that round is the latest. A landing whose pull request was retargeted since its approval gets a new round at the same head too, and `show` prints `a new round reviews <head> against <base>, since the pull request's base changed from <base> after its approval`. A control plane that sends no `unreviewed` has none.
 
+<!-- types: src/control/review-model.ts Label -->
 ```ts
-type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };  // why is GitHub's answer
+// src/control/review-model.ts
+/** The "needs human review" label on the PR, which only a review whose rounds ran out gets. `why` is GitHub's answer. */
+type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };
 ```
 
 `holds` is the same list as `reasons`, one per reason in the same order, each with the code that decides whether the person may waive it, which [the merge policy](merge-policy.md#what-the-person-may-waive) lists. A waiver's `codes` are the codes of the holds it names in `holds`, and the landing matches a waiver by code at its head, so a waiver keeps covering its hold if the hold's wording changes. `reasons` and a waiver's `holds` stay the texts the person reads, and the Land route still takes `waive` as those texts. Both fields are additive: a control plane without them sends neither, and one with them reads a review stored before them with codes worked out from its texts.
 
+<!-- types: src/control/holds.ts Hold HoldCode reservedCases -->
 ```ts
+// src/control/holds.ts
 interface Hold { code: HoldCode; text: string }
-type HoldCode = "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
-  | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed" | "verify-changed"
-  | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}`  // the reviewer's reading of a case, and a Nexus path that hits it
-  | "stale-head" | "waiver-not-carried" | "loop";  // the line a held review gains when its head moves, why a waiver did not carry, and the review loop's own reasons
+/**
+ * What a hold is, which decides its rule, and its text, which only the person reads. A reserved case the reviewer
+ * named and one the paths hit are separate codes, so a waiver of the one the person saw never covers the other.
+ * `loop` is a reason of the review loop's own, such as a deploy's failure, `stale-head` the line a held review
+ * gains when its head moves, and `waiver-not-carried` the line saying why the person's Land at an earlier head did not
+ * carry to this one.
+ */
+type HoldCode =
+  | "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
+  | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed"
+  | "verify-changed" | "no-second-reviewer" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "waiver-not-carried" | "loop";
+/**
+ * The merge policy's hold vocabulary: the reserved cases, the hold codes, and each code's row: its rule, the name a
+ * waiver of it goes by, and what the loop does about it alone.
+ */
+const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
 ```
 
 A round's `base` is the branch its head was reviewed against. A round with `carried` is the reviewer's verdict on head `from` carried to the round's head, whose change against the same base is the same, so no reviewer round ran and it counts against no limit. It is an approval, except with `held: true`, in a review whose rounds ran out, which carries whatever verdict it was held with, and its hold, and runs nothing at the new head. Its `check` and `live` are its own. A waiver's `change` is the change at the head the person pressed Land at, `null` until the landing reads it, and `from` is that head once the waiver carried to a later one with the same change, which `head` then names. A waiver from a control plane before them has neither, and holds at its own head alone. When it does not carry, the review's first hold, `waiver-not-carried`, says why: the files whose patches differ, or why the changes could not be compared. `show` prints `approval carried from <head> to <head>: same change after a rebase`, or `hold carried` for a review whose rounds ran out, under the review line while the carried round is the latest, and `(carried from <head>)` after a carried waiver's head. `events --kind review.approval-carried` and `--kind review.waiver-carried` follow each carry of an approval or a waiver with both heads, and a carried hold has neither.
 
+<!-- types: src/control/review-model.ts Change -->
 ```ts
-type Change = { kind: "known"; base: string; files: { path: string; id: string }[] } | { kind: "unknown"; why: string };  // id: sha256 of the file's paths, modes before and after, and patch against base, hunk headers dropped
+// src/control/review-model.ts
+/**
+ * A pull request's change at a head against branch `base`, as `git patch-id --stable` identifies it: one identity per
+ * changed file, of its path, its path before a rename, its modes before and after, and its patch without the hunk
+ * headers, so a rebase that only moves hunks keeps it, and any changed line, context lines included, or mode does not.
+ * `unknown` when GitHub does not show the whole change, such as a binary file's, so nothing can say it is the same.
+ */
+type Change = { kind: "known"; base: string; files: { path: string; id: string }[] } | { kind: "unknown"; why: string };
 ```
 
 `waiting` is why a landing that deploys waits before it merges, since landings that deploy go one at a time: `<review> deploys`, `<review> rolls back` or `<review> merges` for another review's landing, `a deploy drains the control plane`, or `not every service reports <commit> healthy` for a desired release the fleet does not report healthy, such as one whose deploy failed with nothing to roll back to. `show` ends the review line with `, waiting while ` and that reason, such as `, waiting while rv-1a2b3c4d deploys`.
@@ -669,26 +948,44 @@ The dashboard lists a project's queued threads in the sidebar after its open thr
 
 Queued threads need the control plane's GitHub token, which the PR watch and the review loop read merges with. Without `github.tokenFile`, `start --after` and `start-queued` answer 409 `queued threads need the control plane's GitHub token (github.tokenFile), which is not configured`.
 
+<!-- types: src/contract/threads.ts QueuedThread Wait -->
 ```ts
-/** A thread that has not started, as GET /v1/queued and GET /v1/queued/<thread> answer it. */
+// src/contract/threads.ts
+/** The API's view of a thread that has not started, which `show` and `threads --queued` print. */
 interface QueuedThread {
-  id: string; title: string; project: string;
-  startedBy: string;                       // who queued it, and the thread's startedBy once it starts
-  createdAt: number;                       // when it was queued, in Unix milliseconds
-  status: "queued" | "archived" | "deleted";  // archived is cancelled
-  after: string[];                         // the threads it waits for, without repeats
-  waits: Wait[];                           // one per thread in after, in its order
-  blocked: boolean;                        // some wait is blocked, or since 0.62.0 its start was refused for a missing branch
-  node: string;                            // a node, or "auto"
+  id: ThreadId;
+  title: string;
+  project: ProjectId;
+  /** Who queued it, and the thread's startedBy once it starts. */
+  startedBy: string;
+  /** When it was queued, in Unix milliseconds. */
+  createdAt: number;
+  /** Archived means cancelled. */
+  status: "queued" | "archived" | "deleted";
+  /** The threads it waits for, without repeats. */
+  after: readonly ThreadId[];
+  /** One per predecessor, in `after` order. */
+  waits: readonly Wait[];
+  /** Some wait is blocked, or the queue holds a start refused for a branch the remote does not have. */
+  blocked: boolean;
+  /** A node, or "auto". */
+  node: string;
   worker: "harness" | "claude";
-  model: string | null;                    // a Claude worker's model, null for a Nexus agent thread
-  prompt: string | null;                   // the first message, or the Claude prompt without /poteto-mode
-  branch: string | null; commit: string | null;
-  resources: { cpus: number; memoryGiB: number; diskGiB: number };
-  startNow: { by: string; at: number } | null;  // start-queued asked for it
-  lastError: string | null;                // why the last start attempt failed
+  /** A Claude worker's model, null for a Nexus agent thread. */
+  model: string | null;
+  /** The first message, or the Claude prompt as given, without the `/poteto-mode` a start puts in front. */
+  prompt: string | null;
+  branch: string | null;
+  commit: string | null;
+  /** The size its pylon boots with, as ThreadDetail.pylon.resources. */
+  resources: BootInputs["resources"];
+  /** Who asked `start-queued` to start it now, and when. */
+  startNow: { by: string; at: number } | null;
+  /** Why the last start attempt failed. */
+  lastError: string | null;
 }
-interface Wait { thread: string; state: "waiting" | "landed" | "blocked"; why: string }
+/** What one predecessor means for the queued thread. */
+interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
 ```
 
 | Exit | When |
@@ -1075,18 +1372,31 @@ The control plane records every model call the agents of its threads make, one r
 
 `usage` prints the tokens spent since `--since`, in all and by each breakdown. `--since` is `today` (since midnight UTC), `7d` or `30d` (today and the 6 or 29 UTC days before it), `all`, or the UTC day to start at, such as `2026-10-01`, and `7d` when it is not given, as the dashboard's Usage page defaults to. `--project P` counts only that project's threads. `--by` prints only that breakdown, or those named, comma-separated, and every one when it is not given: `model`, `project`, `kind` (the agent), `role`, and `day`, a UTC day. The text starts with the period and when counting started, then the backfill's line, then a table of the totals, then a table per breakdown, each count shortened, such as `1.2M`. With `--json` it prints the report as the API answers it, every count exact:
 
+<!-- types: src/control/agent-usage.ts Tokens src/control/usage.ts UsageTotals UsageRow UsageReport breakdowns -->
 ```ts
-interface UsageTotals { input: number; output: number; cacheWrite: number; cacheRead: number; total: number; calls: number }
+// src/control/agent-usage.ts
+interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
+// src/control/usage.ts
+interface UsageTotals extends Tokens { total: number; calls: number }
+/** `key` is the model, project, agent kind, thread role, or UTC day as YYYY-MM-DD. */
+type UsageRow = UsageTotals & { key: string };
+/** What `GET /v1/usage` answers. Rows are biggest first, except days, which are newest first. */
 interface UsageReport {
-  since: number | null;        // the start of the period's first UTC day in Unix milliseconds, or null for all of it
-  countingSince: number;       // when this registry started counting
-  project: string | null;
-  thread: string | null;       // the route takes thread=T too, which the CLI does not send
+  /** The start of the period's first UTC day in Unix milliseconds, or null for all of it. */
+  since: number | null;
+  /**
+   * When this registry started counting. Calls before it are those read from the transcripts still readable then:
+   * running pylons' at once, and archived threads' once the backfill reads them.
+   */
+  countingSince: number;
+  project: ProjectId | null;
+  /** The route takes `thread=T`, which the CLI does not send. */
+  thread: ThreadId | null;
   total: UsageTotals;
-  by: { model?: UsageRow[]; project?: UsageRow[]; kind?: UsageRow[]; role?: UsageRow[]; day?: UsageRow[] };
-  backfill: UsageBackfill;     // since 0.33.0, as Usage backfill describes
+  by: Partial<Record<Breakdown, UsageRow[]>>;
+  backfill: UsageBackfill;
 }
-type UsageRow = UsageTotals & { key: string };   // biggest total first, except days, newest first
+const breakdowns = ["model", "project", "kind", "role", "day"] as const;
 ```
 
 `total` is the sum of the four token counts. An unknown `--since` or `--by` fails with exit code 64, the API's 400.
@@ -1258,25 +1568,33 @@ The dashboard's home page shows each item with no thread yet at its phase in the
 
 Pipeline items need the queue, so without the control plane's GitHub token the item routes answer 409 `pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured`.
 
+<!-- types: src/control/pipeline.ts PipelineItem ItemPhase -->
 ```ts
-/** A pipeline item, as GET /v1/items and GET /v1/items/<item> answer it. */
+// src/control/pipeline.ts
+/** The API's view of an item, which `nexus items`, `nexus item show` and the dashboard's pipeline page show. */
 interface PipelineItem {
-  id: string;                              // it-<12 hex>
-  project: string; title: string;
-  addedBy: string;                         // who added it, and its thread's startedBy
-  addedAt: number;                         // Unix milliseconds
-  after: string[];                         // items of the same project whose threads must merge first
+  /** `it-` and 12 hex. */
+  id: ItemId;
+  project: ProjectId;
+  title: string;
+  /** Who added it, and its thread's startedBy. */
+  addedBy: string;
+  /** Unix milliseconds. */
+  addedAt: number;
+  /** Items of the same project whose threads must merge first. */
+  after: readonly ItemId[];
   worker: "harness" | "claude";
-  model: string | null;                    // a Claude worker's model, null for a Nexus agent thread
-  brief: string | null;                    // the first message, or the Claude prompt without /poteto-mode
-  thread: string | null;                   // the thread it became, queued or started
+  /** A Claude worker's model, null for a Nexus agent thread. */
+  model: string | null;
+  /** The first message, or the Claude prompt without `/poteto-mode`. */
+  brief: string | null;
+  /** The thread it became, queued or started, or null before it is queued. */
+  thread: ThreadId | null;
   phase: ItemPhase;
   approved: { by: string; at: number } | null;
 }
-interface ItemPhase {
-  kind: "planned" | "queued" | "building" | "reviewing" | "landing" | "landed" | "held" | "archived" | "cancelled";
-  why: string;
-}
+/** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */
+interface ItemPhase { kind: "planned" | "queued" | "building" | "reviewing" | "landing" | "landed" | "held" | "archived" | "cancelled"; why: string }
 ```
 
 | Exit | When |
@@ -1323,19 +1641,43 @@ A failure is the `thread.failed` event that the pylon's failure appended, and th
 
 `ThreadDetail.judgments` lists the thread's judgments, oldest failure first. Each is a `JudgmentView`:
 
+<!-- types: src/control/judgment.ts JudgmentView src/control/judgment-store.ts Phase Verdict answers -->
 ```ts
+// src/control/judgment.ts
+/** A judgment as `nexus show` and the thread page show it. */
 interface JudgmentView {
-  failure: number;                       // the failure's thread.failed event ID
-  node: string;                          // where the pylon failed
-  failed: string;                        // the failure's reason
-  startedAt: number;                     // Unix milliseconds
-  phase: "judging" | "acting" | "asked" | "done";
-  verdict: { answer: "retry" | "retry-elsewhere" | "person"; why: string; by: "judgment" | "control plane" } | null;  // null while it judges
-  outcome: string | null;                // what Nexus did, once done, such as "retried the pylon on node-a"
-  question: string | null;               // judgment:<failure>, while the person decides
-  brief: string | null;                  // what the judgment was asked, null when the control plane decided without one
-  reply: string | null;                  // the judgment's reply, at most its last 8,000 characters
+  /** The failure's thread.failed event ID. */
+  failure: number;
+  /** Where the pylon failed. */
+  node: NodeName;
+  /** The failure's reason. */
+  failed: string;
+  /** Unix milliseconds. */
+  startedAt: number;
+  phase: Phase["kind"];
+  /** Null while it judges. */
+  verdict: Verdict | null;
+  /** What Nexus did, once done, such as "retried the pylon on node-a". */
+  outcome: string | null;
+  /** The question the person answers, `judgment:<failure>`, while it is asked. */
+  question: string | null;
+  /** What the judgment was asked, null when the control plane decided without one. */
+  brief: string | null;
+  /** The judgment's reply, at most its last 8,000 characters. */
+  reply: string | null;
 }
+// src/control/judgment-store.ts
+type Phase =
+  /** The brief is saved, and once it is sent the answer is due at `deadline`. */
+  | { kind: "judging"; deadline: number | null }
+  /** Saved before the control plane acts, so a pass after a crash acts again. Each action converges. */
+  | { kind: "acting"; verdict: Verdict }
+  /** The person decides on question `judgment:<failure>`. */
+  | { kind: "asked"; verdict: Verdict }
+  | { kind: "done"; verdict: Verdict; outcome: Outcome };
+/** What was decided and by whom: the judgment's answer, or the control plane's own rule when no judgment ran or its answer could not stand. */
+interface Verdict { answer: Answer; why: string; by: "judgment" | "control plane" }
+const answers = ["retry", "retry-elsewhere", "person"] as const;
 ```
 
 `by` is `judgment` for the judgment's own answer. It is `control plane` when Nexus decided by its own rule: no judgment ran because the retries were spent, the answer was missing, malformed or late, the answer could not run, or the thread was archived or deleted before it came.
@@ -1369,14 +1711,15 @@ The control plane puts a guide before the thread's first message, the one `--mes
 
 Each item has a `key`, unique in the block, a `title` and a `brief`. `after` lists keys of earlier items in the same block, or IDs of pipeline items, whose pull requests must merge first. A block with another token, JSON that does not parse, or an item that breaks these rules is not read. Every 15 seconds the control plane reads the replies of each planning thread whose turn ended since it last read them, and asks one question per item of every block it reads, in the block's order. Each question has the ID `plan:<thread>:<block>:<nn>`, where `<block>` is a hash of the block's items and `<nn>` the item's place, its `text` is the title, the brief in full and what it waits on, its `options` are `"accept"` and `"reject"`, its `answerer` is `person`, and its `proposal` is the item. A block read again, in a later pass or after a restart, asks nothing new. A revised block is another block, with its own questions.
 
+<!-- types: src/control/questions.ts Proposal -->
 ```ts
-/** One item of a planning thread's block, as Question.proposal holds it. */
-interface Proposal {
-  block: string;      // 12 hex characters, a hash of the block's items
-  index: number;      // its place in the block, from 1
-  key: string; title: string; brief: string;
-  after: string[];    // keys of earlier items in the block, or pipeline item IDs
-}
+// src/control/questions.ts
+/**
+ * One item of a planning thread's block, as Question.proposal holds it. `block` is 12 hex characters, a hash of the
+ * block's items, and `index` its place in the block, from 1. `after` holds keys of earlier items of the block, or
+ * pipeline item IDs.
+ */
+interface Proposal { block: string; index: number; key: string; title: string; brief: string; after: readonly string[] }
 ```
 
 Answer a question on the thread's page, or with `POST /v1/questions/<id>/answer`, as for any [question](#questions). `accept` adds the item to the thread's project as `item add --project <P> --title <title> --message <brief>` would, with you as `addedBy`, its `after` resolved, and the ID `it-` plus 12 hex characters of a hash of the question's ID. The answer and the item are stored together, so a refusal leaves the question open. Then the item moves as any item does: in a project whose pipeline starts items on their own it becomes a queued thread at once, and in one that waits for approval it waits for `item approve`. `reject` records only the answer. The route refuses an `accept` with:
@@ -1437,18 +1780,32 @@ temperatures: k10temp Tctl 54.1 °C, nvme Composite 41.9 °C
 pylon: pylon-th-0123456789ab, 2 processes, 112.5% CPU, 6.3 GiB resident
 ```
 
+<!-- types: src/protocol/client.ts NodeHealth src/protocol/observations.ts DiskFact -->
 ```ts
+// src/protocol/client.ts
+/**
+ * A node's host, read when asked. A reading is null where the host does not expose it, such as temperatures in a VM, or
+ * load and memory on a host without Linux's /proc. `disk` is the filesystem the backend keeps its pylons' disks on.
+ * `pylons` lists each running pylon's processes, its controller and what it started, such as QEMU, with the percent of
+ * one CPU they used over the sample and their resident memory. It is null from a backend that cannot name them.
+ */
 interface NodeHealth {
-  node: string;
-  readAt: string;            // ISO time the probe read it
-  cpus: number;              // what capacity counts
+  node: NodeName;
+  /** The ISO time the probe read it. */
+  readAt: string;
+  /** What capacity counts. */
+  cpus: number;
   load: { one: number; five: number; fifteen: number } | null;
   memory: { totalGiB: number; availableGiB: number; swapTotalGiB: number; swapFreeGiB: number } | null;
-  disk: { path: string; totalGiB: number; freeGiB: number };  // the filesystem that holds the pylons' disks
-  disks?: Array<{ paths: string[]; totalGiB: number; freeGiB: number; pylons?: true }>;  // absent before 0.54.0
-  temperatures: Array<{ sensor: string; celsius: number }> | null;
-  pylons: Array<{ pylonId: string; processes: number; cpuPercent: number; residentGiB: number }> | null;
+  disk: { path: string; totalGiB: number; freeGiB: number };
+  /** Each filesystem Nexus writes to, the pylons' first. Absent from a probe older than the field. */
+  disks?: readonly DiskFact[];
+  temperatures: readonly { sensor: string; celsius: number }[] | null;
+  pylons: readonly { pylonId: PylonId; processes: number; cpuPercent: number; residentGiB: number }[] | null;
 }
+// src/protocol/observations.ts
+/** A filesystem, once, with the paths Nexus writes to on it. `pylons`: it holds the pylons' disks and their overlays. */
+interface DiskFact { paths: readonly string[]; totalGiB: number; freeGiB: number; pylons?: true }
 ```
 
 A reading the host does not expose is null, and plain `node` prints `unknown`, never 0. Load and memory come from `/proc/loadavg` and `/proc/meminfo`, so a probe on a host without Linux's `/proc` reports them unknown. Temperatures come from every hwmon sensor, named by the sensor's `name` and its label, or by the thermal zones on a host without hwmon, since a zone usually repeats a sensor. A VM often exposes neither. A sensor the host lists but cannot read, such as an AMD GPU's that answers `EBUSY` while the GPU sleeps, is left out of `temperatures`, and the rest of the reading stays. A pylon's processes are its controller and what the controller started, such as QEMU. `cpuPercent` is the percent of one CPU they used over the probe's sample, which asks for one second and is divided by the time it took, so four busy CPUs read 400. `residentGiB` sums their `VmRSS`. A process whose `/proc` files cannot be read, such as one that exits mid-read, is not counted, and a pylon whose controller's cannot be read is not listed. Load and memory fail the whole read when `/proc` has them but cannot read them, and the route answers 500 with `cannot read the node's load` or `memory` and the reason. Free disk fails it too when the filesystem of the pylons' disks cannot be read, with the error that names its path. No other reading fails it. `pylons` lists only running pylons whose controller is alive, and is null from a backend that cannot name its pylons' processes, such as Docker's. The capacity in `nodes` reads the same CPUs and free disk, so its `diskFreeGiB` is now the filesystem of the pylons' disks rather than `/`. `disks` lists each filesystem that holds one of the paths Nexus writes to, once, with those paths: the pylons' state root, `/var/lib/nexus/artifacts`, the probe user's home `/var/lib/nexus` with the Docker and Gondolin caches of image builds, `/var/lib/nexus-control` and `/opt/nexus/releases`. A path the node lacks, such as `/var/lib/nexus-control` on a node without the control plane, is left out. The pylons' filesystem comes first. Plain `node` prints a `disk:` line per filesystem, ending in `, low` for a low one, and prints the single `disk:` line of `disk` from a probe older than 0.54.0. The dashboard's Cluster page lists the same for the picked node, and marks a node's card `disk low` when one of its filesystems is low.
@@ -1457,27 +1814,44 @@ The reply takes about a second, for the CPU sample. Only a deployer may read it,
 
 Since 0.56.0 the control plane reads every online node's health once a minute, whether or not anyone watches, and keeps every health read it makes, that one, the Cluster page's, `node`'s and a failure judgment's, as a sample of the node, at most one per node every 4 seconds, for 31 days. So a node's history has a gap only where the node or the control plane was down, and the Cluster page, which reads the health of the node it shows every 5 seconds while it is open, adds a sample with each read. Its card for every other node shows that node's newest sample, or no reading when it has none from the last 5 minutes. The once-a-minute read skips a node whose last read has not answered until it does, and a slow node holds up no other. It keeps each sample whole for 2 hours, and as buckets of min, sum, max and count per minute for 7 hours, per 2 minutes for 25 hours, per 15 minutes for 8 days and per hour for 31 days. `GET /v1/nodes/<name>/metrics?from=<ms>&to=<ms>` serves the samples from `from` to `to`, in milliseconds since the epoch, with `to` now when it is left out, for the dashboard's Cluster page to graph, and the CLI does not call it. It reads the registry only, never the node. It serves the range from the coarsest tier that still holds `from` and fits, in buckets wide enough that no series has more than 1,000 points, so the Cluster page's 15 minutes and hour come whole, 6 hours by the minute, 24 hours by 2 minutes, 7 days by 15 minutes and 30 days by the hour. The 8 pylons with the highest CPU peak in the range have series of their own, and the rest are summed into `otherPylonsCpu` and `otherPylonsResident`, labelled such as `12 other pylons, summed`, which `otherPylons` names. Each of their points is the pylons' combined use averaged over the bucket's reads, a pylon not running counting 0, and its `min` and `max` are its `avg`, since a combined min or max cannot be told from each pylon's. Memory, swap and disk are in GiB, a pylon's CPU in percent of one CPU, and temperatures in °C.
 
+<!-- types: src/control/node-metrics.ts NodeMetrics MetricSeries Series tiers TierName -->
 ```ts
-interface NodeMetrics {
-  node: string;
-  from: number;
-  to: number;
-  tier: "raw" | "1m" | "2m" | "15m" | "1h";  // the tier the range is served from
-  bucketMs: number;                  // each point's width; a point starts at a multiple of it
-  sampledAt: number | null;          // the newest sample the points hold, null when none
-  series: MetricSeries[];            // by key
-  otherPylons: string[];             // the pylons, as <pylon>:<thread>, summed into the other pylons' series
-}
-interface MetricSeries {
-  key: string;     // load1, load5, load15, cpus, memTotal, memAvailable, swapTotal, swapUsed, diskTotal, diskFree, temp:<sensor>, pylonCpu:<pylon>:<thread>, pylonResident:<pylon>:<thread>, otherPylonsCpu, otherPylonsResident
-  series: { kind: string; sensor?: string; pylon?: string; thread?: string | null };  // the key, parsed
-  label: string;   // such as "1-minute load", the sensor, or a pylon's thread title, else its ID
-  t: number[];     // each point's first sample, in time order
-  min: number[];
-  avg: number[];   // the average of every sample in the point
-  max: number[];
-  n: number[];     // the samples in the point
-}
+// src/control/node-metrics.ts
+/**
+ * `GET /v1/nodes/<name>/metrics`: the node's series over `from` to `to`, in ms since the epoch. `sampledAt`: the newest
+ * sample the points hold, null when none, so a reader that appends later samples counts none twice. `otherPylons`: the
+ * pylons, as `<pylon>:<thread>`, summed into the other pylons' series. `tier` is the tier the range is served from,
+ * `bucketMs` each point's width, a point starting at a multiple of it, and `series` are by key.
+ */
+interface NodeMetrics { node: string; from: number; to: number; tier: TierName; bucketMs: number; sampledAt: number | null; series: MetricSeries[]; otherPylons: string[] }
+/**
+ * A series as the API serves it: its points in time order, each the time of its first sample, its bucket's min,
+ * average of every sample and max, and `n` the samples in it. `key` is the series' kind, with `:<sensor>` for a
+ * temperature and `:<pylon>:<thread>` for a pylon's. `label` is such as "1-minute load", the sensor, or a pylon's
+ * thread title, else its ID.
+ */
+interface MetricSeries { key: string; series: Series; label: string; t: number[]; min: number[]; avg: number[]; max: number[]; n: number[] }
+/** One series of a node's health. A pylon's are keyed by the pylon and the thread it ran for, null for an orphan. */
+type Series =
+  | { kind: "load1" | "load5" | "load15" | "cpus" | "memTotal" | "memAvailable" | "swapTotal" | "swapUsed" | "diskTotal" | "diskFree" }
+  | { kind: "temp"; sensor: string }
+  | { kind: "pylonCpu" | "pylonResident"; pylon: PylonId; thread: ThreadId | null }
+  /** The pylons past `maxPylons` in a range, summed, which only the API serves. */
+  | { kind: "otherPylonsCpu" | "otherPylonsResident" };
+/**
+ * How the registry keeps samples. `raw` keeps each sample. Each other tier keeps one bucket per series per `stepMs`,
+ * which every sample in it adds to. Every tier holds the newest data, and each drops what is older than `keepMs`. Each
+ * range of the node page's picker is served at a tier's own step, 15 min and 1 h raw, 6 h by the minute, 24 h by two
+ * minutes, 7 d by 15 minutes and 30 d by the hour, so reading one regroups nothing.
+ */
+const tiers = [
+  { name: "raw", stepMs: 0, keepMs: 2 * hour },
+  { name: "1m", stepMs: minute, keepMs: 7 * hour },
+  { name: "2m", stepMs: 2 * minute, keepMs: 25 * hour },
+  { name: "15m", stepMs: 15 * minute, keepMs: 8 * day },
+  { name: "1h", stepMs: hour, keepMs: 31 * day },
+] as const satisfies readonly { name: string; stepMs: number; keepMs: number }[];
+type TierName = Tier["name"];
 ```
 
 A pylon's key ends with an empty thread when no thread had the pylon. A sensor name the host repeats gets ` (2)`, ` (3)` and so on. Only a deployer may read it, as with `node`, and anyone else gets 403. An unknown node gets 404, and a `from` that is missing or not a whole number, a `to` that is not one, a `from` not before `to`, or a range longer than 31 days, 400.
@@ -1503,38 +1877,48 @@ rj-firebat
 
 `--json` prints the report:
 
+<!-- types: src/control/doctor-model.ts DoctorReport statuses Status Check Verdict NodeCheckName ControlCheckName -->
 ```ts
+// src/control/doctor-model.ts
 interface DoctorReport {
-  at: string;                         // ISO time the checks ran
-  status: "ok" | "warn" | "fail";     // the worst check's
-  checks: Array<{
-    node: string | null;              // null for the control plane
-    name: "online" | "release" | "disk" | "pylons" | "backup" | "login" | "certificate" | "archived-disks";
-    status: "ok" | "warn" | "fail";
-    text: string;                     // one line: what is wrong and what to do
-  }>;
+  /** The ISO time the checks ran. */
+  at: string;
+  /** The worst of the checks' statuses. */
+  status: Status;
+  checks: readonly Check[];
 }
+const statuses = ["ok", "warn", "fail"] as const;
+type Status = (typeof statuses)[number];
+/** A check of a node, or of the control plane where `node` is null. */
+type Check = Verdict & ({ node: NodeName; name: NodeCheckName } | { node: null; name: ControlCheckName });
+/** `text` is one line: what is wrong and what to do, or what was found when nothing is. */
+interface Verdict { status: Status; text: string }
+type NodeCheckName = "online" | "release" | "disk" | "pylons";
+type ControlCheckName = "release" | "backup" | "login" | "certificate" | "archived-disks";
 ```
 
 The control plane runs the same checks every 5 minutes and keeps each change of a check's status that two passes in a row confirmed, for 30 days, as [the design's health alerts](design.md#doctor-and-health-alerts) describe. Any allowed caller may read them, as it may `nodes` and `release`. `GET /v1/checks` serves a `HealthView`, and `GET /v1/checks/changes` every `HealthChange` kept, newest first. `POST /v1/checks/seen` with `{"through": number}` marks each open problem whose change's `id` is `through` or lower seen, and answers 204. The dashboard's Health page sends it, and any caller may, since what the person saw changes no check. Each change is also a `health.changed` event, with the `HealthChange` as its payload and no thread.
 
+<!-- types: src/control/doctor-model.ts HealthChange HealthView -->
 ```ts
-interface HealthChange {
-  id: number;
-  at: string;                         // ISO time of the pass that confirmed it
-  node: string | null;                // null for the control plane
-  name: DoctorReport["checks"][number]["name"];
-  from: "ok" | "warn" | "fail";       // the status before
-  status: "ok" | "warn" | "fail";     // the status now
-  text: string;                       // the line of the pass that set it, or "no longer checked"
-  seenAt: string | null;              // when the person saw it on the Health page; a problem that got better keeps its predecessor's
-}
-
+// src/control/doctor-model.ts
+/**
+ * A check's status changed, as two passes in a row confirmed it: `at` is the ISO time of the pass that confirmed it,
+ * `from` what it was, and `text` what the pass that set `status` found, or "no longer checked". `seenAt` is when the
+ * person saw the problem on the Health page, null for one not seen yet, and a problem that got better keeps its
+ * predecessor's.
+ */
+type HealthChange = Check & { id: number; at: string; from: Status; seenAt: string | null };
+/** The health as `GET /v1/checks` serves it. */
 interface HealthView {
-  at: string | null;                  // the latest pass's time, null before the first since the control plane started
-  checks: DoctorReport["checks"];     // that pass's checks, which may differ from what two passes confirmed
-  problems: HealthChange[];           // for each check now warn or fail, the change that made it so, oldest first
-  unseen: number;                     // how many of those have no seenAt
+  /** When the latest pass ran, or null before this control plane's first. */
+  at: string | null;
+  /** That pass's checks, the control plane's first and then each node's, which may differ from what two passes confirmed. */
+  checks: readonly Check[];
+  /** For each check whose confirmed status is warn or fail, the change that made it so, oldest first. */
+  problems: readonly HealthChange[];
+  /** How many of those have no `seenAt`. */
+  unseen: number;
 }
 ```
 
@@ -1569,22 +1953,31 @@ th-5c1e0b2d9a77  Old spike  rj-firebat holds no disk for its pylon
 
 A thread is read once it is done or skipped, and `recovered` counts the calls no read had counted before and the tokens they added. A stopped or finished run lists what it skipped. With `--json` the commands print the API's shapes:
 
+<!-- types: src/control/usage.ts UsageBackfill BackfillThread BackfillPlanRow -->
 ```ts
+// src/control/usage.ts
+/**
+ * The usage backfill, which wakes archived threads' pylons one at a time to read their transcripts from the start.
+ * `current` is the pylon a run holds: woken to be read, or read or given up on and waiting for its pause. `read` counts
+ * the threads done or skipped of `of`, every thread a run listed, and `recovered` sums what the done ones recovered.
+ * `finishedAt` is when it stopped or finished.
+ */
 type UsageBackfill =
   | { state: "never" }
   | {
-    state: "running" | "stopped" | "done";
-    startedAt: number;
-    finishedAt: number | null;   // when it stopped or finished
-    current: { thread: string; phase: "reading" | "pausing"; since: number } | null;   // the pylon it holds: woken to be read, or read and pausing
-    waiting: string | null;      // why it waits before the next pylon
-    read: number;                // threads done or skipped
-    of: number;                  // every thread a run listed
-    recovered: { calls: number; tokens: number };
-    skipped: BackfillThread[];
+    state: "running" | "stopped" | "done"; startedAt: number; finishedAt: number | null;
+    current: { thread: ThreadId; phase: "reading" | "pausing"; since: number } | null;
+    /** Why the run waits before the next pylon, such as no room on its node. Null when it does not wait. */
+    waiting: string | null;
+    read: number; of: number; recovered: { calls: number; tokens: number }; skipped: BackfillThread[];
   };
-interface BackfillThread { thread: string; title: string; state: "pending" | "done" | "skipped"; reason: string | null; calls: number; tokens: number; at: number | null }
-interface BackfillPlanRow { thread: string; project: string; node: string; title: string; reason: string | null }   // reason: why a run before skipped it
+/**
+ * A thread a run of the usage backfill listed. `calls` and `tokens` are what reading it recovered: the calls no read had
+ * counted, and the tokens they added. `reason` says why a skipped one was not read, and `at` when it was done or skipped.
+ */
+interface BackfillThread { thread: ThreadId; title: string; state: "pending" | "done" | "skipped"; reason: string | null; calls: number; tokens: number; at: number | null }
+/** An archived thread a start of the backfill would read, with why a run before skipped it, if one did. */
+interface BackfillPlanRow { thread: ThreadId; project: ProjectId; node: NodeName; title: string; reason: string | null }
 ```
 
 The dashboard's Usage page says the same under its totals, with a table of the skipped threads and why. A pylon the backfill reads shows `reading` as its desired phase. [Token usage records](data-model.md#token-usage-records) describes the records.

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { cliDoc, generated } from "../scripts/docs-gen.ts";
 import { minControlVersion } from "./cli/config.ts";
 import { version } from "./version.ts";
 
@@ -47,4 +48,13 @@ test("only the changelog says what an older control plane does, and only above t
     .map((match) => match[1]!)
     .filter((v) => compare(v, minControlVersion) <= 0);
   assert.deepEqual(belowFloor, []);
+});
+
+test("docs/cli.md's type blocks are the source declarations they name, which node scripts/docs-gen.ts writes", () => {
+  assert.equal(read(cliDoc), generated(read(cliDoc)));
+});
+
+test("every TypeScript block in docs/cli.md names the declarations it shows, so none is a hand copy", () => {
+  const unmarked = [...read(cliDoc).matchAll(/^(.*)\n```ts$/gm)].map((match) => match[1]!).filter((line) => !line.startsWith("<!-- types: "));
+  assert.deepEqual(unmarked, []);
 });
