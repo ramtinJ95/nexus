@@ -22,7 +22,7 @@ async function checkout(t: TestContext) {
   guest.exec = async (argv, opts) => {
     reads++;
     assert.equal(opts.cwd, checkoutDir);
-    assert.ok(opts.timeoutMs !== undefined && opts.timeoutMs < gitPollMs, "a stalled helper is stopped before the next poll");
+    assert.ok(opts.timeoutMs !== undefined && opts.timeoutMs > 0 && opts.timeoutMs < gitPollMs, "a stalled helper is stopped before the next poll");
     try {
       const result = await run(argv[0]!, argv.slice(1), { cwd: dir, timeout: opts.timeoutMs });
       return { exitCode: 0, output: result.stdout, truncated: false };
