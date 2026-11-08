@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { themes } from "./shell.ts";
+import { narrow } from "./contract.ts";
 
 const css = readFileSync(new URL("./style.css", import.meta.url), "utf8");
 
@@ -153,4 +154,8 @@ test("a dialog's number inputs look like its other fields and shrink to their co
   assert.ok(rule.selector.split(", ").includes('.form input[type="number"]'), rule.selector);
   assert.match(rule.body, /width:\s*100%;/);
   assert.match(rule.body, /min-width:\s*0;/);
+});
+
+test("the phone's layout rules switch at the width the client lays out a phone's", () => {
+  assert.deepEqual([...css.matchAll(/@media (\([^)]*width[^)]*\))/g)].map((m) => m[1]), [narrow]);
 });

@@ -5,6 +5,7 @@
  */
 import type { Thread } from "../thread-store.ts";
 import type { QueuedThread } from "../../contract/threads.ts";
+import { peekHref } from "./contract.ts";
 import type { Project } from "../project.ts";
 import type { PipelineItem } from "../pipeline.ts";
 import { needKind, needLabels, roundOf } from "../wording.ts";
@@ -72,7 +73,6 @@ export function flightRows(placed: Map<Stage, Line[]>, cards: ReadonlySet<string
 /** Work held for the person, as a line of the stack would show it. */
 export const heldLine = (c: Context, w: HeldWork): Line => w.kind === "item" ? itemLine(c, w.item) : w.kind === "queued" ? queuedLine(c, w.q) : threadLine(c, w.thread);
 
-export const peekHref = (key: string) => `/?peek=${encodeURIComponent(key)}`;
 
 /** A line of the stack, a link to its preview, which for work in Needs you is its card there. */
 function line(l: Line, peeked: string | null): Html {

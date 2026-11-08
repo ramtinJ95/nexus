@@ -5,12 +5,10 @@ import { requestOver } from "./request.js";
 import { callOf } from "../../contract/route.ts";
 import { streamRoutes } from "../../contract/streams.ts";
 import { threadRoutes } from "../../contract/threads.ts";
+import { rowEvents } from "./contract.ts";
 
 export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
   const request = requestOver(api);
-  // The events that change a row's attention, its reply or whether it works, and a check's change, which every tab
-  // hears from the one that follows the events, as it hears the rows.
-  const rowEvents = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended", "health.changed"];
   // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
   // rows it hands them, so a hidden tab notifies without a request or a stream of its own. Every tab showing that one
   // tab's reads, in order, means none shows older rows over newer ones, and each holds a reply back to the same moment.

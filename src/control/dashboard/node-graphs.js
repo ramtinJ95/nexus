@@ -7,6 +7,7 @@ import { afterSwap, el } from "./page.js";
 import { request } from "./request.js";
 import { nodeRoutes } from "../../contract/reports.ts";
 import { onThemeChange, themeValue } from "./theme.js";
+import { kept, storageKeys } from "./contract.ts";
 import { appended, bucketed, charts, columns, gapMs, historyOf, missed, rangeMs, rangeOf, reading, regroupMs, regroups, slotter, yRange } from "./graph-data.ts";
 
 const sheet = new CSSStyleSheet();
@@ -16,13 +17,9 @@ document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 const section = document.getElementById("node-graphs");
 const grid = section.querySelector(".graph-grid");
 const errorNote = document.getElementById("graphs-error");
-const rangeKey = "nexus.node-graphs.range";
-const hiddenKey = "nexus.node-graphs.hidden";
-const stored = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
-const store = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
 
-let range = rangeOf(stored(rangeKey));
-const hidden = new Set((() => { try { return JSON.parse(stored(hiddenKey) ?? "[]"); } catch { return []; } })());
+let range = rangeOf(kept.read(storageKeys.graphRange));
+const hidden = new Set((() => { try { return JSON.parse(kept.read(storageKeys.hiddenGraphs) ?? "[]"); } catch { return []; } })());
 let slots = slotter();
 /** The range's history, null until a fetch answers and after one fails, so the next poll fetches again. */
 let history = null;
@@ -162,7 +159,7 @@ function view(chart, figure) {
     const show = hidden.has(id(line));
     if (show) hidden.delete(id(line));
     else hidden.add(id(line));
-    store(hiddenKey, JSON.stringify([...hidden]));
+    kept.write(storageKeys.hiddenGraphs, JSON.stringify([...hidden]));
     key.setAttribute("aria-pressed", String(show));
     for (let s = seriesIndex(i); s < seriesIndex(i + 1); s++) v.u.setSeries(s, { show });
   }
@@ -276,7 +273,7 @@ for (const b of buttons) {
   b.addEventListener("click", () => {
     if (b.dataset.range === range) return;
     range = rangeOf(b.dataset.range);
-    store(rangeKey, range);
+    kept.write(storageKeys.graphRange, range);
     pick();
     void load();
   });

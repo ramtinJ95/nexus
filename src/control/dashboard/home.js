@@ -4,10 +4,10 @@
 // card into view, as a notice's link does, and opening the card reads its latest reply into it.
 import { afterSwap, refreshAfter, refreshNow, toggled } from "./page.js";
 import { needSelectors } from "./notifications.js";
+import { kept, narrow, peekParam, storageKeys } from "./contract.ts";
 
 const split = document.getElementById("split");
-const desk = matchMedia("(min-width: 761px)");
-const viewKey = "nexus.flight-view";
+const phone = matchMedia(narrow);
 
 const cardOf = (key) => document.querySelector(`.need[data-thread="${key}"],.need[data-peek-key="${key}"]`);
 const keyOf = (card) => card.dataset.thread ?? card.dataset.peekKey;
@@ -27,8 +27,8 @@ function pick(card) {
 /** Previews `key`, or for work in Needs you picks its card, `card` naming which of a thread's cards so a poll keeps it. */
 function peek(key, card) {
   const url = new URL(location.href);
-  if (key === "") url.searchParams.delete("peek");
-  else url.searchParams.set("peek", key);
+  if (key === "") url.searchParams.delete(peekParam);
+  else url.searchParams.set(peekParam, key);
   if (card) url.searchParams.set("card", card);
   else url.searchParams.delete("card");
   if (url.href === location.href) return;
@@ -42,7 +42,7 @@ function peek(key, card) {
 }
 
 if (split !== null) {
-  const view = document.getElementById(`view-${localStorage.getItem(viewKey)}`);
+  const view = document.getElementById(`view-${kept.read(storageKeys.flightView)}`);
   if (view !== null) view.checked = true;
   /**
    * Brings the inbox card a notice opened into view, or the inbox when that card is gone. A notice can come before the
@@ -76,7 +76,7 @@ if (split !== null) {
   document.addEventListener("click", (event) => {
     if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) document.getElementById("side-needs").checked = true;
   });
-  addEventListener("change", ({ target }) => { if (target.name === "flight-view") localStorage.setItem(viewKey, target.value); });
+  addEventListener("change", ({ target }) => { if (target.name === "flight-view") kept.write(storageKeys.flightView, target.value); });
 
   split.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
@@ -90,7 +90,7 @@ if (split !== null) {
     if (link === null || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     // On a phone a Needs you card's thread link opens the thread, as the card it heads is the preview there.
     const head = link.closest(".need-sum");
-    if (head !== null && !desk.matches && link.getAttribute("href").startsWith("/threads/")) return;
+    if (head !== null && phone.matches && link.getAttribute("href").startsWith("/threads/")) return;
     event.preventDefault();
     if (head !== null) {
       const fold = head.parentElement;

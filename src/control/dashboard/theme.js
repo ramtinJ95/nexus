@@ -1,9 +1,8 @@
 // The page's theme, a block of style.css named on <html> as data-theme. view.ts's themeScript names the stored
 // one before the first paint, and this follows the sidebar's picker and toggle, the device and the reader's other tabs.
+import { kept, keeping, storageKeys } from "./contract.ts";
 
-const key = "nexus.theme";
-/** The dark theme the toggle goes back to, so a reader of Tokyo Night who toggles twice is back in Tokyo Night. */
-const darkKey = "nexus.theme.dark";
+const { theme: key, darkTheme: darkKey } = storageKeys;
 
 /** The theme a choice shows: itself, or the device's light or dark for System. */
 export const shown = (choice, deviceDark) => choice !== "system" ? choice : deviceDark ? "dark" : "light";
@@ -22,17 +21,12 @@ export function onThemeChange(changed) {
 }
 
 /**
- * The person's choice and the last dark theme they picked, kept in `storage` while it lets them and in memory for
+ * The person's choice and the last dark theme they picked, so a reader of Tokyo Night who toggles twice is back in
+ * Tokyo Night. They are kept in `storage`, the page's localStorage by default, while it lets them and in memory for
  * the page's life when it refuses a read or a write.
  */
 export function themeStore(storage) {
-  const read = (name) => { try { return storage.getItem(name); } catch { return null; } };
-  const write = (name, value) => {
-    try {
-      if (value === null) storage.removeItem(name);
-      else storage.setItem(name, value);
-    } catch {}
-  };
+  const { read, write } = storage === undefined ? kept : keeping(() => storage);
   let choice = read(key) ?? "system";
   let lastDark = read(darkKey);
   return {
@@ -67,12 +61,7 @@ export function startThemes() {
   const deviceDark = matchMedia("(prefers-color-scheme: dark)");
   const choices = new Set([...picker.options].map((option) => option.value));
   const scheme = () => getComputedStyle(root).colorScheme;
-  let store;
-  try {
-    store = themeStore(localStorage);
-  } catch {
-    store = themeStore(null);
-  }
+  const store = themeStore();
   const apply = () => {
     const choice = choices.has(store.choice) ? store.choice : "system";
     picker.value = choice;

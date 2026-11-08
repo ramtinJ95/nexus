@@ -9,6 +9,7 @@ import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { limitText } from "../wording.ts";
 import { agoText, clock } from "./elapsed.ts";
+import { storageKeys } from "./contract.ts";
 import { grow, type Action } from "./contract.ts";
 
 interface Page { status: number; headers: Record<string, string>; body: string }
@@ -17,7 +18,7 @@ interface Page { status: number; headers: Record<string, string>; body: string }
  * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
  * that refuses the page its storage throws on reading it, and the device's theme stands.
  */
-export const themeScript = `{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
+export const themeScript = `{ let theme = null; try { theme = localStorage.getItem(${JSON.stringify(storageKeys.theme)}); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
@@ -85,7 +86,6 @@ const iconPaths = {
 type IconName = keyof typeof iconPaths;
 export const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
 /** The icons client.js clones from the page's `#icons`, for the folders of the changed files' tree. */
-export const clonedIcons = ["chevron", "folder"] as const satisfies readonly IconName[];
 /** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
 export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */

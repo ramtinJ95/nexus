@@ -6,17 +6,18 @@
 import { coordinator, notificationChannel, noticeText, noticeUrl } from "./notifications.js";
 import { api } from "./request.js";
 import { el, end, follow, main, pollMs, recordVisit, refreshNow, stream, tick, toggled } from "./page.js";
-import { paneKey, pickPane, setOpen } from "./nav.js";
+import { pickPane, setOpen } from "./nav.js";
 import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { activeTab, canRead, changesPane, changesUnreadable, checkout, factsNow, readChanges, renderTabs, showTab, tabsBar, terminalTab } from "./checkout.js";
 import "./composer.js";
 import "./actions.js";
 import { startRows } from "./rows.js";
 import { pageModules } from "./pages.js";
+import { kept, storageKeys } from "./contract.ts";
 void pageModules[main?.dataset.page]?.();
 
 for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
-const savedPane = localStorage.getItem(paneKey);
+const savedPane = kept.read(storageKeys.pane);
 if (savedPane !== null) pickPane(savedPane);
 if (changesPane !== null) {
   checkout.facts = factsNow();

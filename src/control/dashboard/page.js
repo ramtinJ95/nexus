@@ -5,7 +5,7 @@ import { atEnd, endFollower } from "./scroll.js";
 import { request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
-import { grow, unticked } from "./contract.ts";
+import { grow, kept, storageKeys, unticked } from "./contract.ts";
 
 export const main = document.querySelector("main");
 export const pollMs = Number(main?.dataset.pollMs);
@@ -35,8 +35,7 @@ const served = new Map([...document.querySelectorAll("[data-live]")].map((el) =>
 // closes once the step is done.
 export const toggled = new Map();
 // The projects the reader folded in the sidebar stay folded on every page.
-const foldedKey = "nexus.folded";
-const folded = new Set(JSON.parse(localStorage.getItem(foldedKey) ?? "[]"));
+const folded = new Set(JSON.parse(kept.read(storageKeys.folded) ?? "[]"));
 for (const id of folded) toggled.set(id, false);
 document.addEventListener("click", (event) => {
   const toggle = toggledBy(event);
@@ -46,7 +45,7 @@ document.addEventListener("click", (event) => {
   if (!details.classList.contains("group")) return;
   if (details.open) folded.add(details.id);
   else folded.delete(details.id);
-  localStorage.setItem(foldedKey, JSON.stringify([...folded]));
+  kept.write(storageKeys.folded, JSON.stringify([...folded]));
 });
 
 /**

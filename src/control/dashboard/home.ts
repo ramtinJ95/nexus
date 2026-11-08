@@ -13,9 +13,9 @@ import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, closedLabel, quietLabel, newProjectButton, foldCap, foldHref, type Shell } from "./shell.ts";
 import { lifeOfThread, roleLine, type Life } from "./lifecycle.ts";
-import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView } from "./flight.ts";
+import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekKey, peekView } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
-import type { NoticeAttention } from "./contract.ts";
+import { peekHref, type NoticeAttention } from "./contract.ts";
 
 /**
  * Two columns: on the left what waits on the person, each a line that opens to its card, and on the right the work in

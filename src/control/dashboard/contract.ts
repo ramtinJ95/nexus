@@ -5,6 +5,7 @@
  */
 import type { ActualState, ThreadStatus } from "../reconcile.ts";
 import type { Attention } from "../attention.ts";
+import type { EventKind } from "../events.ts";
 
 /** The `data-action` of each button, which actions.js runs. */
 export const actions = [
@@ -51,3 +52,64 @@ export function noticeOf(hash: string): { thread: string; attention: string } | 
 /** The pages whose `data-page` makes client.js load the modules no other page needs, as pages.js lists them. */
 export const pages = ["home", "cluster"] as const;
 export type Page = (typeof pages)[number];
+
+/**
+ * The icons a page's `#icons` template holds, which checkout.js clones into the trees it draws. shell.ts draws each
+ * through view.ts `icon`, which types its name.
+ */
+export const clonedIcons = ["chevron", "folder"] as const;
+
+/** The width at and under which a page lays out as a phone's, which style.css's phone rules also name. */
+export const narrow = "(max-width: 760px)";
+
+/** The `?peek=` of the home page, which previews a thread, a queued thread or an item by its ID. */
+export const peekParam = "peek";
+export const peekHref = (key: string) => `/?${peekParam}=${encodeURIComponent(key)}`;
+
+/**
+ * The events that change a thread list row's attention, its reply or whether it works, and a check's change, which
+ * rows.js follows.
+ */
+export const rowEvents = [
+  "attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended", "health.changed",
+] as const satisfies readonly EventKind[];
+
+/** Each key the client keeps a reader's choice under, in localStorage, or for the tabs in sessionStorage. */
+export const storageKeys = {
+  theme: "nexus.theme",
+  /** The dark theme the toggle goes back to. */
+  darkTheme: "nexus.theme.dark",
+  pane: "nexus.pane",
+  folded: "nexus.folded",
+  flightView: "nexus.flight-view",
+  base: "nexus.base",
+  diffLayout: "nexus.diff-layout",
+  graphRange: "nexus.node-graphs.range",
+  hiddenGraphs: "nexus.node-graphs.hidden",
+  tabs: (thread: string) => `nexus.tabs.${thread}` as const,
+  review: (thread: string) => `nexus.review.${thread}` as const,
+} as const;
+type Keys = typeof storageKeys;
+export type StorageKey = { [K in keyof Keys]: Keys[K] extends (thread: string) => infer R ? R : Keys[K] }[keyof Keys];
+
+export interface Storage { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
+/**
+ * Reads and writes of a browser's storage that a refusal, such as blocked site data or a full quota, turns into no
+ * value and no write, so a page works without it. A null write removes the key.
+ */
+export function keeping(storage: () => Storage | null | undefined) {
+  return {
+    read(key: StorageKey): string | null {
+      try { return storage()?.getItem(key) ?? null; } catch { return null; }
+    },
+    write(key: StorageKey, value: string | null): void {
+      try {
+        if (value === null) storage()?.removeItem(key);
+        else storage()?.setItem(key, value);
+      } catch {}
+    },
+  };
+}
+const browser = globalThis as { localStorage?: Storage; sessionStorage?: Storage };
+export const kept = keeping(() => browser.localStorage);
+export const keptForTab = keeping(() => browser.sessionStorage);
