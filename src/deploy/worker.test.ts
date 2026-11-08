@@ -567,3 +567,46 @@ test("a backup before a migration counts only a successful run that began after 
   assert.equal(starts.length, 1, "no second start once the budget is spent");
   assert.ok(starts[0]! <= 50, "each start is bounded by what is left of the budget");
 });
+
+test("a target whose schema.ts fails to load fails its install with that error, rather than reading as a release from before schema.ts", async (t) => {
+  const { reconcileRole, nodeRegistry } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-broken-schema-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const old = "b".repeat(40);
+  for (const path of ["etc", "units", "deployer", "home", `releases/${old}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${old}/release-commit`), old);
+  await symlink(`releases/${old}`, join(dir, "control-current"));
+  await writeFile(join(dir, "units/nexus-control.service"), "old unit");
+  await writeFile(join(dir, "etc/control.json"), JSON.stringify({ db: "registry.db", listen: { host: "127.0.0.1", port: 1 } }));
+  const reports: any[] = [];
+  const calls: string[] = [];
+  const api = async (path: string, body?: any) => {
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "drain") return { idle: true };
+    if (path === "report") { reports.push(body); return { ok: true }; }
+    assert.fail(path);
+  };
+  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = {
+    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
+    async checkout() {},
+    async run(program: string, args: readonly string[]) {
+      if (program === "env" && !args.includes("NEXUS_PREPARE=1")) {
+        await mkdir(join(dir, `releases/${commit}/src/control`), { recursive: true });
+        await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+        await writeFile(join(dir, `releases/${commit}/src/control/schema.ts`), "export const migrations = [;\n");
+      }
+      if (program === "env" && args.includes("NEXUS_PREPARE=1") || program === "systemctl" && args[0] === "restart") calls.push(`${program} ${args.join(" ")}`);
+      return "";
+    },
+    registry: nodeRegistry({ config: join(dir, "etc/control.json"), home: join(dir, "home"), prefix: dir, status: join(dir, "status.json") }),
+  };
+  await reconcileRole("control", config, api, boundary);
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "failed"]);
+  assert.match(reports.at(-1).reason, /SyntaxError/);
+  assert.doesNotMatch(reports.at(-1).reason, /has no src\/control\/schema\.ts/);
+  assert.deepEqual(calls, [], "the target never activates or restarts");
+  assert.equal(await readlink(join(dir, "control-current")), `releases/${old}`);
+  await writeFile(join(dir, `releases/${commit}/src/control/schema.ts`), 'import "./missing.ts";\nexport const migrations = [];\n');
+  await assert.rejects(boundary.registry.known(`releases/${commit}`), { code: "ERR_MODULE_NOT_FOUND" }, "a schema.ts whose own import is missing is not a release from before schema.ts");
+});

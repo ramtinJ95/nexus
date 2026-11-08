@@ -58,6 +58,13 @@ export interface Transaction {
   /** The backup taken before the switch, which a restore needs once the target has changed stored data. */
   backup?: string;
 }
+const journalPath = (prefix: string, role: Role) => join(prefix, deployJournal(role));
+
+/** The role's last install, from its journal, or null before its first. */
+export async function readJournal(prefix: string, role: Role): Promise<Transaction | null> {
+  return await readJson(journalPath(prefix, role), null) as Transaction | null;
+}
+
 export interface InstallBoundary {
   /**
    * Builds and performs upgrade steps without switching links or restarting services. It refuses a commit that is not
@@ -81,21 +88,23 @@ export interface InstallBoundary {
 
 /** One serialized runner owns a role. Its journal and links must live in a root-owned directory. */
 export class ReleaseInstaller {
+  private readonly prefix: string;
+  private readonly role: Role;
   private readonly link: string;
-  private readonly journal: string;
   private readonly boundary: InstallBoundary;
   constructor(prefix: string, role: Role, boundary: InstallBoundary) {
+    this.prefix = prefix;
+    this.role = role;
     this.boundary = boundary;
     this.link = releaseLink(prefix, role);
-    this.journal = join(prefix, deployJournal(role));
   }
 
-  async observed(): Promise<Transaction | null> {
-    return await readJson(this.journal, null) as Transaction | null;
+  observed(): Promise<Transaction | null> {
+    return readJournal(this.prefix, this.role);
   }
 
   private async record(value: Transaction): Promise<Transaction> {
-    await saveJson(this.journal, value);
+    await saveJson(journalPath(this.prefix, this.role), value);
     return value;
   }
 
@@ -127,7 +136,7 @@ export class ReleaseInstaller {
 
   private async rollback(transaction: Transaction, reason: string): Promise<Transaction> {
     try { reason += `\n${(await this.boundary.journal()).slice(-16_384)}`; }
-    catch { reason += "\njournal unavailable"; }
+    catch (error) { console.error(`could not read the service journal for the rollback reason: ${String(error)}`); reason += "\njournal unavailable"; }
     let refused: string | null;
     try { refused = await this.boundary.rollbackRefused?.(transaction) ?? null; }
     catch (error) { refused = `whether the previous release can start could not be read: ${String(error)}`; }

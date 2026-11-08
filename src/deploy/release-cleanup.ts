@@ -10,7 +10,8 @@ import { readJson, saveJson } from "../node-base/json-file.ts";
 import { diskBytes } from "../node-base/disk-bytes.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Role } from "../protocol/deploy.ts";
-import { deployerFiles, deployJournal, links, prefix as nodePrefix, readReleaseCommit, releaseName, releasesDir, roleLinks, type LinkName } from "../node-base/node-layout.ts";
+import { readJournal } from "./install.ts";
+import { deployerFiles, links, prefix as nodePrefix, readReleaseCommit, releaseName, releasesDir, roleLinks, type LinkName } from "../node-base/node-layout.ts";
 
 export interface ReleaseFact { name: string; commit: string | null; bytes: number; installedAt: number }
 
@@ -82,8 +83,8 @@ export async function readReleases(prefix: string, proc = "/proc"): Promise<Rele
   if (JSON.stringify(sizes) !== JSON.stringify(Object.fromEntries(Object.entries(known).filter(([name]) => name in sizes)))) await saveJson(sizesFile, sizes, { mkdir: true });
   const linked = async (link: LinkName) => nameOf(await readlink(join(prefix, link)).catch(() => null));
   const replaced = async (role: Role) => {
-    const journal = await readJson(join(prefix, deployJournal(role)), null).catch(() => null) as { previous?: string; target?: string } | null;
-    return journal !== null && nameOf(journal.target ?? null) !== null && nameOf(journal.target ?? null) === await linked(roleLinks[role]) ? nameOf(journal.previous ?? null) : null;
+    const journal = await readJournal(prefix, role).catch(() => null);
+    return journal !== null && nameOf(journal.target) !== null && nameOf(journal.target) === await linked(roleLinks[role]) ? nameOf(journal.previous) : null;
   };
   return {
     releases,
