@@ -2067,8 +2067,7 @@ test("show exposes the registry's failed worker and its selected model", async (
   const s = await setup(t);
   const thread = await s.json(["start", "--project", "acme", "--claude", "fix it", "--model", "claude-sonnet-5-5"]);
   const message = "Claude launch did not complete: agent executable missing";
-  claudeWorkerAt(s.registry, thread.id, "failed", { message: message });
-  s.registry.appendEvent("thread.failed", thread.id, { message });
+  claudeWorkerAt(s.registry, thread.id, "failed", { message });
   const detail = await s.json(["show", thread.id]);
   assert.deepEqual(detail.claudeWorker, { state: "failed", model: "claude-sonnet-5-5", message });
   assert.equal(detail.attention, "failed");

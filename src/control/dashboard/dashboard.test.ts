@@ -2292,8 +2292,7 @@ test("a failed Claude worker's dashboard agrees with its registry event and API 
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "worker", claude: "fix it", model: "custom-model" });
   const id = JSON.parse(started.text).id;
   const message = "Claude launch did not complete: executable missing";
-  claudeWorkerAt(s.registry, id, "failed", { message: message });
-  s.registry.appendEvent("thread.failed", id, { message });
+  claudeWorkerAt(s.registry, id, "failed", { message });
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${id}`)).text);
   assert.deepEqual(detail.claudeWorker, { state: "failed", model: "custom-model", message });
   assert.equal(detail.attention, "failed");
