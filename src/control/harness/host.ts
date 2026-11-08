@@ -23,7 +23,7 @@ import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
 import type { AgentCall } from "../agent-usage.ts";
-import { senderNames, type Sender } from "../agent-protocol.ts";
+import { type Sender, senders } from "../agent-protocol.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 
 export type { ConversationId };
@@ -161,7 +161,7 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
       return created.id;
     },
     async send(threadId, text, requestId, mode, sender) {
-      return (await conversation(threadId)).submit({ type: "input", content: text, requestId, whenBusy: mode, ...(sender ? { entry: { kind: `nexus.${sender}`, data: { sender: senderNames[sender] } } } : {}) }, context);
+      return (await conversation(threadId)).submit({ type: "input", content: text, requestId, whenBusy: mode, ...(sender ? { entry: { kind: `nexus.${sender}`, data: { sender: senders[sender].name } } } : {}) }, context);
     },
     async latestTurn(threadId) {
       const conversationId = conversations.get(threadId);

@@ -5,7 +5,7 @@
  * for the twenty minutes a human visit does.
  */
 import { createHash } from "node:crypto";
-import { senderPrefixes, type Sender } from "./agent-protocol.ts";
+import { type Sender, senders } from "./agent-protocol.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
@@ -116,7 +116,7 @@ export function promptSenders(registry: InboxRegistry, thread: ThreadId): Prompt
 }
 
 const prefixSender = (text: string): Sender | null =>
-  (Object.keys(senderPrefixes) as Sender[]).find((sender) => text.startsWith(senderPrefixes[sender])) ?? null;
+  (Object.keys(senders) as Sender[]).find((sender) => text.startsWith(senders[sender].prefix)) ?? null;
 
 /** GitHub text often ends lines with CRLF and indents with tabs, which Claude's prompt cannot take as typed. */
 export function typeable(text: string): string {

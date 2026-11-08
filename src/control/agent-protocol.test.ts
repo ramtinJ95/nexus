@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { judgmentPrefix, latest, mint, planningPrefix, senderNames, senderPrefixes, tokenBlocks } from "./agent-protocol.ts";
+import { judgmentPrefix, latest, mint, planningPrefix, senders, tokenBlocks } from "./agent-protocol.ts";
 
 const schema = z.object({ token: z.string(), verdict: z.enum(["approve", "changes"]) });
 const fenced = (fence: string, body: string) => `\`\`\`${fence}\n${body}\n\`\`\``;
@@ -34,6 +34,6 @@ test("latest is the newest matching block, or null when none matches", () => {
 });
 
 test("each automated sender keeps its name and the prefix its messages start with", (t) => {
-  const sorted = (record: Readonly<Record<string, string>>) => Object.fromEntries(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)));
-  t.assert.snapshot({ names: sorted(senderNames), prefixes: sorted(senderPrefixes), judgment: judgmentPrefix, planning: planningPrefix });
+  const each = (field: "name" | "prefix") => Object.fromEntries(Object.entries(senders).map(([s, v]) => [s, v[field]] as const).sort(([a], [b]) => a.localeCompare(b)));
+  t.assert.snapshot({ names: each("name"), prefixes: each("prefix"), judgment: judgmentPrefix, planning: planningPrefix });
 });

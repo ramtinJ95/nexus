@@ -13,7 +13,7 @@
  * where no session ends. Only a death in the last hour is resumed, so a control plane that starts, or starts this,
  * leaves the turns that died long before to the person.
  */
-import { resumePrefix } from "./agent-protocol.ts";
+import { senders } from "./agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";
@@ -25,7 +25,7 @@ import { threadRole } from "./work-model.ts";
 
 type ResumeRegistry = Pick<Registry, "agent" | "appendEvent" | "claudeResume" | "claudeTranscript" | "isReviewer" | "planning" | "resumedThreads" | "review" | "saveClaudeResume" | "storedThreads" | "thread">;
 
-const text = `${resumePrefix} Your turn stopped before it finished: its Claude session ended, or its model's API failed. Continue where you stopped.`;
+const text = `${senders.resume.prefix} Your turn stopped before it finished: its Claude session ended, or its model's API failed. Continue where you stopped.`;
 
 /**
  * The wait before each resume in a row. Claude Code retries a failed API call for minutes before it gives up, so a turn

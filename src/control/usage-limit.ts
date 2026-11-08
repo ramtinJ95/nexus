@@ -6,11 +6,11 @@
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
-import { usageLimitPrefix } from "./agent-protocol.ts";
+import { senders } from "./agent-protocol.ts";
 
 type UsageLimitRegistry = Pick<Registry, "appendEvent" | "claudeMessage" | "claudeWorker" | "storedThreads" | "thread">;
 
-const text = `${usageLimitPrefix} The usage limit reset. Continue where you stopped.`;
+const text = `${senders["usage-limit"].prefix} The usage limit reset. Continue where you stopped.`;
 /** Claude Code continues a session it still runs about 90 s after the reset, so only a session that did not, such as one whose pylon paused, is typed into. */
 const defaultGraceMs = 180_000;
 

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { reviewPrefix } from "./agent-protocol.ts";
+import { senders } from "./agent-protocol.ts";
 import { tempDir } from "../test-support/kit.ts";
 import { personOnly, type HoldCode } from "./holds.ts";
 import { reservedNames, type ReservedCase } from "../contract/reserved.ts";
@@ -23,7 +23,7 @@ function storedReview(record: Review): Review {
       ...phase, cause: phase.cause ?? (phase.label === undefined ? "unrecorded" : "rounds"),
       holds: phase.holds ?? phase.reasons.map((text) => ({ code: legacyHoldCode(text), text })),
     } : phase,
-    asked: record.asked ?? `${reviewPrefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
+    asked: record.asked ?? `${senders.review.prefix}\nYour last turn ended because your model failed. Carry out Nexus's last request again, and end your reply with the block it asks for, with the token "${record.expect}".`,
     rounds: record.rounds.map((round) => round.verdict === null ? round : { ...round, verdict: { ...round.verdict, findings: round.verdict.findings.map((f) => findingSchema.parse(f)) } })
       .map((round, i) => secondReads(record) && i === record.rounds.length - 1 && round.secondVerdict === undefined ? { ...round, secondVerdict: null } : round),
   };

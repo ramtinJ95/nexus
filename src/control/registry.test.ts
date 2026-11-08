@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { StoredPylon } from "./thread-store.ts";
 import { promptSenders, typeIntoClaude } from "./inbox.ts";
-import { reviewPrefix } from "./agent-protocol.ts";
+import { senders } from "./agent-protocol.ts";
 import { seedRegistry, testPylon, testProject, testRegistry, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 import { migrations } from "./schema.ts";
@@ -114,7 +114,7 @@ test("a Claude message recorded before senders were reads as unknown, and only i
   db.close();
   const registry = testRegistry(t, path);
   assert.deepEqual(registry.claudeMessageSenders(threadId), [{ sender: "unknown", sha256: null }]);
-  const review = `${reviewPrefix}\nReview pull request #7.`;
+  const review = `${senders.review.prefix}\nReview pull request #7.`;
   assert.equal(promptSenders(registry, threadId)(review), "review", "a thread with sends from before the record keeps the prefix");
   assert.equal(promptSenders(registry, threadId)("build the cache"), null);
 

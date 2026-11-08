@@ -14,18 +14,15 @@ export const checkCaller = "nexus-check";
 /** Who starts a verify pylon's thread, as its `startedBy`. */
 export const verifyCaller = "nexus-verify";
 
-/** Who sent an automated input entry, which the entry's kind, `nexus.<sender>`, and its data name. */
-export type Sender = "pr-watch" | "review" | "usage-limit" | "nudge" | "resume";
-export const senderNames: Readonly<Record<Sender, string>> = { "pr-watch": "Nexus PR watch", review: "Nexus review", "usage-limit": "Nexus usage limit", nudge: "Nexus nudge", resume: "Nexus resume" };
-
-export const reviewPrefix = "[Nexus review — automated, not a message from the person]";
-export const nudgePrefix = "[Nexus nudge — automated, not a message from the person]";
-export const prWatchPrefix = "[Nexus PR watch — automated, not a message from the person]";
-export const usageLimitPrefix = "[Nexus usage limit — automated, not a message from the person]";
-export const resumePrefix = "[Nexus resume — automated, not a message from the person]";
+const automated = (name: string) => `[${name} — automated, not a message from the person]`;
+const sender = (name: string) => ({ name, prefix: automated(name) });
+/** Who sends automated input entries: the name an entry's kind, `nexus.<sender>`, and its data give, and the prefix its text starts with. */
+export const senders = {
+  "pr-watch": sender("Nexus PR watch"), review: sender("Nexus review"), "usage-limit": sender("Nexus usage limit"), nudge: sender("Nexus nudge"), resume: sender("Nexus resume"),
+};
+export type Sender = keyof typeof senders;
+export const judgmentPrefix = automated("Nexus judgment");
 export const planningPrefix = "[Nexus planning: automated, not a message from the person]";
-export const judgmentPrefix = "[Nexus judgment — automated, not a message from the person]";
-export const senderPrefixes: Readonly<Record<Sender, string>> = { "pr-watch": prWatchPrefix, review: reviewPrefix, nudge: nudgePrefix, "usage-limit": usageLimitPrefix, resume: resumePrefix };
 
 type CallerRole = "builder" | "reviewer" | "check" | "verify" | "other";
 
