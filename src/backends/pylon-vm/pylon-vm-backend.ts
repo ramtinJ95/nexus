@@ -29,8 +29,8 @@ import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
 import { agentKinds, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
-import { run, socketPathLimit, stopForRetry } from "../../pylon-vm/client.ts";
-import { imageLabel, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
+import { run, socketPathLimit } from "../../pylon-vm/client.ts";
+import { imageLabel, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
@@ -516,7 +516,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     async ensureRunning(bootInputs, live, signal, relaunch = true) {
       const { pylonId } = bootInputs;
       const name = instanceName(pylonId);
-      if (existsSync(instanceFiles(instanceDir(pylonId)).retryStop)) await stopForRetry(stateRoot, name, signal);
+      await sandbox({ action: "finish-retry-stop", name }, signal);
       for (;;) {
         const instance = await settledInstance(pylonId, signal);
         if (instance === null) {
@@ -553,17 +553,17 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async ensurePaused(pylonId, checkpoint, signal, retry = false) {
       const name = instanceName(pylonId);
+      // A retry gives the controller 1 s to answer, and then reads what it last recorded.
       const forPause = async (): Promise<Pick<Inspection, "status"> | null> => {
         if (!retry) return settledInstance(pylonId, signal);
         try {
           return await inspect(pylonId, AbortSignal.any([signal, AbortSignal.timeout(1000)]));
         } catch {
           signal.throwIfAborted();
-          const status = await readJson(instanceFiles(instanceDir(pylonId)).status);
-          return { status: statusSchema.parse(status) };
+          return sandbox({ action: "recorded", name });
         }
       };
-      if (existsSync(instanceFiles(instanceDir(pylonId)).retryStop)) await stopForRetry(stateRoot, name, signal);
+      await sandbox({ action: "finish-retry-stop", name }, signal);
       for (let instance = await forPause(); instance?.status.state !== "stopped"; instance = await forPause()) {
         if (instance === null) return;
         signal.throwIfAborted();
@@ -592,7 +592,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
           case "running": case "interrupted": case "failed": case "starting": case "stopping": case "unavailable":
             try {
               if (retry) await controllerLog(instanceDir(pylonId))(`retry: stopping old controller (booted at ${instance.status.bootedAt ?? "unknown"})`);
-              if (retry) await stopForRetry(stateRoot, name, signal);
+              if (retry) await sandbox({ action: "retry-stop", name }, signal);
               else await sandbox({ action: "stop", name });
               if (retry) await controllerLog(instanceDir(pylonId))(`retry: stopped old controller (booted at ${instance.status.bootedAt ?? "unknown"})`);
             } catch (err) {

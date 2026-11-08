@@ -1079,8 +1079,11 @@ test("an ordinary resume reuses a healthy controller and its boot time", async (
 });
 
 
-/** A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown. */
-async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "silent" | "error") {
+/**
+ * A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown, and a hung one answers no
+ * inspect either. With `exec`, it answers an exec of Herdr's snapshot and any other exec with those, and write-files.
+ */
+async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "silent" | "error", inspect: "answer" | "hang" = "answer", exec?: { snapshot: unknown; other: unknown }) {
   const child = spawn(process.execPath, ["--input-type=module", "-e", `
     import { spawn } from "node:child_process";
     import { once } from "node:events";
@@ -1101,7 +1104,13 @@ async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "
       for await (const chunk of req) body += chunk;
       const action = JSON.parse(body);
       if (action.action === "inspect") {
+        if (${JSON.stringify(inspect)} === "hang") return;
         res.end(JSON.stringify({ ok: true, result: { name: id, labels: { "nexus.image": ${JSON.stringify(image)} }, status: { name: id, state, bootedAt: "2026-10-22T00:00:00Z" } } }));
+      } else if (${JSON.stringify(exec !== undefined)} && action.action === "exec") {
+        const exec = ${JSON.stringify(exec ?? null)};
+        res.end(JSON.stringify({ ok: true, result: String(action.cmd).replace(/['\\\\]/g, "").includes("api snapshot") ? exec.snapshot : exec.other }));
+      } else if (${JSON.stringify(exec !== undefined)} && action.action === "write-files") {
+        res.end(JSON.stringify({ ok: true, result: {} }));
       } else if (action.action === "stop") {
         state = "stopping";
         await writeFile(join(dir, "status.json"), JSON.stringify({ name: id, state }));
@@ -1150,6 +1159,102 @@ for (const stop of ["silent", "error"] as const) test(`retry kills the controlle
   const pids = [...log.matchAll(/controller (\d+) started for/g)].map((m) => Number(m[1]));
   assert.equal(pids.length, 2);
   assert.notEqual(pids[0], pids[1]);
+});
+
+test("a retry whose controller answers no inspect pauses on what the instance's files say, and ends its process group", async (t) => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-hung" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  const controller = await stuckController(t, dir, id, "silent", "hang");
+  assert.equal(await backend.state(id), "booting", "a live controller that does not answer reads as unavailable");
+  await backend.ensurePaused(id, "ckpt-hung-1", AbortSignal.timeout(60_000), true);
+  await controller.exited;
+  assert.deepEqual(await groupMembers(controller.pid), []);
+  assert.equal(existsSync(join(dir, "retry-stop.json")), false);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-hung-1"]]);
+});
+
+test("a retry refuses to pause a controller that answers no inspect when its recorded setup failed on a disk with a checkpoint", async (t) => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-hungsetup" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  await writeFile(join(dir, "disk.qcow2"), "last completed disk");
+  const controller = await stuckController(t, dir, id, "silent", "hang");
+  await writeFile(join(dir, "status.json"), JSON.stringify({ name: id, state: "running", startupError: "Setup exited 1", startupFailures: [{ kind: "setup", message: "Setup exited 1" }] }));
+  await assert.rejects(backend.ensurePaused(id, "ckpt-hungsetup-1", signal(), true), (err: Error & { code?: string }) => err.code === "setup-failed");
+  assert.equal((await groupMembers(controller.pid)).length, 2, "the controller was not stopped");
+  assert.equal(existsSync(join(dir, "stop-seen")), false);
+});
+
+test("a retry stops a controller that answers no inspect and recorded stopping, whatever its recorded setup failure", async (t) => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-hungstop" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  await writeFile(join(dir, "disk.qcow2"), "last completed disk");
+  const controller = await stuckController(t, dir, id, "error", "hang");
+  await writeFile(join(dir, "status.json"), JSON.stringify({ name: id, state: "stopping", startupError: "Setup exited 1", startupFailures: [{ kind: "setup", message: "Setup exited 1" }] }));
+  await backend.ensurePaused(id, "ckpt-hungstop-1", AbortSignal.timeout(60_000), true);
+  await controller.exited;
+  assert.deepEqual(await groupMembers(controller.pid), []);
+  assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "last completed disk");
+});
+
+test("a retry records the sessions of a guest whose controller answers everything but inspect", async (t) => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-slowinspect" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-slowinspect-1", sessions: [] }));
+  const snapshot = herdrSnapshot([{ id: "w1", label: "new shell" }], [herdrPane("w1:p1", "w1", null, "idle")]);
+  const controller = await stuckController(t, dir, id, "error", "hang", { snapshot: finished(0, herdrOk(snapshot).output), other: finished(3) });
+  await backend.ensurePaused(id, "ckpt-slowinspect-2", AbortSignal.timeout(60_000), true);
+  await controller.exited;
+  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "new shell" }];
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-slowinspect-2", sessions: recorded });
+});
+
+test("a retry pause fails when the journal a crash left cannot be finished, and signals nothing", async (t) => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-unfinished" as PylonId;
+  const dir = await leftInstance(instances, id, "stopped");
+  const other = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+  const exited = once(other, "exit");
+  t.after(async () => { other.kill("SIGKILL"); await exited; });
+  await once(other, "spawn");
+  const stale = { ...(await identityOf(other.pid!))!, start: "another-start" };
+  await writeFile(join(dir, "retry-stop.json"), JSON.stringify({ controller: stale, members: [stale] }));
+  await assert.rejects(backend.ensurePaused(id, "ckpt-unfinished-1", signal(), true), /Cannot verify controller \d+'s remaining process group/);
+  assert.equal(existsSync(join(dir, "retry-stop.json")), true);
+  assert.equal(other.exitCode, null, "the process that took the journaled controller's group was not signalled");
+  assert.equal(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8").catch(() => "null")), null, "no checkpoint was recorded");
+});
+
+test("a cancelled retry pause leaves the journal a crash left", async () => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-cancelled" as PylonId;
+  const dir = await leftInstance(instances, id, "stopped");
+  const gone = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  await once(gone, "spawn");
+  const identity = (await identityOf(gone.pid!))!;
+  gone.kill("SIGKILL");
+  await once(gone, "exit");
+  await writeFile(join(dir, "retry-stop.json"), JSON.stringify({ controller: identity, members: [identity] }));
+  await assert.rejects(backend.ensurePaused(id, "ckpt-cancelled-1", AbortSignal.abort(new Error("the job was cancelled")), true), /the job was cancelled/);
+  assert.equal(existsSync(join(dir, "retry-stop.json")), true);
+});
+
+test("a replayed retry pause finishes the journal a crash left after its instance settled as stopped", async () => {
+  const { backend, instances } = await backendWith();
+  const id = "pylon-journaled" as PylonId;
+  const dir = await leftInstance(instances, id, "stopped");
+  const gone = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  await once(gone, "spawn");
+  const identity = (await identityOf(gone.pid!))!;
+  gone.kill("SIGKILL");
+  await once(gone, "exit");
+  await writeFile(join(dir, "retry-stop.json"), JSON.stringify({ controller: identity, members: [identity] }));
+  await backend.ensurePaused(id, "ckpt-journaled-1", signal(), true);
+  assert.equal(existsSync(join(dir, "retry-stop.json")), false);
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-journaled-1"]]);
 });
 
 for (const controllerDied of [false, true]) test(`a retry whose probe died while stop hung recovers its journal and launch lock (controller died: ${controllerDied})`, async (t) => {

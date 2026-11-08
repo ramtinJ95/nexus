@@ -131,6 +131,12 @@ export const actionSchema = z.discriminatedUnion("action", [
 	}),
 	z.strictObject({ action: z.literal("start"), ...identity, boot: bootSchema }),
 	z.strictObject({ action: z.enum(["stop", "inspect"]), ...identity }),
+	/** A failed boot's stop, which may end the controller's process group (FORK.md). The client runs it, never the controller. */
+	z.strictObject({ action: z.literal("retry-stop"), ...identity }),
+	/** Finishes the retry stop a crash or failure cut short, if one is journaled, so no caller reuses or relaunches its controller. The client runs it. */
+	z.strictObject({ action: z.literal("finish-retry-stop"), ...identity }),
+	/** The status the instance's controller last recorded, read without asking it. The client answers it, never the controller. */
+	z.strictObject({ action: z.literal("recorded"), ...identity }),
 	z.strictObject({
 		action: z.literal("shell"),
 		...identity,
@@ -287,6 +293,9 @@ export const actions = {
 	create: { reply: ignored, beside: false },
 	start: { reply: ignored, beside: false },
 	stop: { reply: ignored, beside: false },
+	"retry-stop": { reply: ignored, beside: false },
+	"finish-retry-stop": { reply: ignored, beside: false },
+	recorded: { reply: z.object({ status: statusSchema }), beside: false },
 	inspect: { reply: inspectionSchema, beside: true },
 	/** The guest's sshd on a loopback port, and the key it lets in. */
 	shell: { reply: z.looseObject({ access: z.strictObject({ user: z.string(), port: z.number().int(), identityFile: z.string() }) }), beside: false },
