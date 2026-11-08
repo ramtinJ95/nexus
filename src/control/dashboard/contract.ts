@@ -1,7 +1,7 @@
 /**
  * What the dashboard's pages and its client agree on. The templates and the client import it, so a rename here fails
- * the typecheck, the client's build or src/control/dashboard/actions.test.js. The client bundles this file, so it
- * imports only types.
+ * the typecheck, the client's build or the dashboard's tests. The client bundles this file, so it imports only
+ * types.
  */
 import type { ActualState, ThreadStatus } from "../reconcile.ts";
 import type { Attention } from "../attention.ts";
@@ -19,7 +19,6 @@ export type Action = (typeof actions)[number];
  * is false for an archived or deleted thread, whose pylon stays paused.
  */
 export interface Facts { pylon: ActualState; turn: boolean; agentAt: number; status: ThreadStatus; open: boolean }
-/** Facts as the `dataset` of the element that carries them. */
 export const factsData = (f: Facts) => ({ pylon: f.pylon, turn: String(f.turn), agentAt: String(f.agentAt), threadStatus: f.status, open: String(f.open) });
 export const factsOf = (data: Readonly<Record<string, string | undefined>>): Facts => ({
   pylon: data.pylon as ActualState, turn: data.turn === "true", agentAt: Number(data.agentAt), status: data.threadStatus as ThreadStatus, open: data.open === "true",

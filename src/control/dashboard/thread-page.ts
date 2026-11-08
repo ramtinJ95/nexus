@@ -178,11 +178,6 @@ ${q.lastError !== null && html`<p class="error">The last start attempt failed: $
  */
 const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "pull-request" && (o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref)));
 
-/**
- * What checkout.js reads to decide when to read the checkout's changes: once the pylon runs, and again when its
- * agent was active and no turn runs, as that is when the checkout has changed. The agent's last activity catches a
- * turn that began and ended between two polls.
- */
 function facts({ thread: t, pylon }: ThreadDetail): Html {
   return html`<span${dataset(factsData({ pylon: pylon.actualState, turn: t.working, agentAt: t.lastAgentActivityAt, status: t.status, open: isOpenStatus(t.status) }))}></span>`;
 }

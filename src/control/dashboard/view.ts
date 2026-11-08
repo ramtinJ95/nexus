@@ -126,7 +126,6 @@ export function workingFor(t: Thread, now: number): Html | null {
 
 /** A `dataset`'s entries as the attributes that set them. */
 export const dataset = (data: Readonly<Record<string, string>>) => Object.entries(data).map(([key, value]) => html` data-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}="${value}"`);
-/** A button's `data-action`, which actions.js runs. */
 export const act = (action: Action) => html` data-action="${action}"`;
 
 export const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;

@@ -31,7 +31,6 @@ export interface Shell {
   active?: ThreadId;
   /** The sidebar's link to mark as the open page. */
   nav?: "usage" | "cluster" | "health";
-  /** The page whose own modules client.js loads. */
   page?: Page;
   main: Html;
   inspector?: Html;
