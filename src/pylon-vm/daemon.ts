@@ -3,8 +3,8 @@ import { chmod, rm } from "node:fs/promises";
 import http from "node:http";
 import { text } from "node:stream/consumers";
 import { instanceFiles, scratchDirectory, stateRootOf } from "./instance-layout.ts";
-import { type Action, actionSchema, bootSchema } from "./contracts.ts";
-import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime } from "./runtime.ts";
+import { type Action, actions, actionSchema, bootSchema } from "./contracts.ts";
+import { lifecycleQueue, NotRunning, readIntent, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
 import { controllerLogLimit, rotateLog } from "./log-rotation.ts";
 import { stampLines } from "./controller-log.ts";
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
 			if (!(error instanceof BodyTooLarge)) console.error(error);
 			return refuse(res, error);
 		}
-		if (runsBesideQueue(action.action)) void handle(action, res);
+		if (actions[action.action].beside) void handle(action, res);
 		else void queue.run(() => handle(action, res));
 	});
 	server.once("close", () => {

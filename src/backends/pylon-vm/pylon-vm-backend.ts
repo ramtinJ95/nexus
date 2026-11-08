@@ -30,11 +30,11 @@ import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/gu
 import { agentKinds, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
 import { run, socketPathLimit, stopForRetry } from "../../pylon-vm/client.ts";
-import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
+import { imageLabel, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
-import { asUserIn, controllerLog, controllerLogTail, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
+import { asUserIn, controllerLog, controllerLogTail, pylonGuest, type Sandbox, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
 import { readJson, saveJson } from "../../node-base/json-file.ts";
 import { diskBytes } from "../../node-base/disk-bytes.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
@@ -238,7 +238,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   if (Buffer.byteLength(longest) >= socketPathLimit) {
     throw new Error(`state root ${stateRoot} is too long: a pylon's control socket would be ${Buffer.byteLength(longest)} bytes, and a Unix socket path must stay under ${socketPathLimit}`);
   }
-  const sandbox = (action: Record<string, unknown>, signal?: AbortSignal) => run(stateRoot, action, signal);
+  const sandbox: Sandbox = (action, signal) => run(stateRoot, action, signal);
   const store = artifactDirectory(options.artifacts, tarCodec);
   const statuses: StatusCache = new Map();
   const shells: ShellFlights = new Map();
@@ -263,7 +263,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   async function inspect(pylonId: PylonId, signal?: AbortSignal): Promise<Inspection | null> {
     const name = instanceName(pylonId);
     if (!existsSync(instanceDir(pylonId))) return null;
-    return inspectionSchema.parse(await sandbox({ action: "inspect", name }, signal));
+    return sandbox({ action: "inspect", name }, signal);
   }
 
   const settledInstance = (pylonId: PylonId, signal: AbortSignal) => settled(() => inspect(pylonId), ["starting", "unavailable", "stopping"], signal);
@@ -423,7 +423,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
 
   async function list(): Promise<BackendPylon[]> {
-    const instances = z.array(inspectionSchema).parse(await sandbox({ action: "list", kind: "instances" }));
+    const instances = await sandbox({ action: "list", kind: "instances" });
     const listed = await Promise.all(instances.map(async (instance): Promise<BackendPylon | null> => {
       const pylonId = instance.name as PylonId;
       const image = instance.labels[imageLabel];
@@ -478,7 +478,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         await store.drop(id, [
           ...(await list()).filter((p) => p.image === id).map((p) => `pylon ${p.pylonId}`),
           ...held.flatMap((t) => t?.key.image === id ? [`template ${t.id}`] : []),
-          ...await templates.buildsFrom(stateRoot, id),
+          ...await templates.buildsFrom(sandbox, id),
         ]);
       } finally {
         dropping.delete(id);
@@ -583,7 +583,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
         const sessionSignal = retry ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : undefined;
-        const sessionRun = sessionSignal === undefined ? sandbox : (action: Record<string, unknown>) => sandbox(action, sessionSignal);
+        const sessionRun: Sandbox = sessionSignal === undefined ? sandbox : (action) => sandbox(action, sessionSignal);
         const sessions = instance.status.state === "running"
           ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sessionRun, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
         await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
@@ -620,7 +620,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       const { key, repo, resources } = inputs;
       if (resources.memoryGiB < minPylonMemoryGiB) throw new JobFailure("invalid", `template ${template} asks for ${resources.memoryGiB} GiB, but pylon VMs need at least ${minPylonMemoryGiB} GiB`);
       const remote = sshRemoteOf(repo.url);
-      await holding([key.image], async () => templates.buildTemplate(stateRoot, store, {
+      await holding([key.image], async () => templates.buildTemplate(stateRoot, sandbox, store, {
         config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace: workspaceDir, setup: setupCommands({ kind: "clone", url: repo.url, checkout: { branch: repo.branch, commit: repo.commit } }, inputs.preSetup), retrySetup: false, resume: [], services: {} },
         // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
         boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], publicUrls: {}, hostBridge: null },
@@ -639,7 +639,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     },
 
     async updateSecret(secret, value, signal) {
-      const instances = z.array(inspectionSchema).parse(await sandbox({ action: "list", kind: "instances" }));
+      const instances = await sandbox({ action: "list", kind: "instances" });
       const limit = () => signal === undefined ? AbortSignal.timeout(secretUpdateMs) : AbortSignal.any([signal, AbortSignal.timeout(secretUpdateMs)]);
       // A controller whose boot did not grant the secret answers that it does not hold it, which is no failure.
       const failures = await Promise.all(instances.filter((instance) => instance.status.state === "running").map(async ({ name }) => {

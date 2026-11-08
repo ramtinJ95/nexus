@@ -10,9 +10,9 @@ import { z } from "zod";
 import type { Guest, PreviewOrigin } from "../backend.ts";
 import { processStream } from "../../process-stream.ts";
 import type { PylonId } from "../../ids.ts";
-import { logTailBounds, type ServiceFact } from "../../protocol/observations.ts";
+import { logTailBounds } from "../../protocol/observations.ts";
 import type { PylonLog } from "../../probe/guest/session-wake.ts";
-import { statusSchema } from "../../pylon-vm/contracts.ts";
+import { type ActionInput, type Reply, statusSchema } from "../../pylon-vm/contracts.ts";
 import { stamped } from "../../pylon-vm/controller-log.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { existsError, readLogTail } from "../../pylon-vm/storage.ts";
@@ -41,18 +41,11 @@ export const imageEnv = "/etc/profile.d/gondolin-image-env.sh";
  */
 export const remoteCommand = (argv: readonly string[]) => `[ ! -r ${imageEnv} ] || . ${imageEnv}; exec ${argv.map(q).join(" ")}`;
 
-const execReplySchema = z.object({
-	pid: z.string(),
-	running: z.boolean(),
-	output: z.string(),
-	exitCode: z.number().int().optional(),
-	truncated: z.boolean().optional(),
-});
-/** The controller's answer to the `shell` action: the guest's sshd on a loopback port, and the key it lets in. */
-export const shellReplySchema = z.object({ access: z.strictObject({ user: z.string(), port: z.number().int(), identityFile: z.string() }) });
+/** `run` in the fork's client.ts, for one state root. */
+export type Sandbox = <I extends ActionInput>(action: I, signal?: AbortSignal) => Promise<Reply<I["action"]>>;
 
 /** ssh's arguments for the guest's sshd up to its remote command, without a terminal. */
-export function guestSsh({ access }: z.infer<typeof shellReplySchema>): string[] {
+export function guestSsh({ access }: Reply<"shell">): string[] {
 	return [
 		"-F", "none", "-T", "-p", String(access.port), "-i", access.identityFile,
 		"-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
@@ -60,17 +53,6 @@ export function guestSsh({ access }: z.infer<typeof shellReplySchema>): string[]
 		`${access.user}@127.0.0.1`,
 	];
 }
-const factsSchema = z.array(z.strictObject({
-	name: z.string(),
-	state: z.enum(["starting", "ready", "failed", "stopped"]),
-	port: z.number().int(),
-	declared: z.boolean(),
-	wantsPreview: z.boolean(),
-	unrouted: z.string().exactOptional(),
-})) satisfies z.ZodType<ServiceFact[]>;
-const logsReplySchema = z.object({ output: z.string() });
-const linkReplySchema = z.object({ service: z.string() });
-const unlinkReplySchema = z.object({ refused: z.string().nullable() });
 const loopback = /^http:\/\/127\.0\.0\.1:\d+$/;
 /**
  * How long ensure, restart and service-start wait for the services they started: the longest `timeoutMs` a
@@ -90,10 +72,10 @@ export type StatusCache = Map<PylonId, { stamp: string; state: z.infer<typeof st
  * Each instance's `shell` action while it is in flight. The controller cannot cancel an action, so a stream that starts
  * while one waits shares it rather than queueing another behind it on a pylon that is already slow.
  */
-export type ShellFlights = Map<PylonId, Promise<z.infer<typeof shellReplySchema>>>;
+export type ShellFlights = Map<PylonId, Promise<Reply<"shell">>>;
 
-/** `run` sends an action to the instance's controller, and `dir` is the instance directory. */
-export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<string, unknown>) => Promise<unknown>, statuses: StatusCache, shells: ShellFlights = new Map()): Guest {
+/** `dir` is the instance directory. */
+export function pylonGuest(pylonId: PylonId, dir: string, run: Sandbox, statuses: StatusCache, shells: ShellFlights = new Map()): Guest {
 	const name = pylonId;
 	/**
 	 * The controller only launches a service and watches its readiness itself, so that no health wait holds its
@@ -101,12 +83,12 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 	 * the dependencies an ensure of one service started included, ready or failed, from status reads that queue
 	 * between other actions.
 	 */
-	async function ready(facts: z.infer<typeof factsSchema>) {
+	async function ready(facts: Reply<"services">) {
 		const started = new Set(facts.map((fact) => fact.name));
 		const deadline = Date.now() + readyWaitMs;
 		while (facts.some((fact) => fact.state === "starting") && Date.now() < deadline) {
 			await delay(readyPollMs);
-			facts = factsSchema.parse(await run({ action: "services", name, op: "status" })).filter((fact) => started.has(fact.name));
+			facts = (await run({ action: "services", name, op: "status" })).filter((fact) => started.has(fact.name));
 		}
 		return facts;
 	}
@@ -116,14 +98,14 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 			// The fork waits at most 60 s per call, and a wait never kills the command.
 			const wait = () => Math.max(0, Math.min(60_000, deadline - Date.now()));
 			const cmd = asUserIn(argv.map(q).join(" "), cwd);
-			let reply = execReplySchema.parse(await run({ action: "exec", name, cmd, cwd: "/", timeoutMs: wait() }));
+			let reply = await run({ action: "exec", name, cmd, cwd: "/", timeoutMs: wait() });
 			let output = reply.output;
 			while (reply.running) {
 				if (Date.now() >= deadline) {
 					await run({ action: "exec-kill", name, pid: reply.pid });
 					return { exitCode: null, output, truncated: reply.truncated ?? false };
 				}
-				reply = execReplySchema.parse(await run({ action: "exec-status", name, pid: reply.pid, timeoutMs: wait() }));
+				reply = await run({ action: "exec-status", name, pid: reply.pid, timeoutMs: wait() });
 				output += reply.output;
 			}
 			if (reply.exitCode === undefined) throw new Error(`exec in ${pylonId} finished without an exit code`);
@@ -141,7 +123,7 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 			signal?.throwIfAborted();
 			let asking = shells.get(pylonId);
 			if (asking === undefined) {
-				const flight = run({ action: "shell", name, user: "user" }).then((reply) => shellReplySchema.parse(reply)).finally(() => {
+				const flight = run({ action: "shell", name, user: "user" }).finally(() => {
 					if (shells.get(pylonId) === flight) shells.delete(pylonId);
 				});
 				// Every caller may have given up by the time it settles.
@@ -151,7 +133,7 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 			let leave = () => {};
 			const left = new Promise<never>((_, reject) => { leave = () => reject(signal!.reason); });
 			signal?.addEventListener("abort", leave, { once: true });
-			let shell: z.infer<typeof shellReplySchema>;
+			let shell: Reply<"shell">;
 			try {
 				shell = await Promise.race([asking, left]);
 			} finally {
@@ -167,24 +149,24 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		async services(op, service, lines) {
 			if (op !== "logs") {
 				const forkOp = op === "list" ? "status" : op;
-				const facts = factsSchema.parse(await run({ action: "services", name, op: forkOp, ...(service === undefined ? {} : { service }) }));
+				const facts = await run({ action: "services", name, op: forkOp, ...(service === undefined ? {} : { service }) });
 				return { services: op === "ensure" || op === "restart" ? await ready(facts) : facts };
 			}
 			if (service === undefined) throw new Error("service logs needs the service's name");
-			const { output } = logsReplySchema.parse(await run({ action: "logs", name, service, ...(lines === undefined ? {} : { lines }) }));
-			return { services: factsSchema.parse(await run({ action: "services", name, op: "status", service })), logs: output };
+			const { output } = await run({ action: "logs", name, service, ...(lines === undefined ? {} : { lines }) });
+			return { services: await run({ action: "services", name, op: "status", service }), logs: output };
 		},
 
 		async startService(service, decl) {
-			return ready(factsSchema.parse(await run({ action: "service-start", name, service, ...decl })));
+			return ready(await run({ action: "service-start", name, service, ...decl }));
 		},
 
 		async linkPort(port, title) {
-			return linkReplySchema.parse(await run({ action: "preview", name, port, ...(title === undefined ? {} : { title }) })).service;
+			return (await run({ action: "preview", name, port, ...(title === undefined ? {} : { title }) })).service;
 		},
 
 		async unlinkPort(port) {
-			return unlinkReplySchema.parse(await run({ action: "unpreview", name, port })).refused;
+			return (await run({ action: "unpreview", name, port })).refused;
 		},
 
 		previewOrigin(service) {

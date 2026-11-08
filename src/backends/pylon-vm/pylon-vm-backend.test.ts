@@ -19,7 +19,7 @@ import { bootHooks, createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptio
 import { launchers } from "../../probe/guest/launchers.ts";
 import { settled, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
-import { asUserIn, imageEnv, pylonGuest } from "./pylon-guest.ts";
+import { asUserIn, imageEnv, pylonGuest, type Sandbox } from "./pylon-guest.ts";
 import { saveJson } from "../../node-base/json-file.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import type { BootInputs } from "../../protocol/spawn.ts";
@@ -580,11 +580,11 @@ test("service facts come from the controller's supervisor, a list starts nothing
 test("streams that start while the pylon's shell action waits share it, and one whose caller gave up stops waiting at once", async () => {
   let asked = 0;
   let answer!: (reply: unknown) => void;
-  const guest = pylonGuest("pylon-slow" as PylonId, scratch, async (action) => {
+  const guest = pylonGuest("pylon-slow" as PylonId, scratch, (async (action: Record<string, unknown>): Promise<unknown> => {
     assert.equal(action.action, "shell");
     asked++;
     return new Promise((resolve) => { answer = resolve; });
-  }, new Map(), new Map());
+  }) as Sandbox, new Map(), new Map());
   const callers = [new AbortController(), new AbortController(), new AbortController()];
   const starts = callers.map((c) => guest.stream(["herdr"], () => undefined, c.signal));
   for (const c of callers) c.abort(new Error("the caller left"));
@@ -614,13 +614,13 @@ test("ensure, restart and service-start answer once each service they were answe
   const fact = (name: string, state: string) => ({ name, state, port: name === "api" ? 8001 : 8000, declared: true, wantsPreview: true });
   const actions: Record<string, unknown>[] = [];
   let reads: [string, string][] = [];
-  const guest = pylonGuest("pylon-wait" as PylonId, scratch, async ({ name: _, ...action }) => {
+  const guest = pylonGuest("pylon-wait" as PylonId, scratch, (async ({ name: _, ...action }: Record<string, unknown>) => {
     actions.push(action);
     // Every status lists every service and a linked port, which a wait leaves out.
     if (action.op === "status") return [...reads.shift()!.map((state, i) => fact(["api", "web"][i]!, state)), fact("port-6006", "ready")];
     // An ensure or restart of web answers about the api it references too.
     return action.action === "service-start" ? [fact("web", "starting")] : [fact("api", "starting"), fact("web", "starting")];
-  }, new Map());
+  }) as Sandbox, new Map());
   reads = [["starting", "starting"], ["failed", "ready"]];
   assert.deepEqual(await guest.services("ensure"), { services: [fact("api", "failed"), fact("web", "ready")] });
   reads = [["starting", "ready"], ["ready", "ready"]];

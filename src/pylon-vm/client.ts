@@ -20,8 +20,11 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
 	type Action,
+	type ActionInput,
+	actions,
 	actionSchema,
 	type BootSpec,
+	type Reply,
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
@@ -457,12 +460,16 @@ async function create(
 		);
 	}
 }
-export async function run(
+/** Runs one action, and parses its reply with the action's schema in `actions` in contracts.ts. */
+export async function run<I extends ActionInput>(
 	root: string,
-	input: unknown,
+	input: I,
 	signal?: AbortSignal,
-): Promise<unknown> {
+): Promise<Reply<I["action"]>> {
 	const action = actionSchema.parse(input);
+	return actions[action.action].reply.parse(await dispatch(root, action, signal)) as Reply<I["action"]>;
+}
+async function dispatch(root: string, action: Action, signal?: AbortSignal): Promise<unknown> {
 	await privateRoot(root);
 	if (action.action === "create" || action.action === "prepare")
 		return create(root, action, signal);
