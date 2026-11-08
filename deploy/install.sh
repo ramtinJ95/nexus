@@ -5,10 +5,9 @@
 #   sudo deploy/install.sh --join-token                                  on the control plane's machine, which prints:
 #   sudo deploy/install.sh --join <token> --node <the control plane's tailnet name>     on the new node
 #
-# It checks every prerequisite first, and stops before changing anything when one is missing. It writes
-# /etc/nexus/control.json, control-plane.json, probe.json and deployer.json from `tailscale status --json`
-# (src/deploy/setup.ts), runs the role installers, then asks for the agents' credentials this machine lacks
-# (src/deploy/credentials.ts), and ends
+# It checks every prerequisite first, and stops before changing anything when one is missing. Then `src/deploy/setup.ts
+# install` writes /etc/nexus/control.json, control-plane.json, probe.json and deployer.json from `tailscale status --json`,
+# runs the role installers, asks for the agents' credentials this machine lacks (src/deploy/credentials.ts), and ends
 # with what is left for the person. Without a terminal, or with --non-interactive, the credentials come from NEXUS_*
 # variables instead. Safe to rerun: an existing config keeps its values and secrets, and gains only what is missing,
 # and an existing credential is left as it is.
@@ -72,6 +71,10 @@ check_prerequisites() {
     miss "Nexus runs as systemd services, and this machine is not a Linux booted with systemd." "Install on a Linux that boots with systemd, such as Debian 12, Ubuntu 24.04 or Fedora 42."
   fi
 
+  # images/pylon/gondolin.json and the image's Dockerfile pin every pylon to x86_64.
+  [ "$(machine)" = x86_64 ] \
+    || miss "Pylons run x86_64 images under KVM, and this machine is $(machine)." "Install on an x86_64 Linux machine."
+
   local manager
   manager=$(package_manager)
   major=$(node_major)
@@ -83,12 +86,11 @@ check_prerequisites() {
     esac
   fi
 
-  qemu=qemu-system-$(machine)
+  qemu=qemu-system-x86_64
   if ! in_service_path "$qemu" || ! in_service_path qemu-img; then
-    case $manager:$(machine) in
-      apt:aarch64) packages="sudo apt-get install -y qemu-system-arm qemu-utils" ;;
-      apt:*) packages="sudo apt-get install -y qemu-system-x86 qemu-utils" ;;
-      dnf:*) packages="sudo dnf install -y $qemu-core qemu-img" ;;
+    case $manager in
+      apt) packages="sudo apt-get install -y qemu-system-x86 qemu-utils" ;;
+      dnf) packages="sudo dnf install -y $qemu-core qemu-img" ;;
       *) packages="Install QEMU so that $qemu and qemu-img are in $service_path." ;;
     esac
     miss "Pylons are QEMU VMs, and $qemu or qemu-img is not in $service_path." "$packages"
@@ -131,25 +133,22 @@ check_prerequisites() {
 }
 
 main() {
-  local role=control dotfiles="" join="" roles next failed=0
+  local role=control dotfiles="" i
   local args=("$@")
   if [ "${1:-}" = --join-token ]; then
     [ $# = 1 ] || fail "--join-token takes no other argument. $usage"
     mint_join_token
     return
   fi
-  while [ $# -gt 0 ]; do
-    case $1 in
-      --node) role=node; shift 2 || fail "--node needs the control plane's tailnet name. $usage" ;;
-      --join) join=${2:-}; shift 2 || fail "--join needs the token --join-token printed. $usage" ;;
-      --dotfiles) dotfiles=${2:-}; shift 2 || fail "--dotfiles needs a git URL. $usage" ;;
-      --admit|--add-node|--peer) shift 2 || fail "$1 needs a value. $usage" ;;
-      --non-interactive) shift ;;
+  # Only what the prerequisites depend on. setup.ts install refuses the arguments that are wrong.
+  for ((i = 0; i < $#; i++)); do
+    case ${args[i]} in
+      --node|--node=*|--join|--join=*) role=node ;;
+      --dotfiles) dotfiles=${args[i + 1]:-} ;;
+      --dotfiles=*) dotfiles=${args[i]#*=} ;;
       -h|--help) echo "$usage"; exit 0 ;;
-      *) fail "unknown argument $1. $usage" ;;
     esac
   done
-  [ -z "$join" ] || [ "$role" = node ] || fail "--join needs --node <the control plane's tailnet name>, as --join-token printed it"
 
   check_prerequisites "$role" "$dotfiles" "sudo deploy/install.sh${args[*]:+ ${args[*]}}"
   if [ ${#misses[@]} -gt 0 ]; then
@@ -158,40 +157,8 @@ main() {
     exit 1
   fi
 
-  # The deployer's lock, which every installer and the deployer's worker take, keeps two runs from merging at once.
-  PATH=$service_path with_deployer_lock node "$repo/src/deploy/setup.ts" write "${args[@]}"
-  if [ "$role" = control ]; then
-    bash "$repo/deploy/install-control.sh"
-    roles="control probe"
-  else
-    roles=probe
-  fi
-  bash "$repo/deploy/install-probe.sh"
-  # shellcheck disable=SC2086
-  bash "$repo/deploy/install-deployer.sh" $roles
-  # Before the credentials' prompts, so a refused token stops the run before the person answers them.
-  if [ -n "$join" ]; then
-    PATH=$service_path node "$repo/src/deploy/setup.ts" join "${args[@]}" \
-      || fail "the configs are written and the probe runs, but the control plane did not take the join. Mint a new token if it said so, then rerun with it"
-  fi
-
-  echo
-  # It runs runuser and chown, which live in the sbin directories the units' PATH lacks.
-  next=$(PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" credentials "${args[@]}") || failed=$?
-  watch=()
-  if grep -qx watch <<<"$next"; then watch=(--github-watch); fi
-  if [ ${#watch[@]} -gt 0 ] || grep -qx config <<<"$next"; then
-    PATH=$service_path with_deployer_lock node "$repo/src/deploy/setup.ts" write "${args[@]}" "${watch[@]}"
-  fi
-  if grep -qx config <<<"$next"; then
-    bash "$repo/deploy/install-probe.sh"
-  elif grep -qx probe <<<"$next"; then
-    systemctl try-restart nexus-probe.service
-  fi
-  if grep -qx control <<<"$next"; then bash "$repo/deploy/install-control.sh"; fi
-  [ "$failed" = 0 ] || fail "the credentials step failed, after the restarts its writes needed. Fix what it said, then rerun"
-  echo
-  PATH=$service_path node "$repo/src/deploy/setup.ts" left "${args[@]}"
+  # The credentials step runs runuser and chown, which live in the sbin directories the units' PATH lacks.
+  PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" install --package-manager "$(package_manager)" "$@"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

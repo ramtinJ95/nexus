@@ -1,8 +1,8 @@
 /**
- * Gives the agents their credentials for `deploy/install.sh`, as `node src/deploy/setup.ts credentials`, after the
- * role installers ran. It asks only for what this machine lacks, and leaves every credential it finds as it is. In a
- * terminal it asks the person, and otherwise it reads the answers from NEXUS_* variables, so it never waits on input.
- * It prints what the installer must do next on stdout, one word a line, and everything else on stderr.
+ * Gives the agents their credentials for `node src/deploy/setup.ts install`, after the role installers ran. It asks only
+ * for what this machine lacks, and leaves every credential it finds as it is. In a terminal it asks the person, and
+ * otherwise it reads the answers from NEXUS_* variables, so it never waits on input. It returns what the installer must
+ * do next, and says everything else on stderr.
  */
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";

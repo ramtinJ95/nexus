@@ -13,10 +13,27 @@ import { isDeepStrictEqual, promisify } from "node:util";
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { tailnetNodeIdPattern } from "../node-base/tailscaled.ts";
 import { configFiles, unitNames } from "../node-base/node-layout.ts";
+import { digestPattern } from "../protocol/deploy.ts";
 
 export interface ControlPlane { tailnetNodeId: string; url: string }
 
 const fileName = basename(configFiles.controlPlane);
+
+export interface WorkerConfig {
+  controlUrl: string;
+  controlNodeId: string;
+  token: string;
+  drainTimeoutMs: number;
+  healthTimeoutMs: number;
+}
+/** The control plane comes from control-plane.json. The controlUrl and controlNodeId an older deployer.json holds are left for older code. */
+export function parseWorkerConfig(deployer: unknown, control: ControlPlane): WorkerConfig {
+  const v = deployer as WorkerConfig;
+  if (typeof v !== "object" || v === null || typeof v.token !== "string" || !digestPattern.test(v.token) ||
+      !Number.isInteger(v.drainTimeoutMs) || v.drainTimeoutMs < 0 || v.drainTimeoutMs > 600_000 ||
+      !Number.isInteger(v.healthTimeoutMs) || v.healthTimeoutMs < 1000 || v.healthTimeoutMs > 60_000) throw new Error("invalid deployer.json");
+  return { controlUrl: control.url, controlNodeId: control.tailnetNodeId, token: v.token, drainTimeoutMs: v.drainTimeoutMs, healthTimeoutMs: v.healthTimeoutMs };
+}
 
 export function parseControlPlane(value: unknown): ControlPlane {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("must be a JSON object with tailnetNodeId and url");

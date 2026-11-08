@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { command, ReleaseInstaller } from "./install.ts";
-import { parseWorkerConfig } from "./worker.ts";
+import { parseWorkerConfig } from "./control-plane.ts";
 import { releaseOutcome } from "../protocol/deploy.ts";
 
 const commit = "a".repeat(40);
