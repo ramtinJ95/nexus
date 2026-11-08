@@ -91,7 +91,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   /** Whether a node has room for a check that asks for it, and whether each check start and poll asked for room or opened a run. */
   let checkRoom = true;
   const checkIfRoom: boolean[] = [];
-  const pollOpens: boolean[] = [];
+  const steps: ThreadId[] = [];
   const discarded: ThreadId[] = [];
   let verifies = false;
   let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
@@ -144,7 +144,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         checkIfRoom.push(ifRoom === true);
         const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return { thread: id };
       },
-      poll: (id, _, opens) => { pollOpens.push(opens !== false); return forgotten.has(id) ? { kind: "void" } : check; },
+      step: (id) => { steps.push(id); return forgotten.has(id) ? { kind: "void" } : check; },
+      result: (id) => forgotten.has(id) || check.kind !== "done" ? null : check,
       discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
     },
     live: {
@@ -152,7 +153,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         if (refuse !== null) return { refused: refuse };
         const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return { thread: id };
       },
-      poll: () => live,
+      step: () => live,
+      result: () => live.kind === "done" ? live : null,
       discard(id) { archived.push(id); registry.setThreadStatus(id, "archived"); },
     },
     release: { self, repo: "ramtinJ95/nexus" },
@@ -207,7 +209,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     set checkStartFails(fails: boolean) { checkStartFails = fails; },
     set checkRefused(why: string | null) { checkRefused = why; },
     set checkRoom(room: boolean) { checkRoom = room; },
-    checkIfRoom, pollOpens,
+    checkIfRoom, steps,
     /** Whether the PR's head has a .nexus/verify, the live check's state, and why no node takes a verify pylon. */
     set verifies(v: boolean) { verifies = v; },
     set live(c: CheckState) { live = c; },
@@ -1879,9 +1881,10 @@ test("a request for changes stops a check whose pylon has not run it, without st
   await loop.start(f.builder, { land: null });
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  const stepped = f.steps.length;
   await loop.poll();
   assert.equal(f.review().phase.kind, "fixing");
-  assert.equal(f.pollOpens.at(-1), false, "the last poll of the stopped check opened no run");
+  assert.equal(f.steps.length, stepped, "the stopped check was not stepped, so it opened no run");
   assert.deepEqual(f.discarded, f.checkThreads);
 });
 

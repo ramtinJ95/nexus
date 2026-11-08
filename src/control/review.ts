@@ -501,7 +501,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
       return { ...r, phase: { ...phase, check: { ...check, ...await checks.start(builder, r.pr.branch, round.head, true) } } };
     }
-    const state = checks.poll(check.thread, round.head);
+    const state = checks.step(check.thread, round.head);
     if (state.kind === "unrunnable") {
       checks.discard(check.thread);
       return { ...r, phase: { ...phase, check: { ...check, thread: null, unrunnable: state.output } } };
@@ -705,9 +705,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // A fix round almost always moves the head, so the check stops rather than hold a pylon through it. A result it
       // gave meanwhile is kept for a round at the same head.
       const check = checkThread(phase);
-      const run = check === null ? null : checks.poll(check, round.head, false);
+      const run = check === null ? null : checks.result(check);
       if (check !== null) checks.discard(check);
-      return toBuilder(run?.kind === "done" ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next);
+      return toBuilder(run !== null ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next);
     },
     async fixing(r, phase) {
       const n = roundsSpent(r);
@@ -768,7 +768,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if ("refused" in started) throw new Error(started.refused);
         return { ...r, phase: { ...phase, thread: started.thread } };
       }
-      const state = checks.poll(phase.thread, round.head);
+      const state = checks.step(phase.thread, round.head);
       if (state.kind === "void") {
         checks.discard(phase.thread);
         return { ...r, phase: { ...phase, thread: null } };
@@ -795,7 +795,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         // No node nests KVM with room to spare right now, which may change before the deadline.
         return phase.refused === started.refused ? r : { ...r, phase: { ...phase, refused: started.refused } };
       }
-      const state = live.poll(phase.thread, round.head);
+      const state = live.step(phase.thread, round.head);
       if (state.kind === "void") {
         live.discard(phase.thread);
         return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } };
