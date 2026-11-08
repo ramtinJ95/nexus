@@ -7,6 +7,10 @@ import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { demand, landing } from "./access.ts";
 import { reviewRoutes as routes } from "../../contract/reviews.ts";
 import { landSchema, reviewSchema } from "../../contract/reviews-parse.ts";
+import type { Review } from "../review-model.ts";
+import { reviewSaid } from "../wording.ts";
+
+const said = (r: Review) => ({ ...r, said: reviewSaid(r) });
 
 export function reviewRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined }): readonly RouteEntry[] {
   const { thread } = kit;
@@ -21,13 +25,13 @@ export function reviewRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null
       const body = parse(reviewSchema, await r.body({}));
       const t = thread(params.thread);
       if (body.land) demand(r.roles, landing);
-      return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
+      return created(said(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null })));
     }),
-    on(routes.cancel, { role: "person", action: "cancel a review" }, (params, r) => ok(reviewsOrRefuse().cancel(thread(params.thread).id, r.caller))),
+    on(routes.cancel, { role: "person", action: "cancel a review" }, (params, r) => ok(said(reviewsOrRefuse().cancel(thread(params.thread).id, r.caller)))),
     on(routes.land, landing, async (params, r) => {
       const body = parse(landSchema, await r.body({}));
       const t = thread(params.thread);
-      return ok(reviewsOrRefuse().land(t.id, r.caller, body.head, body.waive));
+      return ok(said(reviewsOrRefuse().land(t.id, r.caller, body.head, body.waive)));
     }),
   ];
 }

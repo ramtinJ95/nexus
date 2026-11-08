@@ -193,5 +193,16 @@
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-400 of PR #400, started on its own: deploying c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7, round 2 of 5, reviewer th-drain-review on gpt-6-astra, landing when approved",
+      "no live check: b2b2b2b2b2b2 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live"
+    ]
   }
 }

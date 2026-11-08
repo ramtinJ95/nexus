@@ -164,6 +164,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-93 of PR #93, started on its own: checking, round 1 of 5, reviewer th-rv-checking-review on gpt-6-astra",
+      "round 1: the reviewer th-rv-checking-review on gpt-6-astra approves, and the second reviewer th-rv-checking-second on claude-sonnet-5-5 approves. It reviews since the change touches search ranking"
+    ]
   }
 }
 --- stderr

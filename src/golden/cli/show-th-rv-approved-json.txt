@@ -154,6 +154,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-96 of PR #96, started on its own: approved, round 1 of 5, reviewer th-rv-approved-review on claude-sonnet-5-5",
+      "no live check: 8c8c8c8c8c8c has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live"
+    ]
   }
 }
 --- stderr

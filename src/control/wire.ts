@@ -68,6 +68,21 @@ export interface ThreadDetail {
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;
+  /** A control plane older than 0.73.0 sends none. */
+  said?: ThreadSaid;
+}
+
+/** The sentences `nexus show` prints of a thread's state, as control/wording.ts words them, null where the state is not. */
+export interface ThreadSaid {
+  /** What a guest that stopped answering fails and what gives it a fresh VM, which follows when it stopped. */
+  guest: string | null;
+  disk: string | null;
+  usage: string | null;
+  /** A paused session's state. */
+  paused: string;
+  prWatch: string;
+  /** The review's line, then its reviewers', round's and live check's notes. */
+  review: readonly string[] | null;
 }
 
 /**

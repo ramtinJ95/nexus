@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.73.0
+
+Adds the sentences the CLI prints of a thread and its review to the replies, worded once by the control plane. `ThreadDetail` gains `said`: what a guest that stopped answering fails and what gives it a fresh VM, why an archived thread's disk is kept, why its token usage is unread, how a paused session resumes, the PR watch's state, and the review's line and notes. The `Review` that `POST /v1/threads/<thread>/review`, `/review/cancel` and `/land` answer gains `said`, the review's line and notes. Every other field is as before. A control plane older than 0.73.0 sends no `said`, so the CLI's `show` prints no guest, disk, usage or PR watch line there, a paused session as `paused`, and a review as its ID with what it needs from the person.
+
 ## 0.72.0
 
 Adds `Question.kind`, which names what a question is about and how it is answered: `proposal`, `ask`, `holds`, `judgment` or `cleanup`, as [Questions](cli.md#questions) describes. `reserved` is still on every question, and null on every kind but `holds`. Every other field is as before. A control plane older than 0.72.0 sends no `kind`, which the CLI does not need.

@@ -343,7 +343,7 @@ const landingOptions = (landed: string[] = []): TestApiOptions => ({
   deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} },
   reviews: {
     deploys: (r: Review) => r.pr.repo === "acme/nexus",
-    land(builder: string) { landed.push(builder); return {}; },
+    land(builder: ThreadId) { landed.push(builder); return testReview({ builder }); },
   } as never as ReviewLoop,
 });
 const head = "9f".repeat(20);

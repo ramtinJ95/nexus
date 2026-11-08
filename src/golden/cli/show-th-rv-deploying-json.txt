@@ -148,6 +148,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-415 of PR #415, started on its own: deploying c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1, round 1 of 5, reviewer th-rv-deploying-review on gpt-6-astra, landing when approved",
+      "no live check: bfbfbfbfbfbf has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live"
+    ]
   }
 }
 --- stderr

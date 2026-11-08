@@ -16,10 +16,13 @@ export type { Question } from "../control/questions.ts";
 export const landOption = "Land";
 export const holdOptions = [landOption, "Leave it"] as const;
 
+/** A review as its routes reply: the record, and its lines as `nexus` prints them. A control plane older than 0.73.0 sends no `said`. */
+export type SaidReview = Review & { said?: readonly string[] };
+
 export const reviewRoutes = {
-  start: route<Review, z.input<typeof reviewSchema>>()("POST", "/v1/threads/{thread}/review"),
-  cancel: route<Review>()("POST", "/v1/threads/{thread}/review/cancel"),
-  land: route<Review, z.input<typeof landSchema>>()("POST", "/v1/threads/{thread}/land"),
+  start: route<SaidReview, z.input<typeof reviewSchema>>()("POST", "/v1/threads/{thread}/review"),
+  cancel: route<SaidReview>()("POST", "/v1/threads/{thread}/review/cancel"),
+  land: route<SaidReview, z.input<typeof landSchema>>()("POST", "/v1/threads/{thread}/land"),
 } as const;
 
 export const questionRoutes = {

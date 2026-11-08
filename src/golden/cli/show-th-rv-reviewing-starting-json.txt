@@ -144,6 +144,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-410 of PR #410, started on its own: reviewing, round 1 of 5, reviewer th-rv-reviewing-starting-review on gpt-6-astra, .nexus/check starting at 1a1a1a1a1a1a",
+      "round 1: the reviewer th-rv-reviewing-starting-review on gpt-6-astra has not answered, and the second reviewer on claude-sonnet-5-5 is starting. It reviews since the change touches src/cli/"
+    ]
   }
 }
 --- stderr
