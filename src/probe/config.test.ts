@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nodeSecrets, parseProbeConfig, parseSecretsEnv, readSecretsFile } from "./config.ts";
+import { nodeSecrets, parseProbeConfig, readSecretsFile } from "./config.ts";
+import { parseSecretsEnv } from "../node-base/secrets-env.ts";
+import { heldSecrets } from "../protocol/observations.ts";
 
 const deploy = new URL("../../deploy/", import.meta.url);
 
@@ -102,7 +104,7 @@ test("a config with a mistake is refused, naming the field", () => {
 });
 
 test("a secrets file maps names to verbatim values", () => {
-  const secrets = parseSecretsEnv("# a comment\n\nSTRIPE_KEY=sk_test_a=b#c\r\n  # indented comment\nGH_TOKEN= spaced \n");
+  const secrets = parseSecretsEnv("# a comment\n\nSTRIPE_KEY=sk_test_a=b#c\r\n  # indented comment\nGH_TOKEN= spaced \n", heldSecrets);
   assert.equal(secrets.value("STRIPE_KEY"), "sk_test_a=b#c");
   assert.equal(secrets.value("GH_TOKEN"), " spaced ");
   assert.equal(secrets.value("MISSING"), undefined);
@@ -110,7 +112,7 @@ test("a secrets file maps names to verbatim values", () => {
 });
 
 test("the shipped example secrets file parses and sets nothing", async () => {
-  const secrets = parseSecretsEnv(await readFile(new URL("secrets.example.env", deploy), "utf8"));
+  const secrets = parseSecretsEnv(await readFile(new URL("secrets.example.env", deploy), "utf8"), heldSecrets);
   assert.equal(secrets.value("STRIPE_KEY"), undefined);
 });
 
@@ -125,12 +127,12 @@ test("a malformed secrets file is refused by line, without echoing values", () =
     ["A=x\nNEXUS_CHATGPT_TOKEN=hunter2", "a secret the control plane hands over", /line 2 sets NEXUS_CHATGPT_TOKEN, which the control plane hands to this probe/],
   ];
   for (const [text, what, message] of cases) {
-    assert.throws(() => parseSecretsEnv(text), (err: Error) => message.test(err.message) && !err.message.includes("hunter"), what);
+    assert.throws(() => parseSecretsEnv(text, heldSecrets), (err: Error) => message.test(err.message) && !err.message.includes("hunter"), what);
   }
 });
 
 test("a node's secrets add a held secret once the control plane hands it over, and stand in for it until then", () => {
-  const secrets = nodeSecrets(parseSecretsEnv("GH_TOKEN=ghp_file\n"));
+  const secrets = nodeSecrets(parseSecretsEnv("GH_TOKEN=ghp_file\n", heldSecrets));
   assert.deepEqual(secrets.names(), ["GH_TOKEN"], "placement waits for the handoff");
   const standIn = secrets.value("NEXUS_CHATGPT_TOKEN");
   assert.ok(standIn !== undefined && standIn !== "", "a spawn granted it boots, rather than failing as secret-missing");

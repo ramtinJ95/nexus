@@ -10,7 +10,8 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startProbe, type Probe, type ProbeOptions } from "./server.ts";
-import { nodeSecrets, parseProbeConfig, parseSecretsEnv, probeAuth } from "./config.ts";
+import { nodeSecrets, parseProbeConfig, probeAuth } from "./config.ts";
+import { parseSecretsEnv } from "../node-base/secrets-env.ts";
 import { readControlPlane } from "../deploy/control-plane.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
@@ -615,7 +616,7 @@ test("capacity counts the CPUs and memory of VMs that are up and the disk of eve
 });
 
 test("a broken pylon's log tail and a failed job's log leave the node with the values it holds and secret-shaped text redacted", async (t) => {
-  const secrets = nodeSecrets(parseSecretsEnv("STRIPE_KEY=rk_live_0123456789abcdef\n"));
+  const secrets = nodeSecrets(parseSecretsEnv("STRIPE_KEY=rk_live_0123456789abcdef\n", []));
   secrets.hold("NEXUS_CHATGPT_TOKEN", "held-token-value-0123");
   const { base, client, fake } = await setup(t, { secrets });
   assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: "held-token-value-0123" })).status, 204);
