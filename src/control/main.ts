@@ -22,7 +22,7 @@ import { startApi } from "./api/server.ts";
 import { registryLocator } from "./locator.ts";
 import { jobDeadlineMs } from "../protocol/jobs.ts";
 import { startLoop } from "./loop.ts";
-import { openRegistry } from "./registry.ts";
+import { openRegistry, type Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
 import { peerHandoff } from "./peers.ts";
 import { githubClient, githubRepo } from "./github.ts";
@@ -54,7 +54,6 @@ import { backupStatusFile, controlPath, ports } from "../node-base/node-layout.t
 import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";
-import { followEvents } from "./follow-events.ts";
 import { services as startServices } from "./services.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -128,6 +127,8 @@ export function parseConfig(text: string): ControlPlaneConfig {
 
 export interface ControlPlane {
   readonly port: number;
+  /** The plane's own registry. Its event followers see only the events appended through it, never another connection's. */
+  readonly registry: Registry;
   close(): Promise<void>;
 }
 
@@ -236,14 +237,15 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }) });
   const watch = services.start({ everyMs: prWatchMs, ...prWatcher({ registry, github, inbox, linked: reviews?.auto, fresh: (t) => loop.readGit(registry.pylon(t.pylonId)!.node, t.pylonId) }) });
   // The events only run a step sooner: each poll above stays its fallback.
-  services.start({ close: followEvents(registry, ["session.turn-ended", "thread.turn-ended", "release.changed"], 1_000, (events) => {
+  services.start({ close: registry.followEvents(["session.turn-ended", "thread.turn-ended", "release.changed"], (events) => {
     for (const id of new Set(events.flatMap((e) => e.kind === "release.changed" ? [] : e.thread ?? []))) {
       void watch.turnEnded(id as ThreadId);
       void reviews?.wake(id as ThreadId);
     }
     if (!events.some((e) => wakesDeployers(registry, e))) return;
     for (const probe of probeMap.values()) probe.wakeDeployer().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
-  }, (err) => log(`following events for wake-ups failed, going on from the newest: ${err.message}`)) });
+  }) });
+  services.start({ everyMs: passMs, poll: () => registry.retainEvents() });
   for (const polled of threads.polls) services.start(polled && { everyMs: passMs, poll: () => polled.poll() });
   services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch }) });
   services.start({ everyMs: passMs, ...deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote }) });
@@ -295,6 +297,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
 
   return {
     port: api.port,
+    registry,
     async close() {
       try {
         await services.close();

@@ -13,11 +13,10 @@ import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { EventKind } from "./events.ts";
-import { followEvents } from "./follow-events.ts";
 import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";
 
-type UsageCounterRegistry = Pick<Registry, "agent" | "eventBatch" | "newestEvent" | "node" | "pylon" | "recordUsage" | "sealedBoot" | "storedThreads" | "thread" | "usageCursor" | "usageCursors">;
+type UsageCounterRegistry = Pick<Registry, "agent" | "followEvents" | "node" | "pylon" | "recordUsage" | "sealedBoot" | "storedThreads" | "thread" | "usageCursor" | "usageCursors">;
 
 export interface UsageCounter {
   /** Reads every thread but the deleted ones now. */
@@ -47,11 +46,10 @@ export function usageCounter(options: {
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>;
   harness: Pick<HarnessHost, "usage">;
   sweepMs?: number;
-  followMs?: number;
   logs?: typeof agentLogs;
   log?: (message: string) => void;
 }): UsageCounter {
-  const { registry, probes, harness, sweepMs = 600_000, followMs = 1_000, logs = agentLogs, log = (message) => console.error(message) } = options;
+  const { registry, probes, harness, sweepMs = 600_000, logs = agentLogs, log = (message) => console.error(message) } = options;
   let closed = false;
   const reads = new Map<string, SingleFlight>();
   const failures = new Map<string, string>();
@@ -147,14 +145,11 @@ export function usageCounter(options: {
   }
 
   // From the newest event, as the sweep at start reads what came before.
-  const stopFollowing = followEvents(registry, [...pylonKinds, ...harnessKinds], followMs, (events) => {
+  const stopFollowing = registry.followEvents([...pylonKinds, ...harnessKinds], (events) => {
     for (const e of events) {
       if (e.thread === null) continue;
       void (pylonKinds.includes(e.kind) ? readPylon : readHarness)(e.thread as ThreadId);
     }
-  }, (err) => {
-    log(`following turn ends for token usage: ${err.message}. Reading every thread and following from the newest`);
-    void sweep();
   });
   const timer = setInterval(() => void sweep(), sweepMs);
   timer.unref();

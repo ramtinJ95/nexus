@@ -667,7 +667,8 @@ test("session state is capped at sixteen, removed at end and pruned with event r
   registry.reportSession(node, { sequence: 10_008, time: now, pylon: pylonId, event: { kind: "session.ended", session: "s10006" } });
   assert.equal(rows().length, 15);
   now += sessionActivityTtlMs;
-  registry.appendEvent("release.changed", null, {});
+  registry.pruneSessions();
+  registry.retainEvents();
   assert.deepEqual(rows(), []);
   assert.equal(registry.events().length, 10_000);
 });

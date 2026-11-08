@@ -272,6 +272,7 @@ test("event followers share the streams' places with thread streams, past which 
 test("an event cursor older than what the log retains is refused with 409", async (t) => {
   const s = await testApi(t);
   for (let i = 0; i < 10_002; i++) s.registry.appendEvent("release.changed", null, {});
+  s.registry.retainEvents();
   for (const path of ["/v1/events?since=1", "/v1/events?since=1&follow=true"]) {
     assert.deepEqual(await s.call("GET", path), { status: 409, body: { error: "event cursor expired; retained events cannot fill the gap", code: null, retryable: false } });
   }
