@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  blocks, builderAwaited, cancellable, ended, findingsOf, inLanding, kindsWhere, landingVerb, findingSchema, reviewerApproved, reviewersFindings, roundNote, roundsSpent, secondReads, settled, verdictSchema, waitsOnPerson,
+  blocks, builderAwaited, cancellable, ended, findingsOf, inLanding, kindsWhere, landingAt, landingVerb, trackStep, findingSchema, reviewerApproved, reviewersFindings, roundNote, roundsSpent, secondReads, settled, verdictSchema, waitsOnPerson,
   type Finding, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Verdict,
 } from "./review-model.ts";
 import type { PrSnapshot } from "./github.ts";
@@ -49,6 +49,57 @@ test("the store's SQL filters read the kinds they filtered before", () => {
   const sorted = (kinds: PhaseKind[]) => [...kinds].sort();
   assert.deepEqual(sorted(kindsWhere((row) => row.settled)), ["cancelled", "closed", "landed", "merged"]);
   assert.deepEqual(sorted(kindsWhere((row) => row.awaitsBuilder)), ["fixing", "reviewing"]);
+});
+
+/** The dashboard's switches as main had them at c461770, before the rows' track and landing step, kept as the proof's baseline. */
+const landingAtBefore = (r: Review) => {
+  switch (r.phase.kind) {
+    case "checking": case "verifying": return r.land === null ? null : { step: r.phase.kind, failed: false };
+    case "quoting": return { step: "checking", failed: false };
+    case "merging": case "deploying": case "landed": return { step: r.phase.kind, failed: false };
+    case "rolling-back": return { step: "deploying", failed: true };
+    case "needs-person": return r.merged !== null && r.land !== null ? { step: "deploying", failed: true } : null;
+    default: return null;
+  }
+};
+const reviewStepBefore = (r: Review) => {
+  switch (r.phase.kind) {
+    case "merging": case "deploying": case "rolling-back": return "landing";
+    case "landed": case "merged": return "deployed";
+    case "needs-person": return r.merged === null ? "review" : "landing";
+    default: return "review";
+  }
+};
+/** The pipeline phase a review puts its builder in, and the step the dashboard placed that at, null where it read past the review. */
+const itemBefore = (r: Review) => {
+  switch (r.phase.kind) {
+    case "landed": case "merged": return "landed";
+    case "needs-person": return "held";
+    case "merging": case "deploying": case "rolling-back": return "landing";
+    case "approved": return r.land === null ? "held" : "landing";
+    case "reviewing": case "fixing": case "quoting": case "checking": case "verifying": return "reviewing";
+    default: return null;
+  }
+};
+const stepBefore = (r: Review) => {
+  const item = itemBefore(r);
+  if (item === null) return null;
+  const mapped = item === "reviewing" && landingAtBefore(r) !== null ? "landing" : ({ reviewing: "review", landing: "landing", landed: "deployed", held: "held" } as const)[item];
+  return mapped !== "held" ? mapped : reviewStepBefore(r);
+};
+
+test("each phase's row gives the track step and landing step the dashboard's switches gave it", () => {
+  for (const [name, phase, extra] of before) {
+    for (const land of [null, { requestedBy: "p" }]) {
+      for (const merged of [null, "m"]) {
+        const r = { since: 10, outbox: null, ...extra, phase, land, merged } as unknown as Review;
+        const at = `${name}, land ${land === null ? "unasked" : "asked"}, ${merged === null ? "unmerged" : "merged"}`;
+        assert.deepEqual(landingAt(r), landingAtBefore(r), at);
+        assert.equal(trackStep(r), stepBefore(r), at);
+        if (itemBefore(r) === "reviewing") assert.equal(trackStep(r) === "landing", landingAtBefore(r) !== null, at);
+      }
+    }
+  }
 });
 
 test("every phase kind has a row", () => {

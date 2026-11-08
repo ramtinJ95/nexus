@@ -259,43 +259,65 @@ export interface Review {
  * landing began its merge. `landing`: a landing's phase, which sees its deploy through whatever happens to the threads,
  * and what it does once it can no longer be stopped, or null before. `awaitsBuilder`: whether the phase keeps the
  * builder's pylon up, while its reviewer reads a round, which may end in findings for the builder, and until those
- * findings are delivered, but never while the reviewer's model fails.
+ * findings are delivered, but never while the reviewer's model fails. `track`: the step of its work's track the review
+ * has taken its builder to, or null when a review that ended short of landing says nothing of where the work is.
+ * `landingStep`: the step of a landing's own steps it is at, and whether it failed there, or null when no landing is on
+ * its way. A landing held after its merge stopped at the deploy, which failed or rolled back. One held before its merge
+ * is not on its way anywhere, and is landable again or not at all.
  */
 interface PhaseRow<P extends Phase> {
   ended: boolean; settled: boolean; waitsOnPerson: boolean; cancellable: boolean;
   landing?: (phase: P) => "deploys" | "rolls back" | "merges" | null;
   awaitsBuilder?: (phase: P, r: Review) => boolean;
+  track: TrackStep | null | ((phase: P, r: Review) => TrackStep);
+  landingStep?: (phase: P, r: Review) => LandingAt | null;
 }
+export type TrackStep = "review" | "landing" | "deployed";
+export const landingSteps = ["checking", "verifying", "merging", "deploying", "landed"] as const;
+export type LandingStep = typeof landingSteps[number];
+export interface LandingAt { step: LandingStep; failed: boolean }
+const asked = (step: LandingStep) => (_: Phase, r: Review): LandingAt | null => r.land === null ? null : { step, failed: false };
+const reached = (step: LandingStep, failed = false) => (): LandingAt => ({ step, failed });
 const phases = {
-  reviewing: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, awaitsBuilder: (phase) => phase.failing === undefined },
-  fixing: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, awaitsBuilder: (_, r) => r.outbox?.to === "builder" },
-  checking: { ended: false, settled: false, waitsOnPerson: false, cancellable: true },
-  verifying: { ended: false, settled: false, waitsOnPerson: false, cancellable: true },
-  quoting: { ended: false, settled: false, waitsOnPerson: false, cancellable: true },
-  approved: { ended: true, settled: false, waitsOnPerson: true, cancellable: false },
-  merging: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, landing: (phase) => phase.authorized === null ? null : "merges" },
-  deploying: { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "deploys" },
-  "rolling-back": { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "rolls back" },
-  landed: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
-  "needs-person": { ended: true, settled: false, waitsOnPerson: true, cancellable: true },
-  merged: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
-  closed: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
-  cancelled: { ended: true, settled: true, waitsOnPerson: false, cancellable: false },
+  reviewing: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, awaitsBuilder: (phase) => phase.failing === undefined, track: "review" },
+  fixing: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, awaitsBuilder: (_, r) => r.outbox?.to === "builder", track: "review" },
+  // A review's checks run as the first steps of its landing once it was asked to land.
+  checking: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("checking") },
+  verifying: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("verifying") },
+  quoting: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: "landing", landingStep: reached("checking") },
+  approved: { ended: true, settled: false, waitsOnPerson: true, cancellable: false, track: (_, r) => r.land === null ? "review" : "landing" },
+  merging: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, landing: (phase) => phase.authorized === null ? null : "merges", track: "landing", landingStep: reached("merging") },
+  deploying: { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "deploys", track: "landing", landingStep: reached("deploying") },
+  "rolling-back": { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "rolls back", track: "landing", landingStep: reached("deploying", true) },
+  landed: { ended: true, settled: true, waitsOnPerson: false, cancellable: false, track: "deployed", landingStep: reached("landed") },
+  "needs-person": {
+    ended: true, settled: false, waitsOnPerson: true, cancellable: true, track: (_, r) => r.merged === null ? "review" : "landing",
+    landingStep: (_, r) => r.merged !== null && r.land !== null ? { step: "deploying", failed: true } : null,
+  },
+  merged: { ended: true, settled: true, waitsOnPerson: false, cancellable: false, track: "deployed" },
+  closed: { ended: true, settled: true, waitsOnPerson: false, cancellable: false, track: null },
+  cancelled: { ended: true, settled: true, waitsOnPerson: false, cancellable: false, track: null },
 } as const satisfies { [K in PhaseKind]: PhaseRow<Extract<Phase, { kind: K }>> };
 export type EndedKind = { [K in PhaseKind]: typeof phases[K]["ended"] extends true ? K : never }[PhaseKind];
 // Each row's functions take its own phase, which `phase.kind` picks, so the row of any phase reads it.
 const rowAt = (kind: PhaseKind) => phases[kind] as unknown as PhaseRow<Phase>;
 const rowOf = (phase: Phase) => rowAt(phase.kind);
+type Flags = Record<"ended" | "settled" | "waitsOnPerson" | "cancellable" | "landing" | "awaitsBuilder", boolean>;
 /** The phase kinds whose row's flags pass `has`, which the store's SQL filters read. */
-export const kindsWhere = (has: (flags: { [F in keyof PhaseRow<Phase>]-?: boolean }) => boolean) => (Object.keys(phases) as PhaseKind[]).filter((kind) => {
-  const { landing, awaitsBuilder, ...row } = rowAt(kind);
-  return has({ ...row, landing: landing !== undefined, awaitsBuilder: awaitsBuilder !== undefined });
+export const kindsWhere = (has: (flags: Flags) => boolean) => (Object.keys(phases) as PhaseKind[]).filter((kind) => {
+  const { ended, settled, waitsOnPerson, cancellable, landing, awaitsBuilder } = rowAt(kind);
+  return has({ ended, settled, waitsOnPerson, cancellable, landing: landing !== undefined, awaitsBuilder: awaitsBuilder !== undefined });
 });
 export const ended = (r: Pick<Review, "phase">) => rowOf(r.phase).ended;
 export const settled = (r: Pick<Review, "phase">) => rowOf(r.phase).settled;
 export const waitsOnPerson = (r: Review | null) => r !== null && rowOf(r.phase).waitsOnPerson;
 export const inLanding = (r: Pick<Review, "phase">) => rowOf(r.phase).landing !== undefined;
 export const landingVerb = (r: Pick<Review, "phase">) => rowOf(r.phase).landing?.(r.phase) ?? null;
+export const trackStep = (r: Review): TrackStep | null => {
+  const { track } = rowOf(r.phase);
+  return typeof track === "function" ? track(r.phase, r) : track;
+};
+export const landingAt = (r: Review) => rowOf(r.phase).landingStep?.(r.phase, r) ?? null;
 /**
  * A landing under way is seen through, so the person cannot cancel it. A review that ended for the person can be, so
  * it stops waiting on them, as nothing else ends it once its pull request merged outside it.
