@@ -4,13 +4,13 @@
  * match the base's, which catches type-only edits that esbuild erases, and esbuild's whitespace-minified output must
  * match too, which a parser rather than this lexer reads. The lexer reads a `/` right after `)` as division, so a
  * regex there, as in `if (x) /a/.test(s)`, could hide a type edit after it. A shell script, a .sh file or one whose
- * first line is a `sh` or `bash` shebang, must match with its whole-line `#` comments dropped, which holds only while
- * no heredoc or multi-line string has such a line. `node scripts/comment-only.ts [base] [path...]`
- * checks the diff under the paths, and fails on a file added, deleted or renamed.
+ * first line is a `sh` or `bash` shebang, must match bash's own reprint of it. `node scripts/comment-only.ts [base]
+ * [path...]` checks the diff under the paths, and fails on a file added, deleted or renamed.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { transformSync } from "esbuild";
+import { shellReprint } from "./shell-reprint.ts";
 
 const [base = "origin/main", ...paths] = process.argv.slice(2);
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28 });
@@ -93,12 +93,6 @@ function code(source: string): string {
 }
 
 const isShell = (path: string, source: string) => path.endsWith(".sh") || /^#!.*\b(ba)?sh\b/.test(source);
-// A line after a trailing `\` continues a command, so a comment there stays in the comparison.
-const shell = (source: string) =>
-  source
-    .split("\n")
-    .filter((line, at, lines) => at === 0 || !/^[ \t]*#/.test(line) || lines[at - 1]!.endsWith("\\"))
-    .join("\n");
 
 const firstDifference = (a: string, b: string) => {
   let at = 0;
@@ -115,7 +109,14 @@ for (const [status, path] of files.map((entry) => entry.split("\t"))) {
   }
   const before = git("show", `${base}:${path}`);
   if (!/\.(ts|js)$/.test(path)) {
-    if (shell(before) !== shell(after)) failures.push(`${path}: commands differ: ${firstDifference(shell(before), shell(after))}`);
+    let reprints: [string, string];
+    try {
+      reprints = [shellReprint(before), shellReprint(after)];
+    } catch (error) {
+      failures.push(`${path}: bash cannot read it: ${(error as { stderr?: string }).stderr?.trim()}`);
+      continue;
+    }
+    if (reprints[0] !== reprints[1]) failures.push(`${path}: commands differ: ${firstDifference(...reprints)}`);
   } else if (code(before) !== code(after)) failures.push(`${path}: code differs: ${firstDifference(code(before), code(after))}`);
   else if (emit(path, before) !== emit(path, after)) failures.push(`${path}: emitted code differs`);
 }
