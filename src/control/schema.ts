@@ -244,8 +244,8 @@ export const migrations: readonly string[] = [
   // unknown.
   `CREATE TABLE IF NOT EXISTS claude_senders (thread TEXT NOT NULL, request_id TEXT NOT NULL, sender TEXT NOT NULL, text_sha256 TEXT NOT NULL,
      PRIMARY KEY (thread, request_id)) STRICT;`,
-  // When each archived thread was archived, which deletes its pylon a day later, and each pylon whose delete that cleanup
-  // sent, until its node no longer has it. A thread archived before has no time, so it gets this migration's, and no disk
+  // When each archived thread was archived, which deletes its pylon a day later, and each pylon whose disk delete that archive's
+  // settle sent, until its node no longer has it. A thread archived before has no time, so it gets this migration's, and no disk
   // goes until a day after it.
   `CREATE TABLE IF NOT EXISTS thread_archives (thread TEXT PRIMARY KEY REFERENCES threads (id), archived_at INTEGER NOT NULL) STRICT;
    CREATE TABLE IF NOT EXISTS disk_cleanups (pylon TEXT PRIMARY KEY REFERENCES pylons (id), thread TEXT NOT NULL REFERENCES threads (id), requested_at INTEGER NOT NULL) STRICT;

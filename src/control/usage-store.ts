@@ -250,7 +250,7 @@ export function usageStore(db: Db, threads: {
     failUsageRead(thread: ThreadId, failure: FailedAttempt) {
       const hold = usageHold();
       if (hold?.thread !== thread || hold.phase !== "reading" || threadRecord(thread)?.status !== "archived") return;
-      finishUsageHold(hold, `the pylon did not boot: ${failure.code}: ${failure.message}`, failure.at);
+      finishUsageHold(hold, `the pylon did not boot: ${failure.code}: ${failure.message}`, Date.now());
     },
     /** The holder lets go of the pylon it holds, once it is paused. */
     releaseUsageHold(hold: Pick<UsageHold, "by">) {

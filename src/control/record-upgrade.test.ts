@@ -218,9 +218,12 @@ test("a registry opened over a failed wake for reading an older control plane ke
   first.savePylon({ ...first.pylon(held.pylonId)!, attempts: { count: 0, last: null, readFailure: { at: 2, code: "setup-failed", message: "the disk is full" } } as Attempts });
   first.close();
 
+  const opened = Date.now();
   const registry = testRegistry(t, path);
   assert.deepEqual(registry.pylon(held.pylonId)!.attempts, noAttempts);
-  assert.deepEqual(registry.usageHold(), { by: "run", thread: held.id, phase: "pausing", since: 2 }, "the hold waits for the pause, so the planner wakes the pylon no more");
+  const hold = registry.usageHold();
+  assert.deepEqual([hold?.by, hold?.thread, hold?.phase], ["run", held.id, "pausing"], "the hold waits for the pause, so the planner wakes the pylon no more");
+  assert.ok(hold!.since >= opened, "the hold waits from the open, not from the old failure");
   const row = registry.usageBackfillThreads().find((r) => r.thread === held.id)!;
   assert.deepEqual([row.state, row.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
 });
