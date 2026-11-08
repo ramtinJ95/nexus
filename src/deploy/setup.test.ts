@@ -482,6 +482,12 @@ test("install.sh names the package manager it found, and parseFlags refuses one 
   assert.throws(() => parseFlags(["install", "--package-manager", "pacman"]), /--package-manager pacman: give apt, dnf, other/);
 });
 
+test("install refuses --github-watch, which names a token file only the credentials step writes, and a second --package-manager", async () => {
+  assert.match(String((await installing(["--github-watch", "--dotfiles", dotfiles])).code), /--github-watch is for setup\.ts write/);
+  assert.match(String((await installing(["--package-manager", "apt", "--dotfiles", dotfiles, "--package-manager", "other"])).code), /--package-manager is install\.sh's/);
+  assert.deepEqual((await installing(["--github-watch"])).ran, [], "nothing runs");
+});
+
 test("the watch's config write names --github-watch where parseFlags reads it, even after arguments that end with --", async () => {
   const { ran } = await installing(["--dotfiles", dotfiles, "--"], ["watch"]);
   const rewrite = ran.filter((line) => line.includes(" write ")).at(-1)!;

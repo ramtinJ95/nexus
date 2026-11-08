@@ -143,7 +143,7 @@ main() {
   # Only what the prerequisites depend on. setup.ts install refuses the arguments that are wrong.
   for ((i = 0; i < $#; i++)); do
     case ${args[i]} in
-      --node|--node=*) role=node ;;
+      --node|--node=*|--join|--join=*) role=node ;;
       --dotfiles) dotfiles=${args[i + 1]:-} ;;
       --dotfiles=*) dotfiles=${args[i]#*=} ;;
       -h|--help) echo "$usage"; exit 0 ;;

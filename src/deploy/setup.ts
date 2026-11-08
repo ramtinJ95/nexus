@@ -569,6 +569,8 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
     // Before the person's arguments, which may end with `--`.
     await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...more, ...args);
   };
+  if (flags.githubWatch) throw new Error("--github-watch is for setup.ts write. install names the GitHub token file once the credentials step has written it");
+  if (args.filter((arg) => arg.startsWith("--package-manager")).length > 1) throw new Error("--package-manager is install.sh's, which names the one it found");
   try {
     await write([]);
     if (flags.node === undefined) await installer("control");
@@ -632,7 +634,7 @@ async function main(args: readonly string[]): Promise<number> {
     return 0;
   }
   if (command === "signed-in" && operands[0] !== undefined) return await signedIn(operands[0]) ? 0 : 1;
-  console.error("usage: node src/deploy/setup.ts install|write|signed-in|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch] [--package-manager apt|dnf|other]");
+  console.error("usage: node src/deploy/setup.ts install|write|signed-in|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--package-manager apt|dnf|other], and write also [--github-watch]");
   return 1;
 }
 

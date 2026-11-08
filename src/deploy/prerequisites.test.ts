@@ -210,6 +210,10 @@ test("the prerequisites read the role and the dotfiles from the arguments, in ei
 main ${args}`);
     assert.equal(run.code, 0, run.stderr);
   }
+  const join = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...complete, tailscaled: [] })} ${steps}
+main --join tok3n`);
+  assert.equal(join.code, 0, join.stderr);
+  assert.deepEqual(ran(join.stderr), ["node ./src/deploy/setup.ts install --package-manager apt --join tok3n"], "a join is a node's, so setup.ts says it needs --node");
   const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
 main --admit macbook`);
   assert.equal(run.code, 1);
