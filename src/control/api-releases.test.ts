@@ -18,7 +18,10 @@ test("deploy defaults off, main resolves, and release records the authenticated 
   assert.equal(r.body.desired.commit, deployCommit);
   assert.equal(r.body.desired.requestedBy, laptop);
   assert.equal(r.body.nodes.length, 2);
+  assert.equal(r.body.controlNode, node);
   assert.equal((await on.call("PUT", "/v1/release", { commit: "--evil" })).status, 400);
+  const unknown = await testApi(t, { deployment: null });
+  assert.equal((await unknown.call("GET", "/v1/release")).body.controlNode, null, "without a deployment the control plane does not know its node");
 });
 
 test("the release view shows a deployer report 90 s old as pending, so a wait on that release is pending", async (t) => {
