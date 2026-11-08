@@ -40,9 +40,9 @@ import type { Thread } from "./thread-store.ts";
 import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
 import { holdOptions, isOpen, type HeldQuestion, type Question, type ThreadQuestion } from "./questions.ts";
 import {
-  answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, heldForGate, humanLabel,
+  answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, gateRun, heldForGate, humanLabel,
   inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, seatsFor, seatsOf, verdictAt, verdictsFor, verdictSchema,
-  type Answer, type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
+  type Answer, type Finding, type GateRun, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
 import { deliverDurable } from "./durable-message.ts";
@@ -330,9 +330,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const due = (reads: Map<string, number>, r: Review) => now() - (reads.get(r.id) ?? -Infinity) >= prWatchMs;
   /** The check thread or verify pylon `phase` holds, and the runs it is one of. */
   const gateThread = (phase: Phase): { thread: ThreadId; runs: CheckRuns } | null => {
-    const check = checkThread(phase);
-    if (check !== null) return { thread: check, runs: checks };
-    return phase.kind === "verifying" && phase.thread !== null ? { thread: phase.thread, runs: live } : null;
+    const thread = gateRun(phase)?.thread ?? null;
+    return thread === null ? null : { thread, runs: phase.kind === "verifying" ? live : checks };
   };
   const end = (r: Review, phase: Extract<Phase, { kind: EndedKind }>): Review => {
     const gate = gateThread(r.phase);
@@ -492,28 +491,43 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * cannot run is left for `checking` to report once the reviewer approves.
    */
   const checkWhileReading = async (r: Review, phase: Extract<Phase, { kind: "reviewing" }>, builder: Thread): Promise<Review> => {
-    const round = r.rounds.at(-1)!;
     const check = phase.check ?? { startedAt: now(), thread: null };
-    if (round.check !== null || check.unrunnable !== undefined || check.refused !== undefined) return r;
-    if (check.thread === null) {
-      const gone = await endedOnGitHub(r);
-      if (gone !== null) return gone;
-      // A check beside the reviewer never overcommits a node: one no node has room for waits for the verdict.
-      return { ...r, phase: { ...phase, check: { ...check, ...await checks.start(builder, r.pr.branch, round.head, true) } } };
-    }
-    const state = checks.poll(check.thread, round.head);
-    if (state.kind === "unrunnable") {
-      checks.discard(check.thread);
-      return { ...r, phase: { ...phase, check: { ...check, thread: null, unrunnable: state.output } } };
-    }
-    if (state.kind !== "done") {
-      if (state.kind !== "void") return r;
-      checks.discard(check.thread);
-      return { ...r, phase: { ...phase, check: { ...check, thread: null } } };
-    }
-    checks.discard(check.thread);
+    if (r.rounds.at(-1)!.check !== null || check.unrunnable !== undefined || check.refused !== undefined) return r;
+    const step = await stepGate(r, "beside", check, builder);
+    if (step.kind === "ended") return step.review;
+    if (step.kind === "run") return step.run === check ? r : { ...r, phase: { ...phase, check: step.run } };
+    checks.discard(step.thread);
+    if (step.kind === "unrunnable") return { ...r, phase: { ...phase, check: { ...check, thread: null, unrunnable: step.output } } };
     const { check: _, ...reading } = phase;
-    return withRound({ ...r, phase: reading }, { check: { passed: state.passed, output: state.output } });
+    return withRound({ ...r, phase: reading }, { check: { passed: step.passed, output: step.output } });
+  };
+  /**
+   * One step of a gate run at the latest round's head: the run beside the reviewer, the check, or the live check. A run
+   * that can give no verdict is thrown away, and the next step starts a fresh one. A run that ended is the caller's to
+   * discard. The check beside the reviewer never overcommits a node, so one no node has room for waits for the
+   * verdict. A live check refused waits for a node that nests KVM with room, which may come before the deadline. Only
+   * those two wait, so a refused check fails the step, which the next pass tries again.
+   */
+  const stepGate = async <Run extends GateRun & { refused?: string }>(r: Review, kind: "beside" | "check" | "live", run: Run, builder: Thread): Promise<
+    { kind: "ended"; review: Review } | { kind: "run"; run: Run | GateRun } | { kind: "unrunnable"; thread: ThreadId; output: string } | { kind: "done"; thread: ThreadId; passed: boolean; output: string }
+  > => {
+    const runs = kind === "live" ? live : checks;
+    const { head } = r.rounds.at(-1)!;
+    if (run.thread === null) {
+      const gone = await endedOnGitHub(r);
+      if (gone !== null) return { kind: "ended", review: gone };
+      const started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
+      if ("thread" in started) return { kind: "run", run: { startedAt: run.startedAt, thread: started.thread } };
+      if (kind === "check") throw new Error(started.refused);
+      return { kind: "run", run: run.refused === started.refused ? run : { ...run, refused: started.refused } };
+    }
+    const state = runs.step(run.thread, head);
+    if (state.kind === "void") {
+      runs.discard(run.thread);
+      return { kind: "run", run: { startedAt: run.startedAt, thread: null } };
+    }
+    if (state.kind === "unrunnable" || state.kind === "done") return { ...state, thread: run.thread };
+    return { kind: "run", run };
   };
   /**
    * The builder rebases a branch that conflicts with its base, even after the last round: a rebase that keeps the
@@ -705,9 +719,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // A fix round almost always moves the head, so the check stops rather than hold a pylon through it. A result it
       // gave meanwhile is kept for a round at the same head.
       const check = checkThread(phase);
-      const run = check === null ? null : checks.poll(check, round.head, false);
+      const run = check === null ? null : checks.result(check);
       if (check !== null) checks.discard(check);
-      return toBuilder(run?.kind === "done" ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next);
+      return toBuilder(run !== null ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next);
     },
     async fixing(r, phase) {
       const n = roundsSpent(r);
@@ -760,52 +774,30 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // The check clones the head commit alone, so a result there, such as one from beside the reviewer, is kept, as the live check is.
       if (phase.thread === null && round.check !== null) return round.check.passed ? await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify")) : gateFailed(r, r);
       if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
-      if (phase.thread === null) {
-        const gone = await endedOnGitHub(r);
-        if (gone !== null) return gone;
-        const started = await checks.start(builder, r.pr.branch, round.head);
-        // Only the check beside the reviewer waits for room, so a start refused here fails the step, which the next pass tries again.
-        if ("refused" in started) throw new Error(started.refused);
-        return { ...r, phase: { ...phase, thread: started.thread } };
-      }
-      const state = checks.poll(phase.thread, round.head);
-      if (state.kind === "void") {
-        checks.discard(phase.thread);
-        return { ...r, phase: { ...phase, thread: null } };
-      }
-      if (state.kind === "unrunnable") return unrunnable(r, state.output);
-      if (state.kind !== "done") return r;
+      const step = await stepGate(r, "check", phase, builder);
+      if (step.kind === "ended") return step.review;
+      if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "checking", ...step.run } };
+      if (step.kind === "unrunnable") return unrunnable(r, step.output);
       // Read while the check thread is held, so a read that fails is retried with the check's result. A landing tried
       // again keeps the round's live check, which ran at the same head.
-      const verifies = state.passed && round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify");
-      const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: state.passed, output: state.output } });
-      const after = state.passed ? await checkPassed(next, verifies) : gateFailed(r, next);
-      checks.discard(phase.thread);
+      const verifies = step.passed && round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify");
+      const next = withRound({ ...r, phase: { ...phase, thread: null } }, { check: { passed: step.passed, output: step.output } });
+      const after = step.passed ? await checkPassed(next, verifies) : gateFailed(r, next);
+      checks.discard(step.thread);
       return after;
     },
     async verifying(r, phase, builder) {
       const round = r.rounds.at(-1)!;
       const refused = phase.refused === undefined ? [] : [`No node could take its verify pylon: ${phase.refused}`];
       if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` }, ...refused);
-      if (phase.thread === null) {
-        const gone = await endedOnGitHub(r);
-        if (gone !== null) return gone;
-        const started = await live.start(builder, r.pr.branch, round.head);
-        if ("thread" in started) return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: started.thread } };
-        // No node nests KVM with room to spare right now, which may change before the deadline.
-        return phase.refused === started.refused ? r : { ...r, phase: { ...phase, refused: started.refused } };
-      }
-      const state = live.poll(phase.thread, round.head);
-      if (state.kind === "void") {
-        live.discard(phase.thread);
-        return { ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } };
-      }
-      if (state.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check could not run at ${round.head}.` }, liveOutput(state.output));
-      if (state.kind !== "done") return r;
-      const next = withRound({ ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } }, { live: { kind: "ran", thread: phase.thread, passed: state.passed, output: state.output } });
+      const step = await stepGate(r, "live", phase, builder);
+      if (step.kind === "ended") return step.review;
+      if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "verifying", ...step.run } };
+      if (step.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check could not run at ${round.head}.` }, liveOutput(step.output));
+      const next = withRound({ ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } }, { live: { kind: "ran", thread: step.thread, passed: step.passed, output: step.output } });
       // Read while the verify pylon is held, as the check's result is.
-      const after = state.passed ? await checked(next) : gateFailed(r, next);
-      live.discard(phase.thread);
+      const after = step.passed ? await checked(next) : gateFailed(r, next);
+      live.discard(step.thread);
       return after;
     },
     async merging(r, phase, builder) {

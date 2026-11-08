@@ -100,8 +100,10 @@ export interface CheckRuns {
    * node that nests KVM, or says why the start was refused. With `ifRoom` it is refused when no node has room for it.
    */
   start(builder: Thread, branch: string, head: string, ifRoom?: true): Promise<{ thread: ThreadId } | { refused: string }>;
-  /** The run's state. A run whose pylon just came up opens its pipe, unless `opens` is false. */
-  poll(thread: ThreadId, head: string, opens?: boolean): CheckState;
+  /** The run's state. A run whose pylon is up keeps it awake, and one whose pylon just came up opens its pipe. */
+  step(thread: ThreadId, head: string): CheckState;
+  /** The verdict the run gave, if it gave one, with no step. */
+  result(thread: ThreadId): Extract<CheckState, { kind: "done" }> | null;
   /** Deletes the check thread and its pylon, or archives the verify pylon. Safe to repeat. */
   discard(thread: ThreadId): void;
 }
@@ -189,7 +191,7 @@ export function checkRuns(options: {
       runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
       return { thread: t.id };
     },
-    poll(id, head, opens = true) {
+    step(id, head) {
       const run = runs.get(id);
       const t = registry.thread(id);
       if (run === undefined || t === undefined || t.status !== "active") return { kind: "void" };
@@ -200,10 +202,13 @@ export function checkRuns(options: {
       registry.recordActivity(id, { agent: Date.now() });
       wake(t);
       if (run.kind === "running") return { kind: "running" };
-      if (!opens) return { kind: "waiting" };
       const probe = runningProbe(registry, probes, t, "work");
       if (probe !== null) open(t, head, probe);
       return { kind: runs.get(id)!.kind === "running" ? "running" : "waiting" };
+    },
+    result(id) {
+      const run = runs.get(id);
+      return run?.kind === "done" && registry.thread(id)?.status === "active" ? run : null;
     },
     discard(id) {
       runs.delete(id);
