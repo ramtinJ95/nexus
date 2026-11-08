@@ -39,3 +39,11 @@ export function prLocation(review: Pick<Review, "merged" | "phase" | "pr"> | nul
   if (prs.length > 0) return { kind: "closed", number: prs.at(-1)!.number };
   return { kind: review === null ? "none" : "unlinked" };
 }
+
+/** The review's PR as the watch last read it, without the head once its comment cap stopped it, since it reads it no more. */
+export function reviewedPr(r: Pick<Review, "pr">, prs: readonly WatchedPr[], stopped: boolean): WatchedPr | undefined {
+  const pr = prs.find((p) => p.repo === r.pr.repo && p.number === r.pr.number);
+  if (pr === undefined || !stopped) return pr;
+  const { head: _, ...read } = pr;
+  return read;
+}
