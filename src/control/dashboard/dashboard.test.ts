@@ -279,6 +279,7 @@ test("thousands of closed threads leave the home page small, and their page list
   assert.match(textOf(first), /Never started Thread Never ran cancelled/, "a queued thread cancelled before it started is listed with the closed");
   assert.match(first, /<a class="link" href="\/threads\/closed\?project=acme&amp;page=2">Show older<\/a>/);
   assert.doesNotMatch(first, />Newer</);
+  assert.match(sectionOf(first, "project-acme"), /<span class="count">2000<\/span>/, "the closed page counts what the home page's line counts");
   assert.match(first, /<div class="page" id="fold-list" data-live>/, "the client's poll swaps the list as threads close");
   const second = (await s.call("GET", "/threads/closed?project=acme&page=2")).text;
   assert.deepEqual(listed(second), Array.from({ length: 100 }, (_, i) => title(1899 - i)), "the next hundred");

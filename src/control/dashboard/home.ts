@@ -124,7 +124,7 @@ export function foldPage(c: Context, kind: "quiet" | "closed", project: Project 
   const queued = cancelled.filter((q) => q.project === p.id);
   const older = threads.length > page * foldCap || queued.length > page * foldCap;
   return html`<section aria-labelledby="project-${p.id}">
-<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><span class="count">${threads.length + queued.length}</span></div>
+<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><span class="count">${threads.length}</span></div>
 ${threads.length + queued.length === 0 ? html`<p class="empty">No ${kind === "quiet" ? "quiet" : "archived or deleted"} threads.</p>` : html`${paged(threads).length > 0 && table(c, paged(threads))}
 ${paged(queued).length > 0 && html`<h3 class="ov-sub">Never started</h3><table class="ov ov-queued">
 <thead><tr><th>Thread</th></tr></thead>
