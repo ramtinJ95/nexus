@@ -27,6 +27,7 @@ test("each guest path, name and limit equals the literal it replaced", () => {
     nexusTurn: "/usr/local/bin/nexus-turn.ts",
     callTimeoutMs: 10_000,
     herdrSession: "nexus",
+    herdrClient: "herdr --session nexus",
     herdrServerStartMs: 5_000,
   });
   assert.equal(herdrPanePattern.source, "^w[0-9]{1,9}:p[0-9]{1,9}$");

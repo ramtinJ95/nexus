@@ -30,8 +30,8 @@ export interface PylonOverlay {
 /**
  * Renders three files:
  * - /etc/profile.d/nexus.sh: NEXUS_PYLON=1, NEXUS_PYLON_ID, NEXUS_THREAD_ID, NEXUS_PROJECT, NEXUS_NODE, NEXUS_API.
- * - /home/user/.nexus/pylon.json: the same facts for `nexus info --json`.
- * - /home/user/.nexus/PYLON.md: prose for the agent. It is in a pylon, where its repository came from and how to
+ * - pylonInfoFile: the same facts for `nexus info --json`.
+ * - pylonGuideFile: prose for the agent. It is in a pylon, where its repository came from and how to
  *   commit and publish from it, which hosts it can reach and that everything else is blocked, the names and hosts
  *   of its secrets, its preview URLs, that work survives sleep only on disk, how to declare
  *   outputs, that pi is signed in to ChatGPT when the pylon was granted the ChatGPT token, that other logins use
