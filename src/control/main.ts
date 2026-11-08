@@ -222,7 +222,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake, gate, log,
     queue: github !== null, planning: { replies: agents.replies },
   }));
-  const { startThread } = threads.api;
+  const { startThread, queue, pipeline, planning } = threads.api;
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
   const gateRuns = { registry, probes: probeMap, startThread, wake: wakeThread };
   const reviews = services.start(github === null ? null : { everyMs: passMs, ...reviewLoop({
@@ -270,11 +270,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const api = services.start(await startApi({
     ...(config.https ? { https: { port: ports.dashboard, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
-    reviews,
-    ...threads.api,
+    features: { reviews, queue, pipeline, planning, cleanup, images, usageBackfill: backfill, doctor },
+    startThread,
     gate,
     deployment,
-    cleanup,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     joins: {
@@ -291,9 +290,6 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     wake,
     probes: probeMap,
     previewPorts: config.previewPorts,
-    images,
-    usageBackfill: backfill,
-    doctor,
     health: health.latest,
   }));
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);

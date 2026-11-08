@@ -23,7 +23,7 @@ import { queuedView } from "../queue.ts";
 import type { QueuedThread } from "../../contract/threads.ts";
 import { periods, type Period } from "../usage.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
-import type { ReviewLoop } from "../review.ts";
+import type { Features } from "../features.ts";
 import type { Review } from "../review-model.ts";
 import { ok } from "../dashboard/view.ts";
 import type { Context, FoldView, HomeView, Latest, Peek, ThreadView } from "../dashboard/context.ts";
@@ -60,9 +60,9 @@ function latestOf(d: ThreadDetail, items: readonly Item[]): Latest {
   };
 }
 
-export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
+export function dashboardRoutes(kit: ApiKit, options: { features: Features; health(): DoctorReport | null }, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry, detail } = kit;
-  const deploys = (r: Review) => options.reviews?.deploys(r) ?? false;
+  const deploys = (r: Review) => options.features.reviews?.deploys(r) ?? false;
   const live = liveStreams();
 
   /** A failed read shows in the conversation, so the rest of the page still says what the pylon is doing. */
@@ -82,7 +82,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     let byProject: Map<string, Thread[]> | undefined;
     let queued: Map<string, QueuedThread[]> | undefined;
     const c: Context = {
-      registry, row, deploys, now: Date.now(), caller, landRefusal: !options.reviews ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
+      registry, row, deploys, now: Date.now(), caller, landRefusal: options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
       answerRefusal: (question) => refusalOf(roles, question),
       threads: () => threads ??= registry.threads(),
       threadsIn: (project) => (byProject ??= Map.groupBy(c.threads(), (t) => t.project)).get(project) ?? [],
@@ -141,7 +141,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       if (first === undefined) return { ...ok(notFound(c, "No nodes yet.")), status: 404 };
       return ok(await cluster(c, r.roles, first.name));
     }],
-    ["GET", /^\/health$/, anyAllowed, (_, r) => ok(healthPage(context(r), options.health?.() ?? null))],
+    ["GET", /^\/health$/, anyAllowed, (_, r) => ok(healthPage(context(r), options.health()))],
     ...(["closed", "quiet"] as const).map((kind): RouteEntry => ["GET", new RegExp(`^\\/threads\\/${kind}$`), anyAllowed, (_, r) => {
       const c = context(r);
       const id = r.query.get("project");

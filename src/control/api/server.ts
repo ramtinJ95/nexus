@@ -18,7 +18,7 @@
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
-import { DeployDraining, isDraining, turnGate, type TurnGate } from "../drain.ts";
+import { DeployDraining, isDraining, type TurnGate } from "../drain.ts";
 import { answerLocalHealth, runningCommit } from "../../deploy/health.ts";
 import { version } from "../../version.ts";
 import { once } from "node:events";
@@ -42,7 +42,6 @@ import type { PortRange, StoredPylon, Thread } from "../thread-store.ts";
 import { claudeConversations } from "../claude-conversation.ts";
 import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } from "../thread-agent.ts";
 import type { Whoami } from "../wire.ts";
-import type { UsageBackfillJob } from "../usage-backfill.ts";
 import { attachRoute, parseAttachQuery } from "../../contract/attach-parse.ts";
 import { apiKeepAliveMs } from "../../contract/route.ts";
 import { openTerminal } from "../../guest-terminal.ts";
@@ -69,31 +68,17 @@ import { imageRoutes } from "./image-routes.ts";
 import { doctorRoutes } from "./doctor-routes.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { BodyTooLarge, readBody } from "../../node-base/request-body.ts";
-import type { ImageRollout } from "../image-rollout.ts";
 import type { StartKey, StartRequest } from "../start-request.ts";
-import type { Pipeline } from "../pipeline.ts";
-import type { Planning } from "../planning.ts";
-import type { CleanupPass } from "../cleanup.ts";
-import type { ThreadQueue } from "../queue.ts";
-import type { ReviewLoop } from "../review.ts";
+import type { Features } from "../features.ts";
 import { attachScript } from "../../guest-contract.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
   prWatchEnabled?: boolean;
-  /** Null without a control-plane GitHub token, which the review loop reads and merges with. */
-  reviews?: ReviewLoop | null;
-  /** Null without a control-plane GitHub token, which tells it when a predecessor's pull request merged. */
-  queue?: ThreadQueue | null;
-  /** Null without the queue, which starts its items' threads. */
-  pipeline?: Pipeline | null;
-  /** Marks planning threads, writes what their messages start with, and adds the items the person accepts from them. */
-  planning?: Planning | null;
-  /** Asks the person what each node could delete, and deletes what they agree to. Without it, a deployer's releases are not recorded. */
-  cleanup?: CleanupPass;
+  features: Features;
   deployment?: DeploymentOptions;
-  /** The drain gate every turn start passes. Omitted: the API builds one over the registry's drain. */
-  gate?: TurnGate;
+  /** The drain gate every turn start passes. */
+  gate: TurnGate;
   registry: Registry;
   host: string;
   /** 0 picks a free port. */
@@ -112,14 +97,8 @@ export interface ApiOptions {
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command" | "stream" | "health">>;
   /** The https ports each node's previews are allocated from, the loop's range. */
   previewPorts: PortRange;
-  /** Image builds and rollouts. Without it, their routes answer 409. */
-  images?: ImageRollout;
-  /** The usage backfill. Without it, its routes answer 409. */
-  usageBackfill?: UsageBackfillJob;
-  /** Runs `nexus doctor`'s checks now. Without it, `GET /v1/doctor` answers 409. */
-  doctor?: () => Promise<DoctorReport>;
-  /** The health passes' latest, null before the first. Without it, `GET /v1/checks` serves no checks. */
-  health?: () => DoctorReport | null;
+  /** The health passes' latest, null before the first. */
+  health(): DoctorReport | null;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
@@ -140,15 +119,15 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
     ...dashboardRoutes(kit, options, nodeHealth),
     ...releaseRoutes(kit, options),
     ...streamRoutes(kit),
-    ...projectRoutes(kit, options),
-    ...usageRoutes(kit, options),
+    ...projectRoutes(kit, options.features),
+    ...usageRoutes(kit, options.features),
     ...nodeRoutes(kit, nodeHealth),
-    ...threadRoutes(kit, options),
-    ...pipelineRoutes(kit, options),
-    ...reviewRoutes(kit, options),
-    ...questionRoutes(kit, options),
+    ...threadRoutes(kit, options.features),
+    ...pipelineRoutes(kit, options.features),
+    ...reviewRoutes(kit, options.features),
+    ...questionRoutes(kit, options.features),
     ...pylonRoutes(kit, options),
-    ...imageRoutes(kit, options),
+    ...imageRoutes(kit, options.features),
     ...doctorRoutes(kit, options),
   ];
 }
@@ -161,7 +140,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
   const claude = claudeConversations({ registry, probes });
-  const agents: ThreadAgents = threadAgents({ registry, harness, claude, inPylon, whileRunning, wake: wakeThread, planning: options.planning ?? null });
+  const agents: ThreadAgents = threadAgents({ registry, harness, claude, inPylon, whileRunning, wake: wakeThread, planning: options.features.planning });
 
   const views = threadViews(registry, agents, options);
   const { pylonState } = views;
@@ -183,7 +162,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const { open } = sse;
 
   const draining = () => isDraining(registry.drain());
-  const gate = options.gate ?? turnGate(draining);
+  const { gate } = options;
   const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, agentOf, draining, gate };
 
   const routes: readonly RouteEntry[] = [

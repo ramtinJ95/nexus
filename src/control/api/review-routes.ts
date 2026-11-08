@@ -1,5 +1,4 @@
-import type { ReviewLoop } from "../review.ts";
-import { HttpError } from "../http-error.ts";
+import { feature, type Features } from "../features.ts";
 import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { demand, landing } from "./access.ts";
 import { reviewRoutes as routes } from "../../contract/reviews.ts";
@@ -9,13 +8,10 @@ import { reviewSaid } from "../wording.ts";
 
 const said = (r: Review) => ({ ...r, said: reviewSaid(r) });
 
-export function reviewRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined }): readonly RouteEntry[] {
+export function reviewRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { thread } = kit;
 
-  function reviewsOrRefuse(): ReviewLoop {
-    if (!options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
-    return options.reviews;
-  }
+  const reviewsOrRefuse = () => feature(features, "reviews");
 
   return [
     on(routes.start, { role: "person", action: "start a review" }, async (params, r) => {

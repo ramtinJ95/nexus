@@ -1,18 +1,16 @@
 import { HttpError } from "../http-error.ts";
-import { itemView, type Pipeline } from "../pipeline.ts";
+import { itemView } from "../pipeline.ts";
+import { feature, type Features } from "../features.ts";
 import type { ItemId } from "../../ids.ts";
 import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
 import { itemRoutes as routes } from "../../contract/projects.ts";
 import { itemSchema } from "../../contract/projects-parse.ts";
 
-export function pipelineRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null | undefined }): readonly RouteEntry[] {
+export function pipelineRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { registry } = kit;
 
-  function pipelineOrRefuse(): Pipeline {
-    if (!options.pipeline) throw new HttpError(409, "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
-    return options.pipeline;
-  }
+  const pipelineOrRefuse = () => feature(features, "pipeline");
 
   function item(id: string) {
     const record = registry.item(id as ItemId);

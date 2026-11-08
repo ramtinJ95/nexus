@@ -1,6 +1,6 @@
 import { HttpError } from "../http-error.ts";
 import { releaseView, resolveMain } from "../releases.ts";
-import type { CleanupPass } from "../cleanup.ts";
+import { feature, type Features } from "../features.ts";
 import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, demand, type Deployment } from "./access.ts";
 import { releaseRoutes as routes } from "../../contract/release.ts";
@@ -9,7 +9,7 @@ import { commitSchema, deploySchema, drainSchema, releasesSchema, reportSchema }
 /** The deployment, and what `main` resolves to, which a test fixes. */
 export type DeploymentOptions = Deployment & { resolveMain?: () => Promise<string> };
 
-export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined; cleanup?: CleanupPass | undefined }): readonly RouteEntry[] {
+export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined; features: Features }): readonly RouteEntry[] {
   const { registry, agents, draining, gate } = kit;
 
   async function busyTurns() {
@@ -41,8 +41,7 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
     on(routes.releases, { role: "reporter" }, async (_, r) => {
       const node = registry.nodeByTailnetId(r.caller)!;
       const { inventory, outcomes } = parse(releasesSchema, await r.body());
-      if (options.cleanup === undefined) throw new HttpError(409, "this control plane runs no cleanup, so it records no releases");
-      return ok({ delete: options.cleanup.releases(node.name, inventory, outcomes) });
+      return ok({ delete: feature(options.features, "cleanup").releases(node.name, inventory, outcomes) });
     }),
     on(routes.drain, { role: "control-node", action: "drains" }, async (_, r) => {
       const body = parse(drainSchema, await r.body());

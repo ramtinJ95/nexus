@@ -1,7 +1,4 @@
-import type { Pipeline } from "../pipeline.ts";
-import type { Planning } from "../planning.ts";
-import type { CleanupPass } from "../cleanup.ts";
-import type { ReviewLoop } from "../review.ts";
+import { feature, type Features } from "../features.ts";
 import type { TailnetNodeId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
@@ -33,7 +30,7 @@ function answeredWith<Q extends Question>(answered: Q, option: string): Q {
   return answered;
 }
 
-export function questionRoutes(kit: ApiKit, options: { planning?: Planning | null | undefined; pipeline?: Pipeline | null | undefined; cleanup?: CleanupPass | undefined; reviews?: ReviewLoop | null | undefined }): readonly RouteEntry[] {
+export function questionRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { execInPylon, registry, claude } = kit;
 
   /**
@@ -84,19 +81,18 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
     },
     holds: (question, body, caller) => {
       const option = optionOf(question, body);
-      if (!options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
-      return answeredWith(options.reviews.answerHolds(question, option, caller), option);
+      return answeredWith(feature(features, "reviews").answerHolds(question, option, caller), option);
     },
     proposal: async (question, body, caller) => {
-      const answered = record(question, optionOf(question, body), caller, options.planning?.answered);
-      await options.pipeline?.poll();
+      const answered = record(question, optionOf(question, body), caller, features.planning?.answered);
+      await features.pipeline?.poll();
       return answered;
     },
     judgment: (question, body, caller) => record(question, optionOf(question, body), caller),
     cleanup: (question, body, caller) => {
       const answered = record(question, optionOf(question, body), caller);
       // The deletes take as long as the node's disk does, so the answer does not wait for them.
-      void options.cleanup?.poll();
+      void features.cleanup?.poll();
       return answered;
     },
   };

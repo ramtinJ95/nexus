@@ -16,10 +16,11 @@ import { Html, html, ago, short } from "./view.ts";
 import type { LandRefusal, Context } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { landingTrack } from "./lifecycle.ts";
+import { notConfigured } from "../not-configured.ts";
 
 const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
   "not a deployer": (caller) => `This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.`,
-  "no review loop": () => "Nexus cannot land it now: the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured.",
+  "no review loop": () => `Nexus cannot land it now: ${notConfigured.reviews}.`,
 };
 
 const answerRefusals: Record<AnswerRefusal, (caller: TailnetNodeId) => string> = {
