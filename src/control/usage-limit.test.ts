@@ -148,7 +148,7 @@ test("a pass that throws rejects every poll that joined it, and the next poll ru
   await f.resumer.close();
 });
 
-test("a send that fails the same way every pass is logged once, and again after a pass that sent", async (t) => {
+test("a send that fails the same way every pass is logged once, and again after a pass in which it did not fail", async (t) => {
   const f = fixture(t);
   const logged: string[] = [];
   let failure: Error | null = new Error("the probe is unreachable");
@@ -159,7 +159,7 @@ test("a send that fails the same way every pass is logged once, and again after 
   await resumer.poll();
   failure = new Error("the probe is unreachable");
   await resumer.poll();
-  assert.equal(logged.length, 2, "the pass between them sent without failing");
+  assert.equal(logged.length, 2, "the pass between them did not fail");
 });
 
 test("a pass reads no archived or deleted thread", async (t) => {

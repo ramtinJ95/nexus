@@ -1739,6 +1739,7 @@ test("a check that cannot start beside the reviewer leaves the reviewer's remind
   await loop.poll();
   assert.match(f.sent.at(-1)!.message.text, /no nexus-review block/);
   assert.equal(f.review().nudges, 1);
+  assert.deepEqual(f.logged, [`review ${f.review().id} of ${f.builder}: the check beside the reviewer did not start and will be tried again (Error)`], "the passes it failed in log it once");
   f.checkStartFails = false;
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
