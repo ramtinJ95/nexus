@@ -21,6 +21,7 @@ import type { QueuedRecord } from "./queue-store.ts";
 import type { QueuedThread, Wait } from "../contract/threads.ts";
 import { sendWithStandingRules } from "./standing-rules.ts";
 import { prLocation, watchedPrs } from "./pr-watch-model.ts";
+import { deliverDurable } from "./durable-message.ts";
 
 type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
@@ -106,9 +107,10 @@ export function threadQueue(options: {
     if (record?.status !== "started" || record.firstMessage !== "pending" || record.message === null) return;
     const t = registry.thread(id);
     if (t === undefined || t.status === "archived" || t.status === "deleted") return;
-    const requestId = requestIds.queued(id);
-    await sendWithStandingRules(registry, id, requestId, record.message, (text) => send(id, text, requestId));
-    registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" });
+    await deliverDurable({ id: requestIds.queued(id), text: record.message }, async (m) => {
+      await sendWithStandingRules(registry, id, m.id, m.text, (text) => send(id, text, m.id));
+      return "delivered";
+    }, () => registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" }));
   }
 
   async function attempt(id: ThreadId): Promise<Thread> {
