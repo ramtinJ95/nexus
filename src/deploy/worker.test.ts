@@ -607,4 +607,6 @@ test("a target whose schema.ts fails to load fails its install with that error, 
   assert.doesNotMatch(reports.at(-1).reason, /has no src\/control\/schema\.ts/);
   assert.deepEqual(calls, [], "the target never activates or restarts");
   assert.equal(await readlink(join(dir, "control-current")), `releases/${old}`);
+  await writeFile(join(dir, `releases/${commit}/src/control/schema.ts`), 'import "./missing.ts";\nexport const migrations = [];\n');
+  await assert.rejects(boundary.registry.known(`releases/${commit}`), { code: "ERR_MODULE_NOT_FOUND" }, "a schema.ts whose own import is missing is not a release from before schema.ts");
 });
