@@ -90,7 +90,7 @@ export interface ApiOptions {
   /** `POST /v1/join`, the one route a machine that is no node or caller yet may call. Omitted: no machine can join. */
   joins?: { whois: WhoisNode; configured: ReadonlySet<TailnetNodeId>; joined(node: JoinedNode): void };
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
-  hostnames: ReadonlySet<string>;
+  hostnames: Pick<ReadonlySet<string>, "has">;
   harness: ThreadHarness;
   startThread(start: Start): Promise<Thread>;
   /** Asks the loop for a pass over the node's pylons. */

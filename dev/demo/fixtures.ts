@@ -45,16 +45,15 @@ const hour = 60 * minute;
 const day = 24 * hour;
 const callerRoles = { [reviewerCaller]: "reviewer", [checkCaller]: "check", [verifyCaller]: "verify" } as const;
 
-/** The registry's clock is Date.now, which the demo shifts into the past while it seeds. */
-export const clock = { shift: 0 };
-const realNow = Date.now;
-Date.now = () => realNow() - clock.shift;
-const now = () => realNow();
+let shift = 0;
+/** The registry's clock, which the demo shifts into the past while it seeds. */
+export const demoClock = () => Date.now() - shift;
+const now = () => Date.now();
 /** Runs `seed` as if it were `ago` before now. */
 async function back<T>(ago: number, seed: () => T | Promise<T>): Promise<T> {
-  const before = clock.shift;
-  clock.shift = ago;
-  try { return await seed(); } finally { clock.shift = before; }
+  const before = shift;
+  shift = ago;
+  try { return await seed(); } finally { shift = before; }
 }
 
 const firebat = "rj-firebat" as NodeName;

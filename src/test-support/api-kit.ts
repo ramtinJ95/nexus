@@ -67,11 +67,13 @@ export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features"
   planning?: boolean;
   dotfiles?: typeof dotfiles;
   gitIdentity?: { name: string; email: string };
+  /** The registry's clock. */
+  clock?: () => number;
 };
 
-export async function testApi(t: import("node:test").TestContext, options: TestApiOptions = {}) {
-  const { deployment, images: imagesOf, usageBackfill: backfillOf, queue: queued, pipeline: piped, planning: planned = piped, dotfiles: dots, gitIdentity, reviews = null, cleanup = null, doctor = null, ...apiOptions } = options;
-  const registry = openRegistry(join(dir, `${randomUUID()}.db`));
+export async function testApi(t: Pick<import("node:test").TestContext, "after">, options: TestApiOptions = {}) {
+  const { deployment, images: imagesOf, usageBackfill: backfillOf, queue: queued, pipeline: piped, planning: planned = piped, dotfiles: dots, gitIdentity, reviews = null, cleanup = null, doctor = null, clock, ...apiOptions } = options;
+  const registry = openRegistry(join(dir, `${randomUUID()}.db`), clock);
   const images = imagesOf?.(registry);
   const backfill = backfillOf?.(registry);
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });

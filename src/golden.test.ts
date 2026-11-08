@@ -28,7 +28,7 @@ await import("./golden/frozen.ts");
 const { deployToken, laptop, phone, reporterHeaders, testApi } = await import("./test-support/api-kit.ts");
 const { tokenDigest } = await import("./protocol/deploy.ts");
 const { tempDir } = await import("./test-support/kit.ts");
-const { demoCheckout, demoProbes, demoReviews, seedDemo } = await import("../dev/demo/fixtures.ts");
+const { demoCheckout, demoClock, demoProbes, demoReviews, seedDemo } = await import("../dev/demo/fixtures.ts");
 const { seedReviews } = await import("./golden/reviews.ts");
 const { utc } = await import("./contract/usage.ts");
 const { version } = await import("./version.ts");
@@ -55,12 +55,11 @@ interface Capture { file: string; read(signal: AbortSignal): Promise<string> }
 test("the API, the CLI and the dashboard answer the demo world as their golden captures record", async (t) => {
   // A check must fail on a changed capture, never rewrite it.
   assert.ok(!update || (process.env.CI === undefined && process.env.NEXUS_CHECK === undefined), "NEXUS_GOLDEN_UPDATE=1 is refused where CI or NEXUS_CHECK is set");
-  const context = { after: (close: () => unknown) => t.after(close) } as never as import("node:test").TestContext;
   const checkout = await demoCheckout();
   t.after(() => rm(checkout, { recursive: true, force: true }));
   let report: () => import("./control/doctor-model.ts").DoctorReport | null = () => null;
-  const s = await testApi(context, {
-    pipeline: true, planning: true, probes: demoProbes(() => s.registry, checkout),
+  const s = await testApi(t, {
+    pipeline: true, planning: true, clock: demoClock, probes: demoProbes(() => s.registry, checkout),
     allowed: new Set([laptop, phone, node]),
     // `nexus deploy main` resolves main here, never against GitHub.
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: { [node]: tokenDigest(deployToken) }, resolveMain: async () => "b".repeat(40) },
