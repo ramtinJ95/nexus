@@ -18,7 +18,7 @@ import type { ConversationId, ModelRef } from "@earendil-works/pi-durable";
 import { openHarnessHost } from "./host.ts";
 import type { ProbeAddress } from "./pylon-env.ts";
 import { connectProbe } from "../../protocol/client.ts";
-import { localApiWhois } from "../../tailscale.ts";
+import { localApiWhois } from "../../node-base/tailscaled.ts";
 
 export const scriptedModel: ModelRef = { provider: "nexus-fixture", modelId: "scripted" };
 /** What each scripted answer reports it used. */

@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/
 import { join } from "node:path";
 import { test } from "node:test";
 import { readJson, saveJson } from "./json-file.ts";
-import { tempDir } from "./test-support/kit.ts";
+import { tempDir } from "../test-support/kit.ts";
 
 async function dir(t: { after: (fn: () => Promise<void>) => void }): Promise<string> {
   const path = await tempDir("nexus-json-file-", t);

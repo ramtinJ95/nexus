@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { saveJson } from "../json-file.ts";
+import { saveJson } from "../node-base/json-file.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
 import { directory, scratchDirectory } from "./instance-layout.ts";
 import { existsError, privateDirectory } from "./storage.ts";

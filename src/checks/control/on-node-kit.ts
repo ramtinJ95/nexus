@@ -17,7 +17,7 @@ import { shellQuote } from "../../shell.ts";
 import { isImageId, type TailnetNodeId } from "../../ids.ts";
 import { probePort } from "../../protocol/routes.ts";
 import { scriptedModel, scriptedModels } from "../../control/harness/test-fixture.ts";
-import { localApiWhois } from "../../tailscale.ts";
+import { localApiWhois } from "../../node-base/tailscaled.ts";
 import { nodePreviews, readNodeFacts } from "./node-facts.ts";
 import { callText } from "../../test-support/kit.ts";
 import type { ThreadDetail } from "../../control/wire.ts";

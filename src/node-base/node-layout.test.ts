@@ -3,14 +3,14 @@ import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as layout from "./node-layout.ts";
 import { backupStatusFile, configFiles, controlPath, deployerFiles, deployerLink, deployerWakeFile, etc, ports, prefix, releasesDir, roleLinks, servicePath, stateDirs, unitDir, unitNames, users } from "./node-layout.ts";
-import { defaultPreviewPorts, parseConfig } from "./control/main.ts";
-import { probePort } from "./protocol/routes.ts";
-import { stores } from "./deploy/credentials.ts";
-import { parseFlags, setup } from "./deploy/setup.ts";
-import { backupBudgetMs, drainYieldMs } from "./deploy/worker.ts";
-import { shutdownPauseMs } from "./probe/shutdown.ts";
+import { defaultPreviewPorts, parseConfig } from "../control/main.ts";
+import { probePort } from "../protocol/routes.ts";
+import { stores } from "../deploy/credentials.ts";
+import { parseFlags, setup } from "../deploy/setup.ts";
+import { backupBudgetMs, drainYieldMs } from "../deploy/worker.ts";
+import { shutdownPauseMs } from "../probe/shutdown.ts";
 
-const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 const seconds = (text: string, key: string) => {
   const [, value, unit] = new RegExp(`^${key}=(\\d+)(min|s)?$`, "m").exec(text) ?? assert.fail(`${key} is set`);
   return Number(value) * (unit === "min" ? 60 : 1);
@@ -118,7 +118,7 @@ test("the deployer's and the probe's own deadlines fit inside the timeouts their
 });
 
 test("unitNames names every unit file in deploy/", () => {
-  const files = readdirSync(new URL("../deploy/", import.meta.url)).filter((name) => /\.(service|timer|path)$/.test(name));
+  const files = readdirSync(new URL("../../deploy/", import.meta.url)).filter((name) => /\.(service|timer|path)$/.test(name));
   assert.deepEqual([...Object.values(unitNames)].sort(), files.sort());
 });
 

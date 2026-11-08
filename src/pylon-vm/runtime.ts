@@ -20,7 +20,7 @@ import { commandsRoot, GuestProcesses } from "./processes.ts";
 import { startRelay } from "./relay.ts";
 import { GuestServices } from "./services.ts";
 import { shellQuote as q } from "../shell.ts";
-import { saveJson } from "../json-file.ts";
+import { saveJson } from "../node-base/json-file.ts";
 import { serialQueue } from "../single-flight.ts";
 import { existsError } from "./storage.ts";
 import { instanceFiles } from "./instance-layout.ts";

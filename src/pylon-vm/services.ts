@@ -9,7 +9,7 @@ import { checked, direct, readGuestFile, serviceRunning, startService, stopServi
 import { openPortal } from "./portals.ts";
 import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "../preview-links.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
-import { readJson, saveJson } from "../json-file.ts";
+import { readJson, saveJson } from "../node-base/json-file.ts";
 import { instanceFiles } from "./instance-layout.ts";
 import { parse } from "../parse.ts";
 import { serialQueue } from "../single-flight.ts";

@@ -27,7 +27,7 @@ import type { OverlayFile } from "../protocol/spawn.ts";
 import { type CheckpointId, type ImageId, isImageId, isTemplateId, type PortableArtifactId, type PylonId, type TemplateId } from "../ids.ts";
 import type { PausedSession } from "../protocol/observations.ts";
 import { publicUrls } from "../public-urls.ts";
-import { diskBytes } from "../disk-space.ts";
+import { diskBytes } from "../node-base/disk-bytes.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "../probe/guest/session-wake.ts";
 import { pausedSessionsIn } from "../probe/guest/sessions.ts";
 import { sessionsFile } from "../../images/pylon/nexus-contract.ts";

@@ -2,7 +2,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Whoami } from "../../control/wire.ts";
-import { saveJson } from "../../json-file.ts";
+import { saveJson } from "../../node-base/json-file.ts";
 import { call, CliError } from "../transport.ts";
 import { type Command, str } from "../kit.ts";
 import { controlPorts, configFile, readConfig, checkVersion, socksOf, controlUrl } from "../config.ts";

@@ -13,7 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { run, sweepScratch } from "./client.ts";
 import { directory, scratchDirectory } from "./instance-layout.ts";
 import { identityOf, publishIdentity } from "./identity.ts";
-import { saveJson } from "../json-file.ts";
+import { saveJson } from "../node-base/json-file.ts";
 import { privateDirectory } from "./storage.ts";
 
 type Inspection = { connected: boolean; status: { state: string } };

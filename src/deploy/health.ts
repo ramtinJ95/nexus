@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
-import { parseReleaseCommit, releaseCommitFile } from "../node-layout.ts";
+import { parseReleaseCommit, releaseCommitFile } from "../node-base/node-layout.ts";
 
 /**
  * Read from this process's immutable release, not from a link a deployer may already have moved. A checkout has no

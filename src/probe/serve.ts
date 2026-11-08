@@ -15,7 +15,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { JobFailure } from "../protocol/jobs.ts";
 import type { TailscaleServe } from "./run.ts";
-import { readJson, saveJson } from "../json-file.ts";
+import { readJson, saveJson } from "../node-base/json-file.ts";
 import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
 import type { TailscaleCli } from "../tailscale.ts";

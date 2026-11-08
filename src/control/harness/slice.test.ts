@@ -24,7 +24,7 @@ import { createDockerBackend } from "../../backends/docker-backend.ts";
 import { nodeSecrets } from "../../probe/config.ts";
 import { startProbe, type Probe } from "../../probe/server.ts";
 import { connectProbe } from "../../protocol/client.ts";
-import { localApiWhois } from "../../tailscale.ts";
+import { localApiWhois } from "../../node-base/tailscaled.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
 import { openHarnessHost, type HarnessHost } from "./host.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";

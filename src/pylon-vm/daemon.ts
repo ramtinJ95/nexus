@@ -10,7 +10,7 @@ import { controllerLogLimit, rotateLog } from "./log-rotation.ts";
 import { stampLines } from "./controller-log.ts";
 import { agentError, existsError, readRecord } from "./storage.ts";
 import { parse } from "../parse.ts";
-import { BodyTooLarge, readBody } from "../request-body.ts";
+import { BodyTooLarge, readBody } from "../node-base/request-body.ts";
 
 async function main(): Promise<void> {
 	stampLines(process.stdout);

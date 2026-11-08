@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { fullCommit, reportStates, type ReportBody, type Role } from "../protocol/deploy.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
-import { releaseName } from "../node-layout.ts";
+import { releaseName } from "../node-base/node-layout.ts";
 import { deleteOutcomeSchema } from "../protocol/cleanup.ts";
 import { pinsSchema } from "../protocol/images.ts";
 import { isImageId, type ImageId, type NodeName } from "../ids.ts";

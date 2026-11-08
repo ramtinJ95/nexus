@@ -12,7 +12,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import type { VmBackend } from "../backends/backend.ts";
 import { shutdownCheckpointId, type JobId, type NodeName, type PylonId } from "../ids.ts";
-import { readJson, saveJson } from "../json-file.ts";
+import { readJson, saveJson } from "../node-base/json-file.ts";
 import { nonEmpty, parse } from "../parse.ts";
 import { pylonIdSchema } from "../protocol/fields.ts";
 import type { PylonObservation } from "../protocol/observations.ts";

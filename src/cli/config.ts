@@ -2,11 +2,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { readJson } from "../json-file.ts";
+import { readJson } from "../node-base/json-file.ts";
 import { parse } from "../parse.ts";
 import { call, CliError, type Endpoint, type HostPort } from "./transport.ts";
 import { type Values, str } from "./kit.ts";
-import { ports } from "../node-layout.ts";
+import { ports } from "../node-base/node-layout.ts";
 
 /**
  * The oldest control plane this CLI reads, raised when the CLI starts relying on something newer. 0.53.0 is the first
