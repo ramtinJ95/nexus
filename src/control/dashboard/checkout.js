@@ -3,7 +3,7 @@ import { request } from "./request.js";
 import { changesBases, pylonRoutes, statusLetters } from "../../contract/pylon.ts";
 import { afterSwap, el, end, main, present, retryShots, scroller, showError } from "./page.js";
 import { bases, checkoutText } from "./checkout-text.js";
-import { factsOf } from "./contract.ts";
+import { factsOf, narrow } from "./contract.ts";
 
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
@@ -357,7 +357,7 @@ async function showTerminal() {
 const layoutKey = "nexus.diff-layout";
 let diffLayout = localStorage.getItem(layoutKey) === "split" ? "split" : "unified";
 /** A window as narrow as a phone's, which draws unified, as split leaves each side too few characters to read. */
-const narrow = matchMedia("(max-width: 760px)");
+const phone = matchMedia(narrow);
 /** The open diff as last read, so a change of layout draws it again without reading the pylon. */
 let openDiff = null;
 
@@ -386,7 +386,7 @@ function redrawDiff() {
   openDiff = { ...openDiff, read: ++diffRead };
   void drawDiff(openDiff);
 }
-narrow.addEventListener("change", redrawDiff);
+phone.addEventListener("change", redrawDiff);
 // The head script has painted the theme, so the picker's module loads after the page's own.
 void import("./theme.js").then(({ onThemeChange, startThemes }) => {
   startThemes();
@@ -397,7 +397,7 @@ void import("./theme.js").then(({ onThemeChange, startThemes }) => {
 async function drawDiff({ read, head, shown, truncated }) {
   try {
     const { diffView, imagePair } = await import("./diff.js");
-    const view = shown.kind === "lines" ? await diffView(shown.files, narrow.matches ? "unified" : diffLayout) : null;
+    const view = shown.kind === "lines" ? await diffView(shown.files, phone.matches ? "unified" : diffLayout) : null;
     if (read !== diffRead) return;
     const typing = document.activeElement?.matches?.(".note-text") ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     head.querySelector(".fv-layout").hidden = view === null;

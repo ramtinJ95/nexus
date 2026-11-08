@@ -4,9 +4,10 @@
 // card into view, as a notice's link does, and opening the card reads its latest reply into it.
 import { afterSwap, refreshAfter, refreshNow, toggled } from "./page.js";
 import { needSelectors } from "./notifications.js";
+import { narrow } from "./contract.ts";
 
 const split = document.getElementById("split");
-const desk = matchMedia("(min-width: 761px)");
+const phone = matchMedia(narrow);
 const viewKey = "nexus.flight-view";
 
 const cardOf = (key) => document.querySelector(`.need[data-thread="${key}"],.need[data-peek-key="${key}"]`);
@@ -90,7 +91,7 @@ if (split !== null) {
     if (link === null || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     // On a phone a Needs you card's thread link opens the thread, as the card it heads is the preview there.
     const head = link.closest(".need-sum");
-    if (head !== null && !desk.matches && link.getAttribute("href").startsWith("/threads/")) return;
+    if (head !== null && phone.matches && link.getAttribute("href").startsWith("/threads/")) return;
     event.preventDefault();
     if (head !== null) {
       const fold = head.parentElement;

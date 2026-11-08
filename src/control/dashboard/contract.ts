@@ -57,3 +57,6 @@ export type Page = (typeof pages)[number];
  * through view.ts `icon`, which types its name.
  */
 export const clonedIcons = ["chevron", "folder"] as const;
+
+/** The width at and under which a page lays out as a phone's, which style.css's phone rules also name. */
+export const narrow = "(max-width: 760px)";
