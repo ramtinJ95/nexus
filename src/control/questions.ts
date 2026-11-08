@@ -9,7 +9,8 @@ import { z } from "zod";
 import type { AskAnswer } from "../../images/pylon/nexus-contract.ts";
 import { textLimits, type ClaudeEntry } from "./claude-transcript.ts";
 import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
-import type { Hold, ReservedCase } from "./holds.ts";
+import type { Hold } from "./holds.ts";
+import type { ReservedCase } from "../contract/reserved.ts";
 import type { Cleanup } from "./cleanup-model.ts";
 
 /** What every question has, whatever its subject. */

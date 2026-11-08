@@ -1,11 +1,10 @@
 /** `nexus events`: the control plane's events, once or followed. */
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { NexusEvent } from "../../control/events.ts";
 import { CliError } from "../transport.ts";
 import { type Command, reconnectMs, request, str, strs, untilConsumerGone } from "../kit.ts";
 import { callOf } from "../../contract/route.ts";
-import { streamRoutes, type EventsQuery } from "../../contract/streams.ts";
+import { streamRoutes, type EventsQuery, type NexusEvent } from "../../contract/streams.ts";
 import { transient } from "../config.ts";
 
 export const eventsCommands: Readonly<Record<string, Command>> = {

@@ -1,7 +1,7 @@
 /**
  * The thread and queued-thread routes of the control plane's API: each route's method, path, query and the types of
- * its body and reply. The server registers its handlers against them and the CLI calls them. It imports nothing at
- * run time, so a browser can bundle it. threads-parse.ts holds the request schemas.
+ * its body and reply, and what a client reads of a reply. The server registers its handlers against them and the CLI
+ * calls them. It imports nothing at run time, so a browser can bundle it. threads-parse.ts holds the request schemas.
  */
 import type { z } from "zod";
 import type { ConversationView } from "@earendil-works/pi-durable";
@@ -12,6 +12,29 @@ import type { Thread } from "../control/thread-store.ts";
 import type { Sent, ThreadDetail, ThreadRow } from "../control/wire.ts";
 import type { activitySchema, messageSchema, seenSchema, startSchema } from "./threads-parse.ts";
 import { pylonWaitMs, queryOf, route, type QueryCodec } from "./route.ts";
+
+export type { ListeningPort, Sent, ThreadDetail, ThreadRow, Whoami } from "../control/wire.ts";
+export type { RefusalCode } from "../control/refusal.ts";
+export type { Placement, Preview, Room, Thread } from "../control/thread-store.ts";
+export type { ThreadSetup } from "../control/templates.ts";
+export type { ClaudeConversation, ClaudeEntry, PromptSource } from "../control/claude-transcript.ts";
+
+/** A thread's conversation, tagged with the kind of agent it is from. */
+export type AgentView = { kind: "harness"; view: ConversationView } | { kind: "claude"; view: ClaudeConversation };
+
+/** Tags a view as served, so the dashboard and the CLI tell the two apart without asking the thread again. */
+export function agentView(view: ConversationView | ClaudeConversation): AgentView {
+  return "kind" in view ? { kind: "claude", view } : { kind: "harness", view };
+}
+
+/** "stopped on its usage limit until 06:30 UTC", or "…, which reset at 06:30 UTC" once the reset passed. A reset more than a day away also names its date, as in "Oct 29, 05:30 UTC". */
+export function usageLimitText(limit: { resetsAt: number | null }, now: number): string {
+  if (limit.resetsAt === null) return "stopped on its usage limit";
+  const at = new Date(limit.resetsAt);
+  const time = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")} UTC`;
+  const when = Math.abs(limit.resetsAt - now) > 86_400_000 ? `${at.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}, ${time}` : time;
+  return limit.resetsAt > now ? `stopped on its usage limit until ${when}` : `stopped on its usage limit, which reset at ${when}`;
+}
 
 /** What one predecessor means for the queued thread. */
 export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }

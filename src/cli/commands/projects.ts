@@ -1,10 +1,9 @@
 /** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
-import { defaultSecondReview, upgradeProject, type LoginKind, type Project, type SecondReview } from "../../control/project.ts";
 import { secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
 import { CliError } from "../transport.ts";
 import { type Command, str, strs, request, resourcesOf, resourceOptions, table } from "../kit.ts";
-import { projectRoutes } from "../../contract/projects.ts";
+import { defaultSecondReview, projectRoutes, type LoginKind, type Project, type SecondReview } from "../../contract/projects.ts";
 
 /**
  * `NAME:HOST[,HOST...]`, such as GH_TOKEN:api.github.com,github.com. A value pasted by mistake, as in NAME=value,
@@ -30,11 +29,12 @@ function autoReviewOf(v: Parameters<typeof str>[0]) {
 }
 const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart: true } } as const;
 const pipelineText = (p: Project) => p.pipeline == null ? "pipeline off" : p.pipeline.autoStart ? "pipeline starts items" : "pipeline waits for approval";
-/** Read through `upgradeProject`, since a control plane older than modes sends `land`. */
+/** A control plane older than 0.67.0 sends `land` in place of the mode. */
 const autoReviewText = (project: Project) => {
-  const setting = upgradeProject(project).autoReview;
+  const setting = project.autoReview as (NonNullable<Project["autoReview"]> & { land?: boolean }) | null | undefined;
   if (setting == null) return "auto review off";
-  return setting.mode === "yolo" ? `auto review and land, waiving holds, for ${setting.enabledBy}` : setting.mode === "land" ? `auto review and land, for ${setting.enabledBy}` : `auto review, set by ${setting.enabledBy}`;
+  const mode = setting.mode ?? (setting.land === true ? "land" : "review");
+  return mode === "yolo" ? `auto review and land, waiving holds, for ${setting.enabledBy}` : mode === "land" ? `auto review and land, for ${setting.enabledBy}` : `auto review, set by ${setting.enabledBy}`;
 };
 
 const secondReviewText = (p: Project) => {

@@ -21,7 +21,8 @@ import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earen
 import type { JobId, LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { TemplateRecord } from "./templates.ts";
-import { maxEntries, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
+import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
+import { maxEntries } from "../contract/streams.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 import type { WaitingAsk } from "./questions.ts";
 

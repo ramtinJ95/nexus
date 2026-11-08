@@ -5,7 +5,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ChangedFile, PullRequest } from "./github.ts";
-import { reservedCases, type Hold, type HoldCode } from "./holds.ts";
+import type { Hold, HoldCode } from "./holds.ts";
+import { reservedCases } from "../contract/reserved.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
 

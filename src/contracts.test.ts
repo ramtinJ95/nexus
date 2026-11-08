@@ -96,7 +96,7 @@ test("every path code names inside an installed release is tracked", () => {
 });
 
 test("every path the merge policy names is a tracked file or folder", () => {
-  const named = [...read(listed("src/control/policy.ts")).matchAll(/"([\w.-]*\/[\w./-]*|[\w-]+\.json)"/g)].map((match) => match[1]!).filter((path) => !path.startsWith("./"));
+  const named = [...read(listed("src/control/policy.ts")).matchAll(/"([\w.-]*\/[\w./-]*|[\w-]+\.json)"/g)].map((match) => match[1]!).filter((path) => !path.startsWith("./") && !path.startsWith("../"));
   assert.ok(named.length > 30, `${named.length} paths`);
   assert.deepEqual(missing(named), []);
 });

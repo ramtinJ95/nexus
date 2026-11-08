@@ -25,6 +25,9 @@ import type { Thread } from "../control/thread-store.ts";
 import type { ThreadDetail } from "../control/wire.ts";
 import { detailText } from "./thread-text.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
+import { reviewView } from "../control/review-view.ts";
+import type { Question } from "../control/questions.ts";
+import { keptPastDay } from "../control/reconcile.ts";
 import { testPr, testReview } from "../test-support/registry-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import type { Judgment } from "../control/judgment-store.ts";
@@ -285,12 +288,15 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   const detail: ThreadDetail = await s.json(["show", id]);
   assert.equal(detail.thread.settleFailure?.count, 1, "show --json carries the archive's settle");
   const disk = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("disk:"));
-  const dayOld = { ...detail, thread: { ...detail.thread, archivedAt: Date.now() - 25 * 60 * 60_000 } };
   assert.deepEqual(disk(detail), []);
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 25 * 60 * 60_000 });
+  const dayOld: ThreadDetail = await s.json(["show", id]);
   assert.deepEqual(disk(dayOld), ["disk: kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed once, the last because its pylon did not boot within 10 minutes"]);
-  assert.deepEqual(disk({ ...dayOld, pylon: { ...dayOld.pylon, actualState: "absent" } }), []);
+  assert.deepEqual(disk({ ...dayOld, keptPastDay: null }), [], "the API's keptPastDay is null for an absent pylon");
+  const { keptPastDay: _kept, ...older } = dayOld;
+  assert.deepEqual(disk(older), [], "a control plane older than 0.71.0 serves no keptPastDay, and show prints no disk line");
   const { settleFailure: _, ...unfailed } = dayOld.thread;
-  assert.deepEqual(disk({ ...dayOld, thread: { ...unfailed, usageSettledAt: 1, backedUpAt: 2 } }), []);
+  assert.equal(keptPastDay({ ...unfailed, usageSettledAt: 1, backedUpAt: 2 }, Date.now()), null);
 });
 
 test("show says a pylon's guest is not answering, since when and what to do, and nothing while it answers", async (t) => {
@@ -313,7 +319,8 @@ test("show says an archived thread's usage is unread when its pylon could not be
   const detail: ThreadDetail = await s.json(["show", id]);
   assert.equal(detail.thread.usageUnread, "its pylon failed: gave up after 5 failed attempts", "show --json carries it");
   const lines = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("usage:") || line.startsWith("disk:"));
-  const dayOld = { ...detail, thread: { ...detail.thread, archivedAt: Date.now() - 25 * 60 * 60_000 } };
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 25 * 60 * 60_000 });
+  const dayOld: ThreadDetail = await s.json(["show", id]);
   assert.deepEqual(lines(dayOld), ["usage: unread, as its pylon failed: gave up after 5 failed attempts, so its disk goes 24 hours after the archive without it"], "a disk whose usage cannot be read is not kept for it");
   assert.deepEqual(lines({ ...dayOld, pylon: { ...dayOld.pylon, actualState: "absent" } }), ["usage: unread, as its pylon failed: gave up after 5 failed attempts, so its disk went without it"]);
 });
@@ -1739,7 +1746,7 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   const review = testReview({ phase: { kind: "approved" }, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [{ code: "reserved-path:egress", text: egress }, { code: "check-changed", text: check }] } }] });
   const api = (async (method: string, path: string) => {
     assert.deepEqual([method, path], ["GET", "/v1/threads/th-builder"]);
-    return { review, questions: [] };
+    return { review, reviewView: reviewView(review, []), questions: [] };
   }) as Api;
   const yes = confirmingTerminal("yes");
   assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { head: approvedRound.head, waive: [egress, check] });
@@ -1749,24 +1756,35 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   }
   await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("yes", false).terminal), (err: CliError) => err.kind === "invalid");
   const nothing = confirmingTerminal("yes");
-  const unheld = (async () => ({ review: { ...review, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [] } }] }, questions: [] })) as Api;
+  const unheldReview = { ...review, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [] } }] };
+  const unheld = (async () => ({ review: unheldReview, reviewView: reviewView(unheldReview, []), questions: [] })) as Api;
   assert.deepEqual(await pressOf(unheld, "th-builder", nothing.terminal), { head: approvedRound.head }, "nothing to waive asks nothing");
   assert.equal(nothing.shown(), "");
+  const asked: string[] = [];
+  const olderApi = (async (method: string, path: string) => {
+    asked.push(`${method} ${path}`);
+    return { review, questions: [] };
+  }) as Api;
+  const older = confirmingTerminal("yes");
+  await assert.rejects(pressOf(olderApi, "th-builder", older.terminal), (err: CliError) => err.kind === "failed" && /^land --waive needs a control plane of 0\.71\.0 or later/.test(err.message));
+  assert.equal(older.shown(), "", "a control plane that serves no reviewView gets no prompt");
+  assert.deepEqual(asked, ["GET /v1/threads/th-builder"], "and nothing past the thread's read");
 });
 
 test("land --waive answers the review's question about its holds, once the person confirmed the holds it names, while the review still runs too", async () => {
   const egress = "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts.";
   const review = testReview({ phase: { kind: "reviewing" }, rounds: [{ head: approvedRound.head, verdict: null, check: null, answers: null }] });
-  const question = { id: "holds-rv-1-a", thread: "th-builder", text: "Land?", options: ["Land", "Leave it"], reserved: "egress", answerer: "deployer", askedAt: 1, answer: null,
+  const question: Question = { id: "holds-rv-1-a", thread: "th-builder" as ThreadId, text: "Land?", options: ["Land", "Leave it"], reserved: "egress", answerer: "deployer", askedAt: 1, answer: null,
     holds: { review: review.id, head: approvedRound.head, base: "main", holds: [{ code: "reserved-path:egress", text: egress }] } };
-  const api = (async () => ({ review, questions: [question] })) as Api;
+  const api = (async () => ({ review, reviewView: reviewView(review, [question]), questions: [question] })) as Api;
   const yes = confirmingTerminal("yes");
   assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { question: question.id, running: true });
   assert.match(answeredText(review, true), /^Waived the holds at 111111111111\. It lands once the reviewer approves and its checks pass\.\nreview rv-\S+ of PR #7: reviewing,/, "a review still under way is not landing yet");
   assert.match(answeredText({ ...review, phase: { kind: "checking", startedAt: 1, thread: null } }, false), /^Landing review /);
   assert.equal(yes.shown(), `Land pull request #7 at ${approvedRound.head}, waiving the holds the merge policy reserves for you:\n  ${egress}\nType yes to waive them and land: `);
   await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("no").terminal), (err: CliError) => err.kind === "failed");
-  const answered = (async () => ({ review, questions: [{ ...question, answer: { option: "Leave it", by: "nLAPTOP", at: 2 } }] })) as Api;
+  const answeredQuestion: Question = { ...question, answer: { option: "Leave it", by: laptop, at: 2 } };
+  const answered = (async () => ({ review, reviewView: reviewView(review, [answeredQuestion]), questions: [answeredQuestion] })) as Api;
   assert.deepEqual(await pressOf(answered, "th-builder", confirmingTerminal("yes").terminal), { head: approvedRound.head }, "an answered question is not asked again");
 });
 

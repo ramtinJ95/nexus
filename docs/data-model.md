@@ -220,7 +220,7 @@ pi-durable records two kinds of spend only in its running total, the `pi.usage` 
 
 ### Usage backfill
 
-The backfill reads every Claude Code transcript and pi session on archived threads' pylons from the start, one pylon at a time. `usage_backfill` holds its run, one row at most, and `usage_backfill_threads` a row for each thread a run listed. `UsageBackfill`, `BackfillThread` and `BackfillPlanRow` in `src/control/usage.ts` are the shapes, and `src/control/usage-backfill.ts` is the job.
+The backfill reads every Claude Code transcript and pi session on archived threads' pylons from the start, one pylon at a time. `usage_backfill` holds its run, one row at most, and `usage_backfill_threads` a row for each thread a run listed. `UsageBackfill`, `BackfillThread` and `BackfillPlanRow` in `src/contract/usage.ts` are the shapes, and `src/control/usage-backfill.ts` is the job.
 
 | `usage_backfill` | Meaning |
 |---|---|

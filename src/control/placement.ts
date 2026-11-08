@@ -4,6 +4,7 @@ import { diskRefusal } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase } from "./reconcile.ts";
 import { Refusal } from "./refusal.ts";
+import { gib } from "../util/gib.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
@@ -212,8 +213,6 @@ export function uncounted(p: StoredPylon, seen: PylonObservation | undefined): R
   const reboots = seen.phase === "stopped" || (seen.phase === "broken" && seen.cause === "controller" && p.retrying);
   return reboots ? { cpus, memoryGiB, diskGiB: 0 } : { cpus: 0, memoryGiB: 0, diskGiB: 0 };
 }
-
-export const gib = (n: number) => Number(n.toFixed(1));
 
 export function overcommitted(c: NodeRecord["capacity"]): boolean {
   return c !== null && c.committedMemoryGiB > c.memoryGiB;

@@ -9,7 +9,7 @@ import { Agent, request } from "node:http";
 import { connect, isIP, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { WebSocket } from "ws";
-import type { RefusalCode } from "../control/refusal.ts";
+import type { RefusalCode } from "../contract/threads.ts";
 import { apiIdleMs, apiKeepAliveMs } from "../contract/route.ts";
 
 /** Every way a command fails. Each has its own exit code, so a caller can tell them apart without parsing text. */

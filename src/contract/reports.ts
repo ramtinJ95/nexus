@@ -7,10 +7,13 @@ import type { z } from "zod";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { NodeSummary } from "../control/wire.ts";
 import type { NodeMetrics } from "../control/node-metrics.ts";
-import type { BackfillPlanRow, UsageBackfill, UsageReport } from "../control/usage.ts";
+import type { BackfillPlanRow, UsageBackfill, UsageReport } from "./usage.ts";
 import type { DoctorReport, HealthChange, HealthView } from "../control/doctor-model.ts";
 import type { checksSeenSchema } from "./reports-parse.ts";
 import { queryOf, route, type QueryCodec } from "./route.ts";
+
+export type { NodePylons } from "../control/placement.ts";
+export type { DoctorReport } from "../control/doctor-model.ts";
 
 /** Milliseconds since the epoch. `to` is now by default. */
 export interface MetricsQuery { from: number; to?: number | undefined }

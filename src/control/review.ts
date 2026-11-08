@@ -28,7 +28,8 @@ import { defaultClaudeModel, modelFamily, secondReviewerModels } from "../protoc
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
-import { caseOf, remedyOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
+import { caseOf, remedyOf, waivable, waivedName, type Hold } from "./holds.ts";
+import { reservedCases, reservedNames } from "../contract/reserved.ts";
 import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule, staleQuote, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import type { AgentState } from "./agent-conversation.ts";

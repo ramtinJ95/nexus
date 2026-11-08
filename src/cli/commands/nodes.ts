@@ -1,10 +1,10 @@
 /** `nexus nodes` and `nexus node`: the nodes' capacity and pylons, and one node's health. */
-import { gib, type NodePylons } from "../../control/placement.ts";
+import { gib } from "../../util/gib.ts";
 import type { NodeCapacity } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { diskText, lowDisk } from "../../disk-space.ts";
 import { type Command, ago, request, table } from "../kit.ts";
-import { nodeRoutes } from "../../contract/reports.ts";
+import { nodeRoutes, type NodePylons } from "../../contract/reports.ts";
 
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
 function capacityText(c: Partial<NodeCapacity>, overcommitted: boolean): string {

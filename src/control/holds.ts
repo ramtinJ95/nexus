@@ -1,15 +1,8 @@
 /**
- * The merge policy's hold vocabulary: the reserved cases, the hold codes, and each code's row: its rule, the name a
- * waiver of it goes by, and what the loop does about it alone.
+ * The merge policy's hold vocabulary: the hold codes, and each code's row: its rule, the name a waiver of it goes by,
+ * and what the loop does about it alone. src/contract/reserved.ts holds the reserved cases.
  */
-export const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
-export type ReservedCase = typeof reservedCases[number];
-
-export const reservedNames: Readonly<Record<ReservedCase, string>> = {
-  secrets: "changes to secrets", egress: "changes to the egress allowlist", auth: "changes to login or auth", tailnet: "changes to the tailnets",
-  "destructive-migration": "database migrations that delete or rewrite existing data", "image-rebuild": "pylon image rebuilds",
-  "cli-breaking": "breaking changes to the CLI's contract", irreversible: "anything irreversible",
-};
+import { reservedNames, type ReservedCase } from "../contract/reserved.ts";
 
 export const personOnly = "Always needs the person: ";
 

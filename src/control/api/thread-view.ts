@@ -6,7 +6,7 @@ import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadAgents } from "../thread-agent.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import { actualState, desiredPhase, keptPastDay, retryRefusal } from "../reconcile.ts";
-import { agentView, type AgentView } from "../conversation-view.ts";
+import { agentView, type AgentView } from "../../contract/threads.ts";
 import { bootNetwork } from "../threads.ts";
 import { judgmentView } from "../judgment.ts";
 import { reviewView } from "../review-view.ts";

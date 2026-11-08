@@ -1,8 +1,7 @@
 /** The pipeline items: `items` and the `item` commands. */
-import type { PipelineItem } from "../../control/pipeline.ts";
 import { type Command, str, request, briefOptions, briefOf, ago, table, clip } from "../kit.ts";
 import { itemRules } from "../../contract/threads-parse.ts";
-import { itemRoutes } from "../../contract/projects.ts";
+import { itemRoutes, type PipelineItem } from "../../contract/projects.ts";
 
 const itemRow = (i: PipelineItem) => [i.id, i.phase.kind, i.phase.why, i.thread ?? "no thread yet", i.project, ago(i.addedAt), i.title];
 

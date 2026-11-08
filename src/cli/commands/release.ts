@@ -3,16 +3,11 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
-import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
-import type { ImageOperation } from "../../control/image-store.ts";
-import { ended, type Review } from "../../control/review-model.ts";
-import { landPress } from "../../control/policy.ts";
-import { isOpen } from "../../control/questions.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
-import { deployWaitMs, imageRoutes, releaseRoutes } from "../../contract/release.ts";
-import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
+import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
+import { questionRoutes, reviewRoutes, type Review } from "../../contract/reviews.ts";
 import { reviewText } from "../thread-text.ts";
 
 function releaseText(view: ReleaseView): string {
@@ -95,26 +90,24 @@ export async function confirmWaiver(terminal: Terminal, pr: number, head: string
 }
 
 /**
- * What the dashboard's Land press sends for the thread's review as it is now: its head, and the holds the press
- * waives, once the person confirmed them on `terminal`. While the review asks about its holds, the `question` to
- * answer Land instead, once the person confirmed the holds it names, and whether the review is still `running`, so
- * the answer waives them for its landing later rather than starts it.
+ * What the dashboard's Land press sends for the thread's review as the API's `reviewView` says it is now: its head,
+ * and the holds the press waives, once the person confirmed them on `terminal`. While the review asks about its
+ * holds, the `question` to answer Land instead, once the person confirmed the holds it names, and whether the review
+ * is still `running`, so the answer waives them for its landing later rather than starts it.
  */
 export async function pressOf(api: Api, id: string, terminal: Terminal): Promise<{ head?: string; waive?: string[]; question?: string; running?: boolean }> {
   needsTerminal(terminal);
-  const { review, questions } = await request(api, threadRoutes.show, { thread: id });
+  const { review, reviewView: view } = await request(api, threadRoutes.show, { thread: id });
   if (review === null) return {};
-  const asking = questions.find((q) => isOpen(q) && q.holds?.review === review.id);
-  if (asking?.holds !== undefined) {
-    if (!await confirmWaiver(terminal, review.pr.number, asking.holds.head, asking.holds.holds.map((h) => h.text))) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
-    return { question: asking.id, running: !ended(review) };
+  if (view == null) throw new CliError("failed", "land --waive needs a control plane of 0.71.0 or later, which says what a Land press waives. Upgrade it, or press Land on the dashboard");
+  if (view.question !== null) {
+    if (!await confirmWaiver(terminal, review.pr.number, view.question.head, view.question.holds.map((h) => h.text))) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
+    return { question: view.question.id, running: !view.ended };
   }
-  const press = landPress(review);
-  const head = review.rounds.at(-1)!.head;
-  if (press.kind !== "lands" || press.waives.length === 0) return { head };
-  const waive = press.waives.map((h) => h.text);
-  if (!await confirmWaiver(terminal, review.pr.number, head, waive)) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
-  return { head, waive };
+  if (view.press.kind !== "lands" || view.press.waives.length === 0) return { head: view.head };
+  const waive = view.press.waives.map((h) => h.text);
+  if (!await confirmWaiver(terminal, review.pr.number, view.head, waive)) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
+  return { head: view.head, waive };
 }
 
 /** What `land --waive` prints once it answered the review's question: a landing, or a waiver for a review still under way. */

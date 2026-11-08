@@ -18,7 +18,8 @@ import { observeNode, image, laptop, type testApi } from "../../test-support/api
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../test-support/kit.ts";
 import { sampleOf } from "../node-metrics.ts";
 import { personPhase, type Review, type Round } from "../review-model.ts";
-import { personOnly, reservedNames } from "../holds.ts";
+import { personOnly } from "../holds.ts";
+import { reservedNames } from "../../contract/reserved.ts";
 import { proposalQuestion } from "../planning.ts";
 import { startKey } from "../threads.ts";
 import { checkoutDir, claudeHook } from "../../../images/pylon/nexus-contract.ts";
