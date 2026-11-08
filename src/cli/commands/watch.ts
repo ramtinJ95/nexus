@@ -3,15 +3,16 @@
  * the watch's events, whose types this exports.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ConversationView, EntryRecord, LiveState } from "@earendil-works/pi-durable";
+import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, ThreadDetail } from "../../control/wire.ts";
 import type { Thread } from "../../control/thread-store.ts";
-import { maxEntries, type ClaudeConversation, type ClaudeEntry } from "../../control/claude-transcript.ts";
+import { maxEntries, type ClaudeEntry } from "../../control/claude-transcript.ts";
 import { agentView, claudeFrames, queuedOf, type ClaudeFrame, type ViewFrame } from "../../control/conversation-view.ts";
 import type { ActualState } from "../../control/reconcile.ts";
 import { CliError } from "../transport.ts";
-import { type Api, type Follow, type Command, str, thread, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
+import { type Api, type Follow, type Command, str, thread, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
+import { threadRoutes } from "../../contract/threads.ts";
 import { entryText, type View, queuedTexts, busy, conversationText, claudeEntryText, claudeText } from "../conversation-text.ts";
 
 /** What watch reports of a thread, as one event whenever any of it changes. */
@@ -250,7 +251,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   async function poll() {
     while (!stop.signal.aborted) {
       try {
-        detail = await api("GET", thread(id)) as ThreadDetail;
+        detail = await request(api, threadRoutes.show, { thread: id });
         firstDetail.resolve(detail);
         succeeded("poll");
         print();
@@ -277,7 +278,7 @@ export const watchCommands: Readonly<Record<string, Command>> = {
   conversation: {
     args: [1, 1],
     async run(api, [id]) {
-      const served = agentView(await api("GET", `${thread(id!)}/conversation`) as ConversationView | ClaudeConversation);
+      const served = agentView((await request(api, threadRoutes.conversation, { thread: id! }))!);
       return { json: served.view, text: served.kind === "claude" ? claudeText(served.view) : conversationText(served.view) };
     },
   },

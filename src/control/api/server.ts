@@ -44,6 +44,7 @@ import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } f
 import type { Whoami } from "../wire.ts";
 import type { UsageBackfillJob } from "../usage-backfill.ts";
 import { attachRoute, parseAttachQuery } from "../../contract/attach-parse.ts";
+import { apiKeepAliveMs } from "../../contract/route.ts";
 import { openTerminal } from "../../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "../attach.ts";
 import { refusalStatus } from "../http-error.ts";
@@ -349,6 +350,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   function makeServer(certificate?: Certificate) {
     const serverOptions = {
+      keepAliveTimeout: apiKeepAliveMs,
       // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
       shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url) ?? ""),
     };

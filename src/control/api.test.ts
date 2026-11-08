@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { featureRoutes, type ApiOptions } from "./api/server.ts";
 import type { ApiKit } from "./api/kit.ts";
 import { version } from "../version.ts";
-import type { QueuedThread } from "./queue.ts";
+import type { QueuedThread } from "../contract/threads.ts";
 import type { ReviewLoop } from "./review.ts";
 import { joinTokenTtlMs, mintJoinToken } from "./join.ts";
 import type { ProjectId } from "../ids.ts";
@@ -663,7 +663,6 @@ test("the route table holds the routes it always has, and each path matches one 
     "POST ^\\/v1\\/projects$ allowed: adding a project changes no thread, pylon or project there is",
     "POST ^\\/v1\\/questions\\/([^/]+)\\/answer$ allowed: each question says who may answer it, which refusalOf checks",
     "POST ^\\/v1\\/threads$ person: start a thread, startsTurn",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/(seen|unseen)$ allowed: what the person has read changes no thread or pylon",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/abort$ person: abort a thread's turn",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/activity$ allowed: a page open on the thread only keeps its pylon awake",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/archive$ person: archive a thread",
@@ -674,16 +673,18 @@ test("the route table holds the routes it always has, and each path matches one 
     "POST ^\\/v1\\/threads\\/([^/]+)\\/retry$ person: retry a thread's turn, startsTurn",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/review$ person: start a review",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/review\\/cancel$ person: cancel a review",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/seen$ allowed: what the person has read changes no thread or pylon",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/sessions$ person: open a session in a thread's pylon",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)\\/focus$ person: focus a session in a thread's pylon",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/start$ person: start a queued thread, startsTurn",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/unarchive$ person: unarchive a thread",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/unseen$ allowed: what the person has read changes no thread or pylon",
     "POST ^\\/v1\\/usage\\/backfill$ deployer: start or stop the usage backfill",
     "PUT ^\\/v1\\/release$ deployer: deploy",
   ]);
   const routes = [["GET", /^\/v1\/health$/] as const, ...table];
   for (const [method, regex] of routes) {
-    const path = regex.source.slice(1, -1).replaceAll("\\/", "/").replaceAll("(seen|unseen)", "seen").replaceAll("([^/]+)", "x").replaceAll("([\\w.-]+)", "x");
+    const path = regex.source.slice(1, -1).replaceAll("\\/", "/").replaceAll("([^/]+)", "x").replaceAll("([\\w.-]+)", "x");
     const matching = routes.filter((other) => other[0] === method && other[1].test(path));
     assert.equal(matching.length, path === "/threads/new" ? 2 : 1, `${method} ${path} matches ${matching.length} routes of its method`);
     assert.equal(matching[0]![1], regex);

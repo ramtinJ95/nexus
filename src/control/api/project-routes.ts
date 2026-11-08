@@ -11,6 +11,7 @@ import { gitUrl, type AutoReviewMode, type Project } from "../project.ts";
 import { editedRules, standingRulesLimit } from "../standing-rules.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, demand, landing } from "./access.ts";
+import { resourcesSchema } from "../../contract/threads-parse.ts";
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
@@ -19,7 +20,7 @@ export const projectSchema = z.strictObject({
   repoUrl: gitUrl.nullable(),
   defaultBranch: z.string().min(1),
   defaultNode: z.string().min(1).transform((node) => node as NodeName | "auto"),
-  resources: z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() }),
+  resources: resourcesSchema,
   allowedHosts: z.array(host),
   secrets: z.array(z.strictObject({ name: z.string().regex(secretNamePattern), hosts: z.array(z.string().regex(secretHostPattern)).min(1) }))
     .refine((grants) => new Set(grants.map((grant) => grant.name)).size === grants.length, "duplicate secret names: list all of a secret's hosts in one grant")
@@ -38,7 +39,7 @@ const secondReviewSchema = z.union([
 /** Only an edit sets `autoReview`, and the API records its caller in it, so a project's add cannot name someone else. */
 const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup: true })
   .extend({
-    resources: projectSchema.shape.resources.partial(), autoReview: z.union([z.strictObject({ mode: z.enum(["review", "land", "yolo"]) }), z.strictObject({ land: z.boolean() })]).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
+    resources: resourcesSchema.partial(), autoReview: z.union([z.strictObject({ mode: z.enum(["review", "land", "yolo"]) }), z.strictObject({ land: z.boolean() })]).nullable(), pipeline: z.strictObject({ autoStart: z.boolean() }).nullable(),
     standingRules: rulesText.nullable(), secondReview: secondReviewSchema.nullable(),
   }).partial();
 

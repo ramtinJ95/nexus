@@ -13,7 +13,8 @@ import { asSent, named, nonEmpty, parse } from "../parse.ts";
 import { isImageId, isTemplateId, type NodeName, type PortableArtifactId, type ProjectId, type TailnetNodeId } from "../ids.ts";
 import { imageId, sha256, templateId } from "./fields.ts";
 import { probeError, ProbeHttpError, text, verifyPeer, type Whois } from "./http.ts";
-import { probeRoutes, routePath } from "./routes.ts";
+import { probeRoutes } from "./routes.ts";
+import { routePath } from "../util/route-path.ts";
 
 const manifestHeader = "x-nexus-manifest";
 /** A copy that sends nothing for this long has broken off. tar can be slow to start on a large sparse file. */

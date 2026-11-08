@@ -10,6 +10,7 @@ import { connect, isIP, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { WebSocket } from "ws";
 import type { RefusalCode } from "../control/refusal.ts";
+import { apiKeepAliveMs } from "../contract/route.ts";
 
 /** Every way a command fails. Each has its own exit code, so a caller can tell them apart without parsing text. */
 export type ErrorKind = "failed" | "unreachable" | "refused" | "not-found" | "conflict" | "invalid";
@@ -88,8 +89,7 @@ export async function call(endpoint: Endpoint, method: string, path: string, bod
   return reply(method, path, status, text);
 }
 
-/** The API's server closes a connection idle for Node's default 5 s, so the pool lets go of one before that. */
-const pooledMs = 4_000;
+const pooledMs = apiKeepAliveMs - 1_000;
 const pools = new WeakMap<Endpoint, Agent>();
 
 /** One keep-alive connection for the GETs of a process, so a poll every second or two costs no tunnel or handshake. */

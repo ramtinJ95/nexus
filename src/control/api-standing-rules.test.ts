@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { checkCaller, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
 import { checkGate, verifyGate } from "./gate.ts";
 import type { PipelineItem } from "./pipeline.ts";
-import type { QueuedThread } from "./queue.ts";
+import type { QueuedThread } from "../contract/threads.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import type { ImageId, ProjectId, ThreadId } from "../ids.ts";

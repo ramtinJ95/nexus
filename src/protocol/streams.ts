@@ -10,7 +10,8 @@ import { PassThrough, type Duplex } from "node:stream";
 import { z } from "zod";
 import { parseJson } from "../parse.ts";
 import type { PylonId } from "../ids.ts";
-import { probeRoutes, routePath } from "./routes.ts";
+import { probeRoutes } from "./routes.ts";
+import { routePath } from "../util/route-path.ts";
 
 /**
  * A stream is a raw pipe to a process in the guest, such as the pi-env daemon. It carries the process's stdout

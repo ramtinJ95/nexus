@@ -4,7 +4,8 @@ import { createServer } from "node:http";
 import type { JobId, NodeName, PortableArtifactId, PylonId, TailnetNodeId } from "../ids.ts";
 import { connectProbe } from "./client.ts";
 import { fetchArtifact } from "./artifacts.ts";
-import { probeRoutes, routePath, routeRole } from "./routes.ts";
+import { probeRoutes, routeRole } from "./routes.ts";
+import { routePath } from "../util/route-path.ts";
 
 /** Each (method, path) client.ts and artifacts.ts spelled out, with the role routeAuth gave its prefix, before the table. */
 const before = [

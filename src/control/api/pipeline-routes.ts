@@ -7,7 +7,7 @@ import { itemView, type Pipeline } from "../pipeline.ts";
 import type { ItemId } from "../../ids.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
-import { startSchema } from "./thread-routes.ts";
+import { startSchema } from "../../contract/threads-parse.ts";
 
 /** A pipeline item: what its queued thread starts with, after the items whose threads must merge first. */
 const itemSchema = startSchema.omit({ after: true, requestId: true, planning: true }).extend({ after: z.array(z.string().min(1)).max(32).optional() });

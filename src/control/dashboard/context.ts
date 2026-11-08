@@ -5,7 +5,7 @@ import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import type { Review } from "../review-model.ts";
 import type { AnswerRefusal, Question } from "../questions.ts";
-import type { QueuedThread } from "../queue.ts";
+import type { QueuedThread } from "../../contract/threads.ts";
 import type { InboxNeed } from "../work.ts";
 
 export type LandRefusal = "no review loop" | "not a deployer";

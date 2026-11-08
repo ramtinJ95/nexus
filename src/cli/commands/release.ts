@@ -2,14 +2,15 @@
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
-import type { ImagesCurrent, ThreadDetail } from "../../control/wire.ts";
+import type { ImagesCurrent } from "../../control/wire.ts";
 import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
 import type { ImageOperation } from "../../control/image-store.ts";
 import { ended, type Review } from "../../control/review-model.ts";
 import { landPress } from "../../control/policy.ts";
 import { isOpen } from "../../control/questions.ts";
 import { CliError } from "../transport.ts";
-import { type Api, type Result, type Command, str, thread, int, table, pollUntil } from "../kit.ts";
+import { type Api, type Result, type Command, str, thread, request, int, table, pollUntil } from "../kit.ts";
+import { threadRoutes } from "../../contract/threads.ts";
 import { reviewText } from "../thread-text.ts";
 
 function releaseText(view: ReleaseView): string {
@@ -99,7 +100,7 @@ export async function confirmWaiver(terminal: Terminal, pr: number, head: string
  */
 export async function pressOf(api: Api, id: string, terminal: Terminal): Promise<{ head?: string; waive?: string[]; question?: string; running?: boolean }> {
   needsTerminal(terminal);
-  const { review, questions } = await api("GET", thread(id)) as ThreadDetail;
+  const { review, questions } = await request(api, threadRoutes.show, { thread: id });
   if (review === null) return {};
   const asking = questions.find((q) => isOpen(q) && q.holds?.review === review.id);
   if (asking?.holds !== undefined) {
@@ -148,7 +149,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
       if (question !== undefined) {
         await api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option: "Land" });
-        const { review } = await api("GET", thread(id!)) as ThreadDetail;
+        const { review } = await request(api, threadRoutes.show, { thread: id! });
         return { json: review, text: answeredText(review!, running === true) };
       }
       const r = await api("POST", `${thread(id!)}/land`, press) as Review;

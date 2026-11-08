@@ -16,7 +16,8 @@ import { parseCommandResult, type CommandResult, type PylonCommand } from "./com
 import { clientByteStream, streamPath, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { artifactUsageSchema, dropReplySchema, type ArtifactUsage, type DropReply, type DropRequest } from "./cleanup.ts";
-import { gitReadReplySchema, probePort, probeRoutes, routePath, type ProbeRoute } from "./routes.ts";
+import { gitReadReplySchema, probePort, probeRoutes, type ProbeRoute } from "./routes.ts";
+import { routePath } from "../util/route-path.ts";
 import { isProbeError, probeError, ProbeHttpError, text, verifyPeer, type Whois } from "./http.ts";
 
 /**

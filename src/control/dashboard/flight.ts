@@ -4,7 +4,7 @@
  * from `?peek=` so a poll keeps it fresh and a link opens it without a script.
  */
 import type { Thread } from "../thread-store.ts";
-import type { QueuedThread } from "../queue.ts";
+import type { QueuedThread } from "../../contract/threads.ts";
 import type { Project } from "../project.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { PipelineItem, ItemPhase } from "../pipeline.ts";

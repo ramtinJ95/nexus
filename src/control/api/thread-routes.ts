@@ -1,7 +1,7 @@
 /**
  * Starting, listing, messaging, archiving and deleting threads, and the turns and pylons a person retries.
  */
-import { z } from "zod";
+import type { z } from "zod";
 import type { Planning } from "../planning.ts";
 import { isPipelineRequestId, requestIds, type ProjectId, type ThreadId } from "../../ids.ts";
 import type { StartKey } from "../start-request.ts";
@@ -9,48 +9,14 @@ import type { Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { Refusal } from "../refusal.ts";
 import { observedPylon } from "../observed.ts";
-import { queuedView, type QueuedThread, type ThreadQueue } from "../queue.ts";
+import { queuedView, type ThreadQueue } from "../queue.ts";
 import { retryRefusal } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
 import { sendWithStandingRules } from "../standing-rules.ts";
-import { ok, created, noContent, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { ok, created, noContent, parse, on, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
-import { projectSchema } from "./project-routes.ts";
-
-export const startSchema = z.strictObject({
-  model: z.string().trim().min(1).max(200).optional(),
-  claude: z.string().trim().min(1).max(16_384).refine((prompt) => !prompt.includes("\0"), "a Claude prompt cannot hold a NUL character, which no command-line argument can").optional(),
-  project: z.string().min(1),
-  title: z.string().min(1),
-  node: z.string().min(1).optional(),
-  branch: z.string().min(1).optional(),
-  /**
-   * Until the control plane mirrors repos, the caller may pin a commit. The default is the branch tip at clone time.
-   * A scratch project has none to pin.
-   */
-  commit: z.string().min(1).optional(),
-  /** The thread's size where it differs from its project's. Its pylon boots this size on every wake. */
-  resources: projectSchema.shape.resources.partial().optional(),
-  /** Queue the thread to start once each of these threads' pull requests has merged. */
-  after: z.array(z.string().min(1)).min(1).max(32).optional(),
-  /** A Nexus agent thread's first message, sent as the person's once it starts. */
-  message: z.string().min(1).optional(),
-  /** Minted by the client per start, such as start:<uuid>. A retry with the same ID and body is the same start. */
-  requestId: z.string().min(1).max(200).optional(),
-  /** A Nexus agent thread that plans: its proposals become questions for the person. */
-  planning: z.literal(true).optional(),
-});
-
-// Agent activity comes from the harness.
-const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
-const activitySchema = z.strictObject({ kind: z.literal("human") });
-const messageSchema = z.strictObject({
-  text: z.string().min(1),
-  /** Minted by the client per message, such as msg:<uuid>. A retry with the same ID is the same message. */
-  requestId: z.string().min(1),
-  /** followUp waits for the current run. steer joins it after its current tool round. */
-  mode: z.enum(["followUp", "steer"]).default("followUp"),
-});
+import { threadRoutes as routes, type QueuedThread } from "../../contract/threads.ts";
+import { activitySchema, messageSchema, seenSchema, startSchema } from "../../contract/threads-parse.ts";
 
 export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null | undefined; planning?: Planning | null | undefined }): readonly RouteEntry[] {
   const { lookup, thread, guard, wakeThread, row, detail, open, registry, harness, startThread, agents, agentOf } = kit;
@@ -157,68 +123,71 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
     return record.status === "started" ? registry.thread(record.id)! : queuedView(registry, record);
   }
 
+  const seen = (unseen: boolean) => async ({ thread: id }: { thread: string }, r: { body(empty?: unknown): Promise<unknown> }) => {
+    const t = thread(id);
+    const body = parse(seenSchema, await r.body({}));
+    registry.markSeen(t.id, unseen, Date.now(), body.lastReplyAt);
+    return noContent;
+  };
+
   return [
-    ["GET", /^\/v1\/threads$/, anyAllowed, (_, r) => {
-      const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
-      return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
-    }],
-    ["POST", /^\/v1\/threads$/, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
+    on(routes.list, anyAllowed, (_, r) => {
+      const threads = registry.threads(r.query.project as ProjectId | undefined);
+      return ok((r.query.deleted === false ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
+    }),
+    on(routes.start, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
       return created(await start(await r.body(), r.caller));
-    }],
-    ["GET", /^\/v1\/queued$/, anyAllowed, (_, r) => {
-      const project = r.query.get("project");
-      return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === null || q.project === project)).map((q) => queuedView(registry, q)));
-    }],
-    ["GET", /^\/v1\/queued\/([^/]+)$/, anyAllowed, (m) => {
-      const queued = registry.queuedThread(m[1]! as ThreadId);
-      if (queued === undefined || queued.status === "started") throw new HttpError(404, `no queued thread ${m[1]!}`);
+    }),
+    on(routes.queued, anyAllowed, (_, r) => {
+      const { project } = r.query;
+      return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === undefined || q.project === project)).map((q) => queuedView(registry, q)));
+    }),
+    on(routes.queuedThread, anyAllowed, ({ thread: id }) => {
+      const queued = registry.queuedThread(id as ThreadId);
+      if (queued === undefined || queued.status === "started") throw new HttpError(404, `no queued thread ${id}`);
       return ok(queuedView(registry, queued));
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, { role: "person", action: "start a queued thread", startsTurn: true }, async (m, r) => {
-      return created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller));
-    }],
-    ["GET", /^\/v1\/threads\/([^/]+)$/, anyAllowed, (m) => ok(detail(thread(m[1]!)))],
-    ["DELETE", /^\/v1\/threads\/([^/]+)$/, { role: "person", action: "delete a thread" }, async (m) => {
-      const found = lookup(m[1]!);
-      return ok("queued" in found ? queuedStatus(m[1]!, "deleted") : await setStatus(found.thread, "deleted"));
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, { role: "allowed", why: "what the person has read changes no thread or pylon" }, async (m, r) => {
-      const t = thread(m[1]!);
-      const body = parse(seenSchema, await r.body({}));
-      registry.markSeen(t.id, m[2] === "unseen", Date.now(), body.lastReplyAt);
-      return noContent;
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, { role: "person", action: "archive a thread" }, async (m) => {
-      const found = lookup(m[1]!);
-      return ok("queued" in found ? queuedStatus(m[1]!, "archived") : await setStatus(found.thread, "archived"));
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, { role: "person", action: "unarchive a thread" }, (m) => {
-      const found = lookup(m[1]!);
-      return ok("queued" in found ? queuedStatus(m[1]!, "queued") : unarchive(found.thread));
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, { role: "allowed", why: "a page open on the thread only keeps its pylon awake" }, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
+    }),
+    on(routes.startQueued, { role: "person", action: "start a queued thread", startsTurn: true }, async ({ thread: id }, r) => {
+      return created(await queueOrRefuse().startNow(id as ThreadId, r.caller));
+    }),
+    on(routes.show, anyAllowed, ({ thread: id }) => ok(detail(thread(id)))),
+    on(routes.delete, { role: "person", action: "delete a thread" }, async ({ thread: id }) => {
+      const found = lookup(id);
+      return ok("queued" in found ? queuedStatus(id, "deleted") : await setStatus(found.thread, "deleted"));
+    }),
+    on(routes.seen, { role: "allowed", why: "what the person has read changes no thread or pylon" }, seen(false)),
+    on(routes.unseen, { role: "allowed", why: "what the person has read changes no thread or pylon" }, seen(true)),
+    on(routes.archive, { role: "person", action: "archive a thread" }, async ({ thread: id }) => {
+      const found = lookup(id);
+      return ok("queued" in found ? queuedStatus(id, "archived") : await setStatus(found.thread, "archived"));
+    }),
+    on(routes.unarchive, { role: "person", action: "unarchive a thread" }, ({ thread: id }) => {
+      const found = lookup(id);
+      return ok("queued" in found ? queuedStatus(id, "queued") : unarchive(found.thread));
+    }),
+    on(routes.activity, { role: "allowed", why: "a page open on the thread only keeps its pylon awake" }, async ({ thread: id }, r) => { recordActivity(thread(id), await r.body()); return noContent; }),
     // The body first, so the thread's status is read after the last await before the message is submitted.
-    ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, { role: "person", action: "message a thread", startsTurn: true }, async (m, r) => {
+    on(routes.message, { role: "person", action: "message a thread", startsTurn: true }, async ({ thread: id }, r) => {
       const body = await r.body();
-      const t = thread(m[1]!, { status: "open" });
+      const t = thread(id, { status: "open" });
       return { status: 202, body: await agentOf(t).send(t, parse(messageSchema, body)) };
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, { role: "person", action: "abort a thread's turn" }, async (m) => {
-      const t = thread(m[1]!, { status: "kept" });
+    }),
+    on(routes.abort, { role: "person", action: "abort a thread's turn" }, async ({ thread: id }) => {
+      const t = thread(id, { status: "kept" });
       await agents[registry.agent(t).kind].abort(t);
       return noContent;
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, { role: "person", action: "retry a thread's turn", startsTurn: true }, async (m) => {
-      await harness.retry(thread(m[1]!, { status: "open", agent: "harness" }).id);
+    }),
+    on(routes.retry, { role: "person", action: "retry a thread's turn", startsTurn: true }, async ({ thread: id }) => {
+      await harness.retry(thread(id, { status: "open", agent: "harness" }).id);
       return noContent;
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, { role: "person", action: "retry a thread's pylon" }, (m) => {
-      retryPylon(thread(m[1]!));
+    }),
+    on(routes.retryPylon, { role: "person", action: "retry a thread's pylon" }, ({ thread: id }) => {
+      retryPylon(thread(id));
       return noContent;
-    }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, anyAllowed, async (m) => {
-      const t = thread(m[1]!, { status: "kept" });
+    }),
+    on(routes.conversation, anyAllowed, async ({ thread: id }) => {
+      const t = thread(id, { status: "kept" });
       return ok(await agents[registry.agent(t).kind].read(t));
-    }],
+    }),
   ];
 }
