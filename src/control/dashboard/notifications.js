@@ -1,6 +1,7 @@
-import { attentions, needsPerson } from "../attention.ts";
+import { needsPerson } from "../attention.ts";
+import { attentionLabels } from "../client-wording.ts";
 
-export const noticeText = (row) => attentions[row.attention].label;
+export const noticeText = (row) => attentionLabels[row.attention];
 /** A notice opens the inbox's card for what the thread waits on. A reply waits on no one, so it opens the thread. */
 export const noticeUrl = (row) => row.attention === "reply" ? `/threads/${row.id}` : `/#needs-you:${row.id}:${row.attention}`;
 /** The cards a notice's hash names, best first: the thread's card for that attention, then any of the thread's. */

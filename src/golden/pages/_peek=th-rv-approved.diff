@@ -4,9 +4,9 @@ what differs from pages/index.html:
  </div>
  </details>
  </article>
--<article class="need need-review" id="need-th-rv-approved-review" data-thread="th-rv-approved" data-attention="decision" tabindex="-1" aria-label="Approved review: chore(deps): bump stripe-js to 5.2">
+-<article class="need need-review" id="need-th-rv-approved-review" data-thread="th-rv-approved" data-attention="decision" tabindex="-1" aria-label="Approved, yours to land: chore(deps): bump stripe-js to 5.2">
 -<details class="need-fold" id="fold-need-th-rv-approved-review">
-+<article class="need need-review picked" id="need-th-rv-approved-review" data-thread="th-rv-approved" data-attention="decision" tabindex="-1" aria-label="Approved review: chore(deps): bump stripe-js to 5.2">
++<article class="need need-review picked" id="need-th-rv-approved-review" data-thread="th-rv-approved" data-attention="decision" tabindex="-1" aria-label="Approved, yours to land: chore(deps): bump stripe-js to 5.2">
 +<details class="need-fold" id="fold-need-th-rv-approved-review" open>
  <summary class="need-sum" data-why="Approved, and lands once you press Land">
  <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">

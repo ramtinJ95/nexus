@@ -717,7 +717,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.match(paused.stderr, /session w1:p1 is paused with its pylon and resumes when its pylon wakes/);
   assert.deepEqual(s.commands, []);
   const shown = (await s.nexus(["show", thread.id])).stdout;
-  assert.match(shown, /^session: claude-code "review" in pane w1:p1, paused \(resumes on wake\)$/m);
+  assert.match(shown, /^session: claude-code "review" in pane w1:p1, paused, resumes on wake$/m);
   assert.match(shown, /^session: pi "plan" as failed-0123456789ab, failed: pi exited 1$/m);
   s.probeAnswers(async () => ({ kind: "drop-failed-session", dropped: true }));
   assert.equal((await s.nexus(["session", "close", thread.id, "failed-0123456789ab"])).code, 0);
@@ -731,7 +731,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.equal(archived.code, 5);
   assert.match(archived.stderr, /is archived, so its pylon stays paused/);
   assert.deepEqual(s.commands, []);
-  assert.match((await s.nexus(["show", thread.id])).stdout, /^session: claude-code "review" in pane w1:p1, paused \(resumes on unarchive\)$/m);
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^session: claude-code "review" in pane w1:p1, paused, resumes on unarchive$/m);
 });
 
 /** A pipe to the relay in the guest that prints Herdr's screen once its source is in, and exits 0 when its stdin ends. */

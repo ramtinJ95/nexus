@@ -25,7 +25,7 @@ type NudgeRegistry = Pick<Registry, "isReviewer" | "node" | "nudge" | "nudgedThr
 const text = `${nudgePrefix}
 Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you are blocked or the task needs no pull request, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
 
-const maxNudges = 2;
+export const maxNudges = 2;
 
 export function builderNudger(options: {
   registry: NudgeRegistry; github: Pick<GitHub, "find">; inbox: Inbox;

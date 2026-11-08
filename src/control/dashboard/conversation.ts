@@ -6,6 +6,7 @@ import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { AgentView } from "../conversation-view.ts";
 import { isOpen } from "../questions.ts";
 import { clock } from "./elapsed.ts";
+import { dialogWaits, freshVm, parkedText } from "../wording.ts";
 import { Html, html, dot, icon, unseen, limitText, ago, grows, type Tone } from "./view.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item, type ToolItem, type AskItem, type UserItem } from "./items.ts";
@@ -32,7 +33,7 @@ export function runOf(d: ThreadDetail, view: AgentView | null, items: readonly I
   // Attention ranks a reply above a wait, so the session's own state says whether a dialog waits in the terminal.
   const terminal = d.thread.sessionWaiting === true;
   if (terminal || open.some((q) => q.ask !== undefined) || (!busy && (open.length > 0 || d.thread.usageLimit !== undefined))) {
-    const why = terminal ? `${d.thread.sessionWaitingMessage ?? "It waits for input"}, in the pylon's terminal.`
+    const why = terminal ? `${dialogWaits(d.thread)}.`
       : open.length > 0 ? `${open.length === 1 ? "A question waits" : `${open.length} questions wait`} for your answer, above.`
       : `${limitText(d.thread, now)}.`;
     return { kind: "waiting", why, inTerminal: terminal };
@@ -63,7 +64,7 @@ export function stateBar(t: Thread, run: Run, now: number): Html {
       case "idle": return [html`Idle`, html`${run.repliedAt !== null && html`replied ${ago(run.repliedAt, now)}`}${run.paused && html`${run.repliedAt !== null && " · "}the pylon is paused, and a message wakes it`}`, html``];
       case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, run.claude ? interrupt : abort];
       case "waiting": return [html`Waiting for you`, html`${run.why}`, open && run.inTerminal && terminal];
-      case "parked": return [html`Stuck`, html`${run.tasks} ${run.tasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry" data-action="retry" data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
+      case "parked": return [html`Stuck`, html`${parkedText(run.tasks)}. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry" data-action="retry" data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
     }
   })();
   return html`<div class="state-bar state-${run.kind}" id="agent-state" data-state="${run.kind}" role="status">${run.kind === "working" ? html`<span class="spin" aria-hidden="true"></span>` : dot(runTone[run.kind])}<span class="state-label">${label}</span><span class="state-detail">${detail}</span>${end}${attach}</div>`;
@@ -110,7 +111,7 @@ export function composer(d: ThreadDetail, agent: ThreadAgent["kind"], run: Run, 
   const hint = claude !== null && primary === "steer" ? "Claude takes it at its next step." : look.hint;
   return html`<form id="prompt" class="composer composer-${primary}" data-thread="${t.id}"${claude !== null && " data-claude"}>
 ${asOf !== null && html`<p class="comp-note">${asOf} Sending a message wakes it and resumes Claude.</p>`}
-${d.pylon.notAnswering !== undefined && html`<p class="comp-note" role="alert">The pylon's guest has not answered its commands since ${ago(Date.parse(d.pylon.notAnswering.since), now)}, so a message may fail. Archive and unarchive the thread to give it a fresh VM. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first.</p>`}
+${d.pylon.notAnswering !== undefined && html`<p class="comp-note" role="alert">The pylon's guest has not answered its commands since ${ago(Date.parse(d.pylon.notAnswering.since), now)}, so a message may fail. ${freshVm}</p>`}
 <div class="comp-box">
 <textarea id="prompt-text" name="text" rows="2" required aria-label="${claude === null ? "Message the agent" : "Message Claude"}" placeholder="${placeholder}"></textarea>
 <div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}${hint !== null && html`<span class="dim small comp-hint">${hint}</span>`}<span class="comp-sends">${queue && html`<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp" title="Queue after this run (⌥↵)">Queue <kbd>⌥↵</kbd></button>`}<button type="submit" class="send send-${primary}" id="send" name="mode" value="${look.mode}" title="${look.label} (⌘↵)">${icon("up")}<span class="send-label">${look.label}</span> <kbd>⌘↵</kbd></button></span></div>

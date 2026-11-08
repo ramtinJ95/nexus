@@ -4,15 +4,18 @@
  * and what waits on the person.
  */
 import type { ThreadId } from "../../ids.ts";
-import { keptPastDay } from "../reconcile.ts";
 import { itemView, phaseStep, steps, threadStage, type ItemPhase, type PipelineItem, type Step } from "../pipeline.ts";
 import { checkBeside, checkThread, landingAt, landingSteps, liveNote, roundsSpent, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
-import { html, limitText, type Html, type Tone } from "./view.ts";
+import { html, type Html, type Tone } from "./view.ts";
+import { duration, needWording } from "../wording.ts";
 import type { Context } from "./context.ts";
 import type { ThreadNeed } from "../work.ts";
 import type { Role } from "../work-model.ts";
 
 export type Stage = Step | "held";
+
+/** How long a landed thread stays under Deployed once it is archived, as the review loop archives each builder that lands. */
+export const deployedForMs = 24 * 60 * 60 * 1000;
 
 /** Each phase of the work in flight, in the order work moves through them, with the tone of its marker. */
 export const stages: readonly { stage: Stage; label: string; tone: Tone; means: string }[] = [
@@ -22,7 +25,7 @@ export const stages: readonly { stage: Stage; label: string; tone: Tone; means: 
   { stage: "review", label: "In review", tone: "review", means: "Its pull request is open, or the review loop runs its rounds" },
   { stage: "held", label: "Held for you", tone: "bad", means: "Only you move these on" },
   { stage: "landing", label: "Landing", tone: "busy", means: "Checked, merged and deployed one at a time" },
-  { stage: "deployed", label: "Deployed", tone: "ok", means: "Merged, and deployed where the project deploys, until a day after its thread is archived" },
+  { stage: "deployed", label: "Deployed", tone: "ok", means: `Merged, and deployed where the project deploys, until ${duration(deployedForMs)} after its thread is archived` },
 ];
 export const stageLabel = Object.fromEntries(stages.map((s) => [s.stage, s.label])) as Record<Stage, string>;
 
@@ -55,39 +58,6 @@ function reviewNext(r: Review): string | null {
     case "needs-person": return r.phase.reasons[0] ?? null;
     case "merged": case "closed": case "cancelled": return null;
     default: return r.phase satisfies never;
-  }
-}
-
-/** What a card says waits on the person, from the first thing of the thread's that does. */
-export function needLabel(n: ThreadNeed): string {
-  switch (n.kind) {
-    case "review": return n.d.review?.phase.kind === "needs-person" ? "Review needs you" : "Approved, yours to land";
-    case "nudge": return "Stopped short of a pull request";
-    case "resume": return "Stopped resuming its turns";
-    case "disk": return "Disk kept for its usage";
-    case "question": return n.question.holds !== undefined ? "Holds to waive" : n.question.ask !== undefined ? "Claude asks" : n.question.proposal !== undefined ? "Proposed item" : n.d.judgments.some((j) => j.question === n.question.id) ? "Judgment" : "Needs your decision";
-    case "thread": return { waiting: "Dialog in its terminal", limited: "Usage limit", parked: "Stuck on the restart limit", failed: "Failed" }[n.attention];
-  }
-}
-
-const firstLine = (text: string) => text.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
-
-/** Why a thing of the thread's waits on the person, in a line, which the card it opens to says in full. */
-export function needWhy(n: ThreadNeed, now: number): string {
-  const { d } = n;
-  const t = d.thread;
-  switch (n.kind) {
-    case "review": return "";
-    case "nudge": return "Its turn ended without a pull request after two nudges";
-    case "resume": return n.why;
-    case "disk": return firstLine(keptPastDay(t, now) ?? "Its disk is kept for its token usage");
-    case "question": return firstLine(n.question.ask?.questions[0]?.question ?? n.question.proposal?.title ?? n.question.text);
-    case "thread": switch (n.attention) {
-      case "waiting": return t.sessionWaitingMessage ?? "A dialog waits for input in the pylon's terminal";
-      case "limited": return `It ${limitText(t, now)}`;
-      case "parked": return `${d.agent?.parkedTasks ?? 0} ${d.agent?.parkedTasks === 1 ? "task" : "tasks"} hit the restart limit`;
-      case "failed": return firstLine(d.pylon.failed ?? d.claudeWorker?.message ?? "It failed");
-    }
   }
 }
 
@@ -128,7 +98,7 @@ export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id:
   const { phase, at } = threadStage(c.registry, id, c.now);
   const needs = c.needs().filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.kind !== "held" && n.d.thread.id === id);
   const review = c.registry.review(id);
-  const said = (needs.length === 0 ? null : needWhy(needs[0]!, c.now) || null) ?? (review === null ? null : reviewNext(review));
+  const said = (needs.length === 0 ? null : needWording(needs[0]!, c.now).why || null) ?? (review === null ? null : reviewNext(review));
   return { stage: stageOf(phase.kind), at, why: said ?? phase.why, needs };
 }
 

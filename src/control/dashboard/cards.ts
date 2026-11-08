@@ -5,8 +5,9 @@
 import type { ThreadDetail } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
-import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, reviewersNote, roundNote, roundsSpent, type Review } from "../review-model.ts";
-import { reviewedPr } from "../pr-watch-model.ts";
+import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, reviewersNote, roundNote, type Review } from "../review-model.ts";
+import { answerFinal } from "../client-wording.ts";
+import { needLabels, reviewPr, roundOf, stoppedShort } from "../wording.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { landsOnItsOwn } from "../project.ts";
 import { heldBy, landPress } from "../policy.ts";
@@ -66,12 +67,12 @@ export function questionCard(c: Context, q: Question): Html {
   }
   const refusal = c.answerRefusal(q);
   // Land on a question about holds is a Land press, so its confirmation says what it waives and merges.
-  const confirm = (option: string) => q.holds !== undefined && option === "Land" ? `${q.text.split("\n")[0]} The answer cannot be changed.` : `Answer "${option}"? The answer cannot be changed.`;
+  const confirm = (option: string) => q.holds !== undefined && option === "Land" ? `${q.text.split("\n")[0]} ${answerFinal}` : `Answer "${option}"? ${answerFinal}`;
   const buttons = q.options.map((option) => refusal === null
     ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="${confirm(option)}">${option}</button>`
     : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${option}</button>`);
-  return html`<section class="landing question" data-question="${q.id}" aria-label="Needs your decision">
-<div class="land-top"><h2>Needs your decision</h2>${q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
+  return html`<section class="landing question" data-question="${q.id}" aria-label="${needLabels.question}">
+<div class="land-top"><h2>${needLabels.question}</h2>${q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
 <div class="question-text">${prose(q.text)}</div>
 <p class="land-meta">Asked ${ago(q.askedAt, c.now)}. ${answerers[q.answerer]}</p>
 <div class="land-act"><div class="question-options">${buttons}</div>${refusal !== null && html`<p class="error">${answerRefusals[refusal](c.caller)}</p>`}</div>
@@ -128,8 +129,6 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 </section>`;
 }
 
-export const prOf = (d: ThreadDetail) => d.review === null ? undefined : reviewedPr(d.review, d.pullRequests, d.prWatch.stopped);
-
 /**
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
  * Land button, and then the landing's steps until it lands or ends for them again. The land route decides who may
@@ -164,7 +163,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
 <div class="land-act need-act">${cancelReview(d.thread.id, r, "btn-ghost")}</div>`}
 </section>`;
   }
-  const pr = prOf(d);
+  const pr = reviewPr(d);
   if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, id, card) : null;
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it.
@@ -197,7 +196,7 @@ ${round.live?.kind === "ran" && html`<details id="${id("land-live")}"><summary>T
   return html`<section class="landing" ${named(title)}>
 ${top(title)}
 ${roundNote(r) !== null && html`<p class="land-note">${roundNote(r)}</p>`}
-<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind})${r.second?.kind === "claude" && ` and ${r.second.model} (second reviewer)`}${r.second?.kind === "none" && " alone, with no second reviewer"}${!card && ` in round ${roundsSpent(r)} of ${r.maxRounds}`} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
+<p class="land-meta">Head ${short(round.head)} · approved by ${r.models.reviewer} (${r.reviewerKind})${r.second?.kind === "claude" && ` and ${r.second.model} (second reviewer)`}${r.second?.kind === "none" && " alone, with no second reviewer"}${!card && ` in ${roundOf(r)}`} · .nexus/check passed · ${round.live === undefined ? "no live check ran" : round.live.kind === "absent" ? "no .nexus/verify, so no live check" : `live check ${round.live.passed ? "passed" : "failed"}`}</p>
 ${card ? html`${reasons.length === 0 ? nothing : html`<ul class="land-reasons">${rules.map((h, i) => html`<li><details id="${id(`land-hold-${i}`)}"><summary>${h.reason} ${tag(h)}</summary><span class="dim">${h.why}</span></details></li>`)}</ul>`}
 <details id="${id("land-why")}"><summary>Findings and checks</summary>${found}</details>`
   : html`<details id="${id("land-why")}" open><summary>Why it waits for you</summary>
@@ -218,16 +217,16 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
  * One that merged or closed outside the review has nothing left to review. Cancelling it ends it for the person, who
  * then owns the pull request, and archives its reviewer.
  */
-function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof prOf>, id: (name: string) => string, card: boolean): Html {
+function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof reviewPr>, id: (name: string) => string, card: boolean): Html {
   const outside = pr === undefined || pr.state === "open" ? null : pr.state;
   const land = landsOnItsOwn(c.registry.project(d.thread.project)?.autoReview);
   const refusal = land || c.landRefusal === "no review loop" ? c.landRefusal : null;
   const again = outside === null && d.thread.status === "active";
   const confirm = `Review pull request #${r.pr.number}, "${r.pr.title}", again? A new reviewer thread starts at round 1${land ? ", and Nexus lands the pull request once it approves, as this project lands its reviews" : ""}.`;
-  const title = outside === "merged" ? "Merged outside its review" : outside === "closed" ? "Closed outside its review" : "Review needs you";
+  const title = outside === "merged" ? "Merged outside its review" : outside === "closed" ? "Closed outside its review" : needLabels["held-review"];
   return html`<section class="landing held-review" ${card ? html`aria-label="${title}"` : html`aria-labelledby="${id("landing-h")}"`}>
 ${!card && html`<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2><a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a></div>`}
-<p class="land-meta">${card ? "Reviewer" : `Ended in round ${roundsSpent(r)} of ${r.maxRounds} · reviewer`} <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})${r.second?.kind === "claude" && html` · second reviewer <a href="/threads/${r.second.thread}">${r.second.thread}</a> on ${r.second.model}`}</p>
+<p class="land-meta">${card ? "Reviewer" : `Ended in ${roundOf(r)} · reviewer`} <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})${r.second?.kind === "claude" && html` · second reviewer <a href="/threads/${r.second.thread}">${r.second.thread}</a> on ${r.second.model}`}</p>
 ${reviewersNote(r) !== null && html`<p class="land-note">${reviewersNote(r)}</p>`}
 ${r.phase.kind === "needs-person" && html`<ul class="error">${r.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
 ${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} merged on GitHub outside this review, so nothing is left to review or land.${c.deploys(r) && " Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run."} Cancel the review once nothing more is needed.</p>`
@@ -249,21 +248,21 @@ export function resumeCard(c: Context, t: Thread, id = (name: string) => name): 
   const resume = c.registry.claudeResume(t.id);
   if (resume?.state !== "person") return null;
   return html`<section class="landing nudge" aria-labelledby="${id("resume-h")}">
-<div class="land-top"><h2 id="${id("resume-h")}">Stopped resuming its turns</h2></div>
+<div class="land-top"><h2 id="${id("resume-h")}">${needLabels.resume}</h2></div>
 <p class="land-note">${resume.why} Write to it to resume it: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
 <div class="land-act need-act"><a class="btn btn-primary" href="/threads/${t.id}#write" data-write>Write to it</a></div>
 </section>`;
 }
 
 /**
- * Above the landing card, for a builder that ended its turns short of a pull request after two nudges: Nexus stopped
+ * Above the landing card, for a builder that ended its turns short of a pull request after its nudges: Nexus stopped
  * nudging it and waits on the person, whose message makes the thread theirs. `id` names its elements, as `landing`'s.
  */
 export function nudgeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
   if (c.registry.nudge(t.id)?.state !== "person") return null;
   return html`<section class="landing nudge" aria-labelledby="${id("nudge-h")}">
-<div class="land-top"><h2 id="${id("nudge-h")}">Stopped short of a pull request</h2></div>
-<p class="land-note">Its turn ended without a pull request after two nudges, so Nexus stopped nudging it. Write to it to say what to do next: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
+<div class="land-top"><h2 id="${id("nudge-h")}">${needLabels.nudge}</h2></div>
+<p class="land-note">${stoppedShort}, so Nexus stopped nudging it. Write to it to say what to do next: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
 <div class="land-act need-act"><a class="btn btn-primary" href="/threads/${t.id}#write" data-write>Write to it</a></div>
 </section>`;
 }

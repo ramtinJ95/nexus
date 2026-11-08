@@ -11,11 +11,12 @@ import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { promptSenders } from "../inbox.ts";
 import type { AgentView } from "../conversation-view.ts";
-import { checkBeside, liveNote, phaseNote, reviewersNote, roundNote, roundsSpent } from "../review-model.ts";
+import { liveNote, reviewersNote, roundNote } from "../review-model.ts";
+import { freshVm, plannerGaveUp, prWatchText, reviewLine, sessionPaused } from "../wording.ts";
 import type { QueuedThread, Wait } from "../../contract/threads.ts";
 import { tokenCount, type UsageTotals } from "../usage.ts";
-import { attentions } from "../attention.ts";
-import { Html, html, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
+import { attentionLabels } from "../client-wording.ts";
+import { Html, html, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { itemsOf, modelOf } from "./items.ts";
@@ -121,7 +122,7 @@ function headState(d: ThreadDetail, run: Run, now: number): readonly [string, To
   const own = threadState({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon }, now);
   const open = d.thread.status === "active" || d.thread.status === "idle";
   if (!open || d.pylon.actualState !== "running" || (d.attention !== null && d.attention !== "working")) return own;
-  return run.kind === "working" ? [attentions.working.label, attentions.working.tone] : run.kind === "idle" ? ["agent idle", "idle"] : own;
+  return run.kind === "working" ? [attentionLabels.working, attentionTone.working] : run.kind === "idle" ? ["agent idle", "idle"] : own;
 }
 
 /** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */
@@ -273,20 +274,20 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
   : html`<span title="${exact(usage.total)}">${tokenCount(usage.total)}</span> <span class="dim">(${usageColumns.filter((col) => col.field !== "total").map((col, i) => html`${i > 0 && " · "}<span title="${exact(usage[col.field])}">${col.short} ${tokenCount(usage[col.field])}</span>`)})</span>`}</dd>
 </dl>
 <code class="id">${pylon.id}</code>
-${pylon.failed !== null && html`<p class="error">The planner gave up: ${pylon.failed.split("\n")[0]}</p>`}
-${pylon.notAnswering !== undefined && html`<p class="error">The guest has not answered its last ${pylon.notAnswering.timeouts} commands, since ${ago(Date.parse(pylon.notAnswering.since), now)}. Archive and unarchive the thread to give it a fresh VM. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first.</p>`}
+${pylon.failed !== null && html`<p class="error">${plannerGaveUp(pylon.failed)}</p>`}
+${pylon.notAnswering !== undefined && html`<p class="error">The guest has not answered its last ${pylon.notAnswering.timeouts} commands, since ${ago(Date.parse(pylon.notAnswering.since), now)}. ${freshVm}</p>`}
 </section>
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + d.pullRequests.length)}</h2>
-${!d.prWatch.enabled ? html`<p class="empty">PR watch: off (no control-plane GitHub token configured).</p>` : html`<p>PR watch: ${d.prWatch.stopped ? "stopped (10 comment-only wakes)" : "on"}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
+${!d.prWatch.enabled ? html`<p class="empty">${prWatchText(d.prWatch)}.</p>` : html`<p>${prWatchText(d.prWatch)}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}
 ${d.pullRequests.map((pr) => html`<p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}: ${pr.title}</a> — ${pr.state}, checks ${pr.checks}, review ${pr.review}</p>`)}
-${d.review != null && html`<p>Nexus review ${d.review.id}${d.review.auto && ", started on its own"}: ${d.review.phase.kind}, round ${roundsSpent(d.review)} of ${d.review.maxRounds}, by <a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a> on ${d.review.models.reviewer}${d.review.land !== null && ", landing when approved"}${phaseNote(d.review)}${checkBeside(d.review)}</p>${reviewersNote(d.review) !== null && html`<p class="dim">${reviewersNote(d.review)}</p>`}${roundNote(d.review) !== null && html`<p class="dim">${roundNote(d.review)}</p>`}${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}${cancelReview(t.id, d.review, "btn-xs btn-ghost danger")}`}
+${d.review != null && html`<p>Nexus ${reviewLine(d.review).lead}<a href="/threads/${d.review.reviewer}">${d.review.reviewer}</a>${reviewLine(d.review).tail}</p>${reviewersNote(d.review) !== null && html`<p class="dim">${reviewersNote(d.review)}</p>`}${roundNote(d.review) !== null && html`<p class="dim">${roundNote(d.review)}</p>`}${liveNote(d.review) !== null && html`<p class="dim">${liveNote(d.review)}</p>`}${d.review.phase.kind === "needs-person" && html`<ul class="error">${d.review.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}${cancelReview(t.id, d.review, "btn-xs btn-ghost danger")}`}
 ${outputs.length === 0 ? html`<p class="empty">No other outputs yet.</p>` : html`<ul class="list outs">${outputs.map((o) => html`<li><span class="o-kind">${outputLabel[o.kind]}</span><code>${o.ref}</code></li>`)}</ul>`}
 </section>
 ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d.claudeWorker.state} · ${d.claudeWorker.model ?? "unknown"}</p>${d.claudeWorker.message === undefined ? "" : html`<pre>${d.claudeWorker.message}</pre>`}</section>`}
 <section aria-labelledby="sessions-h"><h2 id="sessions-h">Sessions ${count(d.sessions.length)}</h2>
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>
 <span class="o-kind">${harnessNamed(s.harness)?.label}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${s.state === "running" ? state(s.status, sessionTone[s.status])
-  : s.state === "paused" ? state(t.status === "archived" ? "paused, resumes on unarchive" : "paused, resumes on wake", "idle")
+  : s.state === "paused" ? state(sessionPaused(t), "idle")
   : state("failed", "bad")}${s.herdrPane !== null && html`<code class="dim pane">${s.herdrPane}</code>`}
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}
 ${s.state === "failed" && html`<p class="error s-why">It did not come back from the last wake, which the next tries again: ${s.message}</p>`}

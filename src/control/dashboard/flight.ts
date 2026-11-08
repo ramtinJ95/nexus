@@ -8,14 +8,14 @@ import type { QueuedThread } from "../../contract/threads.ts";
 import type { Project } from "../project.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { PipelineItem } from "../pipeline.ts";
-import { roundsSpent } from "../review-model.ts";
+import { needKind, needLabels, roundOf } from "../wording.ts";
 import { Html, html, dot, icon, ago, state, actualBadge, threadState, dims, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import type { HeldWork } from "../work.ts";
 import { clock, span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
 import type { Item } from "./items.ts";
-import { lifeOfItem, phaseTone, pipelineItems, lifeOfThread, needLabel, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
+import { deployedForMs, lifeOfItem, phaseTone, pipelineItems, lifeOfThread, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
 import { threadRole } from "../work-model.ts";
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook, threadTitle } from "./shell.ts";
@@ -41,9 +41,6 @@ const threadLine = (c: Context, t: Thread): Line => {
 };
 const queuedLine = (c: Context, q: QueuedThread): Line => ({ key: q.id, title: q.title, project: q.project, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued", dim: false, order: 0 });
 const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.title, project: i.project, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], when: "item", dim: false, order: i.addedAt });
-
-/** How long a landed thread stays under Deployed once it is archived, as the review loop archives each builder that lands. */
-const deployedForMs = 24 * 60 * 60 * 1000;
 
 /**
  * Every piece of work once, at its stage: items not yet threads, queued threads, and open builder threads, and an
@@ -113,7 +110,7 @@ const close = html`<a class="icon-btn peek-close" href="/" data-peek="" aria-lab
 /** What moves the work on next, said once: what of it waits on the person, or what the step it is on does next, or what is given in its place. */
 function next(life: Life, said?: Html): Html {
   const held = life.stage === "held";
-  const labels = [...new Set(life.needs.map(needLabel))];
+  const labels = [...new Set(life.needs.map((n) => needLabels[needKind(n)]))];
   return html`<div class="peek-next${held && " held"}"><span class="peek-k">${held ? "Waits on you" : "Next"}</span>${said ?? html`<p>${held && labels.length > 0 && html`<b>${labels.join(", ")}.</b> `}${life.why.replace(/\.$/, "")}.</p>`}</div>`;
 }
 
@@ -179,7 +176,7 @@ ${role === "builder" ? html`${lifeTrack(life!, false)}
 ${next(life!)}` : roleLine(c, t.id, role)}
 <dl class="peek-facts">
 <dt>State</dt><dd>${label}</dd>
-${pr !== undefined && html`<dt>Pull request</dt><dd><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">round ${roundsSpent(r)} of ${r.maxRounds}</span>`}</dd>`}
+${pr !== undefined && html`<dt>Pull request</dt><dd><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">${roundOf(r)}</span>`}</dd>`}
 <dt>Pylon</dt><dd>${state(...actualBadge[d.pylon.actualState])} <span class="dim">on</span> ${d.pylon.node}</dd>
 </dl>
 ${latest(d, items, c.now)}

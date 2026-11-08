@@ -1,17 +1,18 @@
 /** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
-import { desiredPhase, keptPastDay } from "../reconcile.ts";
+import { desiredPhase } from "../reconcile.ts";
 import type { ThreadId } from "../../ids.ts";
 import type { ThreadDetail } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { Project } from "../project.ts";
-import { cannotLand, roundsSpent, settled, type Review } from "../review-model.ts";
-import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, limitText, threadState, dims, ago, workingFor, type Part } from "./view.ts";
+import { cannotLand, settled, type Review } from "../review-model.ts";
+import { needWording, reviewPr, roundOf, type NeedAction } from "../wording.ts";
+import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context } from "./context.ts";
 import type { HeldWork, InboxNeed, ThreadNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
-import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard, resumeCard } from "./cards.ts";
+import { cleanupCard, judgmentCards, questionCard, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
-import { lifeOfThread, needWhy, roleLine, type Life } from "./lifecycle.ts";
+import { lifeOfThread, roleLine, type Life } from "./lifecycle.ts";
 import { threadRole } from "../work-model.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
@@ -149,7 +150,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
   const t = n.d.thread;
   const [what, body] = needCard(c, n);
   const life = lifeOfThread(c, t.id);
-  const why = needWhy(n, c.now) || life.why;
+  const why = needWording(n, c.now).why || life.why;
   return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${leads.has(n) ? whereNow(c, n.d, life, itemsOf(t.id)) : n.kind === "review" && html`<p class="need-facts">${prFact(n.d.review!.pr, n.d.review)}</p>`}${body}`, why, mark(n))}
 </article>`;
@@ -174,46 +175,39 @@ ${reply?.kind === "agent" && html`<p class="need-reply"><span class="dim">Latest
 }
 
 /** A pull request's link, with its review's round while the review is under way. */
-const prFact = (pr: { url: string; title: string; number: number }, r: Review | null) => html`<span><a class="link" href="${pr.url}" target="_blank" rel="noreferrer" title="${pr.title}">#${pr.number}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">round ${roundsSpent(r)} of ${r.maxRounds}</span>`}</span>`;
+const prFact = (pr: { url: string; title: string; number: number }, r: Review | null) => html`<span><a class="link" href="${pr.url}" target="_blank" rel="noreferrer" title="${pr.title}">#${pr.number}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">${roundOf(r)}</span>`}</span>`;
 
 /** What the card is, and what it shows: a review, question or nudge as its thread's page shows it, or what stopped the thread and the one action that gets past it. */
 function needCard(c: Context, n: ThreadNeed): [what: string, body: Html] {
   const { d } = n;
   const t = d.thread;
-  const button = (action: string, label: string) => html`<button type="button" class="btn btn-xs" data-action="${action}" data-thread="${t.id}">${label}</button>`;
-  const fix = (why: Part, act: Part) => html`<p class="land-note">${why}</p><div class="need-act">${act}</div>`;
+  const { label, fix } = needWording(n, c.now);
+  if (fix !== null) return [label, html`<p class="land-note">${fix.body}</p><div class="need-act">${needAction(t, fix.action)}</div>`];
+  const named = (name: string) => `${name}-${t.id}`;
   switch (n.kind) {
     case "review": {
-      const card = landing(c, d, (name) => `${name}-${t.id}`, true);
-      const pr = prOf(d);
-      const refused = cannotLand(d.review!, t, pr);
-      if (refused !== null) return ["Review needs you", card ?? html`<p class="land-note">It cannot land, as ${refused}.</p>`];
-      const summary = pr?.summary;
+      const card = landing(c, d, named, true);
+      const refused = cannotLand(d.review!, t, reviewPr(d));
+      if (refused !== null) return [label, card ?? html`<p class="land-note">It cannot land, as ${refused}.</p>`];
+      const summary = reviewPr(d)?.summary;
       const quote = d.review!.rounds.at(-1)!.verdict?.notCheckedLive ?? null;
-      return [d.review!.phase.kind === "needs-person" ? "Held review" : "Approved review", html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}
+      return [label, html`${summary !== undefined && summary !== "" && html`<p class="need-summary">${inline(summary)}</p>`}
 <div class="need-unchecked"><h3>Not checked live</h3>${quote === null ? html`<p class="land-note">The reviewer quoted nothing.</p>` : prose(quote.replace(/^\s*(#{1,6}\s*)?not checked live:?\s*(\n|$)/i, ""))}</div>
 ${card}`];
     }
-    case "nudge": return ["Stopped short", nudgeCard(c, t, (name) => `${name}-${t.id}`)!];
-    case "resume": return ["Turns died", resumeCard(c, t, (name) => `${name}-${t.id}`)!];
-    case "disk": return ["Disk kept", fix(`Its disk is kept past its 24 hours, as ${keptPastDay(t, c.now)}. Nexus tries the read again on its own, or delete the thread, which deletes the disk with the token usage on it unread.`,
-      html`<button type="button" class="btn btn-xs danger" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its disk goes with the token usage on it unread.">Delete</button>`)];
+    case "nudge": return [label, nudgeCard(c, t, named)!];
+    case "resume": return [label, resumeCard(c, t, named)!];
     case "question": {
       const q = n.question;
+      if (q.holds !== undefined) return [label, html`${questionCard(c, q)}${landing(c, d, named, true)}`];
       const judgment = d.judgments.filter((j) => j.question === q.id);
-      if (q.holds !== undefined) return ["Holds to waive", html`${questionCard(c, q)}${landing(c, d, (name) => `${name}-${t.id}`, true)}`];
-      return [q.ask !== undefined ? "Claude asks" : q.proposal !== undefined ? "Proposed item" : judgment.length > 0 ? "Judgment" : "Question",
-        html`${judgment.length > 0 && judgmentCards(c, { ...d, judgments: judgment })}${questionCard(c, q)}`];
+      return [label, html`${judgment.length > 0 && judgmentCards(c, { ...d, judgments: judgment })}${questionCard(c, q)}`];
     }
-    case "thread": switch (n.attention) {
-      case "waiting": return ["Dialog in its terminal", fix(`${t.sessionWaitingMessage ?? "A dialog waits for input"}, in the pylon's terminal.`, html`<a class="btn btn-xs" href="/threads/${t.id}#terminal">${icon("terminal")}Open terminal</a>`)];
-      case "limited": return ["Usage limit", fix(`It ${limitText(t, c.now)}. Nexus has it continue once the limit resets, or archive it to stop it.`, button("archive", "Archive"))];
-      case "parked": return ["Stuck", fix(`${d.agent?.parkedTasks ?? 0} ${d.agent?.parkedTasks === 1 ? "task" : "tasks"} hit the restart limit and hold the run.`, button("retry", "Retry"))];
-      case "failed": {
-        const why = d.pylon.failed?.split("\n")[0] ?? d.claudeWorker?.message ?? "It failed.";
-        return ["Failed", d.pylon.failed !== null && d.pylon.retryRefused === null ? fix(`The planner gave up on its pylon: ${why}`, button("retry-pylon", "Retry"))
-          : fix(d.pylon.failed !== null ? `The planner gave up on its pylon: ${why} ${d.pylon.retryRefused}.` : `The Claude worker failed: ${why}`, button("archive", "Archive"))];
-      }
-    }
+    default: throw new Error(`need ${n.kind} has no card`);
   }
+}
+
+function needAction(t: Thread, a: NeedAction): Html {
+  if (a.kind === "terminal") return html`<a class="btn btn-xs" href="/threads/${t.id}#terminal">${icon("terminal")}Open terminal</a>`;
+  return html`<button type="button" class="btn btn-xs${a.danger && " danger"}" data-action="${a.action}" data-thread="${t.id}"${a.confirm !== undefined && html` data-confirm="${a.confirm}"`}>${a.label}</button>`;
 }

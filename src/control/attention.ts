@@ -3,22 +3,16 @@ import type { ThreadQuestion } from "./questions.ts";
 export type Attention = "failed" | "decision" | "parked" | "limited" | "reply" | "working" | "waiting" | null;
 
 /**
- * How each attention shows. `needsPerson` keeps a thread's row bright and notifies on a change to it. Waiting ranks
- * below working, but only waiting is blocked on the person.
+ * Whether each attention waits on the person, which keeps a thread's row bright and notifies on a change to it. Waiting
+ * ranks below working, but only waiting is blocked on the person.
  */
-export const attentions = {
-  failed: { label: "failed", tone: "bad", needsPerson: true },
-  decision: { label: "needs your decision", tone: "bad", needsPerson: true },
-  parked: { label: "parked", tone: "bad", needsPerson: true },
-  limited: { label: "stopped on its usage limit", tone: "bad", needsPerson: true },
-  reply: { label: "new reply", tone: "reply", needsPerson: true },
-  working: { label: "agent working", tone: "work", needsPerson: false },
-  waiting: { label: "waiting for input", tone: "idle", needsPerson: true },
-} as const satisfies Record<NonNullable<Attention>, { label: string; tone: string; needsPerson: boolean }>;
+const waitsOnPerson: Record<NonNullable<Attention>, boolean> = {
+  failed: true, decision: true, parked: true, limited: true, reply: true, working: false, waiting: true,
+};
 
 /**
  * A thing of a thread's that waits on the person: its review, held for them or stopped at an approval only they land,
- * a question no one has answered, a builder that stopped short of a pull request after two nudges, or a Claude worker
+ * a question no one has answered, a builder that stopped short of a pull request after its nudges, or a Claude worker
  * whose turns kept dying. `since` is when it began to wait, so far as the records say.
  */
 export type Need =
@@ -27,7 +21,7 @@ export type Need =
   | { kind: "nudge"; since: number }
   | { kind: "resume"; why: string; since: number };
 
-export const needsPerson = (attention: Attention) => attention !== null && attentions[attention].needsPerson;
+export const needsPerson = (attention: Attention) => attention !== null && waitsOnPerson[attention];
 
 /** What a thread's attention is read from. `waiting` is a dialog its session waits on, and `limited` its Claude session stopped on its usage limit. */
 export interface AttentionFacts {
