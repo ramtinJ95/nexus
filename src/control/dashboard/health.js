@@ -65,7 +65,10 @@ export async function notice(channel, title, body, url) {
   const dismiss = el("button", { textContent: "Dismiss", type: "button" });
   dismiss.onclick = () => toast.remove();
   toast.append(dismiss);
-  document.body.append(toast);
+  const stack = document.querySelector(".toast-stack") ?? document.body.appendChild(el("div", { className: "toast-stack" }));
+  stack.append(toast);
+  // Past five, the oldest go, so the stack never covers the page.
+  while (stack.children.length > 5) stack.children[0].remove();
   setTimeout(() => toast.remove(), 15000);
   return () => toast.remove();
 }

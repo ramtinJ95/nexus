@@ -90,3 +90,34 @@ test("every function the client calls on the module it loads is one the module e
   assert.deepEqual([...new Set(called)].sort(), ["caughtUp", "markHealthSeen", "notice", "showHealth"]);
   for (const name of called) assert.equal(typeof health[name], "function", name);
 });
+
+test("notices that arrive together stack as separate toasts, and dismissing one leaves the others", async (t) => {
+  class Node {
+    constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.parent = null; this.className = ""; }
+    append(...kids) { for (const kid of kids) { if (typeof kid === "string") continue; kid.remove(); kid.parent = this; this.children.push(kid); } }
+    appendChild(kid) { this.append(kid); return kid; }
+    remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
+    all() { return this.children.flatMap((c) => [c, ...c.all()]); }
+    querySelector(selector) { return this.all().find((c) => c.className.split(" ").includes(selector.slice(1))) ?? null; }
+  }
+  const body = new Node("body");
+  const document = { body, createElement: (tag) => new Node(tag), querySelector: (s) => body.querySelector(s), querySelectorAll: () => [], getElementById: () => null, addEventListener() {} };
+  const globals = { document, localStorage: { getItem: () => null, setItem: () => {} } };
+  const before = Object.fromEntries(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  for (const [k, v] of Object.entries(globals)) Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  t.after(() => { for (const [k, d] of Object.entries(before)) d === undefined ? delete globalThis[k] : Object.defineProperty(globalThis, k, d); });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const n of ["U50", "Second review", "Third"]) await notice("toast", n, "new reply", "/threads/t1");
+  const stacks = body.children.filter((c) => c.className === "toast-stack");
+  assert.equal(stacks.length, 1, "one stack holds every toast");
+  const text = (toast) => toast.children[0].textContent;
+  assert.deepEqual(stacks[0].children.map(text), ["U50: new reply", "Second review: new reply", "Third: new reply"], "three toasts, newest at the bottom");
+  assert.deepEqual(stacks[0].children.map((c) => c.role), ["status", "status", "status"]);
+  stacks[0].children[1].children.find((c) => c.tagName === "BUTTON").onclick();
+  assert.deepEqual(stacks[0].children.map(text), ["U50: new reply", "Third: new reply"], "dismissing the middle toast leaves the other two");
+  for (let i = 0; i < 6; i++) await notice("toast", `More ${i}`, "new reply", "/threads/t1");
+  assert.equal(stacks[0].children.length, 5, "older toasts drop off past five");
+  assert.equal(text(stacks[0].children.at(-1)), "More 5: new reply");
+  t.mock.timers.tick(15_000);
+  assert.equal(stacks[0].children.length, 0, "each toast's timeout removes it");
+});
