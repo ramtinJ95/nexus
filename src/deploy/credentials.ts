@@ -11,6 +11,7 @@ import { access, appendFile, open, readFile, rename, rm, type FileHandle } from 
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { appendSecret, parseSecretsFile } from "../node-base/secrets-env.ts";
+import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
 import { configFiles, prefix, roleLinks, servicePath, stateDirs, users } from "../node-layout.ts";
 
 const exec = promisify(execFile);
@@ -38,10 +39,10 @@ export const stores = {
 
 export const claudeNames = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
 /**
- * The held names come from the agent kinds, which need zod, and this runs before npm ci, so a held name a person put in
- * secrets.env is left for the probe to refuse. Nothing here writes one.
+ * The probe's heldSecrets, which it derives from the agent kinds. Those need zod, and this runs before npm ci, so the
+ * names are copied here and credentials.test.ts checks the copy.
  */
-export const unheld: readonly string[] = [];
+export const heldNames: readonly string[] = [chatgptTokenGrant.name];
 const login = join(prefix, roleLinks.control, "src/control/login.ts");
 
 /** GitHub's published SSH host key fingerprints, https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints */
@@ -298,14 +299,14 @@ export async function provision(role: "control" | "node", host: Host, answers: A
   const addSecret = async (name: string, value: string) => {
     const file = at.secrets;
     const text = await host.read(file);
-    const line = appendSecret(file, text ?? "", name, value, unheld);
+    const line = appendSecret(file, text ?? "", name, value, heldNames);
     if (text === undefined) await host.write(file, line, stores.claude);
     else await host.append(file, line);
     say(`Added ${name} to ${file}.`);
     next.add("probe");
   };
 
-  const secrets = parseSecretsFile(at.secrets, await host.read(at.secrets) ?? "", unheld);
+  const secrets = parseSecretsFile(at.secrets, await host.read(at.secrets) ?? "", heldNames);
   const claudeName = claudeNames.find((name) => secrets.names().includes(name));
   if (claudeName !== undefined) say(`Left ${claudeName} in ${at.secrets} alone.`);
   else {

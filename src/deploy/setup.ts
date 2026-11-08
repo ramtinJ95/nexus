@@ -12,7 +12,7 @@ import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { text } from "node:stream/consumers";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
-import { claudeNames, harnessSignedIn, locations, provision, scripted, stores, system, terminal, unheld, type FollowUp } from "./credentials.ts";
+import { claudeNames, harnessSignedIn, locations, provision, scripted, stores, system, terminal, heldNames, type FollowUp } from "./credentials.ts";
 import { readControlPlane } from "./control-plane.ts";
 import { parseSecretsFile } from "../node-base/secrets-env.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
@@ -462,7 +462,7 @@ export const holdsImage = (store: string) => readdir(store).then((entries) => en
 async function gather(flags: Flags): Promise<Facts> {
   const net = await tailnet();
   const at = await locations(system);
-  const secrets = parseSecretsFile(at.secrets, await system.read(at.secrets).catch(() => undefined) ?? "", unheld);
+  const secrets = parseSecretsFile(at.secrets, await system.read(at.secrets).catch(() => undefined) ?? "", heldNames);
   const common = { self: net.self, secretNames: secrets.names(), gitKey: await system.exists(at.gitKey) };
   if (flags.node !== undefined) {
     const errors: string[] = [];
