@@ -28,7 +28,7 @@ import { defaultClaudeModel, modelFamily, secondReviewerModels } from "../protoc
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
-import { caseOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
+import { caseOf, remedyOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
 import { askedHolds, carryWaiver, headHolds, heldBy, landingHolds, landPress, secondReviewRule, staleQuote, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import type { AgentState } from "./agent-conversation.ts";
@@ -825,9 +825,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
         const { all, left, review, why } = await holds();
-        if (left.length === 1 && left[0]!.code === "conflict") return rebase(review, snapshot.detail.base);
+        const remedy = left.length === 1 ? remedyOf(left[0]!.code) : null;
+        if (remedy === "rebase") return rebase(review, snapshot.detail.base);
         // A quote the description lost since the reviewer gave it is asked for again, once per description.
-        if (left.length === 1 && left[0]!.code === "not-checked-live" && staleQuote(r.rounds.at(-1)!, snapshot.detail.body)) return { ...review, phase: { kind: "quoting", asked: null } };
+        if (remedy === "quote" && staleQuote(r.rounds.at(-1)!, snapshot.detail.body)) return { ...review, phase: { kind: "quoting", asked: null } };
         if (left.length) return toPerson(review, "policy", ...why, ...all);
         if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);

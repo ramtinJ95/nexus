@@ -13,7 +13,7 @@
  */
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import type { SecondReview } from "./project.ts";
-import { holdRule, personOnly, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
+import { holdRule, personOnly, remedyOf, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
 import { answered, blocks, changedPaths, descriptionDigest, findingsOf, seatsFor, unapprovedSeat, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
 
 interface LandingFacts {
@@ -170,7 +170,7 @@ export function landPress(review: Review): LandPress {
   const stuck = holds.filter((h) => holdRule(h.code).holdsAgain && !holdRule(h.code).waivable);
   if (stuck.length) return { kind: "stuck", holds: stuck };
   const round = review.rounds.at(-1)!;
-  const quotes = round.live?.kind === "absent" && (quoteOf(round) === null || holds.some((h) => h.code === "not-checked-live"));
+  const quotes = round.live?.kind === "absent" && (quoteOf(round) === null || holds.some((h) => remedyOf(h.code) === "quote"));
   return { kind: "lands", waives: holds.filter((h) => waivable(h.code)), quotes };
 }
 
