@@ -1,0 +1,6 @@
+400 application/json
+{
+  "error": "✖ Invalid input: expected string, received undefined\n  → at defaultBranch\n✖ Invalid input: expected string, received undefined\n  → at defaultNode\n✖ Invalid input: expected object, received undefined\n  → at resources\n✖ Invalid input: expected array, received undefined\n  → at allowedHosts\n✖ Invalid input: expected array, received undefined\n  → at secrets\n✖ Invalid input: expected array, received undefined\n  → at logins\n✖ Invalid input: expected string, received undefined\n  → at preSetup",
+  "code": null,
+  "retryable": false
+}

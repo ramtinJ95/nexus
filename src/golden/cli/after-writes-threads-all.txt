@@ -51,9 +51,11 @@ th-rv-reviewing-second  active    -                                           py
 th-seeded-1  deleted   -                                           pylon absent     storefront   0s ago   Review of #100: fix(cart): a coupon applies once per cart
 th-rv-verifying  active    -                                           pylon absent     storefront   0s ago   feat(cart): save the cart for a signed-out shopper
 th-rv-reviewing-starting  active    -                                           pylon absent     nexus        0s ago   feat(cli): nexus threads --watch
-th-new-56  active    -                                           pylon absent     storefront   0s ago   Gift cards at checkout
+th-new-59  active    -                                           pylon absent     storefront   0s ago   Gift cards at checkout
 th-queued-1  queued    waits for th-graphs: PR #402 is open  node rj-firebat  nexus        0s ago   Prune events older than 90 days
 th-queued-2  queued    waits for th-rounding: PR #91 is open   node rj-firebat  storefront   0s ago   Wishlist sharing links
-th-new-57  queued    waits for th-queued-1: is queued        node rj-firebat  nexus        0s ago   Split loop.ts by node phase
-th-new-55  queued    waits for th-new-57: is queued        node rj-firebat  nexus        0s ago   Move cleanup onto the new model
+th-new-60  queued    waits for th-queued-1: is queued        node rj-firebat  nexus        0s ago   Split loop.ts by node phase
+th-new-55  queued    waits for th-new-60: is queued        node rj-firebat  nexus        0s ago   Move cleanup onto the new model
+th-new-56  queued    waits for th-sync: PR #57 is open   node rj-firebat  nexus        0s ago   An untitled start, whose brief's first line runs past eighty characters, so its ...
+th-new-57  queued    waits for th-sync: PR #57 is open   node rj-firebat  nexus        0s ago   An untitled Claude worker
 --- stderr

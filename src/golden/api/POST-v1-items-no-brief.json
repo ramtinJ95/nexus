@@ -1,0 +1,6 @@
+400 application/json
+{
+  "error": "an item needs a brief: message for a Nexus agent thread, or claude for a Claude worker",
+  "code": null,
+  "retryable": false
+}

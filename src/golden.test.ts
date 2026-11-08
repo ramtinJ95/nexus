@@ -34,6 +34,7 @@ const { utc } = await import("./control/usage.ts");
 const { version } = await import("./version.ts");
 const { openTerminal, terminalSize } = await import("./guest-terminal.ts");
 const { processStream } = await import("./process-stream.ts");
+const { commands } = await import("./cli/commands/index.ts");
 type TailnetNodeId = import("./ids.ts").TailnetNodeId;
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -219,6 +220,18 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
       return `exit ${r.code}\n--- stdout\n${stdout}--- stderr\n${r.stderr}`;
     },
   });
+  /** Every command's --help, by name, in one file. */
+  const helps: Capture = {
+    file: "cli/help-of-each-command.txt",
+    async read(signal) {
+      const out: string[] = [];
+      for (const name of Object.keys(commands).sort()) {
+        const r = await runners[0]!([...name.split(" "), "--help"], signal);
+        out.push(`$ nexus ${name} --help\nexit ${r.code}\n--- stdout\n${r.stdout}--- stderr\n${r.stderr}`);
+      }
+      return out.join("\n");
+    },
+  };
   /** The command as text and as --json. */
   const both = (...args: string[]) => [nexus(...args), nexus(...args, "--json")];
   /** The command in a terminal of its own, which gets `answer` once its screen shows `prompt`. */
@@ -279,7 +292,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     stream(`/v1/threads/${checked}/events`, 1), stream(`/v1/threads/${id("attach")}/claude/events`, 1),
     stream("/v1/events?follow=true&project=field-notes", "ping"),
 
-    nexus("--help"), nexus("--version"), nexus("nosuch"),
+    nexus("--help"), helps, nexus("--version"), nexus("nosuch"),
     ...both("projects"), ...both("nodes"), ...both("release"), ...both("doctor"), ...both("items"), ...both("items", "--all"),
     ...both("threads"), ...both("threads", "--all"), ...both("threads", "--queued"), ...both("threads", "--project", "storefront"),
     ...both("image", "list"), ...both("image", "current"), ...both("events", "--project", "field-notes"),
@@ -326,6 +339,15 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     nexus("deploy", "main"), api("/v1/release", "PUT", { commit: "a".repeat(40) }),
     as(phone, "person", nexus("deploy", "a".repeat(40))), as(phone, "person", api("/v1/release", "PUT", { commit: "a".repeat(40) })),
     as(node, "node", nexus("start", "--project", "nexus", "--title", "From a node")), as(node, "node", api(`/v1/threads/${id("sync")}/archive`, "POST", {})),
+    nexus("start", "--project", "nexus", "--message", "  An untitled start, whose brief's first line runs past eighty characters, so its title is cut short", "--after", id("sync")),
+    nexus("start", "--project", "nexus", "--claude", "An untitled Claude worker\nwith a second line", "--after", id("sync"), "--json"),
+    nexus("start", "--project", "nexus", "--message", "Planned", "--plan", "--after", id("sync")),
+    nexus("item", "add", "--project", "storefront", "--message", "An untitled item", "--json"),
+    nexus("item", "add", "--project", "storefront", "--title", "No brief"),
+    nexus("project", "add", "sketch", "--scratch", "--json"),
+    { ...api("/v1/projects", "POST", { id: "bare", repoUrl: "https://github.com/ramtinJ95/bare.git" }), file: "api/POST-v1-projects-defaults.json" },
+    { ...api("/v1/threads", "POST", { project: "nexus", model: "m" }), file: "api/POST-v1-threads-model-without-claude.json" },
+    { ...api("/v1/items", "POST", { project: "storefront", title: "No brief" }), file: "api/POST-v1-items-no-brief.json" },
     ...[...both("threads", "--all"), api(`/v1/events?since=${beforeWrites}&kind=attention.changed&kind=review.changed&kind=review.waived&kind=release.changed`)].map((c) => ({ ...c, file: c.file.replace(/^(\w+)\//, "$1/after-writes-") })),
   ];
 

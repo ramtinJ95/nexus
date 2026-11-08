@@ -1,0 +1,4 @@
+exit 64
+--- stdout
+--- stderr
+nexus: item add needs a brief: --message, or --claude for a Claude worker. Run nexus --help for usage
