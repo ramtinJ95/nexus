@@ -21,9 +21,8 @@ import type { ItemRecord } from "./pipeline-store.ts";
 
 type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
 
-const phaseKinds = ["planned", "queued", "building", "reviewing", "landing", "landed", "held", "archived", "cancelled"] as const;
 /** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */
-export interface ItemPhase { kind: typeof phaseKinds[number]; why: string }
+export interface ItemPhase { kind: "planned" | "queued" | "building" | "reviewing" | "landing" | "landed" | "held" | "archived" | "cancelled"; why: string }
 
 /** The API's view of an item, which `nexus items`, `nexus item show` and the dashboard's pipeline page show. */
 export interface PipelineItem {
