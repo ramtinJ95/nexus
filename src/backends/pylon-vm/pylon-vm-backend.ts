@@ -29,15 +29,16 @@ import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
 import { agentKinds, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
-import { controlSocket, run, socketPathLimit, stopForRetry } from "../../pylon-vm/client.ts";
+import { run, socketPathLimit, stopForRetry } from "../../pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
-import { bridgePylonHeader, hostBridgeSocket } from "../../pylon-vm/host-bridge.ts";
+import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
+import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
 import { asUserIn, controllerLog, controllerLogTail, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
 import { readJson, saveJson } from "../../json-file.ts";
 import { diskBytes } from "../../disk-space.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
-import { directory, existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";
+import { existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";
 import { bakedDotfilesDir, bridgeRequestPath, checkoutDir, dotfilesDir, home, workspaceDir } from "../../../images/pylon/nexus-contract.ts";
 
 export interface PylonVmBackendOptions {
@@ -70,7 +71,6 @@ export interface PylonVmBackendOptions {
   previewHost?: string;
 }
 
-const checkpointFile = "nexus-checkpoint.json";
 /** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
 const secretUpdateMs = 5_000;
 
@@ -217,7 +217,7 @@ function checkoutCommands({ url, checkout }: CloneRepo): string[] {
  * private to the probe's user, so only the controllers can set that header.
  */
 export function pylonVmHostBridge(stateRoot: string): HostBridge {
-  const path = hostBridgeSocket(stateRoot);
+  const path = stateFiles(stateRoot).hostBridge;
   const listen = listenHostBridge({ path }, async (req) => {
     const name = req.headers[bridgePylonHeader];
     return req.url === bridgeRequestPath && pylonIdSchema.safeParse(name).success ? name as PylonId : null;
@@ -234,7 +234,7 @@ export function pylonVmHostBridge(stateRoot: string): HostBridge {
 
 export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend {
   const { stateRoot } = options;
-  const longest = controlSocket(directory(stateRoot, "instances", "p".repeat(maxPylonIdLength)));
+  const longest = instanceFiles(directory(stateRoot, "instances", "p".repeat(maxPylonIdLength))).socket;
   if (Buffer.byteLength(longest) >= socketPathLimit) {
     throw new Error(`state root ${stateRoot} is too long: a pylon's control socket would be ${Buffer.byteLength(longest)} bytes, and a Unix socket path must stay under ${socketPathLimit}`);
   }
@@ -258,7 +258,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   }
   const instanceDir = (pylonId: PylonId) => directory(stateRoot, "instances", pylonId);
   // The controller writes disk.qcow2 only when a stop completes, so without it the VM booted from no disk and nothing was saved.
-  const hasCheckpoint = (pylonId: PylonId) => existsSync(join(instanceDir(pylonId), "disk.qcow2"));
+  const hasCheckpoint = (pylonId: PylonId) => existsSync(instanceFiles(instanceDir(pylonId)).disk);
 
   async function inspect(pylonId: PylonId, signal?: AbortSignal): Promise<Inspection | null> {
     const name = instanceName(pylonId);
@@ -269,10 +269,10 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   const settledInstance = (pylonId: PylonId, signal: AbortSignal) => settled(() => inspect(pylonId), ["starting", "unavailable", "stopping"], signal);
 
   async function readSidecar(pylonId: PylonId): Promise<Sidecar> {
-    const sidecar = await readJson(join(instanceDir(pylonId), checkpointFile));
+    const sidecar = await readJson(instanceFiles(instanceDir(pylonId)).checkpoint);
     return sidecar === undefined ? { checkpoint: null } : sidecarSchema.parse(sidecar);
   }
-  const writeSidecar = (pylonId: PylonId, sidecar: Sidecar) => saveJson(join(instanceDir(pylonId), checkpointFile), sidecar);
+  const writeSidecar = (pylonId: PylonId, sidecar: Sidecar) => saveJson(instanceFiles(instanceDir(pylonId)).checkpoint, sidecar);
   /** The mark as `sidecar` holds it. Clearing it drops the sidecar's sessions, which the relaunch brought back. */
   const sidecarMark = (pylonId: PylonId, sidecar: Sidecar): RelaunchMark => ({
     pending: async () => sidecar.relaunch === true,
@@ -328,7 +328,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       files: [...live.overlay],
       hooks: bootHooks(boot),
       publicUrls: publicUrls(boot.pylonId, live.previews, options.previewHost),
-      hostBridge: hostBridgeSocket(options.stateRoot),
+      hostBridge: stateFiles(options.stateRoot).hostBridge,
     };
   }
 
@@ -498,16 +498,16 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     },
     gitSsh: options.gitSsh !== undefined,
     nestedVirtualization: hostNestsKvm(),
-    eventJournal: `${stateRoot}/events.sqlite`,
+    eventJournal: stateFiles(stateRoot).events,
     hostBridge: pylonVmHostBridge(stateRoot),
     storage: stateRoot,
 
     /** Each instance's controller, as it published itself. Its VM runs as its child. */
     async processes() {
-      const names = await readdir(join(stateRoot, "instances")).catch((err: unknown) => existsError(err, "ENOENT") ? [] : Promise.reject(err));
+      const names = await readdir(stateFiles(stateRoot).kind("instances")).catch((err: unknown) => existsError(err, "ENOENT") ? [] : Promise.reject(err));
       // A controller that exits mid-read can answer ESRCH. Health leaves out what it cannot read, as it does a busy sensor.
       const found = await Promise.all(names.map(async (name) => {
-        const identity = await readIdentity(join(directory(stateRoot, "instances", name), "controller.pid"));
+        const identity = await readIdentity(instanceFiles(directory(stateRoot, "instances", name)).pid);
         return identity !== null && await alive(identity) ? [{ pylonId: name as PylonId, pid: identity.pid }] : [];
       }).map((controller) => controller.catch(() => [])));
       return found.flat();
@@ -516,7 +516,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     async ensureRunning(bootInputs, live, signal, relaunch = true) {
       const { pylonId } = bootInputs;
       const name = instanceName(pylonId);
-      if (existsSync(join(instanceDir(pylonId), "retry-stop.json"))) await stopForRetry(stateRoot, name, signal);
+      if (existsSync(instanceFiles(instanceDir(pylonId)).retryStop)) await stopForRetry(stateRoot, name, signal);
       for (;;) {
         const instance = await settledInstance(pylonId, signal);
         if (instance === null) {
@@ -559,11 +559,11 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
           return await inspect(pylonId, AbortSignal.any([signal, AbortSignal.timeout(1000)]));
         } catch {
           signal.throwIfAborted();
-          const status = await readJson(join(instanceDir(pylonId), "status.json"));
+          const status = await readJson(instanceFiles(instanceDir(pylonId)).status);
           return { status: statusSchema.parse(status) };
         }
       };
-      if (existsSync(join(instanceDir(pylonId), "retry-stop.json"))) await stopForRetry(stateRoot, name, signal);
+      if (existsSync(instanceFiles(instanceDir(pylonId)).retryStop)) await stopForRetry(stateRoot, name, signal);
       for (let instance = await forPause(); instance?.status.state !== "stopped"; instance = await forPause()) {
         if (instance === null) return;
         signal.throwIfAborted();

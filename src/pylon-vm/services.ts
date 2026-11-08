@@ -1,4 +1,4 @@
-import { join, posix } from "node:path";
+import { posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { linkedName, parseServicesFile, serviceReference, wantsPreview, withPublicUrls } from "../services-file.ts";
@@ -10,6 +10,7 @@ import { openPortal } from "./portals.ts";
 import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "../preview-links.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
 import { readJson, saveJson } from "../json-file.ts";
+import { instanceFiles } from "./instance-layout.ts";
 import { parse } from "../parse.ts";
 import { serialQueue } from "../single-flight.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
@@ -90,7 +91,7 @@ export class GuestServices {
 		this.publicUrls = publicUrls;
 	}
 	async initialize(): Promise<void> {
-		const assignments = await readJson(join(this.dir, "services.json"));
+		const assignments = await readJson(instanceFiles(this.dir).services);
 		if (assignments !== undefined) this.assignments = assignmentsSchema.parse(assignments);
 		// Saved by a controller that let Nexus's own ports through, they are dropped rather than failing the wake.
 		for (const [name, assignment] of Object.entries(this.assignments))
@@ -98,7 +99,7 @@ export class GuestServices {
 				console.log(`services: ${name}'s saved port ${assignment.port} ${reservedPortMessage}, so it gets another`);
 				delete this.assignments[name];
 			}
-		const adHoc = await readJson(join(this.dir, "adhoc.json"));
+		const adHoc = await readJson(instanceFiles(this.dir).adHoc);
 		for (const [name, service] of Object.entries(adHoc === undefined ? {} : z.record(z.string(), z.unknown()).parse(adHoc))) {
 			try {
 				this.adHocConfig[name] = parse(configSchema.shape.services, { [name]: service }, "adhoc.json")[name]!;
@@ -107,7 +108,7 @@ export class GuestServices {
 			}
 		}
 		// A linked port outlives the boot, because the control plane keeps its preview for the thread's life.
-		const linked = linkedSchema.parse(await readJson(join(this.dir, "linked.json"), []));
+		const linked = linkedSchema.parse(await readJson(instanceFiles(this.dir).linked, []));
 		for (const port of linked) {
 			if (reservedPorts.has(port)) console.log(`services: linked port ${port} ${reservedPortMessage}, so it is not routed`);
 			else this.attached.set(port, await openPortal(await this.ingress(), `/${linkedName(port)}`));
@@ -142,7 +143,7 @@ export class GuestServices {
 			}
 		}
 		if (promoted)
-			await saveJson(join(this.dir, "adhoc.json"), this.adHocConfig);
+			await saveJson(instanceFiles(this.dir).adHoc, this.adHocConfig);
 		this.reservedPorts = Object.values(services).flatMap((service) =>
 			service.port ? [service.port] : [],
 		);
@@ -248,7 +249,7 @@ export class GuestServices {
 			port,
 			...(portal ? { portalPort: Number(new URL(portal.url).port) } : {}),
 		};
-		await saveJson(join(this.dir, "services.json"), this.assignments);
+		await saveJson(instanceFiles(this.dir).services, this.assignments);
 		await this.routes();
 		return entry;
 	}
@@ -362,7 +363,7 @@ export class GuestServices {
 			// Saved before the port counts as attached, so a failed save leaves a retry to save it again.
 			const portal = await openPortal(await this.ingress(), `/${linkedName(port)}`);
 			try {
-				await saveJson(join(this.dir, "linked.json"), [...this.attached.keys(), port]);
+				await saveJson(instanceFiles(this.dir).linked, [...this.attached.keys(), port]);
 			} catch (error) {
 				await portal.close();
 				throw error;
@@ -382,7 +383,7 @@ export class GuestServices {
 		const portal = this.attached.get(port);
 		if (!portal) return unlinkRefusal(port, this.previewServices(), this.configPath);
 		// Saved before the port stops counting as attached, so a failed save leaves it linked and a retry saves it again.
-		await saveJson(join(this.dir, "linked.json"), [...this.attached.keys()].filter((linked) => linked !== port));
+		await saveJson(instanceFiles(this.dir).linked, [...this.attached.keys()].filter((linked) => linked !== port));
 		this.attached.delete(port);
 		await this.routes();
 		await portal.close();
@@ -516,7 +517,7 @@ export class GuestServices {
 					delete this.assignments[name];
 				}
 			}
-			await saveJson(join(this.dir, "services.json"), this.assignments);
+			await saveJson(instanceFiles(this.dir).services, this.assignments);
 			await this.routes();
 			if (selected && !config[selected] && !this.entries.has(selected))
 				throw new Error(
@@ -618,7 +619,7 @@ export class GuestServices {
 			await this.operate("ensure", dependency);
 		const entry = await this.configure(name, service, false);
 		this.adHocConfig[name] = service;
-		await saveJson(join(this.dir, "adhoc.json"), this.adHocConfig);
+		await saveJson(instanceFiles(this.dir).adHoc, this.adHocConfig);
 		await this.start(name, entry, 60000);
 		return this.operate("status", name);
 	}

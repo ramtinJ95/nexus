@@ -1,17 +1,10 @@
 import { mkdir, open, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { instanceFiles } from "./instance-layout.ts";
 import { recordSchema, type SandboxRecord } from "./contracts.ts";
 
-export function directory(
-	root: string,
-	kind: "instances" | "templates",
-	name: string,
-): string {
-	return join(root, kind, name);
-}
 export async function readRecord(dir: string): Promise<SandboxRecord> {
 	return recordSchema.parse(
-		JSON.parse(await readFile(join(dir, "record.json"), "utf8")),
+		JSON.parse(await readFile(instanceFiles(dir).record, "utf8")),
 	);
 }
 export async function privateDirectory(path: string): Promise<void> {

@@ -16,7 +16,7 @@ import type { TemplateManifest } from "../../protocol/images.ts";
 import type { ImageId, TemplateId } from "../../ids.ts";
 import { run } from "../../pylon-vm/client.ts";
 import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
-import { directory } from "../../pylon-vm/storage.ts";
+import { directory, instanceFiles } from "../../pylon-vm/instance-layout.ts";
 import { controllerLogTail } from "./pylon-guest.ts";
 
 const diskFile = "disk.qcow2";
@@ -42,7 +42,7 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
     }
     const found = await settled(async () => (await builds(stateRoot)).find((b) => b.name === name) ?? null, ["starting", "unavailable"], signal);
     if (found?.status.state === "prepared") {
-      await store.publish(name, async (into) => { await copyFile(join(dir, diskFile), join(into, diskFile), constants.COPYFILE_FICLONE); return { ...prepare.manifest, builtAt: new Date().toISOString() }; }, signal);
+      await store.publish(name, async (into) => { await copyFile(instanceFiles(dir).disk, join(into, diskFile), constants.COPYFILE_FICLONE); return { ...prepare.manifest, builtAt: new Date().toISOString() }; }, signal);
       continue;
     }
     if (found !== null) {

@@ -162,6 +162,8 @@
     "src/pylon-vm/host-bridge.ts: reserved-path:auth",
     "src/pylon-vm/identity.ts: reserved-path:auth",
     "src/pylon-vm/identity.ts: reserved-path:egress",
+    "src/pylon-vm/instance-layout.ts: reserved-path:auth",
+    "src/pylon-vm/instance-layout.ts: reserved-path:egress",
     "src/pylon-vm/log-rotation.ts: reserved-path:auth",
     "src/pylon-vm/log-rotation.ts: reserved-path:egress",
     "src/pylon-vm/network.ts: reserved-path:auth",

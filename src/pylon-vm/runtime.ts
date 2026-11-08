@@ -1,6 +1,6 @@
 import { access, readFile, rename } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { join, posix } from "node:path";
+import { posix } from "node:path";
 import { VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
 import { z } from "zod";
 import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
@@ -23,6 +23,7 @@ import { shellQuote as q } from "../shell.ts";
 import { saveJson } from "../json-file.ts";
 import { serialQueue } from "../single-flight.ts";
 import { existsError } from "./storage.ts";
+import { instanceFiles } from "./instance-layout.ts";
 import { nexusKvm } from "../../images/pylon/nexus-contract.ts";
 
 /**
@@ -196,7 +197,7 @@ export class SandboxRuntime {
 				PATH: "/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 			},
 		};
-		const disk = join(this.dir, "disk.qcow2");
+		const disk = instanceFiles(this.dir).disk;
 		let resume = false;
 		try {
 			await access(disk);
@@ -324,7 +325,7 @@ export class SandboxRuntime {
 		const status = this.status();
 		const json = JSON.stringify(status);
 		if (json === this.written) return;
-		await saveJson(join(this.dir, "status.json"), status);
+		await saveJson(instanceFiles(this.dir).status, status);
 		this.written = json;
 	}
 	private async persisting<T>(operation: Promise<T>): Promise<T> {
@@ -342,7 +343,7 @@ export class SandboxRuntime {
 			return this.status();
 		const vm = this.requireVm();
 		const unsettled = await this.leaveRunning("stopping");
-		const next = join(this.dir, "disk.next.qcow2");
+		const next = instanceFiles(this.dir).nextDisk;
 		// leaveRunning never throws, and every later step is inside the try: a failure before the checkpoint must not
 		// leave the controller in stopping.
 		try {
@@ -361,7 +362,7 @@ export class SandboxRuntime {
 			await checked(vm, "sync");
 			await vm.checkpoint(next);
 			this.vm = undefined;
-			await rename(next, join(this.dir, "disk.qcow2"));
+			await rename(next, instanceFiles(this.dir).disk);
 		} catch (error) {
 			console.error(error);
 			await vm.close();
@@ -578,5 +579,5 @@ export function setupOnDisk(marker: string | null, record: SandboxRecord): Setup
 	return ran.setupError === undefined ? {} : { setupError: ran.setupError };
 }
 export async function readIntent(dir: string): Promise<{ prepare: boolean }> {
-	return z.strictObject({ prepare: z.boolean() }).parse(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")));
+	return z.strictObject({ prepare: z.boolean() }).parse(JSON.parse(await readFile(instanceFiles(dir).intent, "utf8")));
 }

@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { closeSync, existsSync, openSync } from "node:fs";
 import {
 	appendFile,
@@ -27,8 +26,8 @@ import {
 	statusSchema,
 } from "./contracts.ts";
 import { alive, groupMembers, identityOf, identitySchema, type ProcessIdentity, publishIdentity, readIdentity } from "./identity.ts";
+import { directory, instanceFiles, isTombstone, kinds, scratchDirectory, stagingDirectory, stateFiles, tombstoneDirectory } from "./instance-layout.ts";
 import {
-	directory,
 	existsError,
 	privateDirectory,
 	readLogTail,
@@ -39,7 +38,6 @@ import { saveJson } from "../json-file.ts";
 
 /** sun_path holds 104 bytes on macOS and 108 on Linux, including the terminating NUL. The shorter rules. */
 export const socketPathLimit = 104;
-export const controlSocket = (dir: string) => join(dir, "control.sock");
 function request(
 	dir: string,
 	action: Action,
@@ -48,7 +46,7 @@ function request(
 	return new Promise((accept, reject) => {
 		const req = http.request(
 			{
-				socketPath: controlSocket(dir),
+				socketPath: instanceFiles(dir).socket,
 				// A stopping controller stops listening, but a connection with a request in flight stays open. Pooled,
 				// it would reach the stopped controller after its socket is gone and keep it, and its controller.pid, alive.
 				agent: false,
@@ -114,9 +112,9 @@ function privateRoot(root: string): Promise<void> {
 	}
 	return checked;
 }
-const controllerAlive = (dir: string) => published(join(dir, "controller.pid"));
+const controllerAlive = (dir: string) => published(instanceFiles(dir).pid);
 /** A client that holds the launch lock is still to start the controller, or waits for it to come up. */
-const launching = (dir: string) => published(join(dir, "launch.lock", "owner"));
+const launching = (dir: string) => published(join(instanceFiles(dir).launchLock, "owner"));
 /**
  * Takes a lock directory with this process's identity already in it, so no one finds it without an owner. A rename
  * replaces only an empty directory, which is all a taker that died before publishing its identity left. Returns the
@@ -213,12 +211,6 @@ async function published(file: string): Promise<boolean> {
 	const identity = await readIdentity(file);
 	return identity !== null && (await alive(identity));
 }
-/**
- * Short, because the instance directory's path would push Gondolin's socket paths past their limit. It lives as long as
- * the controller of `dir`: a launch makes it, and the controller removes it before it gives up its controller.pid.
- */
-export const scratchDirectory = (root: string, dir: string) =>
-	join(root, "tmp", createHash("sha256").update(dir).digest("hex").slice(0, 12));
 /** How long a scratch directory no controller owns is kept, measured from the last entry made or removed in it. */
 export const scratchSweepAgeMs = 60 * 60_000;
 /**
@@ -239,8 +231,8 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		}
 	};
 	const owners = new Map<string, string>();
-	for (const kind of ["instances", "templates"] as const)
-		for (const name of await names(join(root, kind))) {
+	for (const kind of kinds)
+		for (const name of await names(stateFiles(root).kind(kind))) {
 			const dir = directory(root, kind, name);
 			owners.set(scratchDirectory(root, dir), dir);
 		}
@@ -253,7 +245,7 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 	};
 	/** Holds the instance's launch lock while `held` runs, and removes what takes killed partway left beside it. */
 	const holding = async (owner: string, held: () => Promise<boolean>) => {
-		const lock = join(owner, "launch.lock");
+		const lock = instanceFiles(owner).launchLock;
 		const release = await takeLock(lock).catch((error: unknown) => {
 			// Its instance is gone.
 			if (existsError(error, "ENOENT")) return null;
@@ -283,7 +275,7 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		}
 	};
 	const sweep = async (name: string) => {
-		const path = join(root, "tmp", name);
+		const path = join(stateFiles(root).scratch, name);
 		const owner = owners.get(path);
 		if (owner === undefined) {
 			if (!(await old(path))) return false;
@@ -298,7 +290,7 @@ export async function sweepScratch(root: string, now = Date.now()): Promise<stri
 		});
 	};
 	const swept: string[] = [];
-	for (const name of await names(join(root, "tmp")))
+	for (const name of await names(stateFiles(root).scratch))
 		try {
 			if (await sweep(name)) swept.push(name);
 		} catch (error) {
@@ -325,14 +317,14 @@ async function launch(
 	signal?: AbortSignal,
 ): Promise<unknown> {
 	signal?.throwIfAborted();
-	if (existsSync(join(dir, "retry-stop.json"))) throw new Error("Retry stop is unfinished; finish it before starting the sandbox");
+	if (existsSync(instanceFiles(dir).retryStop)) throw new Error("Retry stop is unfinished; finish it before starting the sandbox");
 	const running = await liveness(dir, name, signal);
 	if (running !== absent) return running;
 	if (await controllerAlive(dir))
 		throw new Error(
 			"Sandbox controller is still starting or unavailable. Read controller logs before retrying",
 		);
-	if (Buffer.byteLength(controlSocket(dir)) >= socketPathLimit)
+	if (Buffer.byteLength(instanceFiles(dir).socket) >= socketPathLimit)
 		throw new Error(
 			`Sandbox state path ${dir} is too long for a local control socket. Choose a shorter state root`,
 		);
@@ -341,7 +333,7 @@ async function launch(
 		throw new Error(
 			`Sandbox controller ${daemonPath} is missing`,
 		);
-	const lock = join(dir, "launch.lock");
+	const lock = instanceFiles(dir).launchLock;
 	const release = await holdLock(lock, async () => {
 		if (await controllerAlive(dir))
 			throw new Error(
@@ -353,10 +345,10 @@ async function launch(
 			"Sandbox start or recovery is already in progress. Retry inspect shortly",
 		);
 	try {
-		if (existsSync(join(dir, "retry-stop.json"))) throw new Error("Retry stop is unfinished; finish it before starting the sandbox");
+		if (existsSync(instanceFiles(dir).retryStop)) throw new Error("Retry stop is unfinished; finish it before starting the sandbox");
 		// The boot's resources, so the node counts what a VM still coming up holds.
-		await saveJson(join(dir, "status.json"), { state: "starting", name, resources: spec.resources });
-		await rm(controlSocket(dir), { force: true });
+		await saveJson(instanceFiles(dir).status, { state: "starting", name, resources: spec.resources });
+		await rm(instanceFiles(dir).socket, { force: true });
 		const env: NodeJS.ProcessEnv = {};
 		for (const key of ["PATH", "HOME", "XDG_CACHE_HOME", "GONDOLIN_DEBUG"])
 			if (process.env[key]) env[key] = process.env[key];
@@ -366,7 +358,7 @@ async function launch(
 		env.TMPDIR = scratchDirectory(root, dir);
 		await rm(env.TMPDIR, { recursive: true, force: true });
 		await privateDirectory(env.TMPDIR);
-		const fd = openSync(join(dir, "controller.log"), "a", 0o600);
+		const fd = openSync(instanceFiles(dir).log, "a", 0o600);
 		// The spec carries secret values, so it goes over a pipe and never through the environment or a file.
 		const child = spawn(process.execPath, [daemonPath, dir], {
 			detached: true,
@@ -391,7 +383,7 @@ async function launch(
 		for (let attempt = 0; attempt < 6000; attempt++) {
 			await delay(250, undefined, { signal });
 			const status = statusSchema.parse(
-				JSON.parse(await readFile(join(dir, "status.json"), "utf8")),
+				JSON.parse(await readFile(instanceFiles(dir).status, "utf8")),
 			);
 			if (status.state === "prepared") return offline(dir);
 			if (status.state === "failed" || failure)
@@ -419,17 +411,17 @@ async function create(
 	const kind = action.action === "prepare" ? "templates" : "instances";
 	const dir = directory(root, kind, action.name);
 	const disk = action.action === "create" ? action.disk : undefined;
-	await privateDirectory(join(root, kind));
+	await privateDirectory(stateFiles(root).kind(kind));
 	if (existsSync(dir))
 		throw new Error(
 			`${action.name} already exists. Use inspect or choose a new name`,
 		);
 	// Built aside and renamed in, so a crash never leaves an instance without its record and intent.
-	const staging = join(root, kind, `.${action.name}.creating`);
+	const staging = stagingDirectory(root, kind, action.name);
 	await rm(staging, { recursive: true, force: true });
 	await mkdir(staging, { mode: 0o700 });
 	try {
-		await saveJson(join(staging, "record.json"), {
+		await saveJson(instanceFiles(staging).record, {
 			version: 1,
 			name: action.name,
 			config: action.config,
@@ -438,8 +430,8 @@ async function create(
 		});
 		// A reflink where the filesystem has them, so a large template disk costs no copy.
 		if (disk)
-			await copyFile(disk, join(staging, "disk.qcow2"), constants.COPYFILE_FICLONE);
-		await saveJson(join(staging, "intent.json"), { prepare: kind === "templates" });
+			await copyFile(disk, instanceFiles(staging).disk, constants.COPYFILE_FICLONE);
+		await saveJson(instanceFiles(staging).intent, { prepare: kind === "templates" });
 		await rename(staging, dir);
 	} catch (error) {
 		await rm(staging, { recursive: true, force: true });
@@ -453,7 +445,7 @@ async function create(
 		return await launch(root, dir, action.name, action.boot, signal);
 	} catch (error) {
 		if (signal?.aborted || action.action !== "prepare") throw error;
-		const log = await readLogTail(join(dir, "controller.log"), 20);
+		const log = await readLogTail(instanceFiles(dir).log, 20);
 		const output = log.output.slice(-4096);
 		const detail =
 			output ||
@@ -475,7 +467,7 @@ export async function run(
 	if (action.action === "create" || action.action === "prepare")
 		return create(root, action, signal);
 	if (action.action === "list") {
-		const base = join(root, action.kind);
+		const base = stateFiles(root).kind(action.kind);
 		let names: string[];
 		try {
 			names = await readdir(base);
@@ -486,7 +478,7 @@ export async function run(
 		// A tombstone is garbage whoever left it, and once its instance is gone no destroy of that name may follow.
 		await Promise.all(
 			names
-				.filter((name) => name.startsWith(".") && name.endsWith(".deleting"))
+				.filter(isTombstone)
 				.map((name) => rm(join(base, name), { recursive: true, force: true })),
 		);
 		const found = await Promise.all(
@@ -494,7 +486,7 @@ export async function run(
 				.filter((name) => !name.startsWith("."))
 				.sort()
 				.map(async (name) => {
-					const dir = join(base, name);
+					const dir = directory(root, action.kind, name);
 					try {
 						return await request(
 							dir,
@@ -520,7 +512,7 @@ export async function run(
 		if (action.confirm !== action.name)
 			throw new Error("confirm must match name");
 		// Renamed aside before removal, so a crash midway never leaves an instance without its record.
-		const doomed = join(root, kind, `.${action.name}.deleting`);
+		const doomed = tombstoneDirectory(root, kind, action.name);
 		if (existsSync(dir)) {
 			await readRecord(dir);
 			if ((await send(dir, action, signal)) === absent && (await controllerAlive(dir)))
@@ -532,7 +524,7 @@ export async function run(
 		}
 		await rm(doomed, { recursive: true, force: true });
 		await rm(scratchDirectory(root, dir), { recursive: true, force: true });
-		await rm(join(root, kind, `.${action.name}.creating`), {
+		await rm(stagingDirectory(root, kind, action.name), {
 			recursive: true,
 			force: true,
 		});
@@ -542,7 +534,7 @@ export async function run(
 	if (action.action === "logs" && !action.service) {
 		return {
 			name: action.name,
-			...(await readLogTail(join(dir, "controller.log"), action.lines)),
+			...(await readLogTail(instanceFiles(dir).log, action.lines)),
 		};
 	}
 	if (action.action === "start")
@@ -559,11 +551,11 @@ export async function stopForRetry(root: string, name: string, signal: AbortSign
 	const dir = directory(root, "instances", name);
 	await readRecord(dir);
 	signal.throwIfAborted();
-	const lock = join(dir, "launch.lock");
+	const lock = instanceFiles(dir).launchLock;
 	const release = await holdLock(lock);
 	if (release === null) throw new Error("Sandbox start or recovery is already in progress. Retry stop shortly");
-	const journal = join(dir, "retry-stop.json");
-	const log = (line: string) => appendFile(join(dir, "controller.log"), `${new Date().toISOString()} retry: ${line}\n`, { mode: 0o600 });
+	const journal = instanceFiles(dir).retryStop;
+	const log = (line: string) => appendFile(instanceFiles(dir).log, `${new Date().toISOString()} retry: ${line}\n`, { mode: 0o600 });
 	try {
 		const saved = await readFile(journal, "utf8").catch((error: unknown) => {
 			if (existsError(error, "ENOENT")) return null;
@@ -571,7 +563,7 @@ export async function stopForRetry(root: string, name: string, signal: AbortSign
 		});
 		let owner = saved === null ? null : z.object({ controller: identitySchema, members: z.array(identitySchema) }).parse(JSON.parse(saved));
 		if (owner === null) {
-			const controller = await readIdentity(join(dir, "controller.pid"));
+			const controller = await readIdentity(instanceFiles(dir).pid);
 			if (controller !== null) {
 				const members = await groupMembers(controller.pid);
 				if (members.length > 0) {
@@ -584,7 +576,7 @@ export async function stopForRetry(root: string, name: string, signal: AbortSign
 			}
 		}
 		if (owner !== null) {
-			const current = await readIdentity(join(dir, "controller.pid"));
+			const current = await readIdentity(instanceFiles(dir).pid);
 			if (current !== null && (current.pid !== owner.controller.pid || current.start !== owner.controller.start || current.boot !== owner.controller.boot))
 				throw new Error("The controller changed during retry stop; refusing to stop another boot");
 		}
@@ -608,8 +600,8 @@ export async function stopForRetry(root: string, name: string, signal: AbortSign
 			await checkedSignal("SIGTERM");
 			await reapGroup(controller.pid, `controller ${controller.pid}`, checkedSignal);
 			await log(`stopped old controller ${controller.pid} (start ${controller.start}, host boot ${controller.boot}) and its process group`);
-			await rm(controlSocket(dir), { force: true });
-			await rm(join(dir, "controller.pid"), { force: true });
+			await rm(instanceFiles(dir).socket, { force: true });
+			await rm(instanceFiles(dir).pid, { force: true });
 		}
 		await settle(dir);
 		await rm(journal, { force: true });
@@ -627,7 +619,7 @@ async function settle(dir: string): Promise<unknown> {
 	if (found.status.state !== "interrupted" && found.status.state !== "failed")
 		return found;
 	const status = statusSchema.parse({ name: found.name, state: "stopped" });
-	await saveJson(join(dir, "status.json"), status);
+	await saveJson(instanceFiles(dir).status, status);
 	return { ...found, status };
 }
 async function offline(dir: string) {
@@ -640,7 +632,7 @@ async function offline(dir: string) {
 	});
 	try {
 		status = statusSchema.parse(
-			JSON.parse(await readFile(join(dir, "status.json"), "utf8")),
+			JSON.parse(await readFile(instanceFiles(dir).status, "utf8")),
 		);
 	} catch (error) {
 		if (!existsError(error, "ENOENT")) throw error;

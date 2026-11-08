@@ -8,7 +8,8 @@ import type { PylonId } from "../ids.ts";
 import type { HostBridgeAnswer } from "../host-bridge.ts";
 import { pylonVmHostBridge } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import type { BootSpec } from "./contracts.ts";
-import { hostBridgeHook, hostBridgeSocket } from "./host-bridge.ts";
+import { hostBridgeHook } from "./host-bridge.ts";
+import { stateFiles } from "./instance-layout.ts";
 import { bridgeHost, nexusApi } from "../../images/pylon/nexus-contract.ts";
 import { networkOptions } from "./network.ts";
 
@@ -23,7 +24,7 @@ async function probeSide(t: TestContext) {
   };
   const bridge = await pylonVmHostBridge(stateRoot)(answer);
   t.after(() => bridge.close());
-  return { stateRoot, socket: hostBridgeSocket(stateRoot), calls };
+  return { stateRoot, socket: stateFiles(stateRoot).hostBridge, calls };
 }
 
 const post = (url: string, headers: Record<string, string> = {}) =>
@@ -52,7 +53,7 @@ test("requests to other hosts fall through to the allowlist and secrets", async 
 test("with no probe listening, the guest gets a 503 that says so", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "nexus-bridge-"));
   t.after(() => rm(dir, { recursive: true }));
-  const reply = await hostBridgeHook(hostBridgeSocket(dir), "pylon-t1")(post(`${nexusApi}/v1/request`));
+  const reply = await hostBridgeHook(stateFiles(dir).hostBridge, "pylon-t1")(post(`${nexusApi}/v1/request`));
   assert.ok(reply instanceof Response);
   assert.equal(reply.status, 503);
   assert.match(await reply.text(), /the probe on this node is not answering nexus.pylon/);
@@ -97,7 +98,7 @@ test("a new probe takes over a socket left behind", async (t) => {
   const { stateRoot } = await probeSide(t);
   const second = await pylonVmHostBridge(stateRoot)(async () => ({ status: 200, body: "{}" }));
   t.after(() => second.close());
-  const reply = await hostBridgeHook(hostBridgeSocket(stateRoot), "pylon-t1")(post(`${nexusApi}/v1/request`));
+  const reply = await hostBridgeHook(stateFiles(stateRoot).hostBridge, "pylon-t1")(post(`${nexusApi}/v1/request`));
   assert.equal((reply as Response).status, 200);
 });
 
@@ -108,7 +109,7 @@ test("a probe that starts before any pylon makes the state root, private to its 
   const bridge = await pylonVmHostBridge(stateRoot)(async () => ({ status: 200, body: "{}" }));
   t.after(() => bridge.close());
   assert.equal((await stat(stateRoot)).mode & 0o777, 0o700);
-  const reply = await hostBridgeHook(hostBridgeSocket(stateRoot), "pylon-t1")(post(`${nexusApi}/v1/request`));
+  const reply = await hostBridgeHook(stateFiles(stateRoot).hostBridge, "pylon-t1")(post(`${nexusApi}/v1/request`));
   assert.equal((reply as Response).status, 200);
 });
 

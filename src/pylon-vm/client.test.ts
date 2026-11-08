@@ -10,10 +10,11 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { run, scratchDirectory, sweepScratch } from "./client.ts";
+import { run, sweepScratch } from "./client.ts";
+import { directory, scratchDirectory } from "./instance-layout.ts";
 import { identityOf, publishIdentity } from "./identity.ts";
 import { saveJson } from "../json-file.ts";
-import { directory, privateDirectory } from "./storage.ts";
+import { privateDirectory } from "./storage.ts";
 
 type Inspection = { connected: boolean; status: { state: string } };
 
