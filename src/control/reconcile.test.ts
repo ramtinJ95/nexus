@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   actualState, archivedDiskMs, backoffMs, desiredPhase, diskKept, envelope, idlePolicy, ingest, planPylon,
-  type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
+  type ActivityFacts, type ArchiveFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "../ids.ts";
 import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "../protocol/jobs.ts";
@@ -199,8 +199,8 @@ test("backoffMs follows 5 s, 15 s, 45 s, 2 min, 2 min", () => {
 
 test("desiredPhase", () => {
   const long = now - 3_600_000;
-  const facts = (f: Partial<ActivityFacts>): ActivityFacts => ({ status: "active", agentTurnRunning: false, lastAgentActivityAt: long, lastHumanActivityAt: long, ...f });
-  const cases: [Partial<ActivityFacts>, DesiredPhase][] = [
+  const facts = (f: Partial<ActivityFacts & ArchiveFacts>): ActivityFacts & ArchiveFacts => ({ status: "active", agentTurnRunning: false, lastAgentActivityAt: long, lastHumanActivityAt: long, ...f });
+  const cases: [Partial<ActivityFacts & ArchiveFacts>, DesiredPhase][] = [
     [{ status: "deleted", agentTurnRunning: true }, "deleted"],
     [{ status: "archived", lastHumanActivityAt: now }, "paused"],
     [{ status: "archived", readingUsage: true }, "reading"],
@@ -231,10 +231,10 @@ test("desiredPhase", () => {
 });
 
 test("an archived disk outlives its 24 hours until its token usage is read to the end and a backup that began after that read verified", () => {
-  const archived: ActivityFacts = { status: "archived", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, archivedAt: 0 };
+  const archived: ActivityFacts & ArchiveFacts = { status: "archived", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, archivedAt: 0 };
   const read = { ...archived, usageSettledAt: archivedDiskMs + 5 };
   const failed = { reason: "its pylon did not boot within 10 minutes", at: 7, count: 2 };
-  const cases: [string, ActivityFacts, DesiredPhase, RegExp | null][] = [
+  const cases: [string, ActivityFacts & ArchiveFacts, DesiredPhase, RegExp | null][] = [
     ["never read", archived, "paused", /^its token usage is not read to its end yet$/],
     ["read twice in vain", { ...archived, settleFailure: failed }, "paused", /not read to its end yet, and reading it failed 2 times in a row, the last because its pylon did not boot within 10 minutes$/],
     ["read once in vain", { ...archived, settleFailure: { ...failed, count: 1 } }, "paused", /reading it failed once, the last because/],
@@ -563,4 +563,39 @@ test("ingest: job events and preview hits", () => {
 test("ingest: a preview hit for a pylon the registry does not know writes nothing, not even activity", () => {
   const stranger = "pylon-x" as PylonId;
   assert.deepEqual(ingest({ type: "preview-hit", pylonId: stranger, service: "web", at: "2027-01-01T00:00:05Z", login: null }, node, knows(), now), []);
+});
+
+/** desiredPhase as reconcile.ts had it at 2739948, when ActivityFacts carried the archive's facts, kept as the proof's baseline. */
+function desiredPhaseAt2739948(a: ActivityFacts & ArchiveFacts, now: number): DesiredPhase {
+  if (a.status === "deleted") return "deleted";
+  if (a.status === "archived") {
+    return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs && diskKept(a) === null ? "deleted"
+      : a.readingUsage === true ? "reading" : "paused";
+  }
+  const busy = a.agentTurnRunning || (a.sessionActiveUntil ?? 0) > now || (a.awaitedUntil ?? 0) > now
+    || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs
+    || now - a.lastHumanActivityAt < idlePolicy.humanIdleMs;
+  return busy ? "running" : "paused";
+}
+
+test("desiredPhase gives every fixture of activity and archive facts the phase it gave before the archive's facts left ActivityFacts", () => {
+  const at = 3 * archivedDiskMs;
+  const optional = <K extends keyof ArchiveFacts | keyof ActivityFacts>(key: K, ...values: unknown[]) => [{}, ...values.map((v) => ({ [key]: v }))];
+  const axes: Partial<ActivityFacts & ArchiveFacts>[][] = [
+    [{}, { agentTurnRunning: true }],
+    optional("sessionActiveUntil", at - 1, at + 1),
+    optional("awaitedUntil", at - 1, at + 1),
+    [{}, { lastAgentActivityAt: at - idlePolicy.agentIdleMs + 1 }, { lastHumanActivityAt: at - idlePolicy.humanIdleMs + 1 }],
+    optional("archivedAt", at - archivedDiskMs + 1, at - archivedDiskMs, 0),
+    optional("readingUsage", true, false),
+    optional("usageSettledAt", 10, at),
+    optional("backedUpAt", 5, 11, at + 1),
+    optional("usageUnread", "its pylon failed"),
+    optional("settleFailure", { reason: "its pylon did not boot within 10 minutes", at: 7, count: 3 }),
+    optional("settleWaiting", "rj-firebat is offline"),
+  ];
+  const statuses = (["active", "idle", "archived", "deleted"] as const).map((status): ActivityFacts & ArchiveFacts => ({ status, agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0 }));
+  const fixtures = axes.reduce<(ActivityFacts & ArchiveFacts)[]>((all, axis) => all.flatMap((f) => axis.map((v) => ({ ...f, ...v } as ActivityFacts & ArchiveFacts))), statuses);
+  assert.equal(fixtures.length, 4 * 2 * 3 * 3 * 3 * 4 * 3 * 3 * 4 * 2 * 2 * 2);
+  for (const f of fixtures) assert.equal(desiredPhase(f, at), desiredPhaseAt2739948(f, at), JSON.stringify(f));
 });

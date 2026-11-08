@@ -6,7 +6,7 @@ import type { Db, Holding, Row } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import { roleOf } from "./agent-protocol.ts";
 import type { AgentCall } from "./agent-usage.ts";
-import type { ActivityFacts } from "./reconcile.ts";
+import type { ArchiveFacts } from "./reconcile.ts";
 import type { Thread, ThreadParticipant } from "./thread-store.ts";
 import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "../contract/usage.ts";
 
@@ -109,7 +109,7 @@ export function usageStore(db: Db, threads: {
   const participant: ThreadParticipant = {
     facts(of: readonly Thread[]) {
       const reading = new Set([sql("SELECT thread FROM usage_backfill WHERE state = 'running' AND phase = 'reading'").get()?.thread, settle?.phase === "reading" ? settle.thread : undefined]);
-      return new Map(of.map((t): [ThreadId, Partial<ActivityFacts>] => {
+      return new Map(of.map((t): [ThreadId, Pick<ArchiveFacts, "readingUsage" | "settleWaiting">] => {
         const waiting = t.archivedAt === undefined || t.usageSettledAt !== undefined ? undefined : settleWaits.get(t.id);
         return [t.id, { ...(reading.has(t.id) ? { readingUsage: true } : {}), ...(waiting === undefined ? {} : { settleWaiting: waiting }) }];
       }));

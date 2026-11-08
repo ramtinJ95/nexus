@@ -35,10 +35,17 @@ export interface ActivityFacts {
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
   lastAgentActivityAt: number; // pi-durable turns, Claude hooks and other observed sessions in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
-  /** The usage backfill, or the settle of this archive, reads this archived thread's pylon now. */
-  readingUsage?: boolean;
+}
+
+/**
+ * An archived thread's disk, as its archive row, the newest backup and the usage module say: whether its usage is read
+ * now, and how far it was read, which the disk's delete waits on.
+ */
+export interface ArchiveFacts {
   /** When the thread was archived, present only while it is. */
   archivedAt?: number;
+  /** The usage backfill, or the settle of this archive, reads this archived thread's pylon now. */
+  readingUsage?: boolean;
   /** When this archive's settle read every transcript on its pylon to the end, in a wake for reading after its pause. */
   usageSettledAt?: number;
   /** This archive's last settle that failed, why, and how many failed in a row. Present only while it is unsettled. */
@@ -66,7 +73,7 @@ export const settleFailuresFail = 3;
  * and in a backup of it before the only copy of their transcripts goes. A disk whose usage cannot be read, as a failed
  * pylon's, is not kept for it, as the person decided on 2026-11-02.
  */
-export function diskKept(a: ActivityFacts): string | null {
+export function diskKept(a: ArchiveFacts): string | null {
   if (a.usageUnread !== undefined) return null;
   const f = a.settleFailure;
   if (a.usageSettledAt === undefined) {
@@ -77,17 +84,17 @@ export function diskKept(a: ActivityFacts): string | null {
 }
 
 /** Why the archived thread's disk is kept past its 24 hours at `now`, or null while it is under them or may go. */
-export function keptPastDay(a: ActivityFacts, now: number): string | null {
+export function keptPastDay(a: Pick<ActivityFacts, "status"> & ArchiveFacts, now: number): string | null {
   return a.status === "archived" && a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? diskKept(a) : null;
 }
 
 /** Whether the archive's usage will not be read without the person: its settles keep failing, or it is overdue. */
-export function settleStuck(a: ActivityFacts, now: number): boolean {
+export function settleStuck(a: Pick<ActivityFacts, "status"> & ArchiveFacts, now: number): boolean {
   return keptPastDay(a, now) !== null && a.usageSettledAt === undefined
     && ((a.settleFailure?.count ?? 0) >= settleFailuresFail || now - a.archivedAt! >= settleOverdueMs);
 }
 
-export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
+export function desiredPhase(a: ActivityFacts & ArchiveFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
   if (a.status === "archived") {
     return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs && diskKept(a) === null ? "deleted"

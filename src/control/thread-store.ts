@@ -13,7 +13,7 @@ import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
 import { Refusal } from "./refusal.ts";
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
-import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
+import { desiredPhase, noAttempts, type ActivityFacts, type ArchiveFacts, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import { pylonEventSchema, type HerdrStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
@@ -59,7 +59,7 @@ export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnR
   standingRulesRevision?: number;
 }
 
-export interface Thread extends StoredThread, ActivityFacts {
+export interface Thread extends StoredThread, ActivityFacts, ArchiveFacts {
   sessionWaiting?: boolean;
   /** What the most recently waiting session's report said, when it said anything. */
   sessionWaitingMessage?: string;
@@ -210,8 +210,8 @@ export interface ThreadParticipant {
   outputs?(thread: ThreadId): Output[];
   /** A queued thread starts at `at`, in the transaction that creates it. Throws when it may not start. */
   startQueued?(thread: ThreadId, at: number): void;
-  /** What the feature says of each of `threads` beyond their rows, which the planner reads. */
-  facts?(threads: readonly Thread[]): ReadonlyMap<ThreadId, Partial<ActivityFacts>>;
+  /** What the usage module says of each of `threads`' archive beyond its row, which the planner reads. */
+  facts?(threads: readonly Thread[]): ReadonlyMap<ThreadId, Pick<ArchiveFacts, "readingUsage" | "settleWaiting">>;
 }
 
 interface AwaitWindow { from: number; until: number }
@@ -349,7 +349,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   }
 
   /** What the thread's archive row says, and when the newest backup began, which only an archived thread's disk waits on. */
-  function archiveFacts(r: Row, backedUp: number | null): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt" | "usageUnread"> {
+  function archiveFacts(r: Row, backedUp: number | null): Omit<ArchiveFacts, "readingUsage" | "settleWaiting"> {
     return {
       archivedAt: r.archived_at as number,
       ...(r.usage_unread === null ? {} : { usageUnread: r.usage_unread as string }),

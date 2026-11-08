@@ -5,7 +5,7 @@
  */
 import type { NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
-import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts } from "./reconcile.ts";
+import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts, type ArchiveFacts } from "./reconcile.ts";
 import type { ReleaseReport, ReleaseView } from "../protocol/deploy.ts";
 import type { LoginState } from "./harness/credentials.ts";
 import type { BackupStatusRead } from "./backup-status.ts";
@@ -31,7 +31,7 @@ export interface DoctorFacts {
   login: LoginState | { unreadable: string };
   certificate: CertificateFact;
   /** The archived threads whose disk may be kept for their usage, as the registry's keptArchives lists them, less those whose node has no disk for them. */
-  keptArchives: readonly (ActivityFacts & { id: ThreadId; title: string })[];
+  keptArchives: readonly (ActivityFacts & ArchiveFacts & { id: ThreadId; title: string })[];
 }
 
 const minute = 60_000;
