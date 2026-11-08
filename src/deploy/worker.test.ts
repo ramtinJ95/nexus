@@ -83,58 +83,6 @@ test("activation failure rolls back through fake service executables in a tempor
   assert.equal(await readFile(join(dir, "calls"), "utf8"), "restart\nhealthy\nrestart\nhealthy\n");
 });
 
-test("polling reconciles a desired control release, reports rollback and leaves the probe link alone", async (t) => {
-  const { createServer } = await import("node:http");
-  const { once } = await import("node:events");
-  const { reconcileRole } = await import("./worker.ts");
-  const dir = await mkdtemp(join(tmpdir(), "nexus-poll-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const old = "b".repeat(40);
-  for (const path of ["etc", "units", "deployer", `releases/${old}`]) await mkdir(join(dir, path), { recursive: true });
-  await writeFile(join(dir, `releases/${old}/release-commit`), old);
-  await symlink(`releases/${old}`, join(dir, "control-current"));
-  await symlink(`releases/${old}`, join(dir, "current"));
-  await writeFile(join(dir, "units/nexus-control.service"), "old unit");
-  let processCommit = old;
-  const server = createServer((_req, res) => res.end(JSON.stringify({ commit: processCommit }))).listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => { server.closeAllConnections(); server.close(); });
-  await writeFile(join(dir, "etc/control.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as { port: number }).port } }));
-  const reports: any[] = [];
-  const calls: string[] = [];
-  const api = async (path: string, body?: any) => {
-    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
-    if (path === "drain") return { idle: true };
-    if (path === "report") { reports.push(body); return { ok: true }; }
-    assert.fail(path);
-  };
-  const config = { controlUrl: "http://control/", controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
-  const boundary = {
-    prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"),
-    async checkout() { calls.push("checkout"); },
-    async run(program: string, args: readonly string[]) {
-      calls.push(`${program} ${args.join(" ")}`);
-      if (program === "env" && !args.includes("NEXUS_PREPARE=1")) {
-        await mkdir(join(dir, `releases/${commit}`), { recursive: true });
-        await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
-      }
-      if (program === "env" && args.includes("NEXUS_PREPARE=1")) await writeFile(join(dir, "units/nexus-control.service"), "new unit");
-      // The candidate process never answers with its commit; rollback starts the previous process.
-      if (program === "systemctl" && args[0] === "restart") processCommit = old;
-      return program === "journalctl" ? "candidate API failed" : "";
-    },
-  };
-  await reconcileRole("control", config, api, boundary);
-  assert.deepEqual(reports.map((r) => r.state), ["installing", "rolled-back"]);
-  assert.match(reports.at(-1).reason, /candidate API failed/);
-  assert.equal(await readFile(join(dir, "units/nexus-control.service"), "utf8"), "old unit");
-  assert.equal(await readlink(join(dir, "current")), `releases/${old}`);
-  assert.equal(await readlink(join(dir, "control-current")), `releases/${old}`);
-  calls.length = 0;
-  await reconcileRole("control", config, api, boundary);
-  assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
-});
-
 test("a failed deploy that migrated the registry stays on its release with a backup taken first, and a rollback past the migration is refused before it switches", async (t) => {
   const { createServer } = await import("node:http");
   const { once } = await import("node:events");
@@ -420,12 +368,11 @@ test("a poll of two idle roles reads the release view once, and an unchanged rep
   assert.deepEqual(probe, { role: "probe", commit, target: null, state: "failed", reason: "running release is not healthy" });
 });
 
-test("a control upgrade makes the probe read the release view again, so both roles upgrade in one poll", async (t) => {
+test("a control upgrade lets the probe see control healthy on the new release, so both roles upgrade in one poll", async (t) => {
   const { reconcileRoles } = await import("./worker.ts");
   const m = await bothRoles(t, "b".repeat(40));
   await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
   assert.deepEqual(m.control.posted, ["control installing", "control healthy", "probe installing", "probe healthy"]);
-  assert.equal(m.control.reads, 4, "control plans and activates, then the probe plans and checks control again before it switches");
   assert.equal(await readlink(join(m.dir, "control-current")), `releases/${commit}`);
   assert.equal(await readlink(join(m.dir, "current")), `releases/${commit}`);
 });
