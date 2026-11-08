@@ -43,6 +43,7 @@ import {
   type Answer, type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
+import { deliverDurable } from "./durable-message.ts";
 import type { StartRequest } from "./start-request.ts";
 
 type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
@@ -1006,23 +1007,28 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (r.second?.kind === "starting" && r.phase.kind === "reviewing" && (r.second.tried === null || now() - r.second.tried >= secondRetryMs)) {
       return await startSecond(r, (await read(r)).detail);
     }
-    if (r.outbox !== null) {
-      if (r.outbox.attempted === null) return { ...r, outbox: { ...r.outbox, attempted: now() } };
+    // The builder's or the first reviewer's message goes before the second reviewer's.
+    const outbox = r.outbox !== null
+      ? {
+        ...r.outbox, thread: r.outbox.to === "builder" ? builder! : reviewer!,
+        attempt: (at: number): Review => ({ ...r, outbox: { ...r.outbox!, attempted: at } }),
+        sent: (since: number): Review => ({ ...r, outbox: null, since }),
+      }
+      : second?.outbox != null
+        ? {
+          ...second.outbox, thread: secondThread!,
+          attempt: (at: number): Review => ({ ...r, second: { ...second, outbox: { ...second.outbox!, attempted: at } } }),
+          sent: (since: number): Review => ({ ...r, second: { ...second, outbox: null, since } }),
+        }
+        : null;
+    if (outbox !== null) {
+      const { id, text, attempted, thread, attempt, sent } = outbox;
+      if (attempted === null) return attempt(now());
       const gone = live ? await endedOnGitHub(r) : null;
       if (gone !== null) return gone;
       // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
       if (!registry.isCurrentReview(r)) return r;
-      if (await inbox(r.outbox.to === "builder" ? builder! : reviewer!, { id: r.outbox.id, text: r.outbox.text, sender: "review" }) === "later") return r;
-      return { ...r, outbox: null, since: r.outbox.attempted };
-    }
-    if (second?.outbox != null) {
-      const outbox = second.outbox;
-      if (outbox.attempted === null) return { ...r, second: { ...second, outbox: { ...outbox, attempted: now() } } };
-      const gone = live ? await endedOnGitHub(r) : null;
-      if (gone !== null) return gone;
-      if (!registry.isCurrentReview(r)) return r;
-      if (await inbox(secondThread!, { id: outbox.id, text: outbox.text, sender: "review" }) === "later") return r;
-      return { ...r, second: { ...second, outbox: null, since: outbox.attempted } };
+      return await deliverDurable({ id, text }, (m) => inbox(thread, { ...m, sender: "review" }), () => sent(attempted)) ?? r;
     }
     const phase = r.phase;
     if (ended(r)) return r;
