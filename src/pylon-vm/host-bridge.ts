@@ -1,13 +1,9 @@
 import http from "node:http";
-import { join } from "node:path";
 import type { HttpHooks } from "@earendil-works/gondolin";
 import { bridgeHost } from "../../images/pylon/nexus-contract.ts";
 
 /** Set by the controller, never taken from the guest: the instance whose VM the request came through. */
 export const bridgePylonHeader = "x-nexus-pylon";
-
-/** Where the probe listens for the controllers' forwarded requests. Under the private state root, so only the probe's user reaches it. */
-export const hostBridgeSocket = (stateRoot: string): string => join(stateRoot, "host-bridge.sock");
 
 /**
  * Answers every request to the bridge host by forwarding it to the probe's socket with the instance name

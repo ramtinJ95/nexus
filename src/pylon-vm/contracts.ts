@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { maxServiceLogLines } from "../guest-contract.ts";
 import { previewText, serviceDecl, serviceName } from "../services-file.ts";
+import { kinds } from "./instance-layout.ts";
 
 const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
 const guestPath = z
@@ -109,7 +110,7 @@ const waitMs = z.number().int().min(0).max(60000).default(10000);
 export const actionSchema = z.discriminatedUnion("action", [
 	z.strictObject({
 		action: z.literal("list"),
-		kind: z.enum(["instances", "templates"]).default("instances"),
+		kind: z.enum(kinds).default("instances"),
 	}),
 	z.strictObject({
 		action: z.literal("prepare"),
@@ -140,7 +141,7 @@ export const actionSchema = z.discriminatedUnion("action", [
 	z.strictObject({
 		action: z.literal("destroy"),
 		...identity,
-		kind: z.enum(["instances", "templates"]).default("instances"),
+		kind: z.enum(kinds).default("instances"),
 		confirm: nameSchema,
 	}),
 	z.strictObject({

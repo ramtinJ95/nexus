@@ -1,9 +1,8 @@
 import { once } from "node:events";
 import { chmod, rm } from "node:fs/promises";
 import http from "node:http";
-import { dirname, join } from "node:path";
 import { text } from "node:stream/consumers";
-import { controlSocket, scratchDirectory } from "./client.ts";
+import { instanceFiles, scratchDirectory, stateRootOf } from "./instance-layout.ts";
 import { type Action, actionSchema, bootSchema } from "./contracts.ts";
 import { lifecycleQueue, NotRunning, readIntent, runsBesideQueue, SandboxRuntime } from "./runtime.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
@@ -21,17 +20,16 @@ async function main(): Promise<void> {
 	const record = await readRecord(dir);
 	// The log is opened for appending, so it holds every controller this instance had, and this line tells them apart.
 	console.error(`controller ${process.pid} started for ${record.name}`);
-	const pidFile = join(dir, "controller.pid");
+	const { pid: pidFile, log, socket } = instanceFiles(dir);
 	await publishIdentity(pidFile);
 	// The scratch directory goes first: once controller.pid is gone, a launch may make both again for its own controller,
 	// so this runs once however many paths end the controller.
 	let retiring: Promise<void> | undefined;
 	const retire = () =>
 		(retiring ??= (async () => {
-			await rm(scratchDirectory(dirname(dirname(dir)), dir), { recursive: true, force: true });
+			await rm(scratchDirectory(stateRootOf(dir), dir), { recursive: true, force: true });
 			await rm(pidFile, { force: true });
 		})());
-	const log = join(dir, "controller.log");
 	setInterval(() => void rotateLog(log, controllerLogLimit).catch((error: unknown) => console.error(error)), 60_000).unref();
 	// The launching client writes the boot spec, secrets included, to stdin and closes it.
 	const spec = bootSchema.parse(JSON.parse(await text(process.stdin)));
@@ -55,7 +53,6 @@ async function main(): Promise<void> {
 		return;
 	}
 	const queue = lifecycleQueue();
-	const socket = controlSocket(dir);
 	const closeServer = async () => {
 		server.close();
 		await rm(socket, { force: true });

@@ -12,8 +12,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { saveJson } from "../json-file.ts";
 import { publishIdentity, readIdentity } from "./identity.ts";
-import { scratchDirectory } from "./client.ts";
-import { directory, existsError, privateDirectory } from "./storage.ts";
+import { directory, scratchDirectory } from "./instance-layout.ts";
+import { existsError, privateDirectory } from "./storage.ts";
 
 const name = "pylon-t1";
 const spec = { resources: { cpus: 1, memoryGiB: 1 }, allowedHosts: [], secrets: {}, ssh: null, files: [], hooks: [], publicUrls: {}, hostBridge: null };

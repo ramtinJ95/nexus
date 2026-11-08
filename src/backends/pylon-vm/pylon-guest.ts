@@ -6,7 +6,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { join } from "node:path";
 import { z } from "zod";
 import type { Guest, PreviewOrigin } from "../backend.ts";
 import { processStream } from "../../process-stream.ts";
@@ -17,17 +16,18 @@ import { statusSchema } from "../../pylon-vm/contracts.ts";
 import { stamped } from "../../pylon-vm/controller-log.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { existsError, readLogTail } from "../../pylon-vm/storage.ts";
+import { instanceFiles } from "../../pylon-vm/instance-layout.ts";
 import { asUser } from "../../guest-contract.ts";
 
 /** A login shell as `user`, in `cwd`, as one command string. The fork runs guest commands as root. */
 export const asUserIn = (script: string, cwd: string) => asUser(`cd ${q(cwd)} && ${script}`).map(q).join(" ");
 
 /** The instance's controller log, which `logs` without a service reads. The controller appends to it too. */
-export const controllerLog = (dir: string): PylonLog => (line) => appendFile(join(dir, "controller.log"), `${stamped(line)}\n`, { mode: 0o600 });
+export const controllerLog = (dir: string): PylonLog => (line) => appendFile(instanceFiles(dir).log, `${stamped(line)}\n`, { mode: 0o600 });
 
 /** The end of a build's or an instance's controller log, for a JobFailure's or a broken pylon's logTail. */
 export async function controllerLogTail(dir: string): Promise<string> {
-  return (await readLogTail(join(dir, "controller.log"), logTailBounds.lines)).output.slice(-logTailBounds.chars);
+  return (await readLogTail(instanceFiles(dir).log, logTailBounds.lines)).output.slice(-logTailBounds.chars);
 }
 
 /** gondolin build writes gondolin.json's env here, for login shells. sandboxd's execs get the same env directly. */
@@ -188,7 +188,7 @@ export function pylonGuest(pylonId: PylonId, dir: string, run: (action: Record<s
 		},
 
 		previewOrigin(service) {
-			const path = join(dir, "status.json");
+			const path = instanceFiles(dir).status;
 			let status = statuses.get(pylonId);
 			try {
 				const { ino, size, mtimeNs } = statSync(path, { bigint: true });
