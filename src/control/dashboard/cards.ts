@@ -5,9 +5,9 @@
 import type { ThreadDetail } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
-import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, reviewersNote, roundNote, type Review } from "../review-model.ts";
+import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, type Review } from "../review-model.ts";
 import { answerFinal } from "../client-wording.ts";
-import { needLabels, reviewPr, roundOf, stoppedShort } from "../wording.ts";
+import { needLabels, reviewersNote, reviewPr, roundNote, roundOf, stoppedShort } from "../wording.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { landsOnItsOwn } from "../project.ts";
 import { heldBy, landPress } from "../policy.ts";

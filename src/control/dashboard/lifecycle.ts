@@ -5,9 +5,9 @@
  */
 import type { ThreadId } from "../../ids.ts";
 import { itemView, phaseStep, steps, threadStage, type ItemPhase, type PipelineItem, type Step } from "../pipeline.ts";
-import { checkBeside, checkThread, landingAt, landingSteps, liveNote, roundsSpent, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
+import { checkThread, landingAt, landingSteps, roundsSpent, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
 import { html, type Html, type Tone } from "./view.ts";
-import { duration, needWording } from "../wording.ts";
+import { checkBeside, duration, liveNote, needWording } from "../wording.ts";
 import type { Context } from "./context.ts";
 import type { ThreadNeed } from "../work.ts";
 import type { Role } from "../work-model.ts";

@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  blocks, builderAwaited, cancellable, ended, findingsOf, inLanding, kindsWhere, landingAt, landingVerb, trackStep, findingSchema, reviewerApproved, reviewersFindings, roundNote, roundsSpent, secondReads, settled, verdictSchema, waitsOnPerson,
+  blocks, builderAwaited, cancellable, ended, findingsOf, inLanding, kindsWhere, landingAt, landingVerb, trackStep, findingSchema, reviewerApproved, reviewersFindings, roundsSpent, secondReads, settled, verdictSchema, waitsOnPerson,
   type Finding, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Verdict,
 } from "./review-model.ts";
 import type { PrSnapshot } from "./github.ts";
 import { landingHolds } from "./policy.ts";
+import { roundNote } from "./wording.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import type { ThreadId } from "../ids.ts";
 import { testReview } from "../test-support/registry-kit.ts";
