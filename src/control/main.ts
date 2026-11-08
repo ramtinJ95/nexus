@@ -56,6 +56,7 @@ import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";
 import { followEvents } from "./follow-events.ts";
+import { services as startServices } from "./services.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
@@ -131,6 +132,9 @@ export interface ControlPlane {
   close(): Promise<void>;
 }
 
+/** How often a service with no interval of its own polls. */
+const passMs = 15_000;
+
 type NodeAddress = Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">;
 
 /**
@@ -158,15 +162,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     return client;
   };
   for (const node of [...config.nodes, ...registry.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
-  const timers: NodeJS.Timeout[] = [];
-  /** Runs the pass now and every `ms` after. The API's server keeps the process alive, so no timer does. */
-  const every = (ms: number, pass: () => unknown) => {
-    void pass();
-    timers.push(setInterval(() => { void pass(); }, ms).unref());
-  };
-  const handoff = chatgptToken === undefined ? null : chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken });
-  const peers = peerHandoff({ registry, probes: probeMap });
-  const loop = startLoop({
+  const services = startServices();
+  const handoff = services.start(chatgptToken === undefined ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
+  const peers = services.start(peerHandoff({ registry, probes: probeMap }));
+  const loop = services.start(startLoop({
     registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
     ingest: (event, node, ...rest) => {
       if (event.type === "snapshot") {
@@ -175,11 +174,12 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       }
       return ingest(event, node, ...rest);
     },
-  });
-  const wakeThread = (t: Thread) => { void loop.wake(registry.pylon(t.pylonId)!.node); };
+  }));
+  const wake = (node: NodeName) => { void loop.wake(node); };
+  const wakeThread = (t: Thread) => wake(registry.pylon(t.pylonId)!.node);
 
   const conversations = registry.harnessThreads().map((thread) => ({ thread, id: Number(thread.conversationId) as ConversationId }));
-  const rawHarness = await openHarnessHost({
+  const rawHarness = services.start(await openHarnessHost({
     storagePath: config.harness.storage,
     models,
     model: config.harness.model,
@@ -197,7 +197,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
       wakeThread(t);
     },
     log,
-  });
+  }));
 
   const gate = turnGate(() => isDraining(registry.drain()));
   const harness: typeof rawHarness = {
@@ -208,26 +208,23 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     startJudgment: (...args) => gate.run(() => rawHarness.startJudgment(...args)),
     sendJudgment: (...args) => gate.run(() => rawHarness.sendJudgment(...args)),
   };
-  const images = startImageRollout({
+  const images = services.start(startImageRollout({
     registry, probes: probeMap, buildNode: (config.imageBuildNode ?? "infra-testbench") as NodeName, recipe: () => loadImageRecipe(), release: runningCommit,
-  });
+  }));
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
   const agents = agentReader(registry, harness);
-  const usage = usageCounter({ registry, probes: probeMap, harness });
+  const usage = services.start(usageCounter({ registry, probes: probeMap, harness }));
   const github = token === null ? null : githubClient(token);
-  every(60_000, () => handoff?.poll());
-  const resumer = config.resumeAfterUsageLimit ? usageLimitResumer({ registry, inbox }) : null;
-  every(30_000, () => resumer?.poll());
+  services.start(config.resumeAfterUsageLimit ? { everyMs: 30_000, ...usageLimitResumer({ registry, inbox }) } : null);
   const mirror = projectMirror({ githubToken: token });
-  const wake = (node: NodeName) => { void loop.wake(node); };
-  const backfill = usageBackfill({ registry, counter: usage, wake });
-  const threads = threadServices({
+  const backfill = services.start(usageBackfill({ registry, counter: usage, wake }));
+  const threads = services.start(threadServices({
     registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake, gate, log,
     queue: github !== null, planning: { replies: agents.replies },
-  });
+  }));
   const { startThread } = threads.api;
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
-  const reviews = github === null ? null : reviewLoop({
+  const reviews = services.start(github === null ? null : { everyMs: passMs, ...reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     agentState: agents.state,
     brief: agents.brief,
@@ -237,29 +234,23 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,
     log,
-  });
-  const watch = prWatcher({ registry, github, inbox, linked: reviews?.auto, fresh: (t) => loop.readGit(registry.pylon(t.pylonId)!.node, t.pylonId) });
-  every(prWatchMs, () => watch.poll());
-  every(15_000, () => reviews?.poll());
+  }) });
+  const watch = services.start({ everyMs: prWatchMs, ...prWatcher({ registry, github, inbox, linked: reviews?.auto, fresh: (t) => loop.readGit(registry.pylon(t.pylonId)!.node, t.pylonId) }) });
   // The events only run a step sooner: each poll above stays its fallback.
-  const stopFollowing = followEvents(registry, ["session.turn-ended", "thread.turn-ended", "release.changed"], 1_000, (events) => {
+  services.start({ close: followEvents(registry, ["session.turn-ended", "thread.turn-ended", "release.changed"], 1_000, (events) => {
     for (const id of new Set(events.flatMap((e) => e.kind === "release.changed" ? [] : e.thread ?? []))) {
       void watch.turnEnded(id as ThreadId);
       void reviews?.wake(id as ThreadId);
     }
     if (!events.some((e) => wakesDeployers(registry, e))) return;
     for (const probe of probeMap.values()) probe.wakeDeployer().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
-  }, (err) => log(`following events for wake-ups failed, going on from the newest: ${err.message}`));
-  for (const poll of threads.polls) every(15_000, poll);
-  const nudges = github === null ? null : builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch });
-  every(15_000, () => nudges?.poll());
-  const resumes = deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote });
-  every(15_000, () => resumes.poll());
+  }, (err) => log(`following events for wake-ups failed, going on from the newest: ${err.message}`)) });
+  for (const polled of threads.polls) services.start(polled && { everyMs: passMs, poll: () => polled.poll() });
+  services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch }) });
+  services.start({ everyMs: passMs, ...deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote }) });
   // Judgments need no GitHub, so they run without a token too.
-  const judgments = judgmentPass({ registry, harness, probes: probeMap, wake });
-  every(15_000, () => judgments.poll());
-  const cleanup = cleanupPass({ registry, probes: probeMap, log });
-  every(cleanupEveryMs, () => cleanup.poll());
+  services.start({ everyMs: passMs, ...judgmentPass({ registry, harness, probes: probeMap, wake }) });
+  const cleanup = services.start({ everyMs: cleanupEveryMs, ...cleanupPass({ registry, probes: probeMap, log }) });
   const startedAt = Date.now();
   const doctor = () => runDoctor({
     registry, self: config.self.tailnetNodeId, startedAt,
@@ -269,16 +260,14 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, ports.dashboard, config.https.hostname) : { kind: "none" },
   });
   // An archived disk kept for its usage goes once a backup that began after its read verified.
-  every(60_000, () => readBackupStatus(backupStatusFile).then((s) => {
+  services.start({ everyMs: 60_000, poll: () => readBackupStatus(backupStatusFile).then((s) => {
     const at = backedUpAt(s);
     if (at !== null) registry.recordBackedUp(at);
-  }).catch((err: unknown) => log(`recording the newest backup failed: ${(err as Error).message}`)));
-  const health = healthPasses({ registry, run: doctor, startedAt });
-  every(checkEveryMs, () => health.poll());
-  const sampling = healthSampling({ registry, probes: probeMap, log });
-  every(backgroundReadMs, () => sampling.poll());
-  every(60_000, () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)));
-  const api = await startApi({
+  }).catch((err: unknown) => log(`recording the newest backup failed: ${(err as Error).message}`)) });
+  const health = services.start({ everyMs: checkEveryMs, ...healthPasses({ registry, run: doctor, startedAt }) });
+  services.start({ everyMs: backgroundReadMs, ...healthSampling({ registry, probes: probeMap, log }) });
+  services.start({ everyMs: 60_000, poll: () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)) });
+  const api = services.start(await startApi({
     ...(config.https ? { https: { port: ports.dashboard, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
     reviews,
@@ -306,16 +295,17 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     usageBackfill: backfill,
     doctor,
     health: health.latest,
-  });
+  }));
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);
 
   return {
     port: api.port,
     async close() {
-      for (const timer of timers) clearInterval(timer);
-      stopFollowing();
-      for (const service of [watch, handoff, peers, resumer, reviews, threads, nudges, resumes, judgments, cleanup, health, sampling, api, backfill, usage, harness, loop, images]) await service?.close();
-      registry.close();
+      try {
+        await services.close();
+      } finally {
+        registry.close();
+      }
     },
   };
 }

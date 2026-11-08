@@ -35,6 +35,8 @@ export interface UsageBackfillJob {
   start(): UsageBackfill;
   /** Stops a running run, whose pylon then pauses, and answers its state. */
   stop(): UsageBackfill;
+  readonly everyMs: number;
+  poll(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -273,10 +275,6 @@ export function usageBackfill(options: {
     });
   }
 
-  const timer = setInterval(() => void steps.rerun(), intervalMs);
-  timer.unref();
-  void steps.rerun();
-
   return {
     status: () => registry.usageBackfill(),
     plan,
@@ -292,9 +290,10 @@ export function usageBackfill(options: {
       if (held !== undefined) wake(held.node);
       return state;
     },
+    everyMs: intervalMs,
+    poll: steps.rerun,
     async close() {
       shutdown.abort();
-      clearInterval(timer);
       await steps.settled();
     },
   };
