@@ -633,6 +633,7 @@ test("the nudger loads without the probe's git helper, which only a probe reads"
   const root = join(import.meta.dirname, "../..");
   const copy = await tempDir("nexus-nudge-import-", t);
   cpSync(join(root, "src"), join(copy, "src"), { recursive: true, filter: (path) => !path.endsWith("git-facts.py") });
+  cpSync(join(root, "images/pylon"), join(copy, "images/pylon"), { recursive: true });
   cpSync(join(root, "package.json"), join(copy, "package.json"));
   symlinkSync(join(root, "node_modules"), join(copy, "node_modules"));
   const loaded = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(join(copy, "src/control/nudge.ts")).href)})`], { encoding: "utf8" });
