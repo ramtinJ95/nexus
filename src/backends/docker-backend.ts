@@ -2,8 +2,10 @@
  * The Docker test double for VmBackend, after Amp's Docker provider example. A pylon is a container named
  * after its ID running `sleep infinity` under --init. Pause records its sessions, stops it, commits it to a
  * checkpoint image and removes it. Resume runs from that image and relaunches the sessions. Everything it
- * reports comes from Docker labels, so a probe restart loses nothing. Its services are the exception: see
- * docker-services.ts.
+ * reports comes from Docker labels, so a probe restart loses nothing. Its services run under the pylon VM's
+ * supervisor (src/pylon-vm/services.ts) in the probe, on a docker-service-guest.ts guest, which keeps its files in a
+ * host directory per pylon. A probe restart forgets their last start failures until the next spawn, which the planner
+ * sends after one.
  *
  * A template is a Docker image committed from a build container, and its artifact is that image's
  * `docker save` archive in the artifact store, so templates move between probes as they do between nodes. A
@@ -12,26 +14,30 @@
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { artifactDirectory, fileCodec, type ArtifactDirectory } from "../image/artifacts.ts";
-import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type VmBackend } from "./backend.ts";
+import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type PreviewOrigin, type VmBackend } from "./backend.ts";
 import { JobFailure } from "../protocol/jobs.ts";
 import { dockerBridgeRunArgs, dockerHostBridge } from "./docker-host-bridge.ts";
 import { docker, dockerExec, label, labelFilters } from "./docker-cli.ts";
-import { dockerServices, publishedPorts } from "./docker-services.ts";
+import { dockerServiceGuest } from "./docker-service-guest.ts";
+import { GuestServices, settled } from "../pylon-vm/services.ts";
+import { checkedIn, serviceRoot } from "../pylon-vm/guest.ts";
+import { startRelay } from "../pylon-vm/relay.ts";
+import { configSchema } from "../pylon-vm/contracts.ts";
+import { parse, parseJson } from "../parse.ts";
 import { processStream } from "../process-stream.ts";
 import { installFileCommand, shellQuote as q } from "../shell.ts";
 import type { OverlayFile } from "../protocol/spawn.ts";
 import { type CheckpointId, type ImageId, isImageId, isTemplateId, type PortableArtifactId, type PylonId, type TemplateId } from "../ids.ts";
 import { pausedSessionsSchema, type PausedSession } from "../protocol/observations.ts";
-import { parseJson } from "../parse.ts";
 import { publicUrls } from "../public-urls.ts";
 import { diskBytes } from "../node-base/disk-bytes.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "../probe/guest/session-wake.ts";
 import { pausedSessionsIn } from "../probe/guest/sessions.ts";
-import { sessionsFile } from "../../images/pylon/nexus-contract.ts";
+import { checkoutDir, servicesFile, sessionsFile } from "../../images/pylon/nexus-contract.ts";
 
 const encoded = (sessions: readonly PausedSession[] | null) => sessions === null ? "" : Buffer.from(JSON.stringify(sessions)).toString("base64url");
 const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {
@@ -42,7 +48,10 @@ const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
 
 export interface DockerBackendOptions {
-  /** The local Docker image that stands in for each Nexus image. The backend never pulls. An image booted with an overlay needs a `user`, who owns its home files. */
+  /**
+   * The local Docker image that stands in for each Nexus image. The backend never pulls. An image needs python3 and a
+   * `user`, who owns its home files and runs its services, as in a pylon.
+   */
   images: Readonly<Record<ImageId, string>>;
   /** Put on every container and checkpoint image this backend creates, and required of everything it lists or removes. */
   labels?: Readonly<Record<string, string>>;
@@ -106,7 +115,44 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     return (await docker(["images", "-q", "--filter", `reference=${ref}`], { signal })) !== "";
   }
 
-  const services = dockerServices();
+  /** Each running container's supervisor, and the guest it runs on, from the first spawn that reached it since the probe started. */
+  const supervisors = new Map<PylonId, { services: GuestServices; guest: ReturnType<typeof dockerServiceGuest> }>();
+  const servicesState = (pylonId: PylonId) => join(tmpdir(), "nexus-docker-services", pylonId);
+
+  const unsupervised = (pylonId: PylonId) => `${pylonId} is not running, or no spawn has reached it since the probe started`;
+  function supervisor(pylonId: PylonId): GuestServices {
+    const found = supervisors.get(pylonId);
+    if (found === undefined) throw new Error(unsupervised(pylonId));
+    return found.services;
+  }
+
+  async function forget(pylonId: PylonId): Promise<void> {
+    const found = supervisors.get(pylonId);
+    supervisors.delete(pylonId);
+    await found?.services.close();
+    await found?.guest.close();
+  }
+
+  /**
+   * After every spawn. A boot, or the first spawn since the probe started, makes the container's supervisor and
+   * ensures its services, as a pylon's boot does. A boot also starts the relay, after clearing the pid files its disk
+   * carried. A later spawn gives the supervisor the new URLs, which restart each service whose env they change.
+   */
+  async function supervise(pylonId: PylonId, urls: Record<string, string>, booted: boolean): Promise<void> {
+    const current = supervisors.get(pylonId);
+    if (current !== undefined && !booted) return current.services.setPublicUrls(urls);
+    await forget(pylonId);
+    const guest = dockerServiceGuest(pylonId);
+    if (booted) {
+      await checkedIn(guest, `rm -f ${serviceRoot}/*.pid`);
+      await startRelay(guest);
+    }
+    await mkdir(servicesState(pylonId), { recursive: true });
+    const services = new GuestServices(guest, servicesState(pylonId), servicesFile, checkoutDir, "user", urls);
+    supervisors.set(pylonId, { services, guest });
+    await services.initialize();
+    await services.operate("ensure");
+  }
   const checkpointRef = (pylonId: PylonId, checkpoint: CheckpointId) => `nexus-checkpoint/${pylonId}:${checkpoint}`;
 
   /** The container's own log, `docker logs`, by way of the init process's stdout. */
@@ -153,12 +199,11 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     if (disk === "existing") await markRelaunch(pylonId);
     // Before the services and sessions start, as in a pylon, so both read this spawn's files.
     await guest(pylonId).writeFiles(overlay);
-    await services.apply(pylonId, urls, disk !== "running");
+    await supervise(pylonId, urls, disk !== "running");
     await finishRelaunch(pylonId, guest(pylonId), containerLog(pylonId), containerMark(pylonId), relaunch);
   }
 
   function guest(pylonId: PylonId): Guest {
-    const notYet = (member: string) => () => { throw new Error(`the Docker backend has no Guest.${member} yet`); };
     return {
       // As root, unlike a pylon: a container image need not have a `user`.
       async exec(argv, { cwd, timeoutMs }) {
@@ -182,16 +227,27 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         }
       },
       async services(op, name, lines) {
+        const services = supervisor(pylonId);
         if (op === "logs") {
           if (name === undefined) throw new Error("service logs needs the service's name");
-          return services.logs(pylonId, name, lines);
+          const { output } = await services.logs(name, lines ?? 100);
+          return { services: await services.operate("status", name), logs: output };
         }
-        return { services: await services.operate(pylonId, op, name) };
+        const facts = await services.operate(op === "list" ? "status" : op, name);
+        return { services: op === "ensure" || op === "restart" ? await settled(facts, () => services.operate("status")) : facts };
       },
-      startService: notYet("startService"),
-      linkPort: (port) => services.link(pylonId, port),
-      unlinkPort: (port) => services.unlink(pylonId, port),
-      previewOrigin: (service) => services.origin(pylonId, service),
+      async startService(name, decl) {
+        const services = supervisor(pylonId);
+        return settled(await services.adHoc(name, parse(configSchema.shape.services, { [name]: decl }, "service-start")[name]!), () => services.operate("status"));
+      },
+      linkPort: async (port) => supervisor(pylonId).attach(port),
+      unlinkPort: async (port) => supervisor(pylonId).detach(port),
+      previewOrigin(service) {
+        const services = supervisors.get(pylonId)?.services;
+        if (services === undefined) return { unavailable: unsupervised(pylonId) };
+        const origin = services.urls()[service];
+        return origin === undefined ? { unavailable: `${pylonId} has no preview of ${service}` } : origin as PreviewOrigin;
+      },
     };
   }
 
@@ -291,7 +347,6 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         "--label", `${label.image}=${boot.image}`,
         "--label", `${label.bootedFrom}=${bootedFrom ?? ""}`,
         ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]),
-        "--publish", `127.0.0.1::${publishedPorts.first}-${publishedPorts.last}`,
         ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
       ], { signal });
@@ -321,11 +376,12 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       ], { signal });
       await docker(["rm", existing.Id], { signal });
       // Only now, because snapshots read the services of a container for as long as it runs.
-      services.forget(pylonId);
+      await forget(pylonId);
     },
 
     async ensureDeleted(pylonId, signal) {
-      services.forget(pylonId);
+      await forget(pylonId);
+      await rm(servicesState(pylonId), { recursive: true, force: true });
       const existing = await container(pylonId, signal);
       if (existing !== null) await docker(["rm", "--force", existing.Id], { signal });
       // Newest first, one at a time, because removing a checkpoint can also remove the untagged parent it was committed on.

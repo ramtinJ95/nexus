@@ -138,7 +138,7 @@ function dockerFixture(): SliceFixture {
     marker: "/root/marker",
     cwd: "/",
     sessions: ["shell"],
-    serviceUser: "root",
+    serviceUser: "user",
     pylonLog: async () => {
       const { stdout, stderr } = await execFileAsync("docker", ["logs", pylonId]);
       return stdout + stderr;

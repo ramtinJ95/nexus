@@ -208,7 +208,7 @@ test("code that runs on nodes never imports project.ts, the control plane's Proj
   const nodeFiles = [
     ...["probe", "protocol", "pylon-vm", "backends/pylon-vm"].flatMap((dir) => readdirSync(new URL(dir, src), { recursive: true, encoding: "utf8" })
       .filter((file) => /\.[jt]s$/.test(file) && !/\.(test|check)\.[jt]s$/.test(file)).map((file) => `${dir}/${file}`)),
-    "backends/backend.ts", "backends/docker-backend.ts", "backends/docker-services.ts",
+    "backends/backend.ts", "backends/docker-backend.ts", "backends/docker-service-guest.ts",
   ];
   const importers = nodeFiles.filter((file) => /\b(?:from|import)\s*\(?\s*["'][^"']*\/project\.ts["']/.test(readFileSync(new URL(file, src), "utf8")));
   assert.deepEqual(importers, []);
