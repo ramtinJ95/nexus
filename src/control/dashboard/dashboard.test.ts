@@ -3045,3 +3045,18 @@ test("a review that asks about its holds has one card in Needs you, the question
   assert.ok(!card.includes("data-action=\"land\""));
   assert.match(textOf(card), /Answer the question about its holds above to waive them and land it\.$/);
 });
+
+test("a holds question asked at the review's head on another base is another change, so the Land card offers its own press", async (t) => {
+  const reserved = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
+  const s = await seeded(t, landingOptions());
+  const fix = await s.start("acme", "Fix checkout");
+  const review = approvedReview(fix.id, personPhase("policy", { code: "reserved-path:auth", text: reserved }), { land: { requestedBy: laptop } });
+  s.registry.saveReview(review);
+  s.registry.replaceQuestions(fix.id, "holds-", {
+    kind: "holds", id: "holds-rv-1-b", thread: fix.id, text: `Land pull request #7, "Cache", at ${head.slice(0, 12)}, waiving changes to login or auth?\n- ${reserved}`, options: ["Land", "Leave it"],
+    reserved: "auth", answerer: "deployer", askedAt: Date.now(), holds: { review: review.id, head, base: "main", holds: [{ code: "reserved-path:auth", text: reserved }] },
+  });
+  const card = landingOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  assert.ok(card.includes("data-action=\"land\""), "the card's own Land press");
+  assert.doesNotMatch(textOf(card), /Answer the question about its holds/);
+});
