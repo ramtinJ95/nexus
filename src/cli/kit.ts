@@ -63,7 +63,6 @@ export const resourceOptions = { cpus: { type: "string" }, memory: { type: "stri
  * and --disk give `resources`, --after a list, and start's --request-id and --plan `requestId` and `planning`.
  */
 const textFields = Object.keys(startFields.shape).filter((field) => !["resources", "after", "requestId", "planning"].includes(field));
-/** The flags of a start's or an item's brief. */
 export const briefOptions = { ...Object.fromEntries(textFields.map((field) => [field, { type: "string" }])), ...resourceOptions, after: { type: "string" } } as const satisfies ParseArgsOptionsConfig;
 const flagOf = (field: string) => `--${field === "planning" ? "plan" : field}`;
 

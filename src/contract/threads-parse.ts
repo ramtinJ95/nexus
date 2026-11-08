@@ -25,7 +25,6 @@ export const itemRules: readonly BriefRule[] = [
   ...workerRules,
   { broken: (b) => b.message == null && b.claude === undefined, message: (name) => `an item needs a brief: ${name("message")} for a Nexus agent thread, or ${name("claude")} for a Claude worker` },
 ];
-/** The message of the first rule `b` breaks, or undefined when it breaks none. */
 export const brokenRule = (rules: readonly BriefRule[], b: Brief, name = (field: keyof Brief): string => field) => rules.find((rule) => rule.broken(b))?.message(name);
 
 /** `fields` held to `rules`. Without a title, it takes its brief's first line, which the rules make sure it has. */
