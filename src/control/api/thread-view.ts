@@ -5,10 +5,11 @@ import type { Registry } from "../registry.ts";
 import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadAgents } from "../thread-agent.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
-import { actualState, desiredPhase, retryRefusal } from "../reconcile.ts";
+import { actualState, desiredPhase, keptPastDay, retryRefusal } from "../reconcile.ts";
 import { agentView, type AgentView } from "../conversation-view.ts";
 import { bootNetwork } from "../threads.ts";
 import { judgmentView } from "../judgment.ts";
+import { reviewView } from "../review-view.ts";
 import { linkedName } from "../../services-file.ts";
 import type { BootInputs } from "../../protocol/spawn.ts";
 import type { Project } from "../project.ts";
@@ -71,11 +72,16 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     const previews = registry.previews(t.pylonId);
     const watch = registry.prWatch(t.id);
     const { claudeWorker, agent } = agents[registry.agent(t).kind].detail(t);
+    const review = registry.review(t.id);
+    const questions = registry.questions(t.id);
+    const now = Date.now();
     return {
       thread: t,
       ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.claudeResume(t.id) },
       attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
-      desired: desiredPhase(t, Date.now()),
+      desired: desiredPhase(t, now),
+      // An absent pylon has no disk to keep.
+      keptPastDay: state.actualState === "absent" ? null : keptPastDay(t, now),
       pylon: pylonOf(state, registry.project(t.project)!),
       sessions: registry.sessions(t.pylonId),
       previews,
@@ -83,8 +89,9 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       outputs: registry.outputs(t.id),
       prWatch: { enabled: options.prWatchEnabled ?? false, stopped: watchStopped(watch), error: watch?.error ?? null },
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
-      review: registry.review(t.id),
-      questions: registry.questions(t.id),
+      review,
+      reviewView: review === null ? null : reviewView(review, questions),
+      questions,
       judgments: registry.judgments(t.id).map(judgmentView),
       planning: registry.planning(t.id) !== null,
       attach: herdrClient,

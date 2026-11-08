@@ -9,7 +9,7 @@ type ReleasesRegistry = Pick<Registry, "desiredRelease" | "nodes" | "releaseRepo
 export function releaseView(registry: ReleasesRegistry, self: string | undefined, now = Date.now()): ReleaseView {
   const desired = registry.desiredRelease();
   const reports = registry.releaseReports();
-  return { desired, nodes: registry.nodes().flatMap((n) => {
+  return { desired, controlNode: registry.nodes().find((n) => n.tailnetNodeId === self)?.name ?? null, nodes: registry.nodes().flatMap((n) => {
     const roles = n.tailnetNodeId === self ? ["control", "probe"] as const : ["probe"] as const;
     return roles.map((role) => {
       const report = reports.find((r) => r.node === n.name && r.role === role);

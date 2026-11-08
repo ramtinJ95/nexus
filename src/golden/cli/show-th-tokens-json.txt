@@ -29,6 +29,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": 1800012000000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-tokens",
@@ -187,6 +188,38 @@ exit 0
         }
       ]
     }
+  },
+  "reviewView": {
+    "id": "rv-408",
+    "head": "282d29de282d29de282d29de282d29de282d29de",
+    "ended": true,
+    "holds": [
+      {
+        "code": "reserved-path:secrets",
+        "text": "Always needs the person: changes to secrets, as it changes src/control/secrets.ts.",
+        "holdsAgain": true,
+        "waivable": true,
+        "why": "The policy reserves this for you, and pressing Land here is you waiving it."
+      },
+      {
+        "code": "waiver-not-carried",
+        "text": "The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1.",
+        "holdsAgain": false,
+        "waivable": false,
+        "why": "Your Land was for the change at an earlier commit, so the holds it waived are yours to look at again here."
+      }
+    ],
+    "press": {
+      "kind": "lands",
+      "waives": [
+        {
+          "code": "reserved-path:secrets",
+          "text": "Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
+        }
+      ],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

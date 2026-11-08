@@ -33,6 +33,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-retention",
@@ -69,6 +70,7 @@
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [
     {
       "id": "ask-toolu_0002",

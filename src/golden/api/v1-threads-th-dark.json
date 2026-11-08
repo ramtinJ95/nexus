@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": 1800013500001,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-dark",
@@ -64,6 +65,7 @@
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

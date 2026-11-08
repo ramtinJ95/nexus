@@ -28,6 +28,7 @@
   "seenAt": 1800013860000,
   "lastReplyAt": 1800013800000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-applepay-review",
@@ -64,6 +65,7 @@
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

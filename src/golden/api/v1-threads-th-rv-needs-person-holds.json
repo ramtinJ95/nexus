@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-needs-person-holds",
@@ -140,6 +141,55 @@
       "kind": "none",
       "rule": "the change touches migrations/",
       "why": "no Claude model other than the builder's and the reviewer's could run"
+    }
+  },
+  "reviewView": {
+    "id": "rv-97",
+    "head": "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0",
+    "ended": true,
+    "holds": [
+      {
+        "code": "reserved-path:destructive-migration",
+        "text": "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql.",
+        "holdsAgain": true,
+        "waivable": true,
+        "why": "The policy reserves this for you, and pressing Land here is you waiving it."
+      },
+      {
+        "code": "no-second-reviewer",
+        "text": "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run.",
+        "holdsAgain": true,
+        "waivable": true,
+        "why": "Landing on one reviewer's approval where the project asks for two is yours to accept, and pressing Land here is you accepting it."
+      }
+    ],
+    "press": {
+      "kind": "lands",
+      "waives": [
+        {
+          "code": "reserved-path:destructive-migration",
+          "text": "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql."
+        },
+        {
+          "code": "no-second-reviewer",
+          "text": "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
+        }
+      ],
+      "quotes": false
+    },
+    "question": {
+      "id": "holds-rv-97-af71cd87d35c9fd1",
+      "head": "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0",
+      "holds": [
+        {
+          "code": "reserved-path:destructive-migration",
+          "text": "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql."
+        },
+        {
+          "code": "no-second-reviewer",
+          "text": "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
+        }
+      ]
     }
   },
   "questions": [

@@ -28,6 +28,7 @@
   "seenAt": 1799870460000,
   "lastReplyAt": 1799870400000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-avif",
@@ -53,6 +54,7 @@
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

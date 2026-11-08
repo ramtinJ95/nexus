@@ -38,6 +38,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-backfill",
@@ -74,6 +75,7 @@ exit 0
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

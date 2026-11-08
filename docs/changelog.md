@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.71.0
+
+Adds what the clients worked out from the stored records to the replies. `ThreadDetail` gains `reviewView`, the merge policy's answer for the thread's review: its holds, what a Land press does, and the review's open question about its holds. It also gains `keptPastDay`, why an archived thread's disk is kept past its 24 hours. `ReleaseView` gains `controlNode`, the node the control plane runs on. Each frame of `GET /v1/threads/<thread>/events` gains `busy`, whether the agent's run is working and how many messages wait for it, on the first frame and whenever it changed. `review` and every other field are as before. A control plane older than 0.71.0 sends none of the four.
+
 ## 0.70.0
 
 Adds `status=queued` to `GET /v1/queued`, which leaves out cancelled and deleted queued threads, and `cancelled=false` to `GET /v1/items`, which leaves out cancelled items. `threads` and `items` ask for them rather than filtering the reply, unless `--all` is given. A control plane older than 0.70.0 ignores both, so `threads` and `items` there also list what was cancelled.

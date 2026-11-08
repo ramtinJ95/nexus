@@ -5,6 +5,7 @@
     "requestedBy": "nLAPTOP",
     "requestedAt": 1800007200000
   },
+  "controlNode": null,
   "nodes": [
     {
       "node": "infra-testbench",

@@ -35,6 +35,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rounding",
@@ -148,6 +149,30 @@ exit 0
     "phase": {
       "kind": "fixing"
     }
+  },
+  "reviewView": {
+    "id": "rv-91",
+    "head": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+    "ended": false,
+    "holds": [
+      {
+        "code": "claude-approved",
+        "text": "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.",
+        "holdsAgain": true,
+        "waivable": false,
+        "why": "Nothing here stands in for a harness reviewer's approval: the Claude reviewer's verdict, its findings and reserved cases included, could have been written by code in its pylon."
+      }
+    ],
+    "press": {
+      "kind": "stuck",
+      "holds": [
+        {
+          "code": "claude-approved",
+          "text": "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved."
+        }
+      ]
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

@@ -29,6 +29,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-reviewing-failing",
@@ -124,6 +125,18 @@ exit 0
       "tried": 1800014100000,
       "why": "no node had room for a 4 GiB pylon"
     }
+  },
+  "reviewView": {
+    "id": "rv-411",
+    "head": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-banner",
@@ -53,6 +54,7 @@
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

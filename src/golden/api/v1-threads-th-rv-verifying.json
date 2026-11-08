@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-verifying",
@@ -121,6 +122,18 @@
       "thread": null,
       "refused": "rj-firebat has 2 GiB free, under the 4 GiB a verify pylon needs"
     }
+  },
+  "reviewView": {
+    "id": "rv-94",
+    "head": "6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

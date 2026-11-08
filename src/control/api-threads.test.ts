@@ -58,7 +58,7 @@ test("thread detail derives the actual state from the node's last observation", 
     attention: null, seenAt: null, lastReplyAt: null,
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
-    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, questions: [], judgments: [], planning: false, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
+    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], review: null, reviewView: null, keptPastDay: null, questions: [], judgments: [], planning: false, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
   });
 
   s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
@@ -188,6 +188,20 @@ test("an archived thread's failed pylon can be retried and stays archived, and a
   assert.equal(res.status, 409);
   assert.match(res.body.error, /is deleted/);
   assert.equal((await s.call("POST", "/v1/threads/th-missing/pylon/retry")).status, 404);
+});
+
+test("thread detail says why an archived thread's disk is kept past its 24 hours, and nothing under them or once its pylon is absent", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  const kept = async () => ((await s.call("GET", `/v1/threads/${thread.id}`)).body as ThreadDetail).keptPastDay;
+  assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).status, 200);
+  assert.equal(await kept(), null, "under its 24 hours");
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 25 * 60 * 60_000 });
+  assert.equal(await kept(), "its token usage is not read to its end yet");
+  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", pylons: [] }), []);
+  assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.actualState, "absent");
+  assert.equal(await kept(), null, "an absent pylon has no disk to keep");
 });
 
 test("archive, delete, and activity update the thread and wake its node", async (t) => {

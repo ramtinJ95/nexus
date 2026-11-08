@@ -29,6 +29,7 @@ exit 0
   "seenAt": 1800003660000,
   "lastReplyAt": 1800003600000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-sync",
@@ -132,6 +133,18 @@ exit 0
       "startedAt": 1800014040000,
       "thread": "th-sync-verify"
     }
+  },
+  "reviewView": {
+    "id": "rv-57",
+    "head": "g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],
