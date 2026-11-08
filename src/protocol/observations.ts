@@ -83,11 +83,17 @@ export type PylonObservation =
    */
   | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null; sessions: readonly PausedSession[] | null; wakeAfterBoot?: true }
   /**
-   * The backend reports it interrupted or failed. `logTail`: the last lines of its controller's log, at most 60 lines
-   * and 8 KiB, with what looks like a secret redacted on the node. Empty when the backend keeps no such log.
+   * The backend reports it interrupted or failed. `logTail`: the last lines of its controller's log, within
+   * logTailBounds, with what looks like a secret redacted on the node. Empty when the backend keeps no such log.
    */
   | { pylonId: PylonId; phase: "broken"; detail: string; cause: BrokenCause | "unknown"; logTail: string; wakeAfterBoot?: true }
   | ({ pylonId: PylonId; phase: "running" } & RunningFacts);
+
+/**
+ * How much of a controller's log a broken pylon's or a failed job's `logTail` carries. The node reads at most this,
+ * and the control plane records at most this.
+ */
+export const logTailBounds = { lines: 60, chars: 8_192 } as const;
 
 /**
  * Why a pylon is broken. `setup`: its VM runs with a setup that failed on this boot, and it has no completed checkpoint.

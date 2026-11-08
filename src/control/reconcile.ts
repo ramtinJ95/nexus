@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { retryable } from "../protocol/jobs.ts";
-import { heldSecrets } from "../protocol/observations.ts";
+import { heldSecrets, logTailBounds } from "../protocol/observations.ts";
 import type { ArtifactId, CheckpointId, JobId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
 import type {
@@ -240,15 +240,14 @@ const brokenFailure = (observed: Extract<PylonObservation, { phase: "broken" }>,
   fail("backend", failureMessage(`pylon is broken: ${observed.detail}${refused === null ? "" : `. ${refused}`}`, observed.logTail));
 
 const maxMessageChars = 500;
-const maxLogLines = 60;
-const maxLogChars = 8_192;
 
 /**
- * A failure's message and the last lines of its log, trimmed and bounded as the node reads a controller log. The record
- * carries it into the planner's reason, so the API, the dashboard and the loop's log say why without the node's logs.
+ * A failure's message and the last lines of its log, trimmed and bounded by logTailBounds as the node reads a controller
+ * log. The record carries it into the planner's reason, so the API, the dashboard and the loop's log say why without
+ * the node's logs.
  */
 export function failureMessage(message: string, logTail: string): string {
-  const log = logTail.trim().split("\n").slice(-maxLogLines).join("\n").slice(-maxLogChars);
+  const log = logTail.trim().split("\n").slice(-logTailBounds.lines).join("\n").slice(-logTailBounds.chars);
   return [message.trim().slice(0, maxMessageChars), log].filter((part) => part !== "").join("\n");
 }
 
