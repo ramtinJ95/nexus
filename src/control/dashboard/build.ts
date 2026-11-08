@@ -3,16 +3,17 @@
  * src, so release.sh hashes only sources, and a release builds its own. Each module the client imports only
  * dynamically, such as a language's grammar, becomes a chunk of its own that a page fetches when it needs it.
  */
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, type Metafile } from "esbuild";
+import { bundle, entry } from "./assets.ts";
 
-export const outdir = fileURLToPath(new URL("../../../dist/dashboard/", import.meta.url));
-
-export async function buildDashboard(out = outdir): Promise<Metafile> {
+/** Writes the bundle into `out` with its metafile, which src/control/dashboard/assets.ts serves it by. */
+export async function buildDashboard(out = fileURLToPath(bundle)): Promise<Metafile> {
   await rm(out, { recursive: true, force: true });
   const { metafile } = await build({
-    entryPoints: [fileURLToPath(new URL("./client.js", import.meta.url))],
+    entryPoints: [fileURLToPath(new URL(`./${entry}`, import.meta.url))],
     outdir: out,
     bundle: true,
     format: "esm",
@@ -25,6 +26,7 @@ export async function buildDashboard(out = outdir): Promise<Metafile> {
     loader: { ".css": "text" },
     logLevel: "warning",
   });
+  await writeFile(join(out, "metafile.json"), JSON.stringify(metafile));
   return metafile;
 }
 

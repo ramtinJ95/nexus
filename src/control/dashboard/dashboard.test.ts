@@ -31,6 +31,7 @@ import { promptSenders, typeIntoClaude } from "../inbox.ts";
 import { senders } from "../agent-protocol.ts";
 import { startHint, type HintPart } from "./start-hint.ts";
 import { agoText, clock } from "./elapsed.ts";
+import { bundle } from "./assets.ts";
 import { imageTypes } from "../../image-types.ts";
 import { defaultClaudeModel } from "../../protocol/models.ts";
 import { testApi, type TestApiOptions } from "../../test-support/api-kit.ts";
@@ -2202,13 +2203,13 @@ test("pages link their assets by hash, and a hashed asset is cached for good", a
     assert.ok(versioned.text.length > 0);
     assert.equal((await s.call("GET", `/assets/${file}?v=stale`)).headers["cache-control"], "no-cache");
   }
-  const chunk = (await readdir(new URL("../../../dist/dashboard/", import.meta.url))).find((file) => file !== "client.js");
+  const chunk = (await readdir(bundle)).find((file) => file.endsWith(".js") && file !== "client.js");
   assert.ok(chunk !== undefined, "the bundle has a chunk besides client.js");
   const served = await s.call("GET", `/assets/${chunk}`);
   assert.equal(served.status, 200);
   assert.ok((served.headers["content-type"] as string).startsWith("text/javascript"), "a chunk is served as JavaScript");
   assert.match(served.headers["cache-control"] as string, /immutable/, "a chunk's name has its hash, so it is cached for good");
-  for (const name of ["secret.txt", "notifications.js", "chunk-NOSUCH.js", "..%2Fpackage.json"]) assert.equal((await s.call("GET", `/assets/${name}`)).status, 404, name);
+  for (const name of ["secret.txt", "metafile.json", "notifications.js", "chunk-NOSUCH.js", "..%2Fpackage.json"]) assert.equal((await s.call("GET", `/assets/${name}`)).status, 404, name);
 });
 
 test("pages are served under a content security policy that allows only the dashboard's own origin and the page's one inline script", async (t) => {

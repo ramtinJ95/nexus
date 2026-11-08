@@ -28,7 +28,7 @@ import type { Review } from "../review-model.ts";
 import { ok } from "../dashboard/view.ts";
 import type { ClusterView, Context, FoldView, Latest, NodeReading, Peek, ThreadView } from "../dashboard/context.ts";
 import { needsOf } from "../work.ts";
-import { assets } from "../dashboard/assets.ts";
+import { asset } from "../dashboard/assets.ts";
 import { peekParam } from "../dashboard/contract.ts";
 import { notFound } from "../dashboard/shell.ts";
 import { home, foldPage } from "../dashboard/home.ts";
@@ -219,12 +219,12 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       return ok(await cluster(r, name));
     }],
     ["GET", /^\/assets\/([\w.-]+)$/, anyAllowed, (m, r) => {
-      const asset = assets.get(m[1]!);
-      if (asset === undefined) return { ...ok(notFound(context(r), `No asset ${m[1]!}.`)), status: 404 };
+      const served = asset(m[1]!);
+      if (served === undefined) return { ...ok(notFound(context(r), `No asset ${m[1]!}.`)), status: 404 };
       // Pages link each asset with its hash, and a chunk's name has its hash, so neither URL ever changes and the
       // phone keeps it.
-      const cache = asset.version === null || r.query.get("v") === asset.version ? "public, max-age=31536000, immutable" : "no-cache";
-      return { status: 200, headers: { "content-type": asset.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: asset.body };
+      const cache = served.version === null || r.query.get("v") === served.version ? "public, max-age=31536000, immutable" : "no-cache";
+      return { status: 200, headers: { "content-type": served.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: served.body };
     }],
   ];
 }
