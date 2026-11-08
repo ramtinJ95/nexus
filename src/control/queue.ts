@@ -58,7 +58,7 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const where = prLocationOf(registry, id);
   if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
   if (t.status === "archived" || t.status === "deleted") return blocked(id, `is ${t.status} and its pull request did not merge`);
-  if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.reasons[0] ?? "no reason given"}`);
+  if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
   if (where.kind === "closed") return blocked(id, `PR #${where.number} closed without merging`);
   return where.kind === "open" ? waiting(id, `PR #${where.number} is open`) : waiting(id, "has no pull request yet");
 }

@@ -125,10 +125,10 @@ export type Phase =
   /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
   | { kind: "landed"; commit: string }
   /**
-   * Ended, for the person to decide. `cause` is which part of the loop held it. `reasons` say exactly which condition
-   * failed or which reserved case applies, and `holds` are the same, one per reason in its order, with the code that
-   * decides each one's rule. `unreviewed` is a head the PR moved to after the last round, which no round of this review
-   * reviews.
+   * Ended, for the person to decide. `cause` is which part of the loop held it. `holds` say exactly which condition
+   * failed or which reserved case applies, each with the code that decides its rule. `reasons` are their texts, which
+   * nothing here reads: they stay on the record and in the API for older control planes and CLIs, which read them.
+   * `unreviewed` is a head the PR moved to after the last round, which no round of this review reviews.
    */
   | { kind: "needs-person"; cause: HoldCause; reasons: string[]; holds: Hold[]; label?: Label; unreviewed?: string }
   /** The PR merged or closed outside a review that does not land it, so nothing was left to review. */
@@ -405,7 +405,7 @@ export function cannotLand(r: Review, builder: { status: ThreadStatus }, pr?: Pi
   if (builder.status !== "active") return `thread ${r.builder} is ${builder.status}`;
   if (r.merged !== null) return `review ${r.id} already merged pull request #${r.pr.number} as ${r.merged}, so it does not land again`;
   if (pr !== undefined && pr.state !== "open") return `pull request #${r.pr.number} is ${pr.state} on GitHub outside this review, so there is nothing to land`;
-  if (!landable(r)) return `review ${r.id} of ${r.builder} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.reasons.join(" ")}` : ""}, not approved with its checks passing`;
+  if (!landable(r)) return `review ${r.id} of ${r.builder} is ${r.phase.kind}${r.phase.kind === "needs-person" ? `: ${r.phase.holds.map((h) => h.text).join(" ")}` : ""}, not approved with its checks passing`;
   return null;
 }
 /**

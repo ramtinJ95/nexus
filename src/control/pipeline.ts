@@ -94,7 +94,7 @@ function startedPhase(registry: PipelineRegistry, t: Thread, review: Review | nu
   switch (review?.phase.kind) {
     case "landed": return phase("landed", `${pr} merged as ${review.phase.commit.slice(0, 12)}`);
     case "merged": return phase("landed", `${pr} merged outside its review`);
-    case "needs-person": return phase("held", `its review ended for the person: ${review.phase.reasons[0] ?? "no reason given"}`);
+    case "needs-person": return phase("held", `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
     case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}${phaseNote(review)}`);
     case "approved": return review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
     case "reviewing": case "fixing": case "quoting": case "checking": return phase(onTrack(review), `${pr}, round ${review.rounds.length}: ${review.phase.kind}${checkBeside(review)}`);
