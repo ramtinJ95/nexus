@@ -225,6 +225,16 @@ test("a builder's turn end, from its Claude session or from the harness, has its
   assert.deepEqual(plane.gitReads.sort(), threads.map((th) => th.pylonId).sort());
 });
 
+test("the control plane keeps the newest 10,000 events from its start", async (t) => {
+  const plane = await controlPlaneOf(t, today, { before: (db) => {
+    const registry = openRegistry(db);
+    for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
+    registry.close();
+  } });
+  await until("retention trims the log", () => plane.registry.events("0", { kinds: ["release.changed"] }).length === 10_000, 10_000);
+  assert.throws(() => plane.registry.events("1"), /expired/);
+});
+
 test("each read of a node's health is recorded, and its history read back", async (t) => {
   const health = { node: "rj-firebat", readAt: "2027-01-01T00:00:00.000Z", cpus: 16, load: null, memory: null, disk: { path: "/var/lib/nexus", totalGiB: 457, freeGiB: 180.5 }, temperatures: null, pylons: null } as NodeHealth;
   const plane = await controlPlaneOf(t, today, { health: async () => health });
