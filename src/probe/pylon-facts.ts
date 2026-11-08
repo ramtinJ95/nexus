@@ -1,10 +1,11 @@
 /**
- * What the probe reads from each running pylon's guest for an observation. Each kind of read has at most one
- * outstanding per pylon, and git's read is reused for gitPollMs.
+ * What the probe holds for each pylon, and what it reads from each running pylon's guest for an observation. Each kind
+ * of read has at most one outstanding per pylon, and git's read is reused for gitPollMs.
  */
 import type { BackendPylon, VmBackend } from "../backends/backend.ts";
 import type { LiveHash, PylonId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
+import type { PreviewAssignment } from "../protocol/spawn.ts";
 import { gitPollMs, type DeclaredOutput, type GitFacts, type ListeningFact, type PylonObservation, type ServiceFact, type SessionFact } from "../protocol/observations.ts";
 import type { ServiceName } from "../services-file.ts";
 import { attachedTerminals, sessionFacts } from "./guest/sessions.ts";
@@ -19,8 +20,8 @@ const serviceReadTimeoutMs = 5_000;
 
 type FactKind = "sessions" | "attached" | "services" | "listening" | "outputs" | "git";
 
-/** What the probe holds for one pylon, in memory only. A delete drops it all, and notRunning here and runEnded in startProbe each clear parts. */
-export interface PylonState {
+/** What the probe holds for one pylon, in memory only. Only createPylonStates writes it, and a delete drops it all. */
+interface PylonState {
   /** Cleared, with `published` and `reportedListening`, when a pause starts. */
   liveHash?: LiveHash;
   /** The previews of the pylon's last successful spawn in this process, which published and warmed them. */
@@ -51,23 +52,33 @@ export interface PylonState {
 }
 
 /** Observed not running, or missing from the backend's list: the next boot's reads start fresh, and log a failure again. */
-export function notRunning(state: PylonState) {
+function notRunning(state: PylonState) {
   state.running = false;
   delete state.git;
   state.logged.clear();
 }
 
-/** `pylon` creates a pylon's state, and `pylons` looks it up again without creating it, as a delete may have started. */
 export interface FactDeps {
   backend: VmBackend;
   log: (message: string) => void;
   redacted: (text: string) => string;
-  pylons: ReadonlyMap<PylonId, PylonState>;
-  pylon(pylonId: PylonId): PylonState;
-  relinked(pylonId: PylonId, service: ServiceName): unknown;
 }
 
-export function createFactReader({ backend, log, redacted, pylons, pylon, relinked }: FactDeps) {
+export type PylonStates = ReturnType<typeof createPylonStates>;
+
+/**
+ * The probe's memory of each pylon, with the guest reads that fill it. `pylon` creates a pylon's state, and `pylons`
+ * looks it up again without creating it, as a delete may have started.
+ */
+export function createPylonStates({ backend, log, redacted }: FactDeps) {
+  const pylons = new Map<PylonId, PylonState>();
+  function pylon(pylonId: PylonId): PylonState {
+    let state = pylons.get(pylonId);
+    if (state === undefined) pylons.set(pylonId, state = { diverged: 0, unlinked: new Set(), running: false, logged: new Set(), reads: new Map() });
+    return state;
+  }
+  const relinked = (pylonId: PylonId, service: ServiceName) => { pylons.get(pylonId)?.unlinked.delete(service); };
+
   /**
    * A failed, late or still outstanding read answers `fallback`. `log.line` is logged once until a read succeeds, or on
    * every failure with `log.every`. Without `log` nothing is.
@@ -174,5 +185,69 @@ export function createFactReader({ backend, log, redacted, pylons, pylon, relink
     }
   }
 
-  return { listening, observation };
+  /**
+   * The ports of every pylon the last snapshot saw running, read again: an app that starts or stops listening gives
+   * the probe no event. Whether any changed since that pylon's last observation.
+   */
+  async function listeningChanged(): Promise<boolean> {
+    const changed = await Promise.all([...pylons].filter(([, state]) => state.running).map(async ([pylonId, state]) => {
+      const ports = await listening(pylonId);
+      return ports !== null && JSON.stringify(ports) !== state.reportedListening;
+    }));
+    return changed.some(Boolean);
+  }
+
+  return {
+    observation,
+    listeningChanged,
+    relinked,
+    published: (pylonId: PylonId) => pylons.get(pylonId)?.published ?? [],
+    /** Not dropped: a spawn in flight compares `diverged` at its start and its end, and a list can miss its pylon. */
+    missing(present: ReadonlySet<PylonId>) {
+      for (const [id, state] of pylons) if (!present.has(id)) notRunning(state);
+    },
+    /** Every snapshot after this reads the pylon's git again. */
+    dropGit(pylonId: PylonId) { delete pylons.get(pylonId)?.git; },
+    /** A pause ends the pylon's run, so nothing it applied or reported still holds. */
+    runEnded(pylonId: PylonId) {
+      const state = pylon(pylonId);
+      delete state.liveHash;
+      delete state.published;
+      delete state.reportedListening;
+    },
+    forget(pylonId: PylonId) { pylons.delete(pylonId); },
+    /** What a converge may route: none of the services unlinked since, which leaves the pylon diverged. */
+    routed(pylonId: PylonId, assigned: readonly PreviewAssignment[]): readonly PreviewAssignment[] {
+      const gone = pylons.get(pylonId)?.unlinked;
+      const routed = assigned.filter((p) => !gone?.has(p.service));
+      if (routed.length < assigned.length) pylon(pylonId).diverged++;
+      return routed;
+    },
+    /**
+     * The pylon no longer has what its last spawn applied, so the planner spawns again. A port linked again before a
+     * snapshot saw it unlinked gets its route back that way, as its registry row and live hash did not change.
+     * Recorded before `withdrawRoute`, so a converge that starts while the route is withdrawn leaves the service out.
+     */
+    async withdraw(pylonId: PylonId, service: ServiceName, withdrawRoute: () => Promise<void>) {
+      const state = pylon(pylonId);
+      state.unlinked.add(service);
+      state.diverged++;
+      await withdrawRoute();
+      const current = pylons.get(pylonId);
+      if (current === undefined) return;
+      delete current.liveHash;
+      if (current.published !== undefined) current.published = current.published.filter((p) => p.service !== service);
+    },
+    /** What a spawn compares at its end, to tell whether a withdraw came while it ran. */
+    spawnStarted: (pylonId: PylonId): number => pylon(pylonId).diverged,
+    /** Whether the spawn counts as applied, which a withdraw while it ran, maybe after its converge, prevents, so the planner spawns again. */
+    spawnSucceeded(job: Extract<Job, { kind: "spawn" }>, seen: number): boolean {
+      const state = pylon(job.pylonId);
+      if (state.diverged !== seen) return false;
+      // A pylon whose sessions this spawn left out does not yet look like `live`, so the next spawn brings them back.
+      if (job.relaunch !== false) state.liveHash = job.liveHash;
+      state.published = job.live.previews;
+      return true;
+    },
+  };
 }
