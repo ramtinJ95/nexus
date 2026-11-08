@@ -50,7 +50,6 @@ export function parseControlPlane(value: unknown): ControlPlane {
   return { tailnetNodeId, url: origin.href };
 }
 
-/** Undefined when there is no file. */
 async function readAt(path: string): Promise<ControlPlane | undefined> {
   try {
     const value = await readJson(path);

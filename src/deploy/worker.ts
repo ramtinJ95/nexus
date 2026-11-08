@@ -58,7 +58,6 @@ export interface RegistrySchema {
   backUp(): Promise<string>;
 }
 
-/** Where a node keeps what `nodeRegistry` reads. */
 export interface RegistryPaths {
   /** control.json, whose `db` is the registry. */
   config: string;
@@ -111,13 +110,12 @@ type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: Registr
 const restoreSteps = `deploy/README.md's "A failed deploy past a registry migration"`;
 const applies = ({ release }: SchemaVersions) => release === null ? "has no src/control/schema.ts to say which migrations it applies" : `applies ${release} registry migrations`;
 
-/** What a probe plans from: control's report in the view. */
 function controlHealth(view: ReleaseView): ReleaseHealth {
   const control = view.nodes.find((r) => r.role === "control");
   return { commit: control?.commit ?? null, healthy: control?.state === "healthy" };
 }
 
-/** The files a role's deploy uses. deploy/'s units, installers and configs keep these names. */
+/** deploy/'s units, installers and configs keep these names. */
 function roleFiles({ prefix, etc, units }: NodeBoundary, role: Role) {
   const service = unitNames[role];
   return {

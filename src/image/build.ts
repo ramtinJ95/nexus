@@ -80,7 +80,6 @@ async function writeRecipeFiles(files: ImageRecipe["files"], context: string): P
   for (const dir of dirs) await chmod(dir, 0o755);
 }
 
-/** Dockerfile ARG name for each pin the Dockerfile uses. */
 function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
   return {
     DEBIAN_DIGEST: pins.debianDigest,
@@ -508,7 +507,6 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
   ];
 }
 
-/** Why the check failed on this result, or undefined when it passed. */
 export function smokeFailure(check: SmokeCheck, exitCode: number, output: string): string | undefined {
   if (exitCode !== 0) return `exited ${exitCode}`;
   if (typeof check.expect === "string") {

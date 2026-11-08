@@ -14,7 +14,6 @@ service_path=/usr/local/bin:/usr/bin
 
 fail() { echo "$(basename "$0" .sh): $*" >&2; exit 1; }
 
-# The major version of the Node the units run, or none.
 node_major() {
   PATH=$service_path node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo none
 }
@@ -104,7 +103,6 @@ prepare_probe() {
   if getent group nexus-attach >/dev/null; then groupdel nexus-attach; fi
 }
 
-# Installs the unit file $1 as /etc/systemd/system/$2 and enables it.
 install_unit() {
   local source=$1 unit=/etc/systemd/system/$2
   if ! cmp -s "$source" "$unit"; then

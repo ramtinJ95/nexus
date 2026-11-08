@@ -539,7 +539,6 @@ export interface InstallSteps {
   /** Runs a program on this terminal and resolves its exit code. */
   run(program: string, args: readonly string[]): Promise<number>;
   join(token: string): Promise<void>;
-  /** Fills `next` as it goes, so a run that fails partway still says what its writes need. */
   credentials(next: Set<FollowUp>): Promise<void>;
   left(): Promise<void>;
 }

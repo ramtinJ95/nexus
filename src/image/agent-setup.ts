@@ -445,7 +445,6 @@ const piSettingsSchema = z.object({ packages: z.array(z.string()).default([]), s
 
 const readConfig = async <T>(path: string, schema: z.ZodType<T>): Promise<T> => parseJson(schema, await readFile(path, "utf8"), path);
 
-/** Entries of `dir` that hold a SKILL.md, by name, sorted. */
 async function skillsIn(dir: string): Promise<{ name: string; realPath: string }[]> {
   if (!existsSync(dir)) return [];
   const names = (await readdir(dir)).filter((name) => !name.startsWith(".") && existsSync(join(dir, name, "SKILL.md"))).sort();
