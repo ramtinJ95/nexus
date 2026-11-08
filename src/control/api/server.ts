@@ -72,6 +72,7 @@ import type { Start } from "../start-request.ts";
 import type { Features } from "../features.ts";
 import type { Log } from "../log-once.ts";
 import { attachScript } from "../../guest-contract.ts";
+import { asset, entry } from "../dashboard/assets.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -135,6 +136,8 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
 }
 
 export async function startApi(options: ApiOptions): Promise<Api> {
+  // The control plane does not start without the dashboard's client, which importing the routes does not read.
+  asset(entry);
   const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
   const { thread, threadRefusal, guard, current, roleOf } = access;
