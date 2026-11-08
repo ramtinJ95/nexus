@@ -10,7 +10,8 @@ import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, ty
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import { Refusal } from "./refusal.ts";
 import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
-import type { Placement, Thread } from "./thread-store.ts";
+import type { Placement } from "./placement-model.ts";
+import type { Thread } from "./thread-store.ts";
 import { pylonLive } from "./live.ts";
 import type { Registry } from "./registry.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";

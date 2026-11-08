@@ -8,7 +8,8 @@ import { gib } from "../util/gib.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
-import type { Placement, Room, StoredPylon, Weighed } from "./thread-store.ts";
+import type { StoredPylon } from "./thread-store.ts";
+import type { Placement, Room, Weighed } from "./placement-model.ts";
 
 type PlacementRegistry = Pick<Registry, "nodes" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved">;
 type WeighingRegistry = PlacementRegistry & Pick<Registry, "latestHealthSample">;

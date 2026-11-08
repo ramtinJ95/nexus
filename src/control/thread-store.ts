@@ -17,7 +17,6 @@ import { desiredPhase, noAttempts, type ActivityFacts, type ArchiveFacts, type F
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import { pylonEventSchema, type HerdrStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
-import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
@@ -27,18 +26,8 @@ import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { errorStop, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import { maxEntries } from "../contract/streams.ts";
 import type { NodeStore } from "./node-store.ts";
+import type { Placement } from "./placement-model.ts";
 import { upgradeAttempts, upgradeSubmitted } from "./record-upgrade.ts";
-
-/**
- * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
- * could run the pylon has left once it boots there, or why the node could not.
- */
-export type Placement =
-  | { how: "default" | "named"; node: NodeName }
-  | { how: "auto"; node: NodeName; weighed: readonly Weighed[] };
-export type Weighed = { node: NodeName; left: Room } | { node: NodeName; refused: string };
-/** Uncommitted CPUs and memory, and free disk. CPUs may go below zero, because VMs share a node's CPUs. */
-export interface Room { cpus: number; memoryGiB: number; diskGiB: number }
 
 /** A thread's own row, without what its sessions and the usage backfill say. */
 export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt"> {
@@ -227,7 +216,8 @@ export const holding = {
   settings: ["backed-up-at"],
 } as const satisfies Holding;
 
-export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[]) {
+export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[],
+  holdReleased: (thread: ThreadId, until: number) => boolean) {
   const { transaction, sql, deleteThreadRows } = db;
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
@@ -249,17 +239,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       }
     });
   }
-
-  /**
-   * Room a start placed a pylon in before its row exists, so an overlapping start sees it taken. It is held in memory,
-   * because a start that a crash ended took no room.
-   */
-  const reservations = new Map<PylonId, { node: NodeName; resources: BootInputs["resources"] }>();
-  /**
-   * Holds placement released for room other work needs, by the `until` each had, so a later hold of the thread counts
-   * again. Held in memory, because a restart that loses them only holds the pylons until placement releases them again.
-   */
-  const releasedHolds = new Map<ThreadId, number>();
 
   const backedUpAt = (): number | null => {
     const at = setting("backed-up-at");
@@ -354,7 +333,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
 
   /** `t` with the latest of `holds` that has not ended or been released, and began while its pylon was up. */
   function withHold(t: Thread, holds: readonly AwaitWindow[], now: number): Thread {
-    const until = Math.max(...holds.filter((h) => h.until > now && releasedHolds.get(t.id) !== h.until && desiredPhase(t, h.from) === "running").map((h) => h.until));
+    const until = Math.max(...holds.filter((h) => h.until > now && !holdReleased(t.id, h.until) && desiredPhase(t, h.from) === "running").map((h) => h.until));
     return until === -Infinity ? t : { ...t, awaitedUntil: until };
   }
 
@@ -860,17 +839,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
         OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id AND state = 'starting'))
         ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present) }) as Row[]).map((r) => r.id as PylonId),
-    /** Returns what releases it, once the pylon's row counts it or the start failed. */
-    reserve(pylonId: PylonId, node: NodeName, resources: BootInputs["resources"]): () => void {
-      reservations.set(pylonId, { node, resources });
-      return () => { reservations.delete(pylonId); };
-    },
-    reserved: (node: NodeName) => [...reservations.values()].filter((r) => r.node === node).map((r) => r.resources),
-    /** Ends the thread's hold that lasts until `until`, so its pylon pauses for room other work needs. */
-    releaseHold(thread: ThreadId, until: number) {
-      for (const [id, at] of releasedHolds) if (at <= clock()) releasedHolds.delete(id);
-      releasedHolds.set(thread, until);
-    },
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
     savePylon(saved: Omit<PylonRecord, "desired">) {
       transaction(() => {

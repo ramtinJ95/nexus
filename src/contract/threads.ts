@@ -15,7 +15,8 @@ import { pylonWaitMs, queryOf, route, type QueryCodec } from "./route.ts";
 
 export type { ListeningPort, Sent, ThreadDetail, ThreadRow, Whoami } from "../control/wire.ts";
 export type { RefusalCode } from "../control/refusal.ts";
-export type { Placement, Preview, Room, Thread } from "../control/thread-store.ts";
+export type { Preview, Thread } from "../control/thread-store.ts";
+export type { Placement, Room } from "../control/placement-model.ts";
 export type { ThreadSetup } from "../control/templates.ts";
 export type { ClaudeConversation, ClaudeEntry, PromptSource } from "../control/claude-transcript.ts";
 
