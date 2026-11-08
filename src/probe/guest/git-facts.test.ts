@@ -8,6 +8,7 @@ import { fakeGuest } from "../../backends/fake-guest.ts";
 import { gitFacts } from "./git-facts.ts";
 import { tempDir } from "../../test-support/kit.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
+import { gitPollMs } from "../../protocol/observations.ts";
 
 const exec = promisify(execFile);
 const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
@@ -21,6 +22,7 @@ async function checkout(t: TestContext) {
   guest.exec = async (argv, opts) => {
     reads++;
     assert.equal(opts.cwd, checkoutDir);
+    assert.ok(opts.timeoutMs !== undefined && opts.timeoutMs < gitPollMs, "a stalled helper is stopped before the next poll");
     try {
       const result = await run(argv[0]!, argv.slice(1), { cwd: dir, timeout: opts.timeoutMs });
       return { exitCode: 0, output: result.stdout, truncated: false };
