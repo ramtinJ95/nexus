@@ -13,8 +13,7 @@ import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item } from "./items.ts";
 import { clock } from "./elapsed.ts";
-import { landingAt, landingSteps } from "./cards.ts";
-import { pipelineItems, needLabel, stageLabel, stepStates, steps, type Life, type Step, type StepState } from "./lifecycle.ts";
+import { landingTrack, pipelineItems, needLabel, stageLabel, stepStates, steps, type Life, type Step, type StepState } from "./lifecycle.ts";
 
 /** One turn of the conversation: what started it and from whom, the tools it ran, and the answer it ended on. */
 interface Turn { from: string; text: string; at: number; queued: boolean; tools: number; failed: number; reply: string | null; took: string | null; running: boolean }
@@ -83,14 +82,8 @@ ${findings.length > 0 && html`<ul class="tl-findings">${findings.map((f) => {
 
 /** The landing's own steps, as the landing card in the dock shows them, without its actions. */
 function landingView(c: Context, r: Review): Html | false {
-  const at = landingAt(r);
-  if (at === null) return false;
-  const index = landingSteps.findIndex(([s]) => s === at.step);
-  const deploys = c.deploys(r);
-  return html`<ol class="land-steps">${landingSteps.map(([s, label], i) => {
-    const state = s === "deploying" && !deploys ? "skipped" : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
-    return html`<li class="land-step land-${state}">${label}</li>`;
-  })}</ol>`;
+  const track = landingTrack(r, c.deploys(r));
+  return track !== null && html`<ol class="land-steps">${track.steps.map(({ label, state }) => html`<li class="land-step land-${state}">${label}</li>`)}</ol>`;
 }
 
 /** The thread's brief: its item's, its Claude worker's prompt, or the first message it was sent. */

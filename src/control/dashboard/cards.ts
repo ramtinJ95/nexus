@@ -14,24 +14,7 @@ import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
 import { Html, html, ago, short } from "./view.ts";
 import type { LandRefusal, Context } from "./context.ts";
 import { prose } from "./markdown.ts";
-
-/** The steps of a landing, in order. */
-export const landingSteps = [["checking", "Check"], ["verifying", "Live check"], ["merging", "Merge"], ["deploying", "Deploy"], ["landed", "Landed"]] as const;
-type Step = typeof landingSteps[number][0];
-/**
- * The step a landing is at, and whether it failed there. A landing held after its merge stopped at the deploy, which
- * failed or rolled back. One held before its merge is not on its way anywhere, and is landable again or not at all.
- */
-export function landingAt(r: Review): { step: Step; failed: boolean } | null {
-  switch (r.phase.kind) {
-    case "checking": case "verifying": return r.land === null ? null : { step: r.phase.kind, failed: false };
-    case "quoting": return { step: "checking", failed: false };
-    case "merging": case "deploying": case "landed": return { step: r.phase.kind, failed: false };
-    case "rolling-back": return { step: "deploying", failed: true };
-    case "needs-person": return r.merged !== null && r.land !== null ? { step: "deploying", failed: true } : null;
-    default: return null;
-  }
-}
+import { landingTrack } from "./lifecycle.ts";
 
 const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
   "not a deployer": (caller) => `This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.`,
@@ -160,23 +143,14 @@ export function landing(c: Context, d: ThreadDetail, id = (name: string) => name
   const prLink = html`<a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a>`;
   const top = (title: string) => !card && html`<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2>${prLink}</div>`;
   const named = (title: string) => card ? html`aria-label="${title}"` : html`aria-labelledby="${id("landing-h")}"`;
-  const at = landingAt(r);
-  if (at !== null) {
-    const deploys = c.deploys(r);
-    const index = landingSteps.findIndex(([step]) => step === at.step);
-    const { live } = r.rounds.at(-1)!;
-    // A landing past the live check with none recorded is one from before live checks.
-    const unverified = live?.kind === "absent" ? " (no .nexus/verify)" : live === undefined && index > 1 ? " (not run)" : null;
-    const stateOf = (step: Step, i: number) => (step === "deploying" && !deploys) || (step === "verifying" && unverified !== null) ? "skipped"
-      : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
+  const track = landingTrack(r, c.deploys(r));
+  if (track !== null) {
+    const { at, unverified } = track;
     const title = at.step === "landed" ? "Landed" : r.phase.kind === "needs-person" ? "Merged, not deployed" : r.phase.kind === "rolling-back" ? "Rolling back" : "Landing";
     const phase = r.phase;
     return html`<section class="landing" ${named(title)}>
 ${top(title)}
-<ol class="land-steps">${landingSteps.map(([step, label], i) => {
-  const state = stateOf(step, i);
-  return html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`;
-})}</ol>
+<ol class="land-steps">${track.steps.map(({ step, label, state }) => html`<li class="land-step land-${state}"${state === "now" && html` aria-current="step"`}>${label}${state === "skipped" && (step === "verifying" ? unverified : " (nothing to deploy)")}</li>`)}</ol>
 ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from the description as it is now, what could not be checked live at ${short(r.rounds.at(-1)!.head)}, then .nexus/check runs there.</p>`
   : phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, unless it passed there already.</p>`
   : phase.kind === "verifying" ? html`<p class="land-note">${phase.thread === null && phase.refused !== undefined ? html`No node can take the verify pylon yet: ${phase.refused}` : html`.nexus/verify runs at ${short(r.rounds.at(-1)!.head)} in a verify pylon${phase.thread !== null && html`, <a href="/threads/${phase.thread}">${phase.thread}</a>`}.`}</p>`
@@ -184,7 +158,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   : phase.kind === "merging" ? html`<p class="land-note">Checking the merge policy again with what GitHub says now, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
   : phase.kind === "deploying" ? html`<p class="land-note">Deploying the merge commit ${short(phase.commit)} until every service reports it healthy.</p>`
   : phase.kind === "rolling-back" ? html`<p class="error">${phase.why} Rolling back to ${short(phase.previous)}.</p>`
-  : phase.kind === "landed" ? html`<p class="land-note">Merged as ${short(phase.commit)}${deploys && ", deployed, and every service reports it healthy"}.</p>`
+  : phase.kind === "landed" ? html`<p class="land-note">Merged as ${short(phase.commit)}${c.deploys(r) && ", deployed, and every service reports it healthy"}.</p>`
   : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>
 <p class="land-note">The merge commit ${short(r.merged!)} is on the default branch, but not deployed. Deploy it from a deployer with nexus deploy ${r.merged!}, or leave the fleet where it is, and cancel the review once nothing more is needed.</p>
 <div class="land-act need-act">${cancelReview(d.thread.id, r, "btn-ghost")}</div>`}

@@ -7,9 +7,8 @@ import type { ThreadId } from "../../ids.ts";
 import { roleOf } from "../agent-protocol.ts";
 import { keptPastDay } from "../reconcile.ts";
 import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pipeline.ts";
-import { checkBeside, checkThread, liveNote, roundsSpent, type PhaseKind, type Review } from "../review-model.ts";
+import { checkBeside, checkThread, landingAt, landingSteps, liveNote, roundsSpent, trackStep, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
 import { html, limitText, type Html, type Tone } from "./view.ts";
-import { landingAt } from "./cards.ts";
 import type { Context } from "./context.ts";
 import type { ThreadNeed } from "../work.ts";
 
@@ -36,19 +35,12 @@ export const stageLabel = Object.fromEntries(stages.map((s) => [s.stage, s.label
  */
 export interface Life { stage: Stage | null; at: Step; why: string; needs: readonly ThreadNeed[] }
 
-const ofPhase: Record<ItemPhase["kind"], Stage | null> = {
-  planned: "planned", queued: "queued", building: "building", reviewing: "review", held: "held", landing: "landing", landed: "deployed", archived: null, cancelled: null,
+/** Each pipeline phase's stage, or null once the work was archived or cancelled short of landing, and the tone of its dot. */
+export const ofPhase: Record<ItemPhase["kind"], { stage: Stage | null; tone: Tone }> = {
+  planned: { stage: "planned", tone: "idle" }, queued: { stage: "queued", tone: "idle" }, building: { stage: "building", tone: "work" },
+  reviewing: { stage: "review", tone: "work" }, held: { stage: "held", tone: "bad" }, landing: { stage: "landing", tone: "busy" },
+  landed: { stage: "deployed", tone: "ok" }, archived: { stage: null, tone: "muted" }, cancelled: { stage: null, tone: "muted" },
 };
-
-/** The step a review has taken its thread to, whatever holds it there. */
-function reviewStep(r: Review): Step {
-  switch (r.phase.kind) {
-    case "merging": case "deploying": case "rolling-back": return "landing";
-    case "landed": case "merged": return "deployed";
-    case "needs-person": return r.merged === null ? "review" : "landing";
-    default: return "review";
-  }
-}
 
 /** What a review does next, in the words of the step it is on. */
 function reviewNext(r: Review): string | null {
@@ -65,7 +57,8 @@ function reviewNext(r: Review): string | null {
     case "rolling-back": return `Rolling back: ${r.phase.why}`;
     case "landed": return `Merged as ${r.phase.commit.slice(0, 12)}`;
     case "needs-person": return r.phase.reasons[0] ?? null;
-    default: return null;
+    case "merged": case "closed": case "cancelled": return null;
+    default: return r.phase satisfies never;
   }
 }
 
@@ -154,13 +147,12 @@ export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id:
   const needs = c.needs().filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.kind !== "held" && n.d.thread.id === id);
   const review = c.registry.review(id);
   const started = c.registry.thread(id) !== undefined;
-  // A review's checks run as the first steps of its landing once it was asked to land, as the landing card shows them.
-  const landing = review !== null && phase.kind === "reviewing" && landingAt(review) !== null;
-  const mapped = landing ? "landing" : ofPhase[phase.kind];
-  const at: Step = mapped !== null && mapped !== "held" ? mapped
-    : review !== null ? reviewStep(review)
+  const track = review === null ? null : trackStep(review);
+  const mapped = phase.kind === "reviewing" && track === "landing" ? "landing" : ofPhase[phase.kind].stage;
+  const at: Step = track ?? (mapped !== null && mapped !== "held" ? mapped
+    : review !== null ? "review"
     : !started ? "queued"
-    : c.registry.prWatch(id)?.links.some((l) => l.pr.state === "open") ? "review" : "building";
+    : c.registry.prWatch(id)?.links.some((l) => l.pr.state === "open") ? "review" : "building");
   const stage = needs.length > 0 ? "held" : mapped;
   const said = (needs.length === 0 ? null : needWhy(needs[0]!, c.now) || null) ?? (review === null ? null : reviewNext(review));
   return { stage, at, why: said ?? phase.why, needs };
@@ -169,7 +161,7 @@ export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id:
 /** An item's life: its thread's once it has one, and before then its own phase on the first step. */
 export function lifeOfItem(c: Pick<Context, "registry" | "needs" | "now">, item: PipelineItem): Life {
   if (item.thread !== null) return lifeOfThread(c, item.thread);
-  return { stage: ofPhase[item.phase.kind], at: "planned", why: item.phase.why, needs: [] };
+  return { stage: ofPhase[item.phase.kind].stage, at: "planned", why: item.phase.why, needs: [] };
 }
 
 export const pipelineItems = (c: Pick<Context, "registry">) => c.registry.items().map((i) => itemView(c.registry, i));
@@ -191,4 +183,22 @@ export function miniTrack(life: Life): Html {
   const states = stepStates(life);
   const said = life.stage === "held" ? `held for you at ${stageLabel[life.at].toLowerCase()}` : life.stage === null ? `ended at ${stageLabel[life.at].toLowerCase()}` : `at ${stageLabel[life.at].toLowerCase()}`;
   return html`<span class="trk" role="img" aria-label="${said}">${steps.map((step) => html`<i class="trk-${states[step]}"></i>`)}</span>`;
+}
+
+const landingLabels: Record<LandingStep, string> = { checking: "Check", verifying: "Live check", merging: "Merge", deploying: "Deploy", landed: "Landed" };
+export type LandingState = "done" | "now" | "failed" | "todo" | "skipped";
+/**
+ * The steps of `r`'s landing, each with its state, or null when no landing is on its way, as the landing card and the
+ * timeline draw them. A project that does not deploy skips the deploy. A landing past the live check with none recorded
+ * is one from before live checks, and `unverified` says why it skipped it.
+ */
+export function landingTrack(r: Review, deploys: boolean): { at: LandingAt; unverified: string | null; steps: { step: LandingStep; label: string; state: LandingState }[] } | null {
+  const at = landingAt(r);
+  if (at === null) return null;
+  const index = landingSteps.indexOf(at.step);
+  const { live } = r.rounds.at(-1)!;
+  const unverified = live?.kind === "absent" ? " (no .nexus/verify)" : live === undefined && index > 1 ? " (not run)" : null;
+  const stateOf = (step: LandingStep, i: number): LandingState => (step === "deploying" && !deploys) || (step === "verifying" && unverified !== null) ? "skipped"
+    : i < index || at.step === "landed" ? "done" : i > index ? "todo" : at.failed ? "failed" : "now";
+  return { at, unverified, steps: landingSteps.map((step, i) => ({ step, label: landingLabels[step], state: stateOf(step, i) })) };
 }
