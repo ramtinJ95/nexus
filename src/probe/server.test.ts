@@ -727,6 +727,24 @@ test("a held secret is taken only from the control plane, only under a held name
   assert.deepEqual(secrets.names(), []);
 });
 
+test("a secret body that is not valid HTTP is answered as malformed, not as too large, and the probe logs why it read none", async (t) => {
+  const secrets = nodeSecrets({ value: () => undefined, names: () => [] });
+  const logged: string[] = [];
+  const { base, fake } = await setup(t, { secrets, log: (line) => logged.push(line) });
+  const { hostname, port } = new URL(base);
+  const socket = connect(Number(port), hostname);
+  socket.end("PUT /v1/secrets/NEXUS_CHATGPT_TOKEN HTTP/1.1\r\nHost: probe\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\nnot-a-chunk-size\r\n");
+  let reply = "";
+  socket.on("data", (data: Buffer) => { reply += data; });
+  await once(socket, "close");
+  assert.match(reply, /^HTTP\/1\.1 400 Bad Request\r\n/);
+  assert.doesNotMatch(reply, /at most/);
+  const read = () => logged.filter((line) => line.startsWith("PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: "));
+  for (const deadline = Date.now() + 10_000; read().length === 0 && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(read(), ["PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: aborted"]);
+  assert.deepEqual([secrets.names(), fake.secretUpdates], [[], []], "nothing was held or applied");
+});
+
 test("an observer learns at once that the probe got a held secret it did not have", async (t) => {
   const { base, client } = await setup(t, { secrets: nodeSecrets({ value: () => undefined, names: () => [] }) });
   const events = client.observe(AbortSignal.timeout(5000))[Symbol.asyncIterator]();

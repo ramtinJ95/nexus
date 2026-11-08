@@ -25,7 +25,7 @@ import { dropRequestSchema, type DropRequest } from "../protocol/cleanup.ts";
 import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type GitReadReply, type ParamsOf, type ProbeAuthConfig, type ProbeRoute } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
 import type { Whois } from "../protocol/http.ts";
-import { readBody } from "../request-body.ts";
+import { BodyTooLarge, readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
 import { rawResponse } from "./gateway.ts";
@@ -348,7 +348,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       let value: string;
       try {
         value = await readBody(req, maxSecretBytes);
-      } catch {
+      } catch (err) {
+        if (!(err instanceof BodyTooLarge)) throw err;
         return send(res, 400, `a secret value is at most ${maxSecretBytes} bytes`);
       }
       if (!tokenAlphabet.test(value)) return send(res, 400, "a secret value is a token: letters, digits and -._~+/ with optional = padding");
@@ -463,6 +464,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
+      // A request whose body broke off, or a reply that broke off, has nobody left to tell.
+      if (res.headersSent || res.destroyed) log(`${req.method} ${req.url}: ${(err as Error).message}`);
       if (res.headersSent) return res.destroy(err as Error);
       send(res, 500, (err as Error).message);
     });
