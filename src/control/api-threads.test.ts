@@ -501,7 +501,7 @@ test("thread detail lists the judgments of the thread's failed pylon, oldest fai
 test("a harness, a Claude worker and a bare thread each answer every agent route as their kind does", async (t) => {
   const s = await withThread(t);
   const claude = (await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" })).body as Thread;
-  const bare = await s.startThread({ project: "acme", title: "Check", bare: true }, laptop);
+  const bare = await s.startThread({ request: { project: "acme", title: "Check" }, caller: laptop, role: "check" });
   const threads = { harness: s.thread, claude, bare };
   /** Each route's status, with its error or what its body is. A stream that opens is closed at once. */
   const answer = async (method: string, path: string, body?: unknown) => {

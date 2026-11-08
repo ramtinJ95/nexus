@@ -3,18 +3,12 @@
  * queue, the pipeline, the PR watch, the nudger, the resumer, the review loop, the inbox and the dashboard read it here.
  */
 import type { ThreadId } from "../ids.ts";
-import { roleOf } from "./agent-protocol.ts";
+import { roleOf, type Role } from "./agent-protocol.ts";
 import type { Attention, Need } from "./attention.ts";
 import { prLocation, watchedPrs, type PrLocation } from "./pr-watch-model.ts";
 import { archivedDiskMs, isOpenStatus, settleStuck } from "./reconcile.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-
-/**
- * What a thread is to the work. A builder's work becomes a pull request. The rest serve one: a review's reviewer, a
- * check or verify thread a review started, and a planning thread.
- */
-export type Role = "builder" | "planning" | "reviewer" | "check" | "verify";
 
 /** `isReviewer` also names a reviewer that a later review of the same builder replaced. */
 export function threadRole(registry: Pick<Registry, "isReviewer" | "planning">, t: Pick<Thread, "id" | "startedBy">): Role {

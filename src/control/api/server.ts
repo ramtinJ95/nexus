@@ -29,7 +29,7 @@ import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse }
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { NodeName, TailnetNodeId } from "../../ids.ts";
 import { probeError, type ProbeError } from "../../protocol/http.ts";
 import { runsSealed } from "../locator.ts";
 import type { NodeHealth, ProbeClient } from "../../protocol/client.ts";
@@ -68,7 +68,7 @@ import { imageRoutes } from "./image-routes.ts";
 import { doctorRoutes } from "./doctor-routes.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { BodyTooLarge, readBody } from "../../node-base/request-body.ts";
-import type { StartKey, StartRequest } from "../start-request.ts";
+import type { Start } from "../start-request.ts";
 import type { Features } from "../features.ts";
 import type { Log } from "../log-once.ts";
 import { attachScript } from "../../guest-contract.ts";
@@ -91,7 +91,7 @@ export interface ApiOptions {
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: ReadonlySet<string>;
   harness: ThreadHarness;
-  startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread>;
+  startThread(start: Start): Promise<Thread>;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
   /** One client per registry node, for the guest commands, checkout reads and node health a human asks for. */

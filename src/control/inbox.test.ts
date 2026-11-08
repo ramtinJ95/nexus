@@ -15,7 +15,7 @@ test("a message whose earlier send failed partway counts as delivered, is not ty
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
   const thread = testThread({ id: "th-1" as ThreadId, title: "test", project: project.id, startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
-  registry.createThread(thread, testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } }), "/poteto-mode fix it");
+  registry.createThread(thread, testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } }), { claude: { prompt: "/poteto-mode fix it" } });
   claudeWorkerAt(registry, thread.id, "started", { session });
   registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   registry.ingested(testObservation(node, { pylons: [runningPylon(thread.pylonId, { liveHash: "hash" as LiveHash })] }), []);

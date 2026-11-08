@@ -605,11 +605,12 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       return row === undefined ? null : { event: row.id as number, at: row.time as number };
     },
     /**
-     * A thread and its pylon are created together, because a thread always has exactly one pylon. A `queued` thread's
-     * queue record is marked started in the same transaction, so a queued thread starts at most once, and so is a
-     * start's `key`, so a repeat of its request ID finds the thread.
+     * A thread and its pylon are created together, because a thread always has exactly one pylon. `claude` makes it a
+     * Claude worker. A `queued` thread's queue record is marked started in the same transaction, so a queued thread
+     * starts at most once, and so is a start's `key`, so a repeat of its request ID finds the thread.
      */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt" | "standingRulesRevision"> & { standingRules?: StandingRulesStamp | undefined }, pylon: Omit<PylonRecord, "desired">, claudePrompt?: string, model = defaultClaudeModel, queued = false, key?: StartKey) {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt" | "standingRulesRevision"> & { standingRules?: StandingRulesStamp | undefined }, pylon: Omit<PylonRecord, "desired">,
+      { claude, queued = false, key }: { claude?: { prompt: string; model?: string | undefined }; queued?: boolean; key?: StartKey | undefined } = {}) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         if (queued) for (const p of participants) p.startQueued?.(thread.id, thread.createdAt);
@@ -620,7 +621,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           thread.setup === undefined ? null : JSON.stringify(thread.setup), thread.standingRules === undefined ? null : JSON.stringify(thread.standingRules));
         sql(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)
           VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`).run(pylonParams(pylon));
-        if (claudePrompt !== undefined) addWorker(thread.id, claudePrompt, model);
+        if (claude !== undefined) addWorker(thread.id, claude.prompt, claude.model ?? defaultClaudeModel);
         if (key !== undefined) saveStartKey(key, thread.id);
       });
     },

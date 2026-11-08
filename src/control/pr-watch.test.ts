@@ -29,7 +29,7 @@ function fixture(path = ":memory:") {
   function add(id = "th-1", claude = false, output: string | null = "origin/feature") {
     const thread = testThread({ id: id as ThreadId, title: "test", project: project.id, conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
-    registry.createThread(thread, pylon, claude ? "/poteto-mode fix it" : undefined);
+    registry.createThread(thread, pylon, claude ? { claude: { prompt: "/poteto-mode fix it" } } : {});
     if (claude) claudeWorkerAt(registry, thread.id, "started", { session: "c0ffee00-0000-4000-8000-000000000000" });
     if (output !== null) registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: output });
     return thread.id;
@@ -813,7 +813,7 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   };
   const watcher = prWatcher({ registry: f.registry, github, inbox: f.inbox() });
   const starts: ThreadId[] = [];
-  const queue = threadQueue({ registry: f.registry, gate: { run: (action) => action() }, send: async () => {}, async startThread(_request, _caller, id) { starts.push(id!); throw new Error("not started in this test"); } });
+  const queue = threadQueue({ registry: f.registry, gate: { run: (action) => action() }, send: async () => {}, async startThread({ queued }) { starts.push(queued!); throw new Error("not started in this test"); } });
   f.registry.saveQueued({
     id: "th-after" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [builder],
     request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,

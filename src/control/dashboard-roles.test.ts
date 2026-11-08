@@ -45,9 +45,9 @@ const approve = () => ({ token: "t", verdict: "approve" as const, findings: [], 
 async function reviewed(t: TestContext) {
   const s = await setup(t);
   const builder = await s.start({ title: "Cache the totals" });
-  const reviewer = await s.startThread({ project: "acme", title: "Review of #7: Cache", branch: "cache" }, reviewerCaller);
-  const check = await s.startThread({ project: "acme", title: "Check of cache at 222222222222", branch: "cache", commit: "2".repeat(40), bare: true }, checkCaller);
-  const verify = await s.startThread({ project: "acme", title: "Live check of cache at 111111111111", branch: "cache", commit: "1".repeat(40), bare: true }, verifyCaller);
+  const reviewer = await s.startThread({ request: { project: "acme", title: "Review of #7: Cache", branch: "cache" }, caller: reviewerCaller, role: "reviewer" });
+  const check = await s.startThread({ request: { project: "acme", title: "Check of cache at 222222222222", branch: "cache", commit: "2".repeat(40) }, caller: checkCaller, role: "check" });
+  const verify = await s.startThread({ request: { project: "acme", title: "Live check of cache at 111111111111", branch: "cache", commit: "1".repeat(40) }, caller: verifyCaller, role: "verify" });
   const rounds: Round[] = [
     { head: "1".repeat(40), verdict: approve(), check: { passed: true, output: "ok" }, live: { kind: "ran", thread: verify.id, passed: false, output: "boot failed" }, answers: [] },
     { head: "2".repeat(40), verdict: approve(), check: null, answers: null },
@@ -161,7 +161,7 @@ test("the header reads agent working while the agent works on a running pylon, a
 
 test("a thread started by neither a person's node nor the review loop is a builder, in flight with its track", async (t) => {
   const s = await setup(t);
-  const fix = await s.startThread({ project: "acme", title: "Fix checkout" }, "nexus-queue");
+  const fix = await s.startThread({ request: { project: "acme", title: "Fix checkout" }, caller: "nexus-queue", role: "builder" });
   s.observe([fix]);
   const home = await s.page("/");
   assert.match(flightOf(home).split('id="phase-building"')[1]!.split("</section>")[0]!, new RegExp(`data-peek="${fix.id}"`));

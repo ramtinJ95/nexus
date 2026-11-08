@@ -94,7 +94,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
   async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
     const plans = planning ? feature(features, "planning") : null;
     if (after === undefined) {
-      const t = made === undefined ? await startThread({ ...request, planning }, caller, undefined, key) : registry.thread(made)!;
+      const t = made === undefined ? await startThread({ request, caller, role: planning ? "planning" : "builder", key }) : registry.thread(made)!;
       plans?.begin(t);
       if (message !== undefined && isOpenStatus(t.status)) {
         const requestId = requestIds.brief(t.id);

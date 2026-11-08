@@ -30,7 +30,7 @@ import { testPr, testPylon, testReview, testThread, claudeWorkerAt } from "../te
 import { checkCaller, reviewerCaller, senders, verifyCaller } from "./agent-protocol.ts";
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
-import type { StartRequest } from "./start-request.ts";
+import type { Start, StartRequest } from "./start-request.ts";
 import { Refusal } from "./refusal.ts";
 
 /** A review as `nexus` prints it from the lines the API words of it. */
@@ -61,7 +61,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     if (registry.thread(id as ThreadId) !== undefined) return id as ThreadId;
     const thread = testThread({ id: id as ThreadId, title: id, project: project.id, conversationId: claude || bare ? null : "1", startedBy, createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, liveHash: "hash" });
-    registry.createThread(thread, pylon, claude ? "fix it" : undefined, claude ? "claude-opus-5-5" : undefined);
+    registry.createThread(thread, pylon, claude ? { claude: { prompt: "fix it", model: "claude-opus-5-5" } } : {});
     return thread.id;
   }
   const builder = add("th-builder", options.claudeBuilder ?? true);
@@ -72,7 +72,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const replies = new Map<ThreadId, string[]>();
   const failures = new Map<ThreadId, string>();
   const sent: { to: ThreadId; message: AutomatedMessage }[] = [];
-  const started: StartRequest[] = [];
+  const started: Start[] = [];
   let snapshot: PrSnapshot = { pr: { ...pr }, detail: { head: head1, branch: "feature", base: "main", body: "Adds a cache.\n\nNot checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
   let files: ChangedFile[] = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
   /** The change at each head against the base, for a test that pins it. */
@@ -171,11 +171,11 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     log: (message) => { logged.push(message); },
     now: () => clock,
     brief: async (target) => { const agent = registry.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
-    async startThread(request, caller) {
-      const refused = refuseStart(request);
+    async startThread(start) {
+      const refused = refuseStart(start.request);
       if (refused !== null) throw new Refusal("conflict", refused);
-      started.push(request);
-      const id = add(`th-reviewer-${started.length}`, request.claude !== undefined, caller);
+      started.push(start);
+      const id = add(`th-reviewer-${started.length}`, start.request.claude !== undefined, start.caller);
       await onStart();
       return registry.thread(id)!;
     },
@@ -294,8 +294,8 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   const started = await loop.start(f.builder, { land: null });
   assert.deepEqual(started.models, { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, "another model family than the builder's");
   assert.equal(started.maxRounds, 5, "a review runs 5 rounds unless asked for fewer");
-  assert.equal(f.started[0]!.claude, undefined, "the reviewer is a harness thread");
-  assert.equal(f.started[0]!.branch, "feature");
+  assert.equal(f.started[0]!.request.claude, undefined, "the reviewer is a harness thread");
+  assert.equal(f.started[0]!.request.branch, "feature");
   await loop.poll();
   const reviewer = f.review().reviewer;
   assert.equal(f.sent.length, 1);
@@ -753,8 +753,8 @@ test("a harness builder gets a Claude reviewer only where the project grants a C
   const g = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] });
   const review = await g.loop().start(g.builder, { land: null });
   assert.deepEqual(review.models, { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" });
-  assert.equal(g.started[0]!.raw, true, "no /poteto-mode in front of the reviewer's request");
-  assert.ok(g.started[0]!.claude!.startsWith(senders.review.prefix));
+  assert.equal(g.started[0]!.role, "reviewer", "no /poteto-mode in front of the reviewer's request");
+  assert.ok(g.started[0]!.request.claude!.startsWith(senders.review.prefix));
   assert.equal(review.outbox, null, "a Claude reviewer's request is its first prompt");
 });
 
@@ -4671,12 +4671,12 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   const second = secondOf(started);
   assert.equal(second.model, "claude-fable-5-1");
   assert.equal(second.rule, "the change has 160 changed lines, at least the 150 the project sets");
-  assert.deepEqual([f.started[1]!.claude !== undefined, f.started[1]!.model, f.started[1]!.raw], [true, "claude-fable-5-1", true]);
+  assert.deepEqual([f.started[1]!.request.claude !== undefined, f.started[1]!.request.model, f.started[1]!.role], [true, "claude-fable-5-1", "reviewer"]);
   assert.equal(f.registry.isReviewer(second.thread), true);
   await loop.poll();
   const reviewer = f.review().reviewer;
   const first = f.sent.find((s) => s.to === reviewer)!.message.text;
-  assert.equal(f.started[1]!.claude, first.replace("you run on gpt-6-astra", "you run on claude-fable-5-1").replace(f.review().expect, second.expect), "the second gets the first's request, on its own model and token");
+  assert.equal(f.started[1]!.request.claude, first.replace("you run on gpt-6-astra", "you run on claude-fable-5-1").replace(f.review().expect, second.expect), "the second gets the first's request, on its own model and token");
 
   f.reply(reviewer, verdict(f.review(), {}));
   await loop.poll();
@@ -4914,13 +4914,13 @@ test("both reviewers get the builder's brief, cut as the description is, so a ch
   await loop.poll();
   const first = f.sent.find((s) => s.to === f.review().reviewer)!.message.text;
   assert.match(first, /The brief the builder was given, which says what the change must do\. .*\n<brief>\nfix it\n<\/brief>/);
-  assert.match(f.started[1]!.claude!, /<brief>\nfix it\n<\/brief>/, "the second reviewer gets the same brief");
+  assert.match(f.started[1]!.request.claude!, /<brief>\nfix it\n<\/brief>/, "the second reviewer gets the same brief");
 
   const g = fixture(t, { claudeBuilder: false, secrets: claudeToken });
   g.briefs.set(g.builder, "x".repeat(9_000));
   await g.loop().start(g.builder, { land: null });
   assert.equal(g.review().brief, "x".repeat(8_000), "a harness builder's first message, cut at 8,000 characters");
-  assert.match(g.started[0]!.claude!, new RegExp(`<brief>\\n${"x".repeat(8_000)}\\n</brief>`));
+  assert.match(g.started[0]!.request.claude!, new RegExp(`<brief>\\n${"x".repeat(8_000)}\\n</brief>`));
 });
 
 test("a builder's brief is its Claude worker's prompt or its harness conversation's first message, and a bare thread has none", async (t) => {
@@ -4953,7 +4953,7 @@ test("a pull request that grows into the second reviewer's rule in a fix round, 
   assert.equal(second.rule, "the change has 200 changed lines, at least the 150 the project sets");
   assert.equal(f.review().rounds[0]!.secondVerdict, undefined, "the round before it had none");
   assert.equal(f.review().rounds[1]!.secondVerdict, null);
-  assert.match(f.started.at(-1)!.claude!, new RegExp(`git checkout --detach ${head2}`), "it reads the whole change at the round's head");
+  assert.match(f.started.at(-1)!.request.claude!, new RegExp(`git checkout --detach ${head2}`), "it reads the whole change at the round's head");
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing", "the round waits for it");
@@ -4994,7 +4994,7 @@ test("a second reviewer whose thread does not start yet is tried again each minu
   f.tick(60_000);
   await loop.poll();
   const second = secondOf(f.review());
-  assert.equal(f.started.at(-1)!.model, "claude-fable-5-1");
+  assert.equal(f.started.at(-1)!.request.model, "claude-fable-5-1");
   f.reply(second.thread, secondVerdict(f.review(), {}));
   await loop.poll();
   assert.notEqual(f.review().phase.kind, "reviewing");
@@ -5038,7 +5038,7 @@ test("a second reviewer is archived once both approve and the review waits on th
   assert.equal(f.review().phase.kind, "reviewing");
   const again = secondOf(f.review());
   assert.notEqual(again.thread, first, "a fresh thread reads the new head");
-  assert.match(f.started.at(-1)!.claude!, new RegExp(`git checkout --detach ${head2}`));
+  assert.match(f.started.at(-1)!.request.claude!, new RegExp(`git checkout --detach ${head2}`));
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   f.reply(again.thread, secondVerdict(f.review(), {}));
   await loop.poll();

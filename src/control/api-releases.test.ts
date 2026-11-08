@@ -113,7 +113,7 @@ test("drain reads committed live and queued work rather than a lagging activity 
 test("drain reads only harness conversations, so Claude worker and bare threads never reach the harness", async (t) => {
   const s = await withThread(t, { deployment });
   await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
-  await s.startThread({ project: "acme", title: "Check", bare: true }, laptop);
+  await s.startThread({ request: { project: "acme", title: "Check" }, caller: laptop, role: "check" });
   await s.call("PUT", "/v1/release", { commit: deployCommit });
   s.callAs("nFIREBAT" as TailnetNodeId);
   s.calls.length = 0;

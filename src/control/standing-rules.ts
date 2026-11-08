@@ -1,7 +1,6 @@
-import { roleOf } from "./agent-protocol.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Project, StandingRules } from "./project.ts";
-import type { StartRequest } from "./start-request.ts";
+import type { Start } from "./start-request.ts";
 
 /** The longest rules a project takes, so a brief with them still fits a Claude prompt. */
 export const standingRulesLimit = 8_192;
@@ -16,15 +15,12 @@ export const withStandingRules = (brief: string, rules: Pick<StandingRulesStamp,
   rules === null ? brief : `${brief}\n\n## Standing rules for this project\n\n${rules.text}`;
 
 /**
- * Only a builder carries rules. A `raw` start is the review loop's Claude reviewer, and the review loop's harness
- * reviewer, check and live-check threads are known by their caller: the loop briefs them itself, and a check runs no
- * agent. A planning thread gets none, because the builders of the briefs it writes get the rules on their own.
+ * Only a builder carries rules. The review loop briefs its reviewers itself, a check or verify thread runs no agent, and
+ * the builders of the briefs a planning thread writes get the rules on their own.
  */
-export function standingRulesFor(project: Pick<Project, "standingRules">, request: StartRequest, caller: string): StandingRulesStamp | null {
+export function standingRulesFor(project: Pick<Project, "standingRules">, { request, role }: Pick<Start, "request" | "role">): StandingRulesStamp | null {
   const rules = project.standingRules;
-  const role = roleOf(caller);
-  const builder = request.raw !== true && request.bare !== true && request.planning !== true && role !== "reviewer" && role !== "check" && role !== "verify";
-  return builder && rules?.text != null ? { revision: rules.revision, text: rules.text, carriedBy: request.claude === undefined ? null : "prompt" } : null;
+  return role === "builder" && rules?.text != null ? { revision: rules.revision, text: rules.text, carriedBy: request.claude === undefined ? null : "prompt" } : null;
 }
 
 /**

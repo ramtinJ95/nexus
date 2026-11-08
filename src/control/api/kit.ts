@@ -3,14 +3,14 @@
  */
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
-import type { TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { TailnetNodeId } from "../../ids.ts";
 import type { ClaudeConversations } from "../claude-conversation.ts";
 import type { TurnGate } from "../drain.ts";
 import { HttpError } from "../http-error.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadAgents, ThreadHarness } from "../thread-agent.ts";
-import type { StartKey, StartRequest } from "../start-request.ts";
+import type { Start } from "../start-request.ts";
 import type { Access, Policy, Role } from "./access.ts";
 import type { PylonAccess } from "./pylon-access.ts";
 import type { EventStreams } from "./sse.ts";
@@ -62,7 +62,7 @@ export function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 export interface ApiKit extends Access, PylonAccess, ThreadViews, EventStreams {
   registry: Registry;
   harness: ThreadHarness;
-  startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread>;
+  startThread(start: Start): Promise<Thread>;
   claude: ClaudeConversations;
   agents: ThreadAgents;
   agentOf(t: Thread): ThreadAgents["harness" | "claude"];

@@ -24,6 +24,12 @@ export type Sender = keyof typeof senders;
 export const judgmentPrefix = automated("Nexus judgment");
 export const planningPrefix = "[Nexus planning: automated, not a message from the person]";
 
+/**
+ * What a thread is to the work. A builder's work becomes a pull request. The rest serve one: a review's reviewer, a
+ * check or verify thread a review started, and a planning thread.
+ */
+export type Role = "builder" | "planning" | "reviewer" | "check" | "verify";
+
 type CallerRole = "builder" | "reviewer" | "check" | "verify" | "other";
 
 const nexusCallers: ReadonlyMap<string, CallerRole> = new Map([[reviewerCaller, "reviewer"], [checkCaller, "check"], [verifyCaller, "verify"]]);

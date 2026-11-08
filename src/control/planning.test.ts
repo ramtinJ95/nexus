@@ -65,7 +65,7 @@ async function fixture(t: import("node:test").TestContext, path = ":memory:", fa
   return {
     registry, fake, plans, items, queue,
     async planner(): Promise<Thread> {
-      const thread = await start({ project: "acme", title: "Plan" }, laptop);
+      const thread = await start({ request: { project: "acme", title: "Plan" }, caller: laptop, role: "planning" });
       plans.begin(thread);
       return thread;
     },

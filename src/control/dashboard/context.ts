@@ -5,7 +5,7 @@ import type { Thread, ThreadAgent } from "../thread-store.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Project } from "../project.ts";
 import type { ItemPhase, PipelineItem, Step } from "../pipeline.ts";
-import type { Role } from "../work-model.ts";
+import type { Role } from "../agent-protocol.ts";
 import type { UsageReport, UsageTotals } from "../../contract/usage.ts";
 import type { Item } from "./items.ts";
 import type { Review } from "../review-model.ts";

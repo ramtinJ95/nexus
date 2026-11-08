@@ -238,12 +238,12 @@ test("the review loop's reviewers and check and live-check threads get no standi
   const builder = (await s.call("POST", "/v1/threads", { project: "acme", title: "Builder", message: "Build it." })).body as Thread;
   observeNode(s, node, { total: 64, committed: 0 }, { nestedVirtualization: true });
   // The starts the review loop makes, of a Claude reviewer and a Nexus agent one, which the loop sends its request itself.
-  const claudeReviewer = await s.startThread({ project: "acme", title: "Review of #1", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5", raw: true }, reviewerCaller);
+  const claudeReviewer = await s.startThread({ request: { project: "acme", title: "Review of #1", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5" }, caller: reviewerCaller, role: "reviewer" });
   assert.equal(s.registry.claudeWorker(claudeReviewer.id)!.prompt, "Review PR #1.");
-  const harnessReviewer = await s.startThread({ project: "acme", title: "Review of #1", branch: "main" }, reviewerCaller);
+  const harnessReviewer = await s.startThread({ request: { project: "acme", title: "Review of #1", branch: "main" }, caller: reviewerCaller, role: "reviewer" });
   const head = "a".repeat(40);
-  const check = await s.startThread(checkGate.request(builder, "main", head, 2), checkCaller);
-  const verify = await s.startThread(verifyGate.request(builder, "main", head, 2), verifyCaller);
+  const check = await s.startThread({ request: checkGate.request(builder, "main", head, 2), caller: checkCaller, role: "check" });
+  const verify = await s.startThread({ request: verifyGate.request(builder, "main", head, 2), caller: verifyCaller, role: "verify" });
   for (const started of [claudeReviewer, harnessReviewer, check, verify]) {
     assert.equal(started.standingRulesRevision, undefined, started.title);
     assert.equal(await revisionOf(s, started.id), undefined, started.title);
@@ -278,10 +278,10 @@ test("which starts carry standing rules: a person's builder and queued starts do
     ["a person's planning thread", () => viaApi({ title: "Plan", planning: true }), false],
     ["a queued Nexus agent thread", () => queued({ title: "Queued agent" }), true],
     ["a queued Claude worker", () => queued({ title: "Queued Claude", claude: "Fix it." }), true],
-    ["the review loop's Claude reviewer", async () => (await s.startThread({ project: "acme", title: "Review", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5", raw: true }, reviewerCaller)).id, false],
-    ["the review loop's Nexus agent reviewer", async () => (await s.startThread({ project: "acme", title: "Review", branch: "main" }, reviewerCaller)).id, false],
-    ["a check thread", async () => (await s.startThread(checkGate.request(builder, "main", head, 2), checkCaller)).id, false],
-    ["a verify pylon's thread", async () => (await s.startThread(verifyGate.request(builder, "main", head, 2), verifyCaller)).id, false],
+    ["the review loop's Claude reviewer", async () => (await s.startThread({ request: { project: "acme", title: "Review", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5" }, caller: reviewerCaller, role: "reviewer" })).id, false],
+    ["the review loop's Nexus agent reviewer", async () => (await s.startThread({ request: { project: "acme", title: "Review", branch: "main" }, caller: reviewerCaller, role: "reviewer" })).id, false],
+    ["a check thread", async () => (await s.startThread({ request: checkGate.request(builder, "main", head, 2), caller: checkCaller, role: "check" })).id, false],
+    ["a verify pylon's thread", async () => (await s.startThread({ request: verifyGate.request(builder, "main", head, 2), caller: verifyCaller, role: "verify" })).id, false],
   ];
   for (const [name, start, carries] of table) {
     const id = await start();

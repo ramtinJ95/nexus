@@ -41,7 +41,7 @@ const capacity = testCapacity({ committedMemoryGiB: 8, diskFreeGiB: 400 });
 
 function seed(registry: Registry, claudePrompt?: string) {
   seedRegistry(registry, { project });
-  registry.createThread(thread, pylon, claudePrompt);
+  registry.createThread(thread, pylon, claudePrompt === undefined ? {} : { claude: { prompt: claudePrompt } });
   return registry;
 }
 const seeded = (t: TestContext, path: string, clock?: () => number, claudePrompt?: string) => seed(testRegistry(t, path, clock), claudePrompt);
@@ -284,7 +284,7 @@ test("a registry from a newer control plane is refused", async (t) => {
 /** Another thread's pylon on `on`, for tests that need neighbours. */
 function addPylon(registry: ReturnType<typeof openRegistry>, id: string, on: NodeName = node, claudePrompt?: string): PylonId {
   const other = `pylon-${id}` as PylonId;
-  registry.createThread({ ...thread, id: id as ThreadId, pylonId: other }, { ...pylon, thread: id, pylonId: other, node: on, boot: { ...pylon.boot, pylonId: other } }, claudePrompt);
+  registry.createThread({ ...thread, id: id as ThreadId, pylonId: other }, { ...pylon, thread: id, pylonId: other, node: on, boot: { ...pylon.boot, pylonId: other } }, claudePrompt === undefined ? {} : { claude: { prompt: claudePrompt } });
   return other;
 }
 const ports = { first: 10200, last: 10209 };
@@ -1471,17 +1471,17 @@ test("a queued thread's row and its queue record's start commit together, and a 
     status: "queued", startNow: null, lastError: "no node can run this pylon", startedAt: null, firstMessage: null,
   };
   registry.saveQueued({ ...record, status: "archived" });
-  assert.throws(() => registry.createThread(thread, pylon, undefined, undefined, true), /thread th-1 is no longer queued/);
+  assert.throws(() => registry.createThread(thread, pylon, { queued: true }), /thread th-1 is no longer queued/);
   assert.equal(registry.thread(threadId), undefined, "a cancelled thread gets no row");
   assert.equal(registry.pylon(pylonId), undefined);
 
   registry.saveQueued(record);
-  registry.createThread(thread, pylon, undefined, undefined, true);
+  registry.createThread(thread, pylon, { queued: true });
   assert.equal(registry.thread(threadId)?.id, threadId);
   assert.deepEqual(registry.queuedThread(threadId), { ...record, status: "started", startedAt: thread.createdAt, lastError: null, firstMessage: "pending" });
-  assert.throws(() => registry.createThread(thread, pylon, undefined, undefined, true), /no longer queued/, "a started record never starts again");
+  assert.throws(() => registry.createThread(thread, pylon, { queued: true }), /no longer queued/, "a started record never starts again");
   assert.deepEqual(registry.queuedThreads().map((r) => r.status), ["started"]);
-  assert.throws(() => registry.createThread({ ...thread, id: "th-2" as ThreadId, pylonId: "pylon-th-2" as PylonId }, { ...pylon, pylonId: "pylon-th-2" as PylonId, thread: "th-2" }, undefined, undefined, true), /th-2 is no longer queued/, "a thread with no record is not queued");
+  assert.throws(() => registry.createThread({ ...thread, id: "th-2" as ThreadId, pylonId: "pylon-th-2" as PylonId }, { ...pylon, pylonId: "pylon-th-2" as PylonId, thread: "th-2" }, { queued: true }), /th-2 is no longer queued/, "a thread with no record is not queued");
 });
 
 test("the migration that adds pipeline items turns the pipeline on for project nexus once, and never back on once it is off", (t) => {
@@ -1814,7 +1814,7 @@ test("a deploy drain set to null reads back as null, as does one never set", (t)
 test("the harness threads at start are those whose agent is a conversation, less deleted ones whose abort is recorded", (t) => {
   const registry = seeded(t, tempDb());
   const start = (id: string, conversationId: string, claude?: string) => registry.createThread({ ...thread, id: id as ThreadId, pylonId: `pylon-${id}` as PylonId, conversationId },
-    { ...pylon, thread: id, pylonId: `pylon-${id}` as PylonId, boot: { ...pylon.boot, pylonId: `pylon-${id}` as PylonId } }, claude);
+    { ...pylon, thread: id, pylonId: `pylon-${id}` as PylonId, boot: { ...pylon.boot, pylonId: `pylon-${id}` as PylonId } }, claude === undefined ? {} : { claude: { prompt: claude } });
   start("th-live", "1");
   start("th-deleted", "2");
   start("th-aborted", "3");

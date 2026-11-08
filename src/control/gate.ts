@@ -21,7 +21,7 @@ import { runningProbe } from "./locator.ts";
 import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import type { StartRequest } from "./start-request.ts";
+import type { Start, StartRequest } from "./start-request.ts";
 import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
 type GateRegistry = Pick<Registry, "node" | "project" | "pylon" | "recordActivity" | "sealedBoot" | "setThreadStatus" | "thread">;
@@ -67,17 +67,17 @@ exec ./${file} </dev/null 2>&1`;
  * What a run is: the script, who starts its pylon and how, and what becomes of the pylon afterwards. A check thread is
  * deleted. A verify pylon is archived, so the person can unarchive one within 24 hours to see what its live check left.
  */
-interface Gate { caller: string; pylon: string; script: string; request(builder: Thread, branch: string, head: string, projectCpus: number): StartRequest; after: "deleted" | "archived" }
+interface Gate { caller: string; role: "check" | "verify"; pylon: string; script: string; request(builder: Thread, branch: string, head: string, projectCpus: number): StartRequest; after: "deleted" | "archived" }
 export const checkGate: Gate = {
-  caller: checkCaller, pylon: "check", script: scriptOf(".nexus/check", "check"), after: "deleted",
+  caller: checkCaller, role: "check", pylon: "check", script: scriptOf(".nexus/check", "check"), after: "deleted",
   request: (builder, branch, head, projectCpus) => ({
-    project: builder.project, title: `Check of ${branch} at ${head.slice(0, 12)}`, branch, commit: head, bare: true, resources: { cpus: Math.max(checkCpus, projectCpus) },
+    project: builder.project, title: `Check of ${branch} at ${head.slice(0, 12)}`, branch, commit: head, resources: { cpus: Math.max(checkCpus, projectCpus) },
   }),
 };
 export const verifyGate: Gate = {
-  caller: verifyCaller, pylon: "verify", script: scriptOf(".nexus/verify", "verify"), after: "archived",
+  caller: verifyCaller, role: "verify", pylon: "verify", script: scriptOf(".nexus/verify", "verify"), after: "archived",
   request: (builder, branch, head) => ({
-    project: builder.project, title: `Live check of ${branch} at ${head.slice(0, 12)}`, node: "auto", branch, commit: head, bare: true,
+    project: builder.project, title: `Live check of ${branch} at ${head.slice(0, 12)}`, node: "auto", branch, commit: head,
     resources: { ...verifySize, nestedVirtualization: true },
   }),
 };
@@ -113,7 +113,7 @@ type Run = { kind: "waiting" | "running"; output: Buffer } | { kind: "void" } | 
 export function checkRuns(options: {
   registry: GateRegistry;
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>;
-  startThread(request: StartRequest, caller: string): Promise<Thread>;
+  startThread(start: Start): Promise<Thread>;
   wake(t: Thread): void;
   gate?: Gate;
   /** Hears of each run that ended with a verdict, or with none, so the review that waits on it steps at once. */
@@ -183,7 +183,9 @@ export function checkRuns(options: {
       const projectCpus = registry.project(builder.project)?.resources.cpus ?? 0;
       let t: Thread;
       try {
-        t = await startThread({ near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, gate.caller);
+        t = await startThread({
+          request: { near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, caller: gate.caller, role: gate.role,
+        });
       } catch (err) {
         if (!(err instanceof Refusal)) throw err;
         return { refused: err.message };
