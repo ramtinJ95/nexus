@@ -229,7 +229,7 @@ export async function seedReviews(d: Demo): Promise<[key: string, thread: Thread
     d.registry.savePrWatch(t.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
     // A review whose reviewer thread the person deletes needs that thread to exist.
     const reviewer = spec.key === "rv-cancelled-reviewer"
-      ? (await d.startThread({ project: spec.project, title: `Review of #${spec.number}: ${spec.title}` }, reviewerCaller)).id
+      ? (await d.startThread({ request: { project: spec.project, title: `Review of #${spec.number}: ${spec.title}` }, caller: reviewerCaller, role: "reviewer" })).id
       : `${t.id}-review` as ThreadId;
     const r: Review = {
       id: `rv-${spec.number}`, builder: t.id, reviewer, pr: { repo, number: spec.number, url: pr.url, title: spec.title, branch: `nexus/${spec.number}` },

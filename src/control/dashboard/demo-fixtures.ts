@@ -43,6 +43,7 @@ const run = promisify(execFile);
 const minute = 60_000;
 const hour = 60 * minute;
 const day = 24 * hour;
+const callerRoles = { [reviewerCaller]: "reviewer", [checkCaller]: "check", [verifyCaller]: "verify" } as const;
 
 /** The registry's clock is Date.now, which the demo shifts into the past while it seeds. */
 export const clock = { shift: 0 };
@@ -85,7 +86,7 @@ interface ThreadSpec {
   archived?: boolean;
   /** The pipeline item it was started for. */
   item?: string;
-  /** The review loop's caller, for a reviewer thread, or a check or verify thread, which starts bare. */
+  /** The review loop's caller, for a reviewer thread, or a check or verify thread, which starts with no agent. */
   by?: typeof reviewerCaller | typeof checkCaller | typeof verifyCaller;
   /** Fills in its conversation, reviews and the rest once it exists. */
   extra?: (d: Demo, t: Thread, w: World) => void | Promise<void>;
@@ -748,9 +749,9 @@ export async function seedDemo(d: Demo) {
     const t = await back(spec.ago, async () => {
       if (spec.item !== undefined) {
         const request = { project: spec.project, title: spec.title };
-        return d.startThread(request, laptop, undefined, startKey(requestIds.pipeline(spec.item as ItemId), { request, message: null, after: [] }));
+        return d.startThread({ request, caller: laptop, role: "builder", key: startKey(requestIds.pipeline(spec.item as ItemId), { request, message: null, after: [] }) });
       }
-      if (spec.by !== undefined) return d.startThread({ project: spec.project, title: spec.title, ...(spec.by !== reviewerCaller ? { bare: true } : {}) }, spec.by);
+      if (spec.by !== undefined) return d.startThread({ request: { project: spec.project, title: spec.title }, caller: spec.by, role: callerRoles[spec.by] });
       const res = await d.call("POST", "/v1/threads", {
         project: spec.project, title: spec.title, ...(spec.worker === "claude" ? { claude: spec.title } : {}), ...(spec.worker === "planning" ? { planning: true } : {}),
       });

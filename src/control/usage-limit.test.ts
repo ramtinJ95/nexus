@@ -23,7 +23,7 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
   const threads = ids.map((id) => testThread({ id: id as ThreadId, title: "test", project: project.id, startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 }));
   for (const thread of threads) {
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
-    registry.createThread(thread, pylon, "/poteto-mode fix it");
+    registry.createThread(thread, pylon, { claude: { prompt: "/poteto-mode fix it" } });
     claudeWorkerAt(registry, thread.id, "started", { session });
     const stop: ClaudeEntry = { kind: "notice", at: 5000, tone: "error", text: "You've hit your session limit", usageLimit: limit };
     registry.appendClaudeRead(thread.id, { session, from: transcriptStart, entries: [stop], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });

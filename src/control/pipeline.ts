@@ -204,7 +204,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
     add(request: StartRequest, message: string | null, after: readonly string[], caller: string, id = newItemId()): ItemRecord {
       const broken = brokenRule(itemRules, { ...request, message });
       if (broken !== undefined) throw new Refusal("invalid", broken);
-      const project = checkStart(registry, request, caller);
+      const project = checkStart(registry, { request, role: "builder" });
       if (project.pipeline == null) throw new Refusal("conflict", `the pipeline does not run for project ${project.id}. nexus project edit ${project.id} --pipeline start turns it on`);
       const ids = [...new Set(after)] as ItemId[];
       for (const id of ids) {

@@ -9,6 +9,7 @@ import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
 import type { ImageId, ProjectId, ThreadId } from "../ids.ts";
 import { node, project, image, observeNode, testApi, withImage, withQueue } from "../test-support/api-kit.ts";
+import { seedRegistry, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 
 const rules = "- Run npm test before you push.\n- Keep commits small.";
 const section = (text: string) => `\n\n## Standing rules for this project\n\n${text}`;
@@ -237,12 +238,12 @@ test("the review loop's reviewers and check and live-check threads get no standi
   const builder = (await s.call("POST", "/v1/threads", { project: "acme", title: "Builder", message: "Build it." })).body as Thread;
   observeNode(s, node, { total: 64, committed: 0 }, { nestedVirtualization: true });
   // The starts the review loop makes, of a Claude reviewer and a Nexus agent one, which the loop sends its request itself.
-  const claudeReviewer = await s.startThread({ project: "acme", title: "Review of #1", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5", raw: true }, reviewerCaller);
+  const claudeReviewer = await s.startThread({ request: { project: "acme", title: "Review of #1", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5" }, caller: reviewerCaller, role: "reviewer" });
   assert.equal(s.registry.claudeWorker(claudeReviewer.id)!.prompt, "Review PR #1.");
-  const harnessReviewer = await s.startThread({ project: "acme", title: "Review of #1", branch: "main" }, reviewerCaller);
+  const harnessReviewer = await s.startThread({ request: { project: "acme", title: "Review of #1", branch: "main" }, caller: reviewerCaller, role: "reviewer" });
   const head = "a".repeat(40);
-  const check = await s.startThread(checkGate.request(builder, "main", head, 2), checkCaller);
-  const verify = await s.startThread(verifyGate.request(builder, "main", head, 2), verifyCaller);
+  const check = await s.startThread({ request: checkGate.request(builder, "main", head, 2), caller: checkCaller, role: "check" });
+  const verify = await s.startThread({ request: verifyGate.request(builder, "main", head, 2), caller: verifyCaller, role: "verify" });
   for (const started of [claudeReviewer, harnessReviewer, check, verify]) {
     assert.equal(started.standingRulesRevision, undefined, started.title);
     assert.equal(await revisionOf(s, started.id), undefined, started.title);
@@ -250,4 +251,55 @@ test("the review loop's reviewers and check and live-check threads get no standi
   assert.equal((await s.call("POST", `/v1/threads/${harnessReviewer.id}/messages`, { text: "Look again.", requestId: "msg:r" })).status, 202);
   assert.equal(s.fake.transcript(harnessReviewer.id).messages.at(-1)!.content, "Look again.", "a message to a reviewer carries none");
   assert.equal(await revisionOf(s, harnessReviewer.id), undefined);
+});
+
+test("which starts carry standing rules: a person's builder and queued starts do, planning and the review loop's starts do not", async (t) => {
+  const s = await testApi(t, { queue: true, planning: true });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.setCurrentImage(image.id as ImageId);
+  await setRules(s, rules);
+  const builder = (await s.call("POST", "/v1/threads", { project: "acme", title: "Builder" })).body as Thread;
+  observeNode(s, node, { total: 64, committed: 0 }, { nestedVirtualization: true });
+  const head = "a".repeat(40);
+  const viaApi = async (body: object) => {
+    const started = await s.call("POST", "/v1/threads", { project: "acme", ...body });
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+    return started.body.id as ThreadId;
+  };
+  const queued = async (body: object) => {
+    const record = (await s.call("POST", "/v1/threads", { project: "acme", after: [builder.id], ...body })).body as QueuedThread;
+    assert.equal((await s.call("POST", `/v1/threads/${record.id}/start`)).status, 201);
+    return record.id;
+  };
+  const table: [string, () => Promise<ThreadId>, boolean][] = [
+    ["a person's Nexus agent thread", () => viaApi({ title: "Agent" }), true],
+    ["a person's Claude worker", () => viaApi({ title: "Claude", claude: "Fix it." }), true],
+    ["a person's planning thread", () => viaApi({ title: "Plan", planning: true }), false],
+    ["a queued Nexus agent thread", () => queued({ title: "Queued agent" }), true],
+    ["a queued Claude worker", () => queued({ title: "Queued Claude", claude: "Fix it." }), true],
+    ["the review loop's Claude reviewer", async () => (await s.startThread({ request: { project: "acme", title: "Review", branch: "main", claude: "Review PR #1.", model: "claude-opus-5-5" }, caller: reviewerCaller, role: "reviewer" })).id, false],
+    ["the review loop's Nexus agent reviewer", async () => (await s.startThread({ request: { project: "acme", title: "Review", branch: "main" }, caller: reviewerCaller, role: "reviewer" })).id, false],
+    ["a check thread", async () => (await s.startThread({ request: checkGate.request(builder, "main", head, 2), caller: checkCaller, role: "check" })).id, false],
+    ["a verify pylon's thread", async () => (await s.startThread({ request: verifyGate.request(builder, "main", head, 2), caller: verifyCaller, role: "verify" })).id, false],
+  ];
+  for (const [name, start, carries] of table) {
+    const id = await start();
+    assert.equal(s.registry.standingRulesOf(id) !== null, carries, name);
+  }
+});
+
+test("each registry orders its own sends: one waiting to carry the rules holds up no send to the same thread ID in another registry", async (t) => {
+  const [a, b] = [testRegistry(t), testRegistry(t)].map((registry) => {
+    seedRegistry(registry);
+    const thread = testThread();
+    registry.createThread({ ...thread, standingRules: { revision: 1, text: rules, carriedBy: null } }, testPylon(thread));
+    return { registry, id: thread.id };
+  });
+  let release!: () => void;
+  const held = a!.registry.sendWithStandingRules(a!.id, "msg:a", "Hello.", () => new Promise<void>((resolve) => { release = resolve; }));
+  const sent = await b!.registry.sendWithStandingRules(b!.id, "msg:b", "Hello.", async (text) => text);
+  assert.equal(sent, `Hello.${section(rules)}`);
+  release();
+  await held;
 });

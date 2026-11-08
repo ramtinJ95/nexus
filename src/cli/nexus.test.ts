@@ -2455,7 +2455,7 @@ test("usage prints the tokens of the last 7 days in all and by each breakdown, -
 
 test("a bare thread has no conversation to print, send to or watch", async (t) => {
   const s = await setup(t);
-  const bare = await s.startThread({ project: "acme", title: "Check", bare: true }, "nLAPTOP");
+  const bare = await s.startThread({ request: { project: "acme", title: "Check" }, caller: "nLAPTOP", role: "check" });
   const refused = { code: 5, stdout: "", stderr: `nexus: thread ${bare.id} has no conversation\n` };
   const run = async (args: string[]) => {
     const { code, stdout, stderr } = await s.nexus(args);

@@ -42,10 +42,10 @@ function fixture(t: import("node:test").TestContext, path = ":memory:") {
   const sent: [ThreadId, string, string][] = [];
   const queue = () => threadQueue({
     registry, gate, log: () => {},
-    async startThread(request, caller, id) {
-      starts.push(id!);
+    async startThread(s) {
+      starts.push(s.queued!);
       await held;
-      return start(request, caller, id);
+      return start(s);
     },
     async send(id, text, requestId) {
       sent.push([id, text, requestId]);

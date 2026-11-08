@@ -46,7 +46,7 @@ import {
 import { landsOnItsOwn, type Project } from "./project.ts";
 import { landing } from "./landing.ts";
 import { deliverDurable } from "./durable-message.ts";
-import type { StartRequest } from "./start-request.ts";
+import type { Start } from "./start-request.ts";
 import { servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
@@ -76,7 +76,7 @@ export interface ReviewDeps {
   brief(t: Thread): Promise<string | null>;
   /** The check runs, and the live check's in verify pylons. Each tells `ended` of a run that ended, so the review waiting on it steps at once. */
   runs(ended: (thread: ThreadId) => void): { checks: CheckRuns; live: CheckRuns };
-  startThread(request: StartRequest, caller: string): Promise<Thread>;
+  startThread(start: Start): Promise<Thread>;
   /** The model the harness runs every thread on. */
   harnessModel: string;
   /** The control plane's own node, for the release view, and the repository its releases come from. */
@@ -983,8 +983,9 @@ export function reviewLoop(deps: ReviewDeps) {
    * or else the harness reviewer's first message, which its review sends.
    */
   const startReviewer = (builder: Thread, title: string, branch: string, model: string, claude: boolean, request: string) => deps.startThread({
-    project: builder.project, title: title.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model, raw: true } : {}),
-  }, reviewerCaller);
+    request: { project: builder.project, title: title.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model } : {}) },
+    caller: reviewerCaller, role: "reviewer",
+  });
   /** A second reviewer for `rule` on a model neither the builder nor the first reviewer runs, to start, or why none can run. */
   const secondFor = (rule: string, models: Review["models"], secrets: Project["secrets"]): SecondReviewer => {
     const model = secondReviewerFor([models.builder, models.reviewer], secrets);

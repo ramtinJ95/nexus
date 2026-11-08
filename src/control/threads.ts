@@ -6,7 +6,7 @@ import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, minPylonMemoryGiB, minPylonMemoryReason, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
-import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId, type ThreadId } from "../ids.ts";
+import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import { Refusal } from "./refusal.ts";
 import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
@@ -14,7 +14,7 @@ import type { Placement } from "./placement-model.ts";
 import type { Thread } from "./thread-store.ts";
 import { pylonLive } from "./live.ts";
 import type { Registry } from "./registry.ts";
-import type { StartKey, StartRequest } from "./start-request.ts";
+import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import { standingRulesFor, withStandingRules } from "./standing-rules.ts";
 
 type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "latestHealthSample" | "node" | "nodes" | "now" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserve" | "reserved" | "saveTemplate" | "templates">;
@@ -22,24 +22,25 @@ type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "latestH
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
 
-/** The skill a Claude worker's first prompt runs, put in front unless the prompt is raw or already starts with it. */
+/** The skill a Claude worker's first prompt runs, put in front unless the thread is a reviewer or the prompt already starts with it. */
 const claudeSkill = "/poteto-mode";
 const startsWithSkill = new RegExp(`^${claudeSkill}(?:\\s|$)`);
-const claudePromptOf = (request: StartRequest) =>
-  request.claude === undefined || request.raw === true || startsWithSkill.test(request.claude) ? request.claude : `${claudeSkill} ${request.claude}`;
+const claudePromptOf = ({ request, role }: Pick<Start, "request" | "role">) =>
+  request.claude === undefined || role === "reviewer" || startsWithSkill.test(request.claude) ? request.claude : `${claudeSkill} ${request.claude}`;
 
 /**
  * What a start refuses before it places anything, which a queued start is checked against when it is queued too. A
  * Claude prompt must fit the pylon's open-session prompt, its project's standing rules included.
  */
-export function checkStart(registry: ThreadsRegistry, request: StartRequest, caller: string): Project {
-  const claudePrompt = claudePromptOf(request);
+export function checkStart(registry: ThreadsRegistry, start: Pick<Start, "request" | "role">): Project {
+  const { request } = start;
+  const claudePrompt = claudePromptOf(start);
   if (claudePrompt !== undefined && claudePrompt.length > maxPromptChars) throw new Refusal("invalid", `Claude prompt including ${claudeSkill} exceeds ${maxPromptChars} characters`);
   const project = registry.project(request.project as ProjectId);
   if (project === undefined) throw new Refusal("missing", `no project ${request.project}`);
   const { memoryGiB } = resourcesOf(request.resources, project);
   if (memoryGiB < minPylonMemoryGiB) throw new Refusal("invalid", `the pylon would get ${memoryGiB} GiB, but ${minPylonMemoryReason}`);
-  const rules = standingRulesFor(project, request, caller);
+  const rules = standingRulesFor(project, start);
   if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > maxPromptChars) {
     throw new Refusal("invalid", `Claude prompt including ${claudeSkill} and project ${project.id}'s standing rules exceeds ${maxPromptChars} characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
   }
@@ -113,15 +114,13 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     }
   }
 
-  /**
-   * The conversation is created before the registry row, as HarnessHost.startThread requires. `queuedId` is a queued
-   * thread's, whose queue record the registry marks started with the row. `key` is stored with the row.
-   */
-  return async function startThread(request: StartRequest, caller: string, queuedId?: ThreadId, key?: StartKey): Promise<Thread> {
-    const project = checkStart(registry, request, caller);
+  /** The conversation is created before the registry row, as HarnessHost.startThread requires. */
+  return async function startThread(start: Start): Promise<Thread> {
+    const { request, caller, role, queued, key } = start;
+    const project = checkStart(registry, start);
     // Decided once from the project as read now, so the thread records the rules its first message carries.
-    const rules = standingRulesFor(project, request, caller);
-    const prompt = claudePromptOf(request);
+    const rules = standingRulesFor(project, start);
+    const prompt = claudePromptOf(start);
     const claudePrompt = prompt === undefined ? undefined : withStandingRules(prompt, rules);
     const named = request.node !== undefined && request.node !== "auto";
     const image = registry.currentImage();
@@ -134,7 +133,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const network = bootNetwork(project, dotfiles.repo);
 
     const resources = resourcesOf(request.resources, project);
-    const id = queuedId ?? newThreadId();
+    const id = queued ?? newThreadId();
     const pylonId = pylonIdOf(id);
     const need = { image, resources, network, repo: freshRepo, dotfiles };
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }
@@ -155,7 +154,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const fetched = disk === null || request.branch !== undefined ? await readSetup(project, request, branch) : null;
       const read: SetupRead = disk ?? fetched!;
 
-      const conversationId = request.claude === undefined && request.bare !== true ? await harness.startThread({ threadId: id, pylonId }) : null;
+      const conversationId = request.claude === undefined && role !== "check" && role !== "verify" ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = registry.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
       const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
@@ -174,7 +173,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         live,
         liveHash: liveHashOf(live),
       });
-      registry.createThread({ ...t, ...rules === null ? {} : { standingRules: rules } }, pylon, claudePrompt, request.model, queuedId !== undefined, key);
+      registry.createThread({ ...t, ...rules === null ? {} : { standingRules: rules } }, pylon, { ...claudePrompt === undefined ? {} : { claude: { prompt: claudePrompt, model: request.model } }, queued: queued !== undefined, key });
       wake(node);
       return t;
     } finally {

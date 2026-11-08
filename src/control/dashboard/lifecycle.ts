@@ -10,7 +10,7 @@ import { html, type Html, type Tone } from "./view.ts";
 import { checkBeside, duration, liveNote, needWording } from "../wording.ts";
 import type { Context } from "./context.ts";
 import type { ThreadNeed } from "../wire.ts";
-import type { Role } from "../work-model.ts";
+import type { Role } from "../agent-protocol.ts";
 
 export type Stage = Step | "held";
 

@@ -12,7 +12,7 @@ import { testPylon, testRegistry, testThread } from "../test-support/registry-ki
 import { processStream } from "../process-stream.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
-import type { StartRequest } from "./start-request.ts";
+import type { Start } from "./start-request.ts";
 import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-support/kit.ts";
 import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
@@ -69,14 +69,14 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
     registry.ingested(testObservation(node, { pylons }), []);
   }
   const builder = add("person");
-  const started: StartRequest[] = [];
+  const started: Start[] = [];
   let refuse: Error | null = null;
   const local = (argv: readonly string[]) => argv.map((a) => a.replaceAll(checkoutDir, repo).replace(imageEnv, `cat ${image}`));
   let stream = async (_: PylonId, argv: readonly string[]): Promise<ByteStream> => processStream(argv[0]!, local(argv).slice(1), () => {});
   const runs = (gate?: typeof verifyGate, ended?: (thread: ThreadId) => void): CheckRuns => checkRuns({
     registry, wake: () => {}, ...gate === undefined ? {} : { gate }, ...ended === undefined ? {} : { ended },
     probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
-    async startThread(request, caller) { started.push(request); if (refuse !== null) throw refuse; return add(caller); },
+    async startThread(start) { started.push(start); if (refuse !== null) throw refuse; return add(start.caller); },
   });
   return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; }, set refuse(err: Error | null) { refuse = err; } };
 }
@@ -95,7 +95,7 @@ test("a check runs in a fresh bare check thread of 4 CPUs at the commit, and its
   const f = await fixture(t, "echo typecheck ok; echo tests ok");
   const runs = f.runs();
   const id = await started(runs.start(f.builder, "feature", f.head));
-  assert.deepEqual(f.started, [{ project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, bare: true, resources: { cpus: 4 } }]);
+  assert.deepEqual(f.started, [{ request: { project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, resources: { cpus: 4 } }, caller: checkCaller, role: "check" }]);
   assert.equal(f.registry.thread(id)!.startedBy, checkCaller);
   assert.deepEqual(runs.step(id, f.head), { kind: "waiting" }, "nothing runs until the pylon does");
   f.running(f.registry.thread(id)!);
@@ -121,7 +121,7 @@ test("a check pylon keeps the CPUs of a project sized over 4", async (t) => {
   const f = await fixture(t, "echo tests ok");
   f.registry.editProject(f.builder.project, (p) => ({ ...p, resources: { ...p.resources, cpus: 8 } }));
   await started(f.runs().start(f.builder, "feature", f.head));
-  assert.deepEqual(f.started.map((r) => r.resources), [{ cpus: 8 }]);
+  assert.deepEqual(f.started.map((s) => s.request.resources), [{ cpus: 8 }]);
 });
 
 test("a check's end is heard as it exits, without waiting for the next poll, and a void run's end too", async (t) => {
@@ -149,7 +149,7 @@ test("a check that starts only where a node has room says so in its start, and a
   let streams = 0;
   f.stream = async () => { streams++; throw new Error("no pipe expected"); };
   const id = await started(runs.start(f.builder, "feature", f.head, true));
-  assert.equal(f.started[0]!.ifRoom, true);
+  assert.equal(f.started[0]!.request.ifRoom, true);
   f.running(f.registry.thread(id)!);
   assert.equal(runs.result(id), null);
   assert.equal(streams, 0, "the script never started");
@@ -160,8 +160,11 @@ test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 Gi
   const runs = f.runs(verifyGate);
   const id = await started(runs.start(f.builder, "feature", f.head));
   assert.deepEqual(f.started, [{
-    project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, near: node, node: "auto", branch: "feature", commit: f.head, bare: true,
-    resources: { cpus: 4, memoryGiB: 8, nestedVirtualization: true },
+    request: {
+      project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, near: node, node: "auto", branch: "feature", commit: f.head,
+      resources: { cpus: 4, memoryGiB: 8, nestedVirtualization: true },
+    },
+    caller: verifyCaller, role: "verify",
   }]);
   assert.equal(f.registry.thread(id)!.startedBy, verifyCaller);
   f.running(f.registry.thread(id)!);

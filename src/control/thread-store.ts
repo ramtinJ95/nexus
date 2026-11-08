@@ -6,7 +6,7 @@ import { attentionOf, type Attention, type Need } from "./attention.ts";
 import { previewFailed } from "./plain-wording.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "./events.ts";
 import type { StartKey } from "./start-request.ts";
-import type { StandingRulesStamp } from "./standing-rules.ts";
+import { standingRulesSender, type StandingRulesStamp } from "./standing-rules.ts";
 import { Refusal } from "./refusal.ts";
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import { desiredPhase, isOpenStatus, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
@@ -313,6 +313,19 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     };
   }
 
+  /** The standing rules the thread was started with, which its first message composes with. */
+  function standingRulesOf(id: ThreadId): StandingRulesStamp | null {
+    const row = sql("SELECT standing_rules FROM threads WHERE id = ?").get(id);
+    return row?.standing_rules == null ? null : json<StandingRulesStamp>(row.standing_rules);
+  }
+  const sendWithStandingRules = standingRulesSender({
+    standingRulesOf,
+    // The first message the harness took with the rules stays the one that carried them.
+    standingRulesCarried(id, requestId) {
+      sql("UPDATE threads SET standing_rules = json_set(standing_rules, '$.carriedBy', ?) WHERE id = ? AND json_extract(standing_rules, '$.carriedBy') IS NULL").run(requestId, id);
+    },
+  });
+
   function thread(id: ThreadId): Thread | undefined {
     const row = threadRecord(id);
     return row && withSessions([row])[0];
@@ -592,11 +605,12 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       return row === undefined ? null : { event: row.id as number, at: row.time as number };
     },
     /**
-     * A thread and its pylon are created together, because a thread always has exactly one pylon. A `queued` thread's
-     * queue record is marked started in the same transaction, so a queued thread starts at most once, and so is a
-     * start's `key`, so a repeat of its request ID finds the thread.
+     * A thread and its pylon are created together, because a thread always has exactly one pylon. `claude` makes it a
+     * Claude worker. A `queued` thread's queue record is marked started in the same transaction, so a queued thread
+     * starts at most once, and so is a start's `key`, so a repeat of its request ID finds the thread.
      */
-    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt" | "standingRulesRevision"> & { standingRules?: StandingRulesStamp | undefined }, pylon: Omit<PylonRecord, "desired">, claudePrompt?: string, model = defaultClaudeModel, queued = false, key?: StartKey) {
+    createThread(thread: Omit<Thread, "seenAt" | "lastReplyAt" | "standingRulesRevision"> & { standingRules?: StandingRulesStamp | undefined }, pylon: Omit<PylonRecord, "desired">,
+      { claude, queued = false, key }: { claude?: { prompt: string; model?: string | undefined }; queued?: boolean; key?: StartKey | undefined } = {}) {
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         if (queued) for (const p of participants) p.startQueued?.(thread.id, thread.createdAt);
@@ -607,19 +621,12 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           thread.setup === undefined ? null : JSON.stringify(thread.setup), thread.standingRules === undefined ? null : JSON.stringify(thread.standingRules));
         sql(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)
           VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`).run(pylonParams(pylon));
-        if (claudePrompt !== undefined) addWorker(thread.id, claudePrompt, model);
+        if (claude !== undefined) addWorker(thread.id, claude.prompt, claude.model ?? defaultClaudeModel);
         if (key !== undefined) saveStartKey(key, thread.id);
       });
     },
-    /** The standing rules the thread was started with, which its first message composes with. */
-    standingRulesOf(id: ThreadId): StandingRulesStamp | null {
-      const row = sql("SELECT standing_rules FROM threads WHERE id = ?").get(id);
-      return row?.standing_rules == null ? null : json<StandingRulesStamp>(row.standing_rules);
-    },
-    /** The harness took the message sent under `requestId` with the rules. The first such message stays the one. */
-    standingRulesCarried(id: ThreadId, requestId: string) {
-      sql("UPDATE threads SET standing_rules = json_set(standing_rules, '$.carriedBy', ?) WHERE id = ? AND json_extract(standing_rules, '$.carriedBy') IS NULL").run(requestId, id);
-    },
+    standingRulesOf,
+    sendWithStandingRules,
     startRequest(requestId: string): { thread: ThreadId; body: string } | undefined {
       const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);
       return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };

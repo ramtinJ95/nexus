@@ -15,10 +15,9 @@ import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { checkStart, resourcesOf } from "./threads.ts";
-import type { StartKey, StartRequest } from "./start-request.ts";
+import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { QueuedThread, Wait } from "../contract/threads.ts";
-import { sendWithStandingRules } from "./standing-rules.ts";
 import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
@@ -84,8 +83,8 @@ const statusName = (status: QueuedRecord["status"]) => status === "archived" ? "
 export const refusedRetryMs = 10 * 60_000;
 
 export function threadQueue(options: {
-  registry: QueueRegistry & Pick<Registry, "standingRulesCarried" | "standingRulesOf">;
-  startThread: (request: StartRequest, caller: string, id?: ThreadId) => Promise<Thread>;
+  registry: QueueRegistry & Pick<Registry, "sendWithStandingRules">;
+  startThread: (start: Start) => Promise<Thread>;
   /** A human message, the harness's followUp. A repeated request ID answers with the first submission. */
   send: (thread: ThreadId, text: string, requestId: string) => Promise<unknown>;
   /** The drain gate, which refuses a start while a deploy drains and counts one in flight as a turn starting. */
@@ -109,7 +108,7 @@ export function threadQueue(options: {
     const t = registry.thread(id);
     if (!isOpenStatus(t?.status)) return;
     await deliverDurable({ id: requestIds.queued(id), text: record.message }, async (m) => {
-      await sendWithStandingRules(registry, id, m.id, m.text, (text) => send(id, text, m.id));
+      await registry.sendWithStandingRules(id, m.id, m.text, (text) => send(id, text, m.id));
       return "delivered";
     }, () => registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" }));
   }
@@ -119,7 +118,7 @@ export function threadQueue(options: {
     if (record?.status !== "queued") throw new Refusal("conflict", `thread ${id} is no longer queued`);
     let t: Thread;
     try {
-      t = await gate.run(() => startThread(record.request, record.startedBy, id));
+      t = await gate.run(() => startThread({ request: record.request, caller: record.startedBy, role: "builder", queued: id }));
     } catch (err) {
       const message = (err as Error).message;
       const now = registry.queuedThread(id);
@@ -161,7 +160,7 @@ export function threadQueue(options: {
     add(request, message, after, caller, key) {
       const broken = brokenRule(startRules, { ...request, message });
       if (broken !== undefined) throw new Refusal("invalid", broken);
-      const project = checkStart(registry, request, caller);
+      const project = checkStart(registry, { request, role: "builder" });
       const ids = [...new Set(after)] as ThreadId[];
       for (const id of ids) {
         const t = registry.thread(id);

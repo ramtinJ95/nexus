@@ -100,7 +100,7 @@ function fixture(t: import("node:test").TestContext) {
     const thread = testThread({ id: id as ThreadId, title: id, project: (options.project ?? "reviewed") as ProjectId, conversationId: options.claude ? null : "1", startedBy: options.startedBy ?? "nLAPTOP", createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: `https://github.com/${repo}.git`, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: `https://github.com/${repo}.git`, ref: "main" } } });
     if (options.claude) {
-      registry.createThread(thread, pylon, "build the cache", "claude-opus-5-5");
+      registry.createThread(thread, pylon, { claude: { prompt: "build the cache", model: "claude-opus-5-5" } });
       claudeWorkerAt(registry, thread.id, "started", { session });
       claudes.add(thread.id);
       claudeSeq.set(thread.id, 0);

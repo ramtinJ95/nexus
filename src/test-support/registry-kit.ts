@@ -74,7 +74,7 @@ export function testPylon(thread: Pick<Thread, "id" | "pylonId">, { node = testN
 /** Creates a thread and its pylon. `claudePrompt` makes it a Claude thread whose worker gets that prompt. */
 export function addThread(registry: Registry, options: PylonOptions & { thread?: Partial<Thread>; claudePrompt?: string | undefined } = {}): Thread {
   const thread = testThread(options.thread);
-  registry.createThread(thread, testPylon(thread, options), options.claudePrompt);
+  registry.createThread(thread, testPylon(thread, options), options.claudePrompt === undefined ? {} : { claude: { prompt: options.claudePrompt } });
   return thread;
 }
 
