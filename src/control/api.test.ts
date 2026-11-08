@@ -8,6 +8,7 @@ import type { ApiKit } from "./api/kit.ts";
 import { version } from "../version.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { ReviewLoop } from "./review.ts";
+import { testReview } from "../test-support/registry-kit.ts";
 import { joinTokenTtlMs, mintJoinToken } from "./join.ts";
 import type { ProjectId } from "../ids.ts";
 import { tokenDigest } from "../protocol/deploy.ts";
@@ -549,8 +550,8 @@ test("only a person starts a thread, starts a queued one now or messages one, ne
 test("only a person acts on a thread, its pylon or a project, never the control node, an infrastructure node or a pylon", async (t) => {
   const reviewed: unknown[][] = [];
   const reviews = {
-    async start(...args: unknown[]) { reviewed.push(["start", ...args]); return { id: "rv-1" }; },
-    cancel(...args: unknown[]) { reviewed.push(["cancel", ...args]); return { id: "rv-1" }; },
+    async start(...args: unknown[]) { reviewed.push(["start", ...args]); return testReview(); },
+    cancel(...args: unknown[]) { reviewed.push(["cancel", ...args]); return testReview(); },
   } as never as ReviewLoop;
   const s = await withThread(t, { reviews });
   const testbench = "nTESTBENCH" as TailnetNodeId;

@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ReviewLoop } from "./review.ts";
+import { testReview } from "../test-support/registry-kit.ts";
 import type { ProjectId, TailnetNodeId } from "../ids.ts";
 import { laptop, phone, project, testApi, withThread, deployment } from "../test-support/api-kit.ts";
 
@@ -12,8 +13,8 @@ test("a review needs the GitHub token's loop, and landing, at its start or later
   assert.match(refused.body.error, /github.tokenFile/);
   const asked: unknown[] = [];
   const reviews = {
-    async start(builder: string, request: unknown) { asked.push(["start", builder, request]); return { id: "rv-1" }; },
-    land(builder: string, by: string, head?: string) { asked.push(["land", builder, by, head]); return { id: "rv-1" }; },
+    async start(builder: string, request: unknown) { asked.push(["start", builder, request]); return testReview(); },
+    land(builder: string, by: string, head?: string) { asked.push(["land", builder, by, head]); return testReview(); },
   } as never as ReviewLoop;
   const s = await withThread(t, { reviews, deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop, "nFIREBAT" as TailnetNodeId]), keys: {} } });
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { rounds: 6 })).status, 400, "a review runs at most 5 rounds");
@@ -73,7 +74,7 @@ test("a deployer's land names the holds it waives at the commit it confirmed, an
   const held = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
   const head = "a".repeat(40);
   const landed: unknown[][] = [];
-  const reviews = { land(...args: unknown[]) { landed.push(args); return { id: "rv-1" }; } } as never as ReviewLoop;
+  const reviews = { land(...args: unknown[]) { landed.push(args); return testReview(); } } as never as ReviewLoop;
   const s = await withThread(t, { reviews, deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {} } });
   const land = (body: unknown) => s.call("POST", `/v1/threads/${s.thread.id}/land`, body);
 
