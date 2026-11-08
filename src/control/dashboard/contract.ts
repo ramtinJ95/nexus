@@ -60,3 +60,7 @@ export const clonedIcons = ["chevron", "folder"] as const;
 
 /** The width at and under which a page lays out as a phone's, which style.css's phone rules also name. */
 export const narrow = "(max-width: 760px)";
+
+/** The `?peek=` of the home page, which previews a thread, a queued thread or an item by its ID. */
+export const peekParam = "peek";
+export const peekHref = (key: string) => `/?${peekParam}=${encodeURIComponent(key)}`;

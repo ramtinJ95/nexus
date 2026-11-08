@@ -4,7 +4,7 @@
 // card into view, as a notice's link does, and opening the card reads its latest reply into it.
 import { afterSwap, refreshAfter, refreshNow, toggled } from "./page.js";
 import { needSelectors } from "./notifications.js";
-import { narrow } from "./contract.ts";
+import { narrow, peekParam } from "./contract.ts";
 
 const split = document.getElementById("split");
 const phone = matchMedia(narrow);
@@ -28,8 +28,8 @@ function pick(card) {
 /** Previews `key`, or for work in Needs you picks its card, `card` naming which of a thread's cards so a poll keeps it. */
 function peek(key, card) {
   const url = new URL(location.href);
-  if (key === "") url.searchParams.delete("peek");
-  else url.searchParams.set("peek", key);
+  if (key === "") url.searchParams.delete(peekParam);
+  else url.searchParams.set(peekParam, key);
   if (card) url.searchParams.set("card", card);
   else url.searchParams.delete("card");
   if (url.href === location.href) return;

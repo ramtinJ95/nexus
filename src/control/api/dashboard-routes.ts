@@ -15,7 +15,7 @@
  * the diffs are read by the client from the JSON API, because each read reaches into the pylon and counts as a
  * human's visit, so they are read when asked for rather than with every poll.
  */
-import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { ItemId, NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { AgentView, QueuedThread } from "../../contract/threads.ts";
@@ -29,6 +29,7 @@ import { ok } from "../dashboard/view.ts";
 import type { ClusterView, Context, FoldView, Latest, NodeReading, Peek, ThreadView } from "../dashboard/context.ts";
 import { needsOf } from "../work.ts";
 import { assets } from "../dashboard/assets.ts";
+import { peekParam } from "../dashboard/contract.ts";
 import { notFound } from "../dashboard/shell.ts";
 import { home, foldPage } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
@@ -144,14 +145,14 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     }
     const queued = registry.queuedThread(key as ThreadId);
     if (queued !== undefined && queued.status === "queued") return { kind: "queued", q: queuedView(registry, queued) };
-    const item = registry.items().find((i) => i.id === key);
+    const item = registry.item(key as ItemId);
     return item === undefined ? null : { kind: "item", item: itemView(registry, item, now) };
   }
 
   return [
     ["GET", /^\/$/, anyAllowed, async (_, r) => {
       const now = Date.now();
-      const peek = await peekOf(r.query.get("peek"), now);
+      const peek = await peekOf(r.query.get(peekParam), now);
       return homePage(context(r, now), {}, peek, r.query.get("card"));
     }],
     ["GET", /^\/threads\/new$/, anyAllowed, (_, r) => homePage(context(r), { start: { project: r.query.get("project") } })],
