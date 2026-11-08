@@ -30,16 +30,15 @@ export function openRegistry(path: string, clock = Date.now, log = (message: str
   const kernel = openDb(path);
   const participants: ThreadParticipant[] = [];
   const { saveObservation, saveNodeState, ...nodes } = nodeStore(kernel);
-  // Called from start() on, so after usageStore below.
-  const { updateAttention, threadRecord, saveStartKey, start, ...core } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, participants, () => readingUsage());
+  const { updateAttention, threadRecord, saveStartKey, start, archivedAt, recordSettle, ...core } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, participants);
   const { appendEvent, setThreadStatus, threadStatus, events } = core;
   const { participant: reviewing, ...reviews } = reviewStore(kernel, { setThreadStatus, appendEvent, updateAttention, events });
   const { participant: asking, ...questions } = questionStore(kernel, clock, threadStatus, updateAttention);
   const { participant: nudging, ...nudges } = nudgeStore(kernel, updateAttention);
   const { participant: watching, ...prWatches } = prWatchStore(kernel, appendEvent);
   const { participant: queueing, ...queue } = queueStore(kernel, saveStartKey);
-  const { readingUsage, ...usage } = usageStore(kernel, threadRecord);
-  participants.push(reviewing, asking, nudging, watching, queueing);
+  const { participant: usageHolding, ...usage } = usageStore(kernel, { threadRecord, archivedAt, recordSettle });
+  participants.push(reviewing, asking, nudging, watching, queueing, usageHolding);
   start();
 
   return {

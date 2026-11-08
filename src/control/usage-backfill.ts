@@ -17,8 +17,9 @@ import { observedPylon } from "./observed.ts";
 import { roomLeft, uncounted } from "./placement.ts";
 import { gib } from "../util/gib.ts";
 import type { Registry } from "./registry.ts";
-import type { StoredPylon, Thread, UsageHold } from "./thread-store.ts";
+import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
+import type { UsageHold } from "./usage-store.ts";
 import type { BackfillPlanRow, UsageBackfill } from "../contract/usage.ts";
 
 type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "sealBoot" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitSettle" | "waitUsageBackfill">;
@@ -281,7 +282,7 @@ export function usageBackfill(options: {
     registry.sealBoot(p!.pylonId, o.bootedAt);
   }
 
-  const advance = (holder: Holder, hold: UsageHold, now: number) =>
+  const advance = (holder: Holder, hold: Omit<UsageHold, "by">, now: number) =>
     hold.phase === "reading" ? reading(holder, hold.thread, hold.since, now) : pausing(holder, hold.thread, hold.since, now);
 
   async function step() {
