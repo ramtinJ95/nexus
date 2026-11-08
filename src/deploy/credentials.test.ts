@@ -301,6 +301,20 @@ test("without a terminal the answers come from NEXUS_* variables or the files th
   }
 });
 
+test("a token the probe would refuse is refused before secrets.env is touched, and a secrets.env the probe refuses is not added to", async (t) => {
+  const quoted = await machine(t, "node");
+  const before = await snapshot(quoted.root);
+  await assert.rejects(provision("node", quoted.host, scripted({ NEXUS_CLAUDE_TOKEN: `"${claudeToken}"`, NEXUS_GIT_KEY: "no" }), silent),
+    (err: Error) => /\/etc\/nexus\/secrets\.env: line \d+ quotes the value of CLAUDE_CODE_OAUTH_TOKEN/.test(err.message) && !err.message.includes(claudeToken));
+  assert.deepEqual(await snapshot(quoted.root), before);
+
+  const twice = await machine(t, "node");
+  await twice.put(stores.claude.file, "STRIPE_KEY=a\nSTRIPE_KEY=b\n", 0o640);
+  const refused = await snapshot(twice.root);
+  await assert.rejects(provision("node", twice.host, scripted({ NEXUS_CLAUDE_TOKEN: claudeToken, NEXUS_GIT_KEY: "no" }), silent), /\/etc\/nexus\/secrets\.env: line 2 sets STRIPE_KEY a second time/);
+  assert.deepEqual(await snapshot(twice.root), refused);
+});
+
 test("the harness is signed in when its credentials file holds a login, and a file that is not JSON is refused", () => {
   for (const [file, signedIn] of [[{}, false], [{ deviceId: "d" }, false], [{ credentials: null }, false], [{ credentials: {} }, false], [{ credentials: { openai: { type: "oauth" } } }, true]] as const) {
     assert.equal(harnessSignedIn(JSON.stringify(file)), signedIn, JSON.stringify(file));
