@@ -23,14 +23,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PylonId } from "../../ids.ts";
 import type { JobStatus } from "../../protocol/jobs.ts";
-import { readRoutes } from "../../probe/serve.ts";
 import { defaultPreviewPorts } from "../../control/main.ts";
 import { apiClient, openNodeCheck, passLogger, until } from "./on-node-kit.ts";
 import { openRegistry } from "../../control/registry.ts";
 
-const { probeConfig, stateRoot, previews, host, serveJson, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "previews", resolvesToProbe: true });
+const { probeConfig, stateRoot, host, serveJson, routes, refuseServedPorts, planeConfig, startPlane } = await openNodeCheck({ image: process.argv[3], opens: "previews", resolvesToProbe: true });
 
-const routes = () => readRoutes(previews.routesFile);
 const serveBefore = await serveJson();
 const routesBefore = await routes();
 console.log(`tailscale serve status before: ${serveBefore.trim()}`);
