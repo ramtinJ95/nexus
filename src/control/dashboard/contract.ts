@@ -51,3 +51,9 @@ export function noticeOf(hash: string): { thread: string; attention: string } | 
 /** The pages whose `data-page` makes client.js load the modules no other page needs, as pages.js lists them. */
 export const pages = ["home", "cluster"] as const;
 export type Page = (typeof pages)[number];
+
+/**
+ * The icons a page's `#icons` template holds, which checkout.js clones into the trees it draws. shell.ts draws each
+ * through view.ts `icon`, which types its name.
+ */
+export const clonedIcons = ["chevron", "folder"] as const;
