@@ -6,7 +6,7 @@ import * as contract from "./guest-contract.ts";
 const image = (file: string) => readFileSync(new URL(`../images/pylon/${file}`, import.meta.url), "utf8");
 
 test("each guest path, name and limit equals the literal it replaced", () => {
-  const { asUser, onClaudeTranscript, herdrPanePattern, startHerdrServer, focusScript, attachScript, ...values } = contract;
+  const { asUser, onClaudeTranscript, herdrPanePattern, eventIdPattern, startHerdrServer, focusScript, attachScript, ...values } = contract;
   assert.deepEqual(values, {
     home: "/home/user",
     workspaceDir: "/home/user/workspace",
@@ -25,6 +25,14 @@ test("each guest path, name and limit equals the literal it replaced", () => {
     piEnv: "/usr/local/libexec/nexus/pi-env",
     nexusKvm: "/usr/local/libexec/nexus/nexus-kvm",
     nexusTurn: "/usr/local/bin/nexus-turn.ts",
+    bridgeHost: "nexus.pylon",
+    nexusApi: "http://nexus.pylon",
+    bridgeRequestPath: "/v1/request",
+    servicesActions: ["ensure", "list", "restart", "stop"],
+    maxServiceLogLines: 500,
+    sessionKinds: ["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"],
+    maxSessionLength: 200,
+    maxEventMessageLength: 2048,
     callTimeoutMs: 10_000,
     herdrSession: "nexus",
     herdrClient: "herdr --session nexus",
@@ -32,6 +40,8 @@ test("each guest path, name and limit equals the literal it replaced", () => {
   });
   assert.equal(herdrPanePattern.source, "^w[0-9]{1,9}:p[0-9]{1,9}$");
   assert.equal(herdrPanePattern.flags, "");
+  assert.equal(eventIdPattern.source, "^[0-9a-z-]{1,64}$");
+  assert.equal(eventIdPattern.flags, "");
   assert.deepEqual(asUser("id"), ["runuser", "-l", "user", "-c", "id"]);
   assert.equal(onClaudeTranscript("cat \"$f\"", 3), 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; cat "$f"; exit 0; done; exit 3');
   assert.equal(startHerdrServer, "setsid -f tini -s -- herdr --session nexus server </dev/null >/dev/null 2>&1");

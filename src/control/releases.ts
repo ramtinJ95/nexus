@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { NexusEvent } from "../events.ts";
+import type { NexusEvent } from "./events.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { Registry } from "./registry.ts";
 import { busyDrainReason, fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";

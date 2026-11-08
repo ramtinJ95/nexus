@@ -560,7 +560,7 @@ cursor and thread/project/kind filters. A follower catches up from the registry
 rather than subscribing to an in-memory-only broadcast, so disconnecting between
 replay and live delivery cannot lose an accepted event. Retention expiry is an
 explicit conflict, not a silent jump. Filtering and cursor validation live with
-the event model in `src/events.ts`.
+the event model in `src/control/events.ts`.
 
 Claude workers run inside the pylon, not in the Nexus harness. Thread creation
 persists a first prompt; reconciliation opens a Herdr Claude session when the

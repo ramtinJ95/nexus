@@ -4,7 +4,7 @@
  * `releases:<node>` setting.
  */
 import { json, jsonOrNull, type Db } from "./db.ts";
-import type { EventKind } from "../events.ts";
+import type { EventKind } from "./events.ts";
 import type { NodeName } from "../ids.ts";
 import type { DesiredRelease, Drain, ReleaseReport } from "../protocol/deploy.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";

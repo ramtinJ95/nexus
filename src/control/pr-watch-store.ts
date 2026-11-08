@@ -3,7 +3,7 @@
  * transaction.
  */
 import type { Db } from "./db.ts";
-import type { EventKind } from "../events.ts";
+import type { EventKind } from "./events.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Output } from "./thread-store.ts";
 import type { PullRequest } from "./github.ts";

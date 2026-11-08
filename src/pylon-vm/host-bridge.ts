@@ -1,9 +1,7 @@
 import http from "node:http";
 import { join } from "node:path";
 import type { HttpHooks } from "@earendil-works/gondolin";
-
-/** The host the guest's NEXUS_API names. It never leaves the node, so no allowlist entry or DNS name is needed. */
-export const bridgeHost = "nexus.pylon";
+import { bridgeHost } from "../guest-contract.ts";
 
 /** Set by the controller, never taken from the guest: the instance whose VM the request came through. */
 export const bridgePylonHeader = "x-nexus-pylon";

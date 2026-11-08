@@ -38,7 +38,7 @@ import { readJson, saveJson } from "../../json-file.ts";
 import { diskBytes } from "../../disk-space.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
 import { directory, existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";
-import { bakedDotfilesDir, checkoutDir, dotfilesDir, home, workspaceDir } from "../../guest-contract.ts";
+import { bakedDotfilesDir, bridgeRequestPath, checkoutDir, dotfilesDir, home, workspaceDir } from "../../guest-contract.ts";
 
 export interface PylonVmBackendOptions {
   /**
@@ -222,7 +222,7 @@ export function pylonVmHostBridge(stateRoot: string): HostBridge {
   const path = hostBridgeSocket(stateRoot);
   const listen = listenHostBridge({ path }, async (req) => {
     const name = req.headers[bridgePylonHeader];
-    return req.url === "/v1/request" && pylonIdSchema.safeParse(name).success ? name as PylonId : null;
+    return req.url === bridgeRequestPath && pylonIdSchema.safeParse(name).success ? name as PylonId : null;
   });
   return async (answer) => {
     // The probe can start before the backend's first action makes the state root, so the bridge makes it as the fork does.

@@ -9,7 +9,7 @@ import { checkCaller, resumePrefix, reviewerCaller } from "./agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
-import type { PylonEvent } from "../events.ts";
+import type { PylonEvent } from "../protocol/observations.ts";
 import { runningPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 
 const node = "node" as NodeName;

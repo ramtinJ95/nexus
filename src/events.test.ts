@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry } from "./control/registry.ts";
-import { eventCursor, pylonEventSchema } from "./events.ts";
+import { eventCursor } from "./control/events.ts";
+import { pylonEventSchema } from "./protocol/observations.ts";
 
 test("a follower reconnects across a registry restart without missing events", () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-events-"));

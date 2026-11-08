@@ -21,7 +21,7 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
 import { liveHashOf, type LiveSpec } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
-import type { ReportedEvent } from "../events.ts";
+import type { ReportedEvent } from "../protocol/observations.ts";
 import { transcriptStart } from "./claude-transcript.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-support/kit.ts";
 
