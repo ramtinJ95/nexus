@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 import { once } from "node:events";
 import { gnuTar, until } from "../../test-support/kit.ts";
 import { spawn, spawnSync } from "node:child_process";
-import fs, { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import fs, { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -1060,6 +1060,16 @@ test("a retry bounds session recording on a stuck guest, converges, and launches
   const log = await readFile(join(dir, "controller.log"), "utf8");
   assert.match(log, /controller \d+ started for pylon-retry/);
   assert.ok(log.indexOf("stopped old controller") < log.indexOf("started for pylon-retry"));
+});
+
+test("the backend's first action removes an old scratch directory no controller owns", async () => {
+  const { backend, stateRoot } = await backendWith();
+  const left = join(stateRoot, "tmp", "0123456789ab");
+  await mkdir(left, { recursive: true });
+  const hoursAgo = new Date(Date.now() - 2 * 60 * 60_000);
+  await utimes(left, hoursAgo, hoursAgo);
+  assert.deepEqual(await backend.list(), []);
+  assert.equal(existsSync(left), false);
 });
 
 test("an ordinary resume reuses a healthy controller and its boot time", async () => {

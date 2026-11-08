@@ -29,7 +29,7 @@ import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
 import { agentKinds, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
-import { run, socketPathLimit } from "../../pylon-vm/client.ts";
+import { run, socketPathLimit, sweepScratch } from "../../pylon-vm/client.ts";
 import { imageLabel, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
@@ -238,7 +238,17 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   if (Buffer.byteLength(longest) >= socketPathLimit) {
     throw new Error(`state root ${stateRoot} is too long: a pylon's control socket would be ${Buffer.byteLength(longest)} bytes, and a Unix socket path must stay under ${socketPathLimit}`);
   }
-  const sandbox: Sandbox = (action, signal) => run(stateRoot, action, signal);
+  let swept: Promise<void> | undefined;
+  const sandbox: Sandbox = async (action, signal) => {
+    // Before the first action, so no launch waits on a launch lock the sweep holds. A failed sweep stops no action.
+    await (swept ??= sweepScratch(stateRoot).then(
+      (names) => {
+        if (names.length > 0) console.log(`removed ${names.length} scratch directories no controller owns: ${names.join(", ")}`);
+      },
+      (error: unknown) => console.error("scratch sweep failed:", error),
+    ));
+    return run(stateRoot, action, signal);
+  };
   const store = artifactDirectory(options.artifacts, tarCodec);
   const statuses: StatusCache = new Map();
   const shells: ShellFlights = new Map();

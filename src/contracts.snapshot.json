@@ -195,7 +195,6 @@
     "src/backends/pylon-vm/pylon-vm-backend.ts",
     "src/backends/pylon-vm/pylon-vm-stop-race.check.ts",
     "src/backends/pylon-vm/pylon-vm-templates.ts",
-    "src/checks/control/v6-preview-on-node.ts",
-    "src/probe/main.ts"
+    "src/checks/control/v6-preview-on-node.ts"
   ]
 }
