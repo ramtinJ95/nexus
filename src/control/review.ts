@@ -89,7 +89,7 @@ export interface ReviewDeps {
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
 
 /** The first request to a reviewer on `model`, which is the same for either reviewer, so neither hears of the other. */
-function reviewerRequest(r: Pick<Review, "pr" | "models" | "brief">, detail: Pick<PrSnapshot["detail"], "head" | "base" | "body">, token: string, model: string): string {
+export function reviewerRequest(r: Pick<Review, "pr" | "models" | "brief">, detail: Pick<PrSnapshot["detail"], "head" | "base" | "body">, token: string, model: string): string {
   return `${reviewPrefix}
 You are the independent reviewer of pull request #${r.pr.number}, "${r.pr.title}" (${r.pr.url}). An agent on ${r.models.builder} wrote it; you run on ${model}. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 
@@ -135,7 +135,7 @@ function findingLines(r: Review, round: Round, findings: readonly Finding[], kee
   return groups.map(([head, group]) => [head, group.filter(keep)] as const).filter(([, group]) => group.length).map(([head, group]) => `${head}${group.map(findingLine).join("\n\n")}`).join("\n\n");
 }
 
-function builderFindings(r: Review, token: string): string {
+export function builderFindings(r: Review, token: string): string {
   const n = roundsSpent(r);
   const round = r.rounds.at(-1)!;
   const gate = gateFailure(round);
@@ -157,7 +157,7 @@ Fix each P0 to P2 finding or reject it with a reason. Push what you fix to the p
 \`\`\``;
 }
 
-function builderNotes(r: Review): string {
+export function builderNotes(r: Review): string {
   const round = r.rounds.at(-1)!;
   const findings = reviewersFindings(round);
   const by = r.second?.kind === "claude" ? `The reviewer on ${r.models.reviewer} and the second reviewer on ${r.second.model} approved` : `The reviewer on ${r.models.reviewer} approved`;
@@ -179,7 +179,7 @@ function answersFor(previous: Round, seat: Seat): Answer[] | null {
   return seat === "second" ? previous.answers.flatMap((a) => seconds.has(a.id) ? [{ ...a, id: seconds.get(a.id)! }] : []) : previous.answers.filter((a) => !seconds.has(a.id));
 }
 
-function nextRound(r: Review, previous: Round, token: string, base: string, seat: Seat): string {
+export function nextRound(r: Review, previous: Round, token: string, base: string, seat: Seat): string {
   const n = roundsSpent(r);
   const head = r.rounds.at(-1)!.head;
   const retargeted = previous.base !== undefined && previous.base !== base;
@@ -203,7 +203,7 @@ ${review}
 Check each fix, judge each rejection, and look for anything the new commits break. Classify the whole change again. End your reply with one nexus-review block as before, with the token "${token}".`;
 }
 
-function quoteRequest(r: Review, detail: PrSnapshot["detail"], token: string): string {
+export function quoteRequest(r: Review, detail: PrSnapshot["detail"], token: string): string {
   return `${reviewPrefix}
 Nexus is landing pull request #${r.pr.number} (${r.pr.url}) at ${r.rounds.at(-1)!.head}, which you approved, with no new round. No live check ran there, so the landing needs the description's statement of what could not be checked live, and the description may have changed since you read it. Find the passage of the description below that says what could not be checked live, and check it against the change you approved at that commit: it must not claim as checked live what the change gives no way to check, and it must not leave out a part of the change that only a live run would show works. Quote that passage word for word if it holds up, or answer null if the description does not say or the passage does not hold up.
 
@@ -219,7 +219,7 @@ End your reply with exactly one block like this, with JSON in it:
 }
 
 const fences = { reviewing: "nexus-review", fixing: "nexus-review-answers", quoting: "nexus-quote" } as const;
-function reminder(phase: keyof typeof fences, missing: string | null, token: string): string {
+export function reminder(phase: keyof typeof fences, missing: string | null, token: string): string {
   return `${reviewPrefix}
 ${missing ?? `Your last reply had no ${fences[phase]} block with the token "${token}", so Nexus could not read it.`} End your reply with that block, with JSON in it, as ${phase === "quoting" ? "the request" : "the round's message"} showed.`;
 }
