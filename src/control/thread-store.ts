@@ -416,6 +416,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
 
   return {
     ...claude,
+    /** The registry's clock, the one time source for decisions over its records. */
+    now: clock,
     updateAttention,
     threadRecord,
     saveStartKey,

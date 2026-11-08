@@ -33,7 +33,7 @@ import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseHold" | "releasePreview" | "releasePreviews" | "reserved" | "diskDeleteRequestedAt" | "dropDiskDelete" | "failUsageRead" | "finishDiskDelete" | "reportSession" | "requestDiskDelete" | "savePylon" | "sealedBoot" | "saveTemplate" | "moveClaudeWorker" | "thread" | "threadStatus">;
+type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseHold" | "releasePreview" | "releasePreviews" | "reserved" | "diskDeleteRequestedAt" | "dropDiskDelete" | "failUsageRead" | "finishDiskDelete" | "reportSession" | "requestDiskDelete" | "savePylon" | "sealedBoot" | "saveTemplate" | "moveClaudeWorker" | "now" | "thread" | "threadStatus">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -208,11 +208,11 @@ export function startLoop(options: LoopOptions): Loop {
           stored = withLive(registry.pylon(pylonId)!, thread, link);
         }
         // A listing may predate a delete the probe has since forgotten, so only a boot after the request proves the disk stayed.
-        else if (seen.phase === "running" && Date.parse(seen.bootedAt) > deleteAt && stored.submitted?.job.kind !== "delete" && desiredPhase(thread, Date.now()) !== "deleted") {
+        else if (seen.phase === "running" && Date.parse(seen.bootedAt) > deleteAt && stored.submitted?.job.kind !== "delete" && desiredPhase(thread, registry.now()) !== "deleted") {
           registry.dropDiskDelete(pylonId);
         }
       }
-      const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
+      const pylon = { ...stored, desired: desiredPhase(thread, registry.now()) };
       const ctx: TickContext = {
         probe: link.probe,
         observation: nodeObservation,
@@ -226,7 +226,7 @@ export function startLoop(options: LoopOptions): Loop {
           }
           registry.savePylon(p);
         },
-        desired: () => desiredPhase(registry.thread(found.thread)!, Date.now()),
+        desired: () => desiredPhase(registry.thread(found.thread)!, registry.now()),
         sealedBoot: () => registry.sealedBoot(pylonId),
         uncountedFailed: (failure) => {
           registry.failUsageRead(thread.id, failure);
@@ -312,7 +312,7 @@ export function startLoop(options: LoopOptions): Loop {
             options.onSnapshot?.(node, event.observation);
           }
           if (event.type === "session-event") registry.reportSession(node, event.report);
-          const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
+          const writes = ingest(event, node, known, registry.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
           registry.ingested(current === last ? null : current, writes);
           link.last = current;
           for (const w of writes) if (w.record === "sessions" || w.record === "sessions-paused") listed.add(w.pylonId);

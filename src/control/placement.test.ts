@@ -43,6 +43,7 @@ function fakeRegistry(nodes: FakeNode[]) {
   };
   const byName = new Map(nodes.map((n) => [n.name, n]));
   return {
+    now: () => now,
     nodes: () => nodes.map(record),
     latestHealthSample: (name: string) => { const n = byName.get(name); return n === undefined ? null : sample(n); },
     pylonsWithStatusOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({

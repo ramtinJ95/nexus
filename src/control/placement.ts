@@ -16,7 +16,7 @@ const crashed = (p: PylonObservation) => p.phase === "broken" && p.cause === "co
 /** The VM holds its CPUs and memory. */
 const isUp = (p: PylonObservation) => p.phase !== "stopped" && !crashed(p);
 
-type PlacementRegistry = Pick<Registry, "nodes" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved">;
+type PlacementRegistry = Pick<Registry, "nodes" | "now" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved">;
 type WeighingRegistry = PlacementRegistry & Pick<Registry, "latestHealthSample">;
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
@@ -63,13 +63,13 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
   const { left, pending } = roomLeft(registry, node.name, o, c, need.resources);
-  const held = heldRoom(registry, node.name, Date.now());
+  const held = heldRoom(registry, node.name, registry.now());
   pending.memoryGiB -= held;
   left.memoryGiB += held;
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
-  const free = freeMemory(registry, node.name, o, c, Date.now());
+  const free = freeMemory(registry, node.name, o, c, registry.now());
   // With no fresh reading of its free memory, the node is weighed by its commitments alone.
   if (free !== null) {
     const freeLeft = free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB;
@@ -103,7 +103,7 @@ export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releas
   const record = registry.nodes().find((n) => n.name === node);
   const o = record?.state === "online" ? record.observation : null;
   if (o == null) return [];
-  const now = Date.now();
+  const now = registry.now();
   const held = heldOnly(registry, node, now).sort((a, b) => a.thread.awaitedUntil! - b.thread.awaitedUntil!);
   if (held.length === 0) return [];
   const { left, pending } = roomLeft(registry, node, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 });
@@ -193,7 +193,7 @@ export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need
  * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`).
  */
 export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
-  const now = Date.now();
+  const now = registry.now();
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
   const pending = [...registry.pylonsWithThreadsOn(node)
     .filter(({ pylon, thread }) => pylon.failed === null && wantsToRun(thread, now))
