@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { processStream } from "../process-stream.ts";
 import { probeError } from "../protocol/http.ts";
-import { BodyTooLarge } from "../request-body.ts";
+import { BodyTooLarge } from "../node-base/request-body.ts";
 import { withThread } from "../test-support/api-kit.ts";
 import { errorReply } from "./api/server.ts";
 import { DeployDraining } from "./drain.ts";

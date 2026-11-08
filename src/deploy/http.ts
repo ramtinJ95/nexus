@@ -1,5 +1,5 @@
 import { request } from "node:http";
-import { BodyTooLarge, readBody } from "../request-body.ts";
+import { BodyTooLarge, readBody } from "../node-base/request-body.ts";
 import { PeerRefused, verifyPeer } from "../tailscale.ts";
 import type { Whois } from "../protocol/http.ts";
 

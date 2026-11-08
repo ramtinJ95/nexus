@@ -8,9 +8,9 @@ import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Rol
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
-import { readJson, saveJson } from "../json-file.ts";
+import { readJson, saveJson } from "../node-base/json-file.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-layout.ts";
+import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-base/node-layout.ts";
 
 export interface WorkerConfig {
   controlUrl: string;

@@ -34,7 +34,7 @@ import {
 	readRecord,
 } from "./storage.ts";
 import { reapGroup, signalGroup } from "../process-group.ts";
-import { saveJson } from "../json-file.ts";
+import { saveJson } from "../node-base/json-file.ts";
 
 /** sun_path holds 104 bytes on macOS and 108 on Linux, including the terminating NUL. The shorter rules. */
 export const socketPathLimit = 104;

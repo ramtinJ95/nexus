@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { mkdir, readlink, rename, symlink, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { readJson, saveJson } from "../json-file.ts";
-import { deployJournal, roleLinks, rootPath } from "../node-layout.ts";
+import { readJson, saveJson } from "../node-base/json-file.ts";
+import { deployJournal, roleLinks, rootPath } from "../node-base/node-layout.ts";
 import { fullCommit, type Role } from "../protocol/deploy.ts";
 
 const exec = promisify(execFile);

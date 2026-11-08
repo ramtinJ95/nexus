@@ -1,12 +1,12 @@
 /**
  * Where a Nexus node keeps its releases, configs and state, who owns them, and the units that run them.
- * deploy/release.sh, the deploy scripts and the units name the same paths, and src/node-layout.test.ts checks them
+ * deploy/release.sh, the deploy scripts and the units name the same paths, and src/node-base/node-layout.test.ts checks them
  * against these. The bootstrap deployer and the installers load this before npm ci, so it imports only Node's
  * builtins and modules that do too.
  */
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { fullCommit } from "./protocol/deploy.ts";
+import { fullCommit } from "../protocol/deploy.ts";
 
 export const prefix = "/opt/nexus";
 export const etc = "/etc/nexus";

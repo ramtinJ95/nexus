@@ -19,7 +19,7 @@ import { readControlPlane } from "../deploy/control-plane.ts";
 import { nodeSecrets, probeAuth, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
 import { startProbe } from "./server.ts";
 import { closeProbe } from "./shutdown.ts";
-import { configFiles, prefix, releasesDir, stateDirs } from "../node-layout.ts";
+import { configFiles, prefix, releasesDir, stateDirs } from "../node-base/node-layout.ts";
 
 const config = await readProbeConfig(process.argv[2] ?? configFiles.probe);
 const control = await readControlPlane();

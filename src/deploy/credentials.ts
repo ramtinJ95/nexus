@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { appendSecret, parseSecretsFile } from "../node-base/secrets-env.ts";
 import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
-import { configFiles, prefix, roleLinks, servicePath, stateDirs, users } from "../node-layout.ts";
+import { configFiles, prefix, roleLinks, servicePath, stateDirs, users } from "../node-base/node-layout.ts";
 
 const exec = promisify(execFile);
 

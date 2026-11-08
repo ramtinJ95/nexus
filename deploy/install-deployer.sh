@@ -13,11 +13,11 @@ take_deployer_lock
 install -d -o root -g root -m 0700 "$prefix/deployer/roles"
 # Only a manual install refreshes the recovery implementation and supervisor.
 bootstrap=$prefix/deployer/bootstrap
-install -d -o root -g root -m 0700 "$bootstrap/src/deploy" "$bootstrap/src/protocol"
-rm -f "$bootstrap"/src/deploy/*.test.ts
+install -d -o root -g root -m 0700 "$bootstrap/src/deploy" "$bootstrap/src/node-base" "$bootstrap/src/protocol"
+rm -f "$bootstrap"/src/deploy/*.test.ts "$bootstrap"/src/node-base/*.test.ts
 # The worker's runtime sources. A file the worker imports must be listed here.
 cd "$repo"
-for source in src/deploy/*.ts src/node-layout.ts src/protocol/deploy.ts src/tailscale.ts src/exec.ts src/json-file.ts src/request-body.ts; do
+for source in src/deploy/*.ts src/node-base/*.ts src/protocol/deploy.ts src/tailscale.ts src/exec.ts; do
   [[ "$source" = *.test.ts ]] || install -o root -g root -m 0600 "$source" "$bootstrap/$source"
 done
 printf '{"type":"module"}\n' > "$bootstrap/package.json"

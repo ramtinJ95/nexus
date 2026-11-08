@@ -14,7 +14,7 @@ import { type ImageId, isImageId, type TailnetNodeId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { heldSecrets } from "../protocol/observations.ts";
 import { probePort, type ProbeAuthConfig } from "../protocol/routes.ts";
-import { deployerWakeFile, stateDirs } from "../node-layout.ts";
+import { deployerWakeFile, stateDirs } from "../node-base/node-layout.ts";
 import { parseSecretsFile } from "../node-base/secrets-env.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");

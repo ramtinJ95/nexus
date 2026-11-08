@@ -18,10 +18,10 @@ import { parseSecretsFile } from "../node-base/secrets-env.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
-import { readJson, saveJson } from "../json-file.ts";
+import { readJson, saveJson } from "../node-base/json-file.ts";
 import { isImageId } from "../ids.ts";
 import { localApiWhois, parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
-import { configFiles, ports, rootPath, servicePath, stateDirs, users } from "../node-layout.ts";
+import { configFiles, ports, rootPath, servicePath, stateDirs, users } from "../node-base/node-layout.ts";
 import type { Whois } from "../protocol/http.ts";
 import { defaultHarnessModel } from "../protocol/models.ts";
 

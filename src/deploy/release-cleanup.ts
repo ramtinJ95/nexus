@@ -6,10 +6,10 @@
  */
 import { lstat, readdir, readFile, readlink, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { readJson, saveJson } from "../json-file.ts";
+import { readJson, saveJson } from "../node-base/json-file.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Role } from "../protocol/deploy.ts";
-import { deployerFiles, deployJournal, links, prefix as nodePrefix, readReleaseCommit, releaseName, releasesDir, roleLinks, type LinkName } from "../node-layout.ts";
+import { deployerFiles, deployJournal, links, prefix as nodePrefix, readReleaseCommit, releaseName, releasesDir, roleLinks, type LinkName } from "../node-base/node-layout.ts";
 
 export interface ReleaseFact { name: string; commit: string | null; bytes: number; installedAt: number }
 

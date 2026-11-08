@@ -9,7 +9,7 @@ import { createSecureContext } from "node:tls";
 import { request } from "node:http";
 import { isIPv6, type Socket } from "node:net";
 import { output } from "./exec.ts";
-import { BodyTooLarge, readBody } from "./request-body.ts";
+import { BodyTooLarge, readBody } from "./node-base/request-body.ts";
 import type { TailnetNodeId } from "./ids.ts";
 import type { Whois } from "./protocol/http.ts";
 

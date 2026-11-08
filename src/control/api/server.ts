@@ -68,7 +68,7 @@ import { pylonRoutes } from "./pylon-routes.ts";
 import { imageRoutes } from "./image-routes.ts";
 import { doctorRoutes } from "./doctor-routes.ts";
 import type { DoctorReport } from "../doctor-model.ts";
-import { BodyTooLarge, readBody } from "../../request-body.ts";
+import { BodyTooLarge, readBody } from "../../node-base/request-body.ts";
 import type { ImageRollout } from "../image-rollout.ts";
 import type { StartKey, StartRequest } from "../start-request.ts";
 import type { Pipeline } from "../pipeline.ts";

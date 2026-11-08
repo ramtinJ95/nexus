@@ -35,7 +35,7 @@ import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
 import { asUserIn, controllerLog, controllerLogTail, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
-import { readJson, saveJson } from "../../json-file.ts";
+import { readJson, saveJson } from "../../node-base/json-file.ts";
 import { diskBytes } from "../../disk-space.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
 import { existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";

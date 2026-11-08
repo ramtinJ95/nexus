@@ -51,7 +51,7 @@ import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";
 import { checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { backedUpAt, readBackupStatus } from "./backup-status.ts";
-import { backupStatusFile, controlPath, ports } from "../node-layout.ts";
+import { backupStatusFile, controlPath, ports } from "../node-base/node-layout.ts";
 import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";

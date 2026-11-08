@@ -26,7 +26,7 @@ import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type G
 import type { ParamsOf } from "../util/route-path.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
 import type { Whois } from "../protocol/http.ts";
-import { BodyTooLarge, readBody } from "../request-body.ts";
+import { BodyTooLarge, readBody } from "../node-base/request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
 import { rawResponse } from "./gateway.ts";

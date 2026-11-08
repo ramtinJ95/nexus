@@ -1,7 +1,7 @@
 /** The contract between a backend's host bridge, which carries a pylon's NEXUS_API calls out of its VM or container, and the probe that answers them. */
 import { once } from "node:events";
 import { createServer, type IncomingMessage } from "node:http";
-import { BodyTooLarge, readBody } from "./request-body.ts";
+import { BodyTooLarge, readBody } from "./node-base/request-body.ts";
 import type { PylonId } from "./ids.ts";
 
 /** One NEXUS_API call, from the pylon the bridge named. A 200 body is JSON, any other is plain text. */

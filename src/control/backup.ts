@@ -16,7 +16,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { readConfig, type ControlPlaneConfig } from "./main.ts";
 import { writeBackupStatus, type BackupStatus } from "./backup-status.ts";
-import { backupStatusFile, configFiles, etc, unitNames } from "../node-layout.ts";
+import { backupStatusFile, configFiles, etc, unitNames } from "../node-base/node-layout.ts";
 
 const exec = promisify(execFile);
 

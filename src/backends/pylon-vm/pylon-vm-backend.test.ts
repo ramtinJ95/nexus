@@ -20,7 +20,7 @@ import { launchers } from "../../probe/guest/launchers.ts";
 import { settled, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
 import { asUserIn, imageEnv, pylonGuest } from "./pylon-guest.ts";
-import { saveJson } from "../../json-file.ts";
+import { saveJson } from "../../node-base/json-file.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import type { BootInputs } from "../../protocol/spawn.ts";
 import type { ImageId, NodeName, ProjectId, PylonId, TailnetNodeId, TemplateId } from "../../ids.ts";
