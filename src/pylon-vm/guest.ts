@@ -256,6 +256,46 @@ export async function readGuestFile(vm: VM, path: string, signal?: AbortSignal):
 		throw error;
 	}
 }
+/**
+ * What the services supervisor (services.ts) and the relay (relay.ts) ask of a guest: the pylon VM's Gondolin VM, by
+ * way of vmGuest, or the Docker double's container (src/backends/docker-service-guest.ts).
+ */
+export interface ServiceGuest {
+	/** Runs `cmd` through `/bin/sh -lc` as root, and stops it once `timeoutMs` passes. A nonzero exit is a result. */
+	execute(cmd: string, timeoutMs: number): Promise<{ exitCode: number; output: string }>;
+	/** The file's size, inode and mtime, which change whenever it does, or null when it does not exist. */
+	stamp(path: string): Promise<string | null>;
+	/** The file's bytes, or null when it does not exist. */
+	readFile(path: string): Promise<Buffer | null>;
+	writeFile(path: string, content: string): Promise<void>;
+	/** The base URL of the host's ingress, which sends each route's prefix to its port on the guest's 127.0.0.1. */
+	ingress(): Promise<URL>;
+	setIngressRoutes(routes: { prefix: string; port: number; stripPrefix: boolean }[]): void;
+}
+export function vmGuest(vm: VM): ServiceGuest {
+	let base: string | undefined;
+	return {
+		execute: (cmd, timeoutMs) => execute(vm, cmd, "/", timeoutMs),
+		async stamp(path) {
+			const stat = await direct(vm, ["stat", "-L", "-c", "%s %i %y", path]);
+			if (stat.exitCode === 0) return stat.stdout.trim();
+			if (stat.stderr.includes("No such file or directory")) return null;
+			throw new Error(`${path} could not be read: ${stat.stderr.trim()}`);
+		},
+		readFile: (path) => readGuestFile(vm, path),
+		writeFile: (path, content) => vm.fs.writeFile(path, content),
+		async ingress() {
+			if (!base) base = (await vm.enableIngress({ listenHost: "127.0.0.1", listenPort: 0 })).url;
+			return new URL(base);
+		},
+		setIngressRoutes: (routes) => vm.setIngressRoutes(routes),
+	};
+}
+export async function checkedIn(guest: ServiceGuest, cmd: string, timeoutMs = 30000): Promise<string> {
+	const result = await guest.execute(cmd, timeoutMs);
+	if (result.exitCode !== 0) throw new Error(`Guest command exited ${result.exitCode}: ${result.output}`);
+	return result.output;
+}
 export const serviceRoot = "/var/lib/pi-sandbox/services";
 export const stagingRoot = "/var/lib/pi-sandbox/staging";
 export async function writeFiles(
@@ -273,19 +313,17 @@ export async function writeFiles(
 	);
 	await checked(vm, [...install, `rm -rf ${q(staging)}`].join(" &&\n"));
 }
-export async function serviceRunning(vm: VM, name: string): Promise<boolean> {
-	const result = await execute(
-		vm,
+export async function serviceRunning(guest: ServiceGuest, name: string): Promise<boolean> {
+	const result = await guest.execute(
 		`test -f ${q(`${serviceRoot}/${name}.pid`)} && pid=$(cat ${q(`${serviceRoot}/${name}.pid`)}) && kill -0 "$pid" 2>/dev/null && test "$(cut -d ' ' -f 3 "/proc/$pid/stat")" != Z`,
-		"/",
 		3000,
 	);
 	return result.exitCode === 0;
 }
-export async function stopService(vm: VM, name: string): Promise<void> {
+export async function stopService(guest: ServiceGuest, name: string): Promise<void> {
 	const path = `${serviceRoot}/${name}.pid`;
-	await checked(
-		vm,
+	await checkedIn(
+		guest,
 		`if test -f ${q(path)}; then
 pid=$(cat ${q(path)})
 case "$pid" in ''|*[!0-9]*) echo 'Invalid service process identity'; exit 1;; esac
@@ -304,12 +342,12 @@ fi`,
 	);
 }
 export async function startService(
-	vm: VM,
+	guest: ServiceGuest,
 	name: string,
 	service: Service,
 	url?: string,
 ): Promise<void> {
-	if (await serviceRunning(vm, name)) return;
+	if (await serviceRunning(guest, name)) return;
 	const script = `${serviceRoot}/${name}.sh`;
 	const log = `${serviceRoot}/${name}.log`;
 	const environment = {
@@ -333,10 +371,10 @@ export async function startService(
 		"done",
 		"",
 	].join("\n");
-	await checked(vm, `mkdir -p ${q(serviceRoot)}`);
-	await vm.fs.writeFile(script, content);
-	await checked(
-		vm,
+	await checkedIn(guest, `mkdir -p ${q(serviceRoot)}`);
+	await guest.writeFile(script, content);
+	await checkedIn(
+		guest,
 		`setsid env -u ${commandMark} /bin/sh ${q(script)} </dev/null >>${q(log)} 2>&1 & echo $! > ${q(`${serviceRoot}/${name}.pid`)}`,
 	);
 }
