@@ -11,7 +11,8 @@ import type { ProjectId } from "../ids.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
-import { holdRule, personOnly, reservedNames, type Hold, type HoldCode } from "./holds.ts";
+import { holdRule, personOnly, type Hold, type HoldCode } from "./holds.ts";
+import { reservedNames } from "../contract/reserved.ts";
 import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
 import { checkBeside, liveNote, phaseNote, roundNote } from "./wording.ts";
@@ -19,7 +20,7 @@ import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPh
 import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import { reviewText } from "../cli/thread-text.ts";
-import { defaultSecondReview } from "./project.ts";
+import { defaultSecondReview } from "../contract/projects.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
@@ -1189,6 +1190,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
   ]);
   assert.deepEqual(holds("src/pylon-vm/host-bridge.ts", "src/pylon-vm/network.ts", "src/project.ts"), ["Always needs the person: changes to the egress allowlist, as it changes src/pylon-vm/host-bridge.ts, src/pylon-vm/network.ts."]);
   assert.deepEqual(holds("src/control/holds.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/holds.ts."]);
+  assert.deepEqual(holds("src/contract/reserved.ts"), ["Always needs the person: changes to login or auth, as it changes src/contract/reserved.ts."]);
   assert.deepEqual(holds("src/protocol/routes.ts"), ["Always needs the person: changes to login or auth, as it changes src/protocol/routes.ts."]);
   assert.deepEqual(holds("src/control/api/kit.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/api/kit.ts."]);
   const migration = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,4 @@ export const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," };

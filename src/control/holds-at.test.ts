@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PrSnapshot } from "./github.ts";
-import { holdRule, personOnly, remedyOf, reservedCases, reservedNames, waivable, waivedName, type Hold, type HoldCode } from "./holds.ts";
+import { holdRule, personOnly, remedyOf, waivable, waivedName, type Hold, type HoldCode } from "./holds.ts";
+import { reservedCases, reservedNames } from "../contract/reserved.ts";
 import { holdsAt, landPress } from "./policy.ts";
 import { answered, blocks, findingsOf, seatsFor, unapprovedSeat, type HeldAt, type Review, type Round } from "./review-model.ts";
 import { testPr, testReview } from "../test-support/registry-kit.ts";

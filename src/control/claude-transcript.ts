@@ -68,15 +68,6 @@ export function errorStop(entries: readonly ClaudeEntry[]): Extract<ClaudeEntry,
 }
 const bookkeeping = new Set<ClaudeEntry["kind"]>(["turn", "queue", "pull-request", "record"]);
 
-/** "stopped on its usage limit until 06:30 UTC", or "…, which reset at 06:30 UTC" once the reset passed. A reset more than a day away also names its date, as in "Oct 29, 05:30 UTC". */
-export function usageLimitText(limit: { resetsAt: number | null }, now: number): string {
-  if (limit.resetsAt === null) return "stopped on its usage limit";
-  const at = new Date(limit.resetsAt);
-  const time = `${String(at.getUTCHours()).padStart(2, "0")}:${String(at.getUTCMinutes()).padStart(2, "0")} UTC`;
-  const when = Math.abs(limit.resetsAt - now) > 86_400_000 ? `${at.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}, ${time}` : time;
-  return limit.resetsAt > now ? `stopped on its usage limit until ${when}` : `stopped on its usage limit, which reset at ${when}`;
-}
-
 /** What `GET /v1/threads/<id>/conversation` answers for a Claude worker thread. */
 export interface ClaudeConversation {
   kind: "claude";
@@ -105,7 +96,6 @@ const beforeBytes = 4 << 10;
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 export const transcriptStart: TranscriptCursor = { offset: 0, skipping: false, before: sha256(new Uint8Array()) };
 
-export const maxEntries = 3000;
 /**
  * The most one read takes from the file. A record longer than this is skipped, and a `record` entry says so. A Read of
  * an image records its base64 twice, so its record is about 2.7 times the image, and one of up to about 1.4 MiB fits.

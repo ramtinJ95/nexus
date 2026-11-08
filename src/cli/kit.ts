@@ -2,7 +2,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ParseArgsOptionsConfig } from "node:util";
 import type { z } from "zod";
-import type { Project } from "../control/project.ts";
+import type { Project } from "../contract/projects.ts";
 import { brokenRule, startFields } from "../contract/threads-parse.ts";
 import type { itemSchema } from "../contract/projects-parse.ts";
 import type { WebSocket } from "ws";

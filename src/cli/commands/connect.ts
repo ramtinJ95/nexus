@@ -1,7 +1,7 @@
 /** `nexus connect`: find the control plane on a tailnet name or URL, save it, and say what this device may do. */
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { Whoami } from "../../control/wire.ts";
+import type { Whoami } from "../../contract/threads.ts";
 import { saveJson } from "../../node-base/json-file.ts";
 import { call, CliError } from "../transport.ts";
 import { type Command, str } from "../kit.ts";

@@ -2,19 +2,14 @@
  * A thread, a queued thread and a pylon's checkout as text, as `show`, `threads`, `review` and the checkout commands
  * print them.
  */
-import type { ThreadDetail, ThreadRow } from "../control/wire.ts";
-import type { Placement, Room } from "../control/thread-store.ts";
-import type { QueuedThread, Wait } from "../contract/threads.ts";
-import type { Review } from "../control/review-model.ts";
-import type { Question } from "../control/questions.ts";
-import { reservedNames } from "../control/holds.ts";
-import { usageLimitText } from "../control/claude-transcript.ts";
+import { usageLimitText, type Placement, type QueuedThread, type Room, type ThreadDetail, type ThreadRow, type ThreadSetup, type Wait } from "../contract/threads.ts";
+import type { Question, Review } from "../contract/reviews.ts";
+import { reservedNames } from "../contract/reserved.ts";
 import { keptPastDay } from "../control/reconcile.ts";
 import { diskGoes, freshVm, keptPast, liveNote, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../control/wording.ts";
 import type { Changes, Listing } from "../contract/pylon.ts";
-import type { ThreadSetup } from "../control/templates.ts";
 import { ago, table, clip } from "./kit.ts";
-import { gib } from "../control/placement.ts";
+import { gib } from "../util/gib.ts";
 
 const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;
 function placementText(p: Placement): string {

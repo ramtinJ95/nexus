@@ -4,14 +4,11 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
-import type { ListeningPort, ThreadDetail } from "../../control/wire.ts";
-import { maxEntries, type ClaudeEntry } from "../../control/claude-transcript.ts";
-import { agentView, claudeFrames, queuedOf, type ClaudeFrame, type ViewFrame } from "../../control/conversation-view.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Follow, type Command, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
-import { threadRoutes } from "../../contract/threads.ts";
-import { streamRoutes } from "../../contract/streams.ts";
+import { agentView, threadRoutes, type ClaudeEntry, type ListeningPort, type ThreadDetail } from "../../contract/threads.ts";
+import { claudeFrames, maxEntries, queuedOf, streamRoutes, type ClaudeFrame, type ViewFrame } from "../../contract/streams.ts";
 import { callOf } from "../../contract/route.ts";
 import type { RenderedClaudeEntry, RenderedEntry, RunLiveEvent, ThreadStateEvent, WatchEvent } from "../../contract/watch.ts";
 import { entryText, type View, queuedTexts, busy, conversationText, claudeEntryText, claudeText } from "../conversation-text.ts";

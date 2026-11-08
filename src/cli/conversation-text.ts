@@ -1,8 +1,8 @@
 /** A harness conversation and a Claude worker's transcript as text. */
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
-import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../control/claude-transcript.ts";
-import { queuedOf } from "../control/conversation-view.ts";
+import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../contract/threads.ts";
+import { queuedOf } from "../contract/streams.ts";
 import { clip } from "./kit.ts";
 
 const contentText = (content: string | readonly (TextContent | ImageContent)[]) => typeof content === "string" ? content

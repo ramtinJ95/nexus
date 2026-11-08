@@ -5,7 +5,7 @@
  */
 import type { ThreadDetail, ThreadNeed } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
-import { usageLimitText } from "./claude-transcript.ts";
+import { usageLimitText } from "../contract/threads.ts";
 import { archivedDiskMs, keptPastDay } from "./reconcile.ts";
 import { maxNudges } from "./nudge.ts";
 import { commentCap, reviewedPr } from "./pr-watch-model.ts";

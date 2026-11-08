@@ -55,11 +55,6 @@ export function upgradeProject(project: Project): Project {
 }
 /** Every pull request, or one that changes at least `lines` lines, tests and docs included, or has a reserved path hold. */
 export type SecondReview = { always: true } | { always: false; lines: number | null; reserved: boolean };
-/**
- * What `--second-reviewer on` sets. On 2026-11-04 a second model found a serious bug in three pull requests Nexus's
- * reviewer had passed or was reading, of 158, 220 and 249 changed lines, and only one of them had a reserved path hold.
- */
-export const defaultSecondReview: SecondReview = { always: false, lines: 150, reserved: true };
 export interface PipelineSetting { autoStart: boolean }
 /**
  * `text` is null once cleared. `revision` counts each change, a clear among them, and never goes back, so a thread's

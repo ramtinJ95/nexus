@@ -24,7 +24,8 @@ import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "./tick.ts";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
-import { errorStop, maxEntries, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import { errorStop, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import { maxEntries } from "../contract/streams.ts";
 import type { NodeStore } from "./node-store.ts";
 import { upgradeAttempts } from "./record-upgrade.ts";
 

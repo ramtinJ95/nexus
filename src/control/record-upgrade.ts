@@ -6,7 +6,8 @@
  */
 import { reviewPrefix } from "./agent-protocol.ts";
 import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
-import { personOnly, reservedCases, reservedNames, type HoldCode } from "./holds.ts";
+import { personOnly, type HoldCode } from "./holds.ts";
+import { reservedCases, reservedNames } from "../contract/reserved.ts";
 import { blocks, findingSchema, maxRounds, secondReads, type Change, type Review, type Verdict } from "./review-model.ts";
 
 /** What a waiver saved before Nexus recorded the change it waives reads as, so it holds at its own head alone. */

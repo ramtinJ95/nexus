@@ -9,6 +9,9 @@ import type { Question } from "../control/questions.ts";
 import type { answerSchema, landSchema, reviewSchema } from "./reviews-parse.ts";
 import { route } from "./route.ts";
 
+export type { Review } from "../control/review-model.ts";
+export type { Question } from "../control/questions.ts";
+
 export const reviewRoutes = {
   start: route<Review, z.input<typeof reviewSchema>>()("POST", "/v1/threads/{thread}/review"),
   cancel: route<Review>()("POST", "/v1/threads/{thread}/review/cancel"),

@@ -4,8 +4,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
-import type { Preview } from "../../control/thread-store.ts";
-import { threadRoutes as routes } from "../../contract/threads.ts";
+import { threadRoutes as routes, type Preview } from "../../contract/threads.ts";
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError } from "../transport.ts";

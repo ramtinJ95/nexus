@@ -6,7 +6,8 @@
 import { createHash } from "node:crypto";
 import type { testApi } from "../test-support/api-kit.ts";
 import type { PullRequest } from "../control/github.ts";
-import { caseOf, personOnly, reservedNames, waivedName, type Hold } from "../control/holds.ts";
+import { caseOf, personOnly, waivedName, type Hold } from "../control/holds.ts";
+import { reservedNames } from "../contract/reserved.ts";
 import { holdOptions, type HeldQuestion } from "../control/questions.ts";
 import { personPhase, type ModelFailure, type Review, type Round, type SecondReviewer, type Verdict } from "../control/review-model.ts";
 import type { Thread } from "../control/thread-store.ts";

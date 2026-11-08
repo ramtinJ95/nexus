@@ -3,16 +3,14 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
-import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
-import type { ImageOperation } from "../../control/image-store.ts";
-import { ended, type Review } from "../../control/review-model.ts";
+import { ended } from "../../control/review-model.ts";
 import { landPress } from "../../control/policy.ts";
 import { isOpen } from "../../control/questions.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
-import { deployWaitMs, imageRoutes, releaseRoutes } from "../../contract/release.ts";
-import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
+import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
+import { questionRoutes, reviewRoutes, type Review } from "../../contract/reviews.ts";
 import { reviewText } from "../thread-text.ts";
 
 function releaseText(view: ReleaseView): string {

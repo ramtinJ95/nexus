@@ -18,7 +18,7 @@
 import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { ThreadRow } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
-import type { AgentView } from "../conversation-view.ts";
+import type { AgentView } from "../../contract/threads.ts";
 import { queuedView } from "../queue.ts";
 import type { QueuedThread } from "../../contract/threads.ts";
 import { periods, type Period } from "../usage.ts";

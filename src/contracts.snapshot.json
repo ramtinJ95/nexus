@@ -44,6 +44,7 @@
     "images/pylon/rootfs-init-extra.sh: reserved-path:image-rebuild",
     "spikes/s2-resume-login.mjs: reserved-path:auth",
     "spikes/s5-pi-login.mjs: reserved-path:auth",
+    "src/contract/reserved.ts: reserved-path:auth",
     "src/control/api/access.ts: reserved-path:auth",
     "src/control/api/auth-matrix.test.ts: reserved-path:auth",
     "src/control/api/auth-matrix.txt: reserved-path:auth",

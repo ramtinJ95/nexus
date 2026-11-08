@@ -6,7 +6,7 @@ import type { Db, Holding, Row } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import { roleOf } from "./agent-protocol.ts";
 import type { AgentCall } from "./agent-usage.ts";
-import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "./usage.ts";
+import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "../contract/usage.ts";
 
 /**
  * How far a source of usage was read: a pylon's transcript, by its path, to a byte offset with the SHA-256 of the up

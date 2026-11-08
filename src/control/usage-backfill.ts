@@ -14,11 +14,12 @@ import { desiredPhase } from "./reconcile.ts";
 import type { PylonObservation } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { observedPylon } from "./observed.ts";
-import { gib, roomLeft, uncounted } from "./placement.ts";
+import { roomLeft, uncounted } from "./placement.ts";
+import { gib } from "../util/gib.ts";
 import type { Registry } from "./registry.ts";
 import type { StoredPylon, Thread, UsageHold } from "./thread-store.ts";
 import type { UsageCounter } from "./usage-counter.ts";
-import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
+import type { BackfillPlanRow, UsageBackfill } from "../contract/usage.ts";
 
 type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishSettle" | "finishUsageBackfill" | "finishUsageBackfillThread" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseSettle" | "releaseUsageBackfill" | "reserved" | "sealBoot" | "settleHold" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "waitSettle" | "waitUsageBackfill">;
 
