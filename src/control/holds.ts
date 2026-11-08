@@ -21,7 +21,7 @@ export interface Hold { code: HoldCode; text: string }
 const cases = Object.keys(reservedNames) as ReservedCase[];
 
 /** Whether a hold meets every landing of the same approved head again, and whether the person may waive it, and why. */
-interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
+export interface HoldRule { holdsAgain: boolean; waivable: boolean; why: string }
 /**
  * What the loop does itself for a landing that is held by one hold alone: `rebase` the branch onto its base, or ask the
  * reviewer to `quote` the description again, which a Land press asks for too.

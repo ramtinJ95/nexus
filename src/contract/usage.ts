@@ -13,7 +13,7 @@ export type UsageRow = UsageTotals & { key: string };
 
 /** What `GET /v1/usage` answers. Rows are biggest first, except days, which are newest first. */
 export interface UsageReport {
-  /** The start of the period in Unix milliseconds, or null for all of it. */
+  /** The start of the period's first UTC day in Unix milliseconds, or null for all of it. */
   since: number | null;
   /**
    * When this registry started counting. Calls before it are those read from the transcripts still readable then:
@@ -21,6 +21,7 @@ export interface UsageReport {
    */
   countingSince: number;
   project: ProjectId | null;
+  /** The route takes `thread=T`, which the CLI does not send. */
   thread: ThreadId | null;
   total: UsageTotals;
   by: Partial<Record<Breakdown, UsageRow[]>>;
@@ -37,6 +38,7 @@ export interface BackfillThread { thread: ThreadId; title: string; state: "pendi
  * The usage backfill, which wakes archived threads' pylons one at a time to read their transcripts from the start.
  * `current` is the pylon a run holds: woken to be read, or read or given up on and waiting for its pause. `read` counts
  * the threads done or skipped of `of`, every thread a run listed, and `recovered` sums what the done ones recovered.
+ * `finishedAt` is when it stopped or finished.
  */
 export type UsageBackfill =
   | { state: "never" }

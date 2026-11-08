@@ -1,11 +1,14 @@
 export interface PullRequest {
+  /** owner/repository. */
   repo: string;
   number: number;
   title: string;
   url: string;
   state: "open" | "merged" | "closed";
   checks: "pending" | "passing" | "failed" | "none";
+  /** GitHub's review decision: currently none, approved or changes_requested. */
   review: string;
+  /** Null until GitHub knows. */
   conflict: boolean | null;
 }
 /** What the review loop needs of a PR beyond the watch's summary. `mergeCommit` is null until it is merged. */

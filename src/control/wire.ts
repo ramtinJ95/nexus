@@ -39,7 +39,9 @@ export interface ThreadDetail {
     /** Set while its node reports the running pylon's guest gives no answer to its guest commands. */
     notAnswering?: GuestNotAnswering;
   };
+  /** Every Herdr pane in the pylon and every failed session, as its node last reported them, or what its wake brings back while it is paused. */
   sessions: readonly Session[];
+  /** Every preview of the thread, served or not, listening or not. */
   previews: readonly Preview[];
   /**
    * The TCP ports the pylon listens on that a preview can reach, as its node last reported them, in order. Empty
@@ -68,7 +70,8 @@ export interface ThreadDetail {
 }
 
 /**
- * `service` is the service the port belongs to: declared, ad hoc, or `port-<port>` once it is linked. `preview` is
+ * A TCP port in the pylon that a preview can reach. `service` is the service the port belongs to: declared, ad hoc, or
+ * `port-<port>` once it is linked, and null for a process no service runs. `preview` is
  * that service's preview, or null while it has none, which `POST /v1/threads/<id>/previews` gives it.
  */
 export interface ListeningPort { port: number; service: string | null; preview: Preview | null }

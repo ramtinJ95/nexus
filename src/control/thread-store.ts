@@ -107,8 +107,11 @@ export type StoredPylon = Omit<PylonRecord, "desired" | "thread"> & { thread: Th
 /**
  * A session of a pylon. `id` names it, and is what closes it: its Herdr pane, or `failed-` and a hash for a failed
  * session in no pane. A `paused` session comes back when its pylon wakes. A `failed` one did not come back from the
- * last wake, `message` says why, and the next wake tries it again. `status` is the Herdr status it had when last
- * read running, `unknown` if never. `title` is null for a session last observed from a probe that did not report titles.
+ * last wake, `message` says why, and the next wake tries it again. A paused session's `herdrPane` is the pane it had,
+ * and a failed one's the pane it left behind, such as a shell its agent would not start in. `harness` is `shell` for an
+ * agent Nexus did not start, such as one run by hand. `harnessSessionId` is the Claude Code session ID or the pi
+ * session file, which a wake resumes. `status` is the Herdr status it had when last read running, `unknown` if never.
+ * `title` is its Herdr workspace's label, null for a session last observed from a probe that did not report titles.
  */
 export type Session = { pylon: PylonId; id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null; status: HerdrStatus } & (
   | { state: "running"; herdrPane: string; message: null }
@@ -119,7 +122,9 @@ export type Session = { pylon: PylonId; id: string; harness: SessionHarness; har
  * cannot answer while its node's last observation reports its service failed or its port without a route into the
  * pylon, and null otherwise. `ready` is true once the node publishes the URL, unless the running pylon's last read
  * reports the service starting, stopped or failed, or its port unrouted, whose URL answers 502 or 404 though the node
- * may publish it. A service the read does not list, such as a port linked since, is ready once published.
+ * may publish it. A service the read does not list, such as a port linked since, is ready once published. `service` is
+ * a declared or ad hoc service, or `port-<port>` for a linked port. `httpsPort` is the https port on the pylon's node,
+ * fixed for the thread's life, and `url` is `https://<node's MagicDNS name>:<httpsPort>/`, which a client uses as it is.
  */
 export interface Preview { pylon: PylonId; service: string; httpsPort: number; ready: boolean; failed: string | null; url: string }
 /** The https ports a node's previews are published on, both ends included. */

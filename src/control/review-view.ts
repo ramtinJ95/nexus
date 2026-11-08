@@ -2,8 +2,8 @@
  * What the API serves of a thread's review beside the stored record: what the person's Land press does now and the
  * holds it reads, so a client renders the merge policy's answer instead of running the policy itself.
  */
-import { holdRule, type Hold } from "./holds.ts";
-import { holdsAt, landPress } from "./policy.ts";
+import { holdRule, type Hold, type HoldRule } from "./holds.ts";
+import { holdsAt, landPress, type LandPress } from "./policy.ts";
 import { isOpen, type Question } from "./questions.ts";
 import { ended, type Review } from "./review-model.ts";
 
@@ -13,8 +13,8 @@ export interface ReviewView {
   head: string;
   ended: boolean;
   /** The holds on the review now, each with whether it meets every landing of the head again and whether the person may waive it. */
-  holds: readonly (Hold & ReturnType<typeof holdRule>)[];
-  press: ReturnType<typeof landPress>;
+  holds: readonly (Hold & HoldRule)[];
+  press: LandPress;
   /**
    * The review's open question about its holds, which the person answers Land to waive them, at the head it was asked
    * at. Between a push and the loop's next pass that head is older than `head`, and Land on it is refused.

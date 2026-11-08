@@ -9,7 +9,8 @@ import { pylonWaitMs, queryOf, route, type FileBytes, type QueryCodec } from "./
 
 /**
  * What the Changes view and the diff are read against: `start` is what the pylon booted at, which its first boot
- * records as refs/nexus/base, `head` the last commit, and `turn` where the latest turn began.
+ * records as refs/nexus/base, `head` the last commit, and `turn` where the latest turn began, the hidden snapshot
+ * commit taken before the latest reply.
  */
 export const changesBases = ["start", "head", "turn"] as const;
 export type ChangesBase = (typeof changesBases)[number];
@@ -19,7 +20,7 @@ export type ChangeStatus = (typeof changeStatuses)[number];
 /** The letter the dashboard's changes list shows for each status. */
 export const statusLetters: Readonly<Record<ChangeStatus, string>> = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T" };
 
-/** A directory's entries, sorted by name. `path` is relative to the checkout, and empty for the checkout itself. */
+/** A directory's entries, sorted by name, with a size for a file only. `path` is relative to the checkout, and empty for the checkout itself. */
 export interface Listing { path: string; entries: { name: string; kind: "file" | "dir" | "symlink" | "other"; size: number | null }[]; truncated: boolean }
 export interface ChangesBaseAt {
   kind: ChangesBase;
@@ -28,9 +29,10 @@ export interface ChangesBaseAt {
 }
 export interface ChangedFile {
   path: string;
+  /** The path before a rename. */
   oldPath: string | null;
   status: ChangeStatus;
-  /** Null for a binary file. */
+  /** Lines, null for a binary file. */
   additions: number | null;
   deletions: number | null;
 }
@@ -73,7 +75,7 @@ const diffQuery: QueryCodec<DiffQuery, { base: string | undefined; paths: string
 
 /** The Herdr workspace's label is the harness's name by default, and the harness is Claude Code's. */
 export interface SessionRequest { harness?: SessionHarness | undefined; title?: string | undefined }
-/** A session the route opened. Its observed state shows in ThreadDetail.sessions. */
+/** A session the route opened, which `nexus session open` prints. Its observed state shows in ThreadDetail.sessions. */
 export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
 
 export const pylonRoutes = {

@@ -47,30 +47,29 @@ export type Finding = z.output<typeof findingSchema>;
 export type Verdict = z.output<typeof verdictSchema>;
 export type Answer = z.infer<typeof answersSchema>["answers"][number];
 
-/**
- * A round is one review of `head`. `check` is the repository's checks at `head`, run while the reviewer reads it.
- * `live` is the live check at `head`, recorded once the checks pass, and unset until a live check gave a verdict or
- * found no `.nexus/verify`. `conflict` is the base that `head` conflicted with when the landing tried to merge it, which
- * the builder rebases onto.
- */
 /** Whether the builder answered finding `f`: fixed it, or rejected it with a reason. */
 export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => answers.some((a) => a.id === f.id && (a.action === "fixed" || a.reason.trim() !== ""));
-export interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; heldAt?: HeldAt }
-/** The holds a round's head alone decides, read from the PR's files against `base`. */
-export interface HeldAt { base: string; holds: Hold[] }
 /**
- * `verdict` is the reviewer's, and `secondVerdict` the second reviewer's on a round with that seat (`seatsOf`), without
- * either seeing the other's.
+ * A round is one review of `head`. `verdict` is the reviewer's, and `secondVerdict` the second reviewer's on a round
+ * with that seat (`seatsOf`), without either seeing the other's. `check` is the repository's checks at `head`, run
+ * while the reviewer reads it. `live` is the live check at `head`, recorded once the checks pass, and unset until a live
+ * check gave a verdict or found no `.nexus/verify`. `conflict` is the base that `head` conflicted with when the landing
+ * tried to merge it, which the builder rebases onto.
  * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
- * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a round whose verdict is the reviewer's approval of head `from`, carried to `head` because the
- * change at both is the same, so no reviewer round ran for it and it counts against no limit. Its checks run as any
- * round's do, since the base under the change moved. `quotedFrom` is the digest of the description the reviewer last
- * quoted from when a landing asked it again, so a landing asks again only once the description changed since.
+ * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a
+ * round whose verdict is the reviewer's approval of head `from`, carried to `head` because the change at both is the
+ * same, so no reviewer round ran for it and it counts against no limit. Its checks run as any round's do, since the
+ * base under the change moved. With `held`, in a review whose rounds ran out, it carries whatever verdict it was held
+ * with, and its hold, and runs nothing at the new head. `quotedFrom` is the digest of the description the reviewer
+ * last quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
  * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the
  * loop's next pass while it waits at approval, and from its landing otherwise.
  */
+export interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; heldAt?: HeldAt }
+/** The holds a round's head alone decides, read from the PR's files against `base`. */
+export interface HeldAt { base: string; holds: Hold[] }
 /** The digest of a pull request's description, which a round's `quotedFrom` records. */
 export const descriptionDigest = (body: string) => createHash("sha256").update(body).digest("hex");
 /**
@@ -146,12 +145,12 @@ export type Phase =
  * rounds ran out.
  */
 export type HoldCause = "rounds" | "gate" | "no-verdict" | "agent" | "policy" | "outside" | "thread" | "deploy" | "unrecorded";
-/** The "needs human review" label on the PR, which only a review whose rounds ran out gets. */
+/** The "needs human review" label on the PR, which only a review whose rounds ran out gets. `why` is GitHub's answer. */
 export type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: string };
 export type PhaseKind = Phase["kind"];
 
 /**
- * A pull request's change at a head against branch `base`, as `git patch-id --stable` identifies it: one identity per
+ * A pull request's change at a head against branch `base`, identified as `git patch-id --stable` would: one SHA-256 per
  * changed file, of its path, its path before a rename, its modes before and after, and its patch without the hunk
  * headers, so a rebase that only moves hunks keeps it, and any changed line, context lines included, or mode does not.
  * `unknown` when GitHub does not show the whole change, such as a binary file's, so nothing can say it is the same.
@@ -230,7 +229,7 @@ export type LandRequest =
  * a time, and its outbox names which one its message is for.
  */
 export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
-  /** Part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
+  /** `rv-` and 8 hex, part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
   id: string;
   /** How many messages the review has sent, which numbers their request IDs. */
   sent: number;
@@ -247,6 +246,7 @@ export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   second?: SecondReviewer;
   /** The builder's brief, its first message, cut as the description is, which each reviewer's first request carries. */
   brief?: string | null;
+  /** 1 to 5. */
   maxRounds: number;
   /** Who asked for the PR to land once approved, or null to stop at approval. */
   land: LandRequest | null;

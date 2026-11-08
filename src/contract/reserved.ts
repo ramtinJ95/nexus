@@ -1,4 +1,5 @@
 /** The cases the merge policy reserves for the person, which a question or a hold names, and what each is called. It imports nothing. */
+
 export const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
 export type ReservedCase = typeof reservedCases[number];
 

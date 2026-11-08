@@ -121,7 +121,12 @@ export function servingOf(from: number, to: number, now: number): { tier: Tier; 
   return { tier, bucketMs: Math.max(unit, Math.ceil(width / unit) * unit) };
 }
 
-/** A series as the API serves it: its points in time order, each the time of its first sample and its bucket's min, average and max. */
+/**
+ * A series as the API serves it: its points in time order, each the time of its first sample, its bucket's min,
+ * average of every sample and max, and `n` the samples in it. `key` is the series' kind, with `:<sensor>` for a
+ * temperature and `:<pylon>:<thread>` for a pylon's. `label` is such as "1-minute load", the sensor, or a pylon's
+ * thread title, else its ID.
+ */
 export interface MetricSeries { key: string; series: Series; label: string; t: number[]; min: number[]; avg: number[]; max: number[]; n: number[] }
 
 /**
@@ -178,7 +183,8 @@ export function foldPylons(series: readonly Served[], bucketMs: number): { serie
 /**
  * `GET /v1/nodes/<name>/metrics`: the node's series over `from` to `to`, in ms since the epoch. `sampledAt`: the newest
  * sample the points hold, null when none, so a reader that appends later samples counts none twice. `otherPylons`: the
- * pylons, as `<pylon>:<thread>`, summed into the other pylons' series.
+ * pylons, as `<pylon>:<thread>`, summed into the other pylons' series. `tier` is the tier the range is served from,
+ * `bucketMs` each point's width, a point starting at a multiple of it, and `series` are by key.
  */
 export interface NodeMetrics { node: string; from: number; to: number; tier: TierName; bucketMs: number; sampledAt: number | null; series: MetricSeries[]; otherPylons: string[] }
 

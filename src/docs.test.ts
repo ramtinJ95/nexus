@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { cliDoc, declaration, generated, marker } from "../scripts/docs-gen.ts";
 import { minControlVersion } from "./cli/config.ts";
 import { version } from "./version.ts";
 
@@ -47,4 +48,31 @@ test("only the changelog says what an older control plane does, and only above t
     .map((match) => match[1]!)
     .filter((v) => compare(v, minControlVersion) <= 0);
   assert.deepEqual(belowFloor, []);
+});
+
+test("docs/cli.md's type blocks are the source declarations they name, which node scripts/docs-gen.ts writes", () => {
+  assert.equal(read(cliDoc), generated(read(cliDoc)));
+});
+
+test("every TypeScript block in docs/cli.md names the declarations it shows, so none is a hand copy", () => {
+  assert.equal([...read(cliDoc).matchAll(marker)].length, [...read(cliDoc).matchAll(/^```ts$/gm)].length);
+});
+
+test("docs-gen copies a declaration whole, with its TSDoc and its last line's comment", () => {
+  const source = [
+    "/** Not this. */",
+    "export const x = 1;",
+    "/** A quote. */",
+    'export type Quoted = "say\\";more" | `a;${"b"}`; // trailing',
+    "export interface Generic<T = () => void> extends Base<{ a: 1 }> {",
+    "  /** } and ; in a comment. */",
+    "  value: T; // ;",
+    "}",
+    "export type After = 1; // last",
+  ].join("\n");
+  assert.equal(declaration(source, "Quoted"), '/** A quote. */\ntype Quoted = "say\\";more" | `a;${"b"}`; // trailing');
+  assert.equal(declaration(source, "Generic"), source.split("\n").slice(4, 8).join("\n").replace("export ", ""));
+  assert.equal(declaration(source, "After"), "type After = 1; // last");
+  assert.equal(declaration("/** A file's header. */\n\nexport type First = 1;", "First"), "type First = 1;");
+  assert.equal(declaration("/** The first type. */\nexport type First = 1;", "First"), "/** The first type. */\ntype First = 1;");
 });

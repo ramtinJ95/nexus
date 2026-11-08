@@ -25,6 +25,10 @@ type ImageRolloutRegistry = Pick<Registry, "currentImage" | "image" | "imageOper
 
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 export type ImageEntry = RecordedImage & { nodes: NodeName[] };
+/**
+ * `previous` is the image current before the last rollout, which rollback makes current again. `images` are newest
+ * build first, and `operation` is the running operation, or the last one.
+ */
 export interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
 
 /** The images newest build first. */
