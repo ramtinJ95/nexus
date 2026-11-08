@@ -30,7 +30,7 @@ export function tailscaleCli(binary = "tailscale"): TailscaleCli {
 /** A device as `tailscale status --json` lists it. Each field is null when the device reports none. */
 export interface TailnetDevice {
   id: string | null;
-  /** The MagicDNS name, without its root dot. */
+  /** The MagicDNS name, without its root dot. A DNSName of "." gives "". */
   host: string | null;
   /** The first IPv4 address of its TailscaleIPs. */
   ipv4: string | null;

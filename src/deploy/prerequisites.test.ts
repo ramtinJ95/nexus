@@ -151,6 +151,14 @@ check_prerequisites node '' 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[
   assert.deepEqual(run.stdout.split("\0").filter((entry) => entry !== "").map((entry) => entry.split("\n")[0]), ["- Tailscale is not running and logged in."]);
 });
 
+test("a tailscale check that cannot run stops the installer and says how to see why", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)}
+node() { echo "SyntaxError: broken checkout" >&2; return 1; }
+check_prerequisites node '' 'sudo deploy/install.sh'`);
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /setup\.ts check could not read tailscale's status\. See what it says: tailscale status --json \| node .*\/src\/deploy\/setup\.ts check/);
+});
+
 test("MagicDNS and HTTPS certificates turned off are both reported", async () => {
   const status = { ...running, CurrentTailnet: { ...running.CurrentTailnet, MagicDNSEnabled: false }, CertDomains: null };
   assert.deepEqual(await misses({ ...complete, status }, "node"), [

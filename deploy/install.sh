@@ -64,7 +64,7 @@ miss() {
 }
 
 # Records every prerequisite this machine misses for the role, control or node, and changes nothing. $3 is the command
-# line to rerun.
+# line to rerun. Tailscale's settings are read by src/deploy/setup.ts, so a machine without Node 26 has them checked on the rerun.
 check_prerequisites() {
   local role=$1 dotfiles=$2 rerun=$3 major qemu packages status off
   [ "$(uid)" = 0 ] || miss "The installer changes the system, so it runs as root." "$rerun"
@@ -102,8 +102,12 @@ check_prerequisites() {
   if ! in_service_path tailscale; then
     miss "Tailscale is not installed in $service_path. Nexus reaches its nodes and callers over the tailnet." "curl -fsSL https://tailscale.com/install.sh | sh" "sudo tailscale up"
   elif [ "$major" != none ] && [ "$major" -ge 26 ]; then
-    # Without Node the settings wait for the rerun, which the Node miss above asks for.
-    if status=$(tailscale_status); then off=$(PATH=$service_path node "$repo/src/deploy/setup.ts" check <<<"$status"); else off=not-running; fi
+    if status=$(tailscale_status); then
+      off=$(PATH=$service_path node "$repo/src/deploy/setup.ts" check <<<"$status") \
+        || fail "src/deploy/setup.ts check could not read tailscale's status. See what it says: tailscale status --json | node $repo/src/deploy/setup.ts check"
+    else
+      off=not-running
+    fi
     if [[ $off == *not-running* ]]; then
       miss "Tailscale is not running and logged in." "sudo systemctl enable --now tailscaled && sudo tailscale up"
     else
