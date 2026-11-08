@@ -867,7 +867,6 @@ type HoldCode =
   | "verify-changed" | "no-second-reviewer" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "waiver-not-carried" | "loop";
 // src/contract/reserved.ts
 type ReservedCase = typeof reservedCases[number];
-/** The cases the merge policy reserves for the person, which a question or a hold names, and what each is called. It imports nothing. */
 const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
 ```
 
