@@ -15,6 +15,7 @@ import { layout, threadsOf, queuedLook, closedLabel, quietLabel, newProjectButto
 import { lifeOfThread, roleLine, type Life } from "./lifecycle.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
+import type { NoticeAttention } from "./contract.ts";
 
 /**
  * Two columns: on the left what waits on the person, each a line that opens to its card, and on the right the work in
@@ -180,7 +181,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
   const [what, body] = needCard(c, h, n);
   const life = lifeOfThread(c, t.id);
   const why = needWording(n, c.now).why || life.why;
-  return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
+  return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${(n.kind === "thread" ? n.attention : "decision") satisfies NoticeAttention}" tabindex="-1" aria-label="${what}: ${t.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${leads.has(n) ? whereNow(c, h, n.d, life, replyOf(t.id)) : n.kind === "review" && html`<p class="need-facts">${prFact(n.d.review!.pr, n.d.review)}</p>`}${body}`, why, mark(n))}
 </article>`;
 })}</div>`}`;
