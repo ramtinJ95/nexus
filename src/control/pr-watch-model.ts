@@ -4,7 +4,7 @@
  */
 import type { ThreadId } from "../ids.ts";
 import type { Registry } from "./registry.ts";
-import type { PrWatchState } from "./pr-watch-store.ts";
+import type { PrWatchState, WatchedPr } from "./pr-watch-store.ts";
 
 /** How often the watch reads GitHub. */
 export const prWatchMs = 120_000;
@@ -12,6 +12,8 @@ export const prWatchMs = 120_000;
 export const commentCap = 10;
 /** Whether the comment cap stopped the watch, so it reads the thread's PRs no more. */
 export const watchStopped = (state: Pick<PrWatchState, "commentWakes"> | null | undefined) => (state?.commentWakes ?? 0) >= commentCap;
+/** Whether the watch read the linked PR at least once. A link it has not read yet has an empty `url`. */
+export const wasRead = (pr: Pick<WatchedPr, "url">) => pr.url !== "";
 /**
  * The branches thread `id` pushed to origin. pushedAs is a remote-tracking name, not a URL, and only origin belongs to
  * the project's repository.

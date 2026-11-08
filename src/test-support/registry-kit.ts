@@ -8,7 +8,7 @@ import { newPylonRecord, type PylonRecord } from "../control/tick.ts";
 import { newThreadId, pylonIdOf, type LiveHash, type NodeName, type ProjectId, type PylonId, type TailnetNodeId, type ThreadId } from "../ids.ts";
 import type { RemoteProject } from "../control/project.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
-import type { PullRequest } from "../control/github.ts";
+import type { WatchedPr } from "../control/pr-watch-store.ts";
 import { openRegistry, type Registry } from "../control/registry.ts";
 import type { StoredPylon, Thread } from "../control/thread-store.ts";
 import type { Review } from "../control/review-model.ts";
@@ -85,7 +85,7 @@ export function observeNode(registry: Registry, over: Partial<NodeObservation> =
 }
 
 /** Open pull request #1 of acme/repo, with no checks, no review and no conflict. Its URL follows its repo and number. */
-export function testPr(over: Partial<PullRequest> = {}): PullRequest {
+export function testPr(over: Partial<WatchedPr> = {}): WatchedPr {
   const { repo = "acme/repo", number = 1 } = over;
   return { repo, number, title: "Fix", url: `https://github.com/${repo}/pull/${number}`, state: "open", checks: "none", review: "none", conflict: false, ...over };
 }

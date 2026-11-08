@@ -7,10 +7,6 @@ export interface PullRequest {
   checks: "pending" | "passing" | "failed" | "none";
   review: string;
   conflict: boolean | null;
-  /** The head commit when the PR watch last read the PR, which the review loop compares with the head it reviewed. */
-  head?: string;
-  /** The opening of the PR's description when the PR watch last read it, for the dashboard's card of a held review. */
-  summary?: string;
 }
 /** What the review loop needs of a PR beyond the watch's summary. `mergeCommit` is null until it is merged. */
 export interface PrDetail { head: string; branch: string; base: string; body: string; mergeCommit: string | null }
@@ -51,7 +47,6 @@ export interface GitHub {
   merge(repo: string, number: number, head: string): Promise<MergeResult>;
   /** Adds the label `name` to the PR, creating it in the repository first if it has none. Adding it twice is harmless. */
   label(repo: string, number: number, name: string): Promise<LabelResult>;
-  /** Whether the repository has a file at `path` in commit `commit`. */
   has(repo: string, commit: string, path: string): Promise<boolean>;
 }
 

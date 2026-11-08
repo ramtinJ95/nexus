@@ -4,10 +4,10 @@ import { githubRepo, type GitHub, type PrSnapshot, type PullRequest } from "./gi
 import type { Registry } from "./registry.ts";
 import type { StoredThread, Thread } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
-import type { PrWatchState } from "./pr-watch-store.ts";
+import type { PrWatchState, WatchedPr } from "./pr-watch-store.ts";
 import { scopedFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "./agent-protocol.ts";
-import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
+import { commentCap, pushedBranches, wasRead, watchStopped } from "./pr-watch-model.ts";
 
 type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;
 
@@ -19,10 +19,8 @@ export function summaryOf(body: string): string {
   return line.length > 400 ? `${line.slice(0, 399)}…` : line;
 }
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
-/** An open PR the watch linked but has not read yet, which its empty `url` marks in the stored link. */
-const unread = (repo: string, number: number): PullRequest => ({ repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null });
-/** Whether the watch never read the linked PR, so its first read baselines the comments it already has. */
-const neverRead = (pr: Pick<PullRequest, "url">) => pr.url === "";
+/** An open PR the watch linked but has not read yet. */
+const unread = (repo: string, number: number): WatchedPr => ({ repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null });
 const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
 /**
@@ -129,7 +127,8 @@ export function prWatcher(options: {
         const snapshots = await Promise.all(open.map((l) => poll(l.pr.repo, l.pr.number)));
         for (const [i, link] of open.entries()) {
           const snapshot = snapshots[i]!;
-          const initial = neverRead(link.pr);
+          // The first read baselines the comments the PR already has.
+          const initial = !wasRead(link.pr);
           const before = link.pr;
           link.pr = { ...snapshot.pr, head: snapshot.detail.head, summary: summaryOf(snapshot.detail.body), conflict: snapshot.pr.conflict ?? before.conflict };
           if (snapshot.pr.state !== "open") { link.pr.checks = before.checks; link.pr.review = before.review; continue; }

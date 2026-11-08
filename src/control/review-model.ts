@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ChangedFile, PullRequest } from "./github.ts";
+import type { WatchedPr } from "./pr-watch-store.ts";
 import { reservedCases, type Hold, type HoldCode } from "./holds.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
@@ -422,7 +423,7 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
  * The head `pr` was read at, when it is open there at another head than the latest round's and than the one its hold
  * named. A PR watch's read may be older than the round, so the loop confirms it with GitHub before it acts.
  */
-export const pushedHead = (r: Review, pr: Pick<PullRequest, "state" | "head"> | undefined): string | null =>
+export const pushedHead = (r: Review, pr: Pick<WatchedPr, "state" | "head"> | undefined): string | null =>
   pr?.state !== "open" || pr.head === undefined || r.rounds.at(-1)!.head === pr.head || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
 /**
  * Why the latest round started, when it reviews a head pushed after the previous round's approval rather than the

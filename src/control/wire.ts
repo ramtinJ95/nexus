@@ -9,7 +9,7 @@ import type { GuestNotAnswering } from "../protocol/observations.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ClaudeResume, ClaudeSent, Output, Preview, Session, Thread } from "./thread-store.ts";
 import type { NodeRecord } from "./node-store.ts";
-import type { PullRequest } from "./github.ts";
+import type { WatchedPr } from "./pr-watch-store.ts";
 import type { Question } from "./questions.ts";
 import type { JudgmentView } from "./judgment.ts";
 import type { NodePylons } from "./placement.ts";
@@ -44,7 +44,7 @@ export interface ThreadDetail {
   ports: readonly ListeningPort[] | null;
   outputs: readonly Output[];
   prWatch: { enabled: boolean; stopped: boolean; error: string | null };
-  pullRequests: readonly PullRequest[];
+  pullRequests: readonly WatchedPr[];
   /** The thread's latest review as a builder, or null. */
   review: Review | null;
   /** Every question the thread asked, answered or not, in the order they were asked. */

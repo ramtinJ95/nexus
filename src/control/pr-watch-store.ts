@@ -7,9 +7,17 @@ import type { EventKind } from "./events.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Output } from "./thread-store.ts";
 import type { PullRequest } from "./github.ts";
+import { wasRead } from "./pr-watch-model.ts";
 
+/** A PR as the PR watch last read it. `url` is empty until its first read. */
+export interface WatchedPr extends PullRequest {
+  /** The head commit at that read, which the review loop compares with the head it reviewed. */
+  head?: string;
+  /** The opening of the PR's description at that read, for the dashboard's card of a held review. */
+  summary?: string;
+}
 interface PrLink {
-  pr: PullRequest;
+  pr: WatchedPr;
   seen: string[];
   failed: boolean;
 }
@@ -26,7 +34,7 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
     participant: {
       outputs(thread: ThreadId): Output[] {
         const watch = recordOf<PrWatchState>("pr_watches", "thread", thread);
-        return watch ? watch.links.filter((l) => l.pr.url !== "").map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : [];
+        return watch ? watch.links.filter((l) => wasRead(l.pr)).map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : [];
       },
     },
     prWatch: (thread: ThreadId): PrWatchState | null => recordOf<PrWatchState>("pr_watches", "thread", thread),
@@ -38,10 +46,10 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
       transaction(() => {
         const previous = recordOf<PrWatchState>("pr_watches", "thread", thread);
         if (state.pending !== null && previous?.pending?.id !== state.pending.id) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
-        // A link counts once the watch has read its PR, as outputs() counts it, so a placeholder never fires.
-        const linked = new Set(previous?.links.filter((l) => l.pr.url !== "").map((l) => `${l.pr.repo}#${l.pr.number}`));
+        // A placeholder link never fires.
+        const linked = new Set(previous?.links.filter((l) => wasRead(l.pr)).map((l) => `${l.pr.repo}#${l.pr.number}`));
         for (const { pr } of state.links) {
-          if (pr.url !== "" && !linked.has(`${pr.repo}#${pr.number}`)) appendEvent("pull-request.linked", thread, { repo: pr.repo, number: pr.number, url: pr.url, title: pr.title, state: pr.state });
+          if (wasRead(pr) && !linked.has(`${pr.repo}#${pr.number}`)) appendEvent("pull-request.linked", thread, { repo: pr.repo, number: pr.number, url: pr.url, title: pr.title, state: pr.state });
         }
         if ((previous?.error ?? null) === null && state.error !== null) appendEvent("pull-request.error", thread, { error: state.error });
         if ((previous?.error ?? null) !== null && state.error === null) appendEvent("pull-request.error-cleared", thread, {});
