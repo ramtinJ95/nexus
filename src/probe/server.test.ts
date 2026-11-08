@@ -227,6 +227,25 @@ test("an upgrade is authorized by its path's role like any request, then reaches
   assert.deepEqual((await upgrade(`/v1/pylons/${pylonId}/stream`))[1], `${pylonId} is absent, not running`, "the pylon is checked before the request is read");
 });
 
+test("a stream upgrade is served only with the table's method", async (t) => {
+  const { probe, guestStreams } = await streaming(t);
+  const upgrade = async (method: string) => {
+    const socket = connect(probe.port, "127.0.0.1");
+    socket.write(`${method} ${streamPath(pylonId, ["true"])} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${streamProtocol}\r\n\r\n`);
+    const [head] = await once(socket, "data") as [Buffer];
+    socket.destroy();
+    return head.toString();
+  };
+  for (const method of ["POST", "PUT"]) {
+    const refused = await upgrade(method);
+    assert.match(refused, /^HTTP\/1\.1 404 /, method);
+    assert.ok(refused.endsWith(`no upgrade route /v1/pylons/${pylonId}/stream for nexus-stream`), refused);
+  }
+  assert.equal(guestStreams.length, 0, "nothing started in the guest");
+  assert.match(await upgrade("GET"), /^HTTP\/1\.1 101 /);
+  assert.equal(guestStreams.length, 1);
+});
+
 test("a route on a pylon refuses a pylon that is not running before it reads the request", async (t) => {
   const { base } = await setup(t);
   const res = await fetch(`${base}/v1/pylons/${pylonId}/commands`, { method: "POST", body: "not a command" });

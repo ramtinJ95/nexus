@@ -774,7 +774,7 @@ type Routed = { name: RouteName; params: Readonly<Record<string, string>> } | { 
 type HttpRouteName = { [K in RouteName]: (typeof probeRoutes)[K] extends { upgrade: string } ? never : K }[RouteName];
 /** Each path of probeRoutes as a pattern that names its parameters, with the routes that serve it. */
 const tablePaths = [...new Set(Object.values(probeRoutes).map((route) => route.path))].map((path) => ({
-  pattern: new RegExp(`^${path.replace(/\{(\w+)\}/g, "(?<$1>[^/]+)")}$`),
+  pattern: new RegExp(`^${path.split(/\{(\w+)\}/).map((part, i) => i % 2 === 1 ? `(?<${part}>[^/]+)` : RegExp.escape(part)).join("")}$`),
   names: (Object.keys(probeRoutes) as RouteName[]).filter((name) => probeRoutes[name].path === path),
 }));
 /** A method no route of a path serves answers 405, with the entry after the reason, at these paths, and 404 at the others. */
