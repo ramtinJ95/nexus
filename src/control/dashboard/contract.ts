@@ -5,6 +5,7 @@
  */
 import type { ActualState, ThreadStatus } from "../reconcile.ts";
 import type { Attention } from "../attention.ts";
+import type { EventKind } from "../events.ts";
 
 /** The `data-action` of each button, which actions.js runs. */
 export const actions = [
@@ -64,3 +65,11 @@ export const narrow = "(max-width: 760px)";
 /** The `?peek=` of the home page, which previews a thread, a queued thread or an item by its ID. */
 export const peekParam = "peek";
 export const peekHref = (key: string) => `/?${peekParam}=${encodeURIComponent(key)}`;
+
+/**
+ * The events that change a thread list row's attention, its reply or whether it works, and a check's change, which
+ * rows.js follows.
+ */
+export const rowEvents = [
+  "attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended", "health.changed",
+] as const satisfies readonly EventKind[];
