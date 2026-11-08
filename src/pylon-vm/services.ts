@@ -2,7 +2,7 @@ import { posix } from "node:path";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { linkedName, parseServicesFile, serviceReference, wantsPreview, withPublicUrls } from "../services-file.ts";
-import { relayPorts, reservedPortMessage, reservedPorts } from "../protocol/ports.ts";
+import { relayPortList, relayPorts, reservedPortMessage, reservedPorts } from "../protocol/ports.ts";
 import { shellQuote as q } from "../shell.ts";
 import { configSchema, type Service } from "./contracts.ts";
 import { checked, direct, readGuestFile, serviceRunning, startService, stopService } from "./guest.ts";
@@ -15,7 +15,6 @@ import { parse } from "../parse.ts";
 import { serialQueue } from "../single-flight.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 
-const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
 type Entry = {
 	service: Service;
 	declared: boolean;
