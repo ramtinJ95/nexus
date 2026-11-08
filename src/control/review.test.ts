@@ -26,7 +26,7 @@ import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import { tempDir, watch } from "../test-support/kit.ts";
-import { testPr, testPylon, testReview, testThread } from "../test-support/registry-kit.ts";
+import { testPr, testPylon, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { checkCaller, reviewerCaller, reviewPrefix, verifyCaller } from "./agent-protocol.ts";
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
@@ -2951,7 +2951,7 @@ test("a harness, a Claude worker and a bare thread each give the replies and tak
     { role: "assistant", content: [{ type: "text", text: "Fixed" }, { type: "thinking", thinking: "no" }, { type: "text", text: " it." }], timestamp: 2 } as never,
   );
   const claude = f.registry.thread(f.add("th-claude", true))!;
-  f.registry.setClaudeWorker(claude.id, "fix it", "started", undefined, "s1");
+  claudeWorkerAt(f.registry, claude.id, "started", { session: "s1" });
   f.registry.appendClaudeRead(claude.id, { session: "s1", from: transcriptStart, entries: [{ kind: "prompt", at: 1, text: "fix it", from: "person" }, { kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 3 });
   const bare = f.registry.thread(f.add("th-check-bare", false, checkCaller, true))!;
 
@@ -2988,7 +2988,7 @@ test("a model failure is a harness turn's last message that stopped on an error,
   assert.equal(await failure(harness), null, "a turn the model finished did not fail");
 
   const claude = f.registry.thread(f.add("th-claude", true))!;
-  f.registry.setClaudeWorker(claude.id, "fix it", "started", undefined, "s1");
+  claudeWorkerAt(f.registry, claude.id, "started", { session: "s1" });
   const [overloaded] = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").slice(3).map(parseRecord);
   const append = (entries: ClaudeEntry[], offset: number) => f.registry.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
   append([{ kind: "prompt", at: 1, text: "fix it", from: "person" }, ...overloaded!, { kind: "turn", at: 5, durationMs: 100 }], 1);

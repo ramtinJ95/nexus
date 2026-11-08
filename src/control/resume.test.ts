@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testPylon, testRegistry, testReview, testThread } from "../test-support/registry-kit.ts";
+import { testPylon, testRegistry, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
@@ -37,7 +37,7 @@ function fixture(t: import("node:test").TestContext) {
   function add(id: string, startedBy = "nLAPTOP"): ThreadId {
     const thread = testThread({ id: id as ThreadId, title: id, project: project.id, conversationId: null, startedBy, createdAt: 1, lastHumanActivityAt: 1 });
     registry.createThread(thread, testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } }), "/poteto-mode fix it");
-    registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, session);
+    claudeWorkerAt(registry, thread.id, "started", { session });
     pylons.push(thread.pylonId);
     registry.ingested(testObservation(node, { pylons: pylons.map((p) => runningPylon(p, { liveHash: "hash" as LiveHash })) }), []);
     seq.set(thread.id, 0);

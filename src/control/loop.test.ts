@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { nodePylons } from "./placement.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
-import { addThread, seedRegistry } from "../test-support/registry-kit.ts";
+import { addThread, seedRegistry, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { archivedDiskMs, envelope, ingest as realIngest } from "./reconcile.ts";
 import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
@@ -276,9 +277,9 @@ async function settled(fake: ReturnType<typeof fakeNode>, loop: Loop) {
 const dir = await tempDir("nexus-loop-");
 const tempDb = () => join(dir, `${randomUUID()}.db`);
 
-function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt">> = {}): Thread {
+function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt">> = {}, claudePrompt?: string): Thread {
   seedRegistry(registry, { nodes: [node] });
-  return addThread(registry, { node, boot: { image }, thread: activity });
+  return addThread(registry, { node, boot: { image }, thread: activity, claudePrompt });
 }
 
 function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number } = {}): Loop {
@@ -1938,9 +1939,9 @@ test("a deleted thread whose pylon was retried just before the delete settles th
 
 test("a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
+  const thread = seed(registry, {}, "hello");
   registry.setThreadStatus(thread.id, "deleted");
-  registry.setClaudeWorker(thread.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
+  claudeWorkerAt(registry, thread.id, "starting", { session: "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30" });
   const fake = fakeNode({ autoFinish: true });
   run(t, registry, fake.probe);
   await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
@@ -2066,8 +2067,7 @@ test("every new boot takes the configured git identity, but a checkpoint keeps i
 
 test("a queued Claude worker launches once after its pylon runs", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "/poteto-mode implement it", "pending");
+  const thread = seed(registry, {}, "/poteto-mode implement it");
   const fake = fakeNode({ autoFinish: true });
   const commands: unknown[] = [];
   const probe: ProbeClient = { ...fake.probe, command: async (pylonId, command) => {
@@ -2084,8 +2084,7 @@ test("a queued Claude worker launches once after its pylon runs", async (t) => {
 
 test("a stalled Claude launch reports its screen and failed attention without resubmitting", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "/poteto-mode hello", "pending");
+  const thread = seed(registry, {}, "/poteto-mode hello");
   const fake = fakeNode({ autoFinish: true });
   let launches = 0;
   const probe: ProbeClient = { ...fake.probe, command: async () => {
@@ -2103,8 +2102,7 @@ test("a stalled Claude launch reports its screen and failed attention without re
 
 test("a launch error that says the launch stalled is a failed launch, since only the result marks a stall", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const thread = seed(registry, {}, "hello");
   const fake = fakeNode({ autoFinish: true });
   const probe: ProbeClient = { ...fake.probe, command: async () => {
     throw new Error("Claude launch stalled: no UserPromptSubmit within 30 seconds");
@@ -2116,8 +2114,7 @@ test("a launch error that says the launch stalled is a failed launch, since only
 
 test("a submission receipt wins over a late launch error without a contradictory failed event", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const thread = seed(registry, {}, "hello");
   const fake = fakeNode({ autoFinish: true });
   let launches = 0;
   const probe: ProbeClient = { ...fake.probe, command: async (_pylon, command) => {
@@ -2138,8 +2135,7 @@ test("a submission receipt wins over a late launch error without a contradictory
 
 test("a submission receipt wins over a late stalled result without a contradictory failed event", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const thread = seed(registry, {}, "hello");
   const fake = fakeNode({ autoFinish: true });
   const probe: ProbeClient = { ...fake.probe, command: async (_pylon, command) => {
     if (command.kind !== "open-session") throw new Error("wrong command");
@@ -2155,8 +2151,7 @@ test("a submission receipt wins over a late stalled result without a contradicto
 
 test("a failed launch persists the same diagnostic it publishes and never resubmits", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const thread = seed(registry, {}, "hello");
   const fake = fakeNode({ autoFinish: true });
   let launches = 0;
   const probe: ProbeClient = { ...fake.probe, command: async () => {
@@ -2190,8 +2185,7 @@ function restartingProbe(fake: ReturnType<typeof fakeNode>, answers: ("restart" 
 
 test("a Claude launch whose probe restarts mid-way is sent again under its session once the probe is back, and starts once", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "/poteto-mode hello", "pending");
+  const thread = seed(registry, {}, "/poteto-mode hello");
   const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   const logged: string[] = [];
@@ -2205,8 +2199,7 @@ test("a Claude launch whose probe restarts mid-way is sent again under its sessi
 
 test("a Claude launch whose probe stays away fails once the wait is over", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "pending");
+  const thread = seed(registry, {}, "hello");
   const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   const probe: ProbeClient = { ...fake.probe, command: async (_pylonId, command) => {
@@ -2223,8 +2216,8 @@ test("a Claude launch whose probe stays away fails once the wait is over", async
 
 test("a Claude launch a control plane restart cut off goes again under its session", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "starting", undefined, "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30");
+  const thread = seed(registry, {}, "hello");
+  claudeWorkerAt(registry, thread.id, "starting", { session: "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30" });
   const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   run(t, registry, restartingProbe(fake, [{ kind: "open-session", herdrPane: "w1:p1" }], commands));
@@ -2246,9 +2239,13 @@ test("a control plane that opens on an observation stored from a probe older tha
 });
 
 test("a Claude launch a control plane restart cut off before it recorded a session fails, sent never", async (t) => {
-  const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.setClaudeWorker(thread.id, "hello", "starting");
+  const path = tempDb();
+  const registry = openRegistry(path);
+  const thread = seed(registry, {}, "hello");
+  // An older control plane recorded a starting launch before its session.
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE claude_workers SET state = 'starting' WHERE thread = ?").run(thread.id);
+  raw.close();
   const fake = fakeNode({ autoFinish: true });
   const sent: PylonCommand[] = [];
   run(t, registry, restartingProbe(fake, [], sent));

@@ -13,7 +13,8 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";
-import type { ClaudeSent, Thread } from "./thread-store.ts";
+import type { ClaudeSent } from "./claude-worker.ts";
+import type { Thread } from "./thread-store.ts";
 
 type InboxRegistry = Pick<Registry, "agent" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage">;
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
+import { testPylon, testRegistry, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { agentInbox } from "./inbox.ts";
 import { usageLimitResumer } from "./usage-limit.ts";
 import { usageLimitPrefix } from "./agent-protocol.ts";
@@ -24,7 +24,7 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
   for (const thread of threads) {
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
     registry.createThread(thread, pylon, "/poteto-mode fix it");
-    registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "started", undefined, session);
+    claudeWorkerAt(registry, thread.id, "started", { session });
     const stop: ClaudeEntry = { kind: "notice", at: 5000, tone: "error", text: "You've hit your session limit", usageLimit: limit };
     registry.appendClaudeRead(thread.id, { session, from: transcriptStart, entries: [stop], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
   }

@@ -28,7 +28,7 @@ import { personPhase, type Review } from "../control/review-model.ts";
 import { reviewView } from "../control/review-view.ts";
 import type { Question } from "../control/questions.ts";
 import { keptPastDay } from "../control/reconcile.ts";
-import { testPr, testReview } from "../test-support/registry-kit.ts";
+import { testPr, testReview, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import type { Judgment } from "../control/judgment-store.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
@@ -1002,7 +1002,7 @@ test("watch opens a dropped stream again, reports the outage once, and prints th
  */
 async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof setup>>, launched = true) {
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
-  if (launched) s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  if (launched) claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const projects = await tempDir("nexus-claude-projects-", t);
   await mkdir(join(projects, "-home-user-workspace-repo"));
   s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
@@ -1080,7 +1080,7 @@ test("watch follows a Claude worker's transcript: the entries whole, then each n
 test("watch prints one new entry past the kept 3,000 of a Claude transcript, across a reconnect too", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const prompt = (n: number): ClaudeEntry => ({ kind: "prompt", at: n, text: `prompt ${n}`, from: "person" });
   let offset = 0;
   const read = (entries: ClaudeEntry[]) => {
@@ -1122,7 +1122,7 @@ test("watch's text says a Claude transcript was replaced only when it printed so
   const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
   assert.equal((await lines.next()).value, "-- active, pylon running");
   await writeFile(c.transcript, jsonl(claudeRecords.prompt));
-  s.registry.setClaudeWorker(c.thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, c.thread.id, "started", { session: "s1" });
   c.report("session.turn-started");
   const printed: string[] = [];
   while (!printed.includes("> Count the lines of hello.py")) printed.push((await lines.next()).value as string);
@@ -2067,7 +2067,7 @@ test("show exposes the registry's failed worker and its selected model", async (
   const s = await setup(t);
   const thread = await s.json(["start", "--project", "acme", "--claude", "fix it", "--model", "claude-sonnet-5-5"]);
   const message = "Claude launch did not complete: agent executable missing";
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode fix it", "failed", message);
+  claudeWorkerAt(s.registry, thread.id, "failed", { message: message });
   s.registry.appendEvent("thread.failed", thread.id, { message });
   const detail = await s.json(["show", thread.id]);
   assert.deepEqual(detail.claudeWorker, { state: "failed", model: "claude-sonnet-5-5", message });
@@ -2083,7 +2083,7 @@ test("show exposes the registry's failed worker and its selected model", async (
 test("threads and show say a Claude worker is working while its session's turn runs", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const report = (sequence: number, kind: "session.turn-started" | "session.turn-ended") =>
     s.registry.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
   report(1, "session.turn-started");
@@ -2097,7 +2097,7 @@ test("threads and show say a Claude worker is working while its session's turn r
 test("threads, show and conversation say a Claude worker stopped on its usage limit, until when, and how to resume it", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const resetsAt = Date.now() + 3_600_000;
   const until = `${new Date(resetsAt).toISOString().slice(11, 16)} UTC`;
   const entries: ClaudeEntry[] = [{ kind: "notice", at: 1, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }];
@@ -2112,7 +2112,7 @@ test("threads, show and conversation say a Claude worker stopped on its usage li
 test("show says a Claude worker's turn died, when Nexus resumes it, and why Nexus stopped resuming it", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const report = (sequence: number, kind: "session.turn-started" | "session.ended", at: number) =>
     s.registry.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1", at } });
   report(1, "session.turn-started", 1_000);
@@ -2130,7 +2130,7 @@ test("show says a Claude worker's turn died, when Nexus resumes it, and why Nexu
 test("conversation prints a Claude worker's transcript, and send types into its session, waiting for a paused pylon under one request ID", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
-  s.registry.setClaudeWorker(thread.id, "/poteto-mode count the lines", "started", undefined, "s1");
+  claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const entries: ClaudeEntry[] = [
     { kind: "prompt", at: 1, text: "Count the lines\nof hello.py", from: "person", images: [{ offset: 0, bytes: 900, sha256: "a".repeat(64), index: 0 }] },
     { kind: "tool", at: 2, id: "t1", name: "Bash", input: { command: "wc -l hello.py" } },

@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { deletedWithThread, openDb, type Holding } from "./db.ts";
 
 const foreignReads: Record<string, string[]> = {
-  // previews joins each preview's node.
-  "thread-store.ts": ["nodes"],
+  // previews joins each preview's node, and harnessThreads leaves out the threads with a Claude worker.
+  "thread-store.ts": ["nodes", "claude_workers"],
   // isReviewer reads the thread's record.
   "review-store.ts": ["threads"],
   // usageBackfillThreads joins the threads it backfills.

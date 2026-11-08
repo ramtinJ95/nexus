@@ -3,6 +3,7 @@
  * git@example.com:acme.git. What needs no registry is in kit.ts.
  */
 import type { TestContext } from "node:test";
+import assert from "node:assert/strict";
 import { testObservation } from "./kit.ts";
 import { newPylonRecord, type PylonRecord } from "../control/tick.ts";
 import { newThreadId, pylonIdOf, type LiveHash, type NodeName, type ProjectId, type PylonId, type TailnetNodeId, type ThreadId } from "../ids.ts";
@@ -75,6 +76,16 @@ export function addThread(registry: Registry, options: PylonOptions & { thread?:
   const thread = testThread(options.thread);
   registry.createThread(thread, testPylon(thread, options), options.claudePrompt);
   return thread;
+}
+
+/**
+ * Moves the thread's pending Claude worker to `to` as its launch would, starting under `session`. A stall or failure
+ * says `message`, and appends its thread.failed event.
+ */
+export function claudeWorkerAt(registry: Registry, thread: ThreadId, to: "starting" | "started" | "stalled" | "failed", { session = "launch", message = "" }: { session?: string; message?: string } = {}) {
+  assert.ok(registry.moveClaudeWorker(thread, { to: "starting", session }), `${thread} has a pending Claude worker`);
+  if (to === "started") registry.moveClaudeWorker(thread, { to });
+  else if (to !== "starting") registry.moveClaudeWorker(thread, { to, message });
 }
 
 /** Ingests a snapshot of `over.node` (testNode by default) together with the node online, as the loop ingests one. */

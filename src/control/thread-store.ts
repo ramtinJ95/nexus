@@ -1,14 +1,13 @@
 /**
  * The thread core: each thread, its pylon, sessions, previews, outputs and jobs, the event log, each session's turn and
- * order, its Claude worker, its attention, each start's request ID, the harness conversations aborted, when each
- * archived thread was archived and whether its usage is settled, when the newest backup the control plane has seen
- * began, and the pylons whose disk that settle deletes. The features with per-thread state of their own take part
- * through a ThreadParticipant each, which the registry registers.
+ * order, its attention, each start's request ID, the harness conversations aborted, when each archived thread was
+ * archived and whether its usage is settled, when the newest backup the control plane has seen began, and the pylons
+ * whose disk that settle deletes. It makes the Claude worker's store (claude-worker.ts) and serves it. The features
+ * with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention, type Need } from "./attention.ts";
 import { previewFailed } from "./plain-wording.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "./events.ts";
-import type { Sender } from "./agent-protocol.ts";
 import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
 import { Refusal } from "./refusal.ts";
@@ -22,9 +21,7 @@ import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "./tick.ts";
-import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
-import { errorStop, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
-import { maxEntries } from "../contract/streams.ts";
+import { claudeWorkerStore, type ClaudeStop, type ClaudeWorker } from "./claude-worker.ts";
 import type { NodeStore } from "./node-store.ts";
 import type { Placement } from "./placement-model.ts";
 import { upgradeAttempts, upgradeSubmitted } from "./record-upgrade.ts";
@@ -48,7 +45,7 @@ export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnR
   standingRulesRevision?: number;
 }
 
-export interface Thread extends StoredThread, ActivityFacts, ArchiveFacts {
+export interface Thread extends StoredThread, ActivityFacts, ArchiveFacts, ClaudeStop {
   sessionWaiting?: boolean;
   /** What the most recently waiting session's report said, when it said anything. */
   sessionWaitingMessage?: string;
@@ -56,33 +53,7 @@ export interface Thread extends StoredThread, ActivityFacts, ArchiveFacts {
   working: boolean;
   /** The earliest known start of a running harness or session turn. Absent when none runs or no start is known. */
   workingSince?: number;
-  /** The Claude worker's session stopped on its usage limit and no turn of a session runs since. `resetsAt` is null when Claude Code did not say when the limit resets. */
-  usageLimit?: { stoppedAt: number; resetsAt: number | null };
-  /**
-   * The Claude worker's latest turn died, as its session ended during it or it ended on a model error that was not its
-   * usage limit, and no turn of a session runs since. `at` is when, by the pylon's clock, and `reason` says which, with
-   * the error's text for a model error.
-   */
-  turnDied?: { at: number; cause: "session-ended" | "model-error"; reason: string };
 }
-
-/**
- * Nexus resuming a Claude worker whose turn died (resume.ts). `turn` is the `turnDied.at` of the turn it answers, and
- * `count` the resumes in a row that turn makes. A resume `waiting` goes at `due`, one `sending` is saved before it is
- * first sent at `since`, and one `resumed` went at `at`. After the last resume in a row a turn that died too waits on
- * the person, which makes the attention a decision, and `why` says why in a line. So does a resume that started no
- * turn, or one the session took no message for. The person writing to the thread makes it theirs, which is kept, as
- * the transcript may drop the message.
- */
-export type ClaudeResume =
-  | { state: "waiting"; turn: number; count: number; due: number }
-  | { state: "sending"; turn: number; count: number; since: number }
-  | { state: "resumed"; turn: number; count: number; at: number }
-  | { state: "person"; turn: number; count: number; why: string }
-  | { state: "left-alone" };
-
-/** A Claude worker thread's worker. `session` is the Claude Code session its launch opened, null until the launch names one. */
-export interface ClaudeWorker { prompt: string; state: string; model: string | null; session: string | null; message?: string }
 
 /**
  * A thread's agent: a conversation in the control plane's harness, a Claude Code worker in its pylon, or none, as a
@@ -119,21 +90,6 @@ export interface Preview { pylon: PylonId; service: string; httpsPort: number; r
 /** The https ports a node's previews are published on, both ends included. */
 export interface PortRange { first: number; last: number }
 export interface Output { thread: ThreadId; kind: Extract<RegistryWrite, { record: "output" }>["kind"] | "pull-request"; ref: string }
-
-/** Where the reader of a Claude worker's transcript is in its session's file, how many entries it dropped to keep maxEntries, and when it last read. */
-interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
-/** What one read of a Claude worker's transcript found, from `from` to `cursor`. `reset` says the file was replaced, so `entries` start it over. */
-interface ClaudeRead { session: string; from: TranscriptCursor; entries: readonly ClaudeEntry[]; cursor: TranscriptCursor; reset: boolean; readAt: number }
-/**
- * A message typed into a Claude worker, by its request ID. It is `sending` from before the probe is asked until the
- * probe answers, so a send whose answer was lost, which may have typed some of it, is not typed again. A thread keeps
- * every request ID until it is deleted, since a forgotten ID would be typed again on a resend however late it comes.
- */
-type ClaudeMessage = { state: "sending" } | { state: "sent"; result: ClaudeSent };
-/** Who typed a message into a Claude worker: the person, a Nexus sender, or `unknown` for a send recorded before senders were. */
-type ClaudeMessageSender = Sender | "person" | "unknown";
-/** What a send to a Claude worker answers, and answers again for a resend of its request ID. */
-export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resumed: boolean }
 
 function threadRow(r: Row): StoredThread {
   return {
@@ -209,8 +165,7 @@ const deleted = { deletedWithThread: true } as const;
 export const holding = {
   tables: {
     threads: {}, pylons: {}, sessions: {}, previews: {}, outputs: {}, jobs: {}, events: {}, event_receipts: {}, session_activity: {},
-    session_order: deleted, session_order_floor: deleted, claude_workers: {}, claude_transcripts: deleted, claude_entries: deleted,
-    claude_messages: deleted, claude_senders: deleted, thread_attention: {}, start_requests: {}, aborted_conversations: {},
+    session_order: deleted, session_order_floor: deleted, thread_attention: {}, start_requests: {}, aborted_conversations: {},
     thread_archives: {}, disk_cleanups: deleted,
   },
   settings: ["backed-up-at"],
@@ -222,6 +177,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
+  const { addWorker, claudeStops, workerFailed, launching, turnStarted, sessionEnded, rewindTranscript, ...claude } = claudeWorkerStore(db, {
+    reconcile, updateAttention, appendEvent,
+    endTurn(thread, session, at) {
+      sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
+        .run(thread, session, thread, session, at);
+    },
+  });
   /**
    * Each pylon's attempts and job sent that an older control plane saved are upgraded once, with no event, so every tick
    * reads this code's shape. A failed wake for reading the attempts drop goes to `readFailed` in the same transaction,
@@ -353,52 +315,14 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     return row && withSessions([row])[0];
   }
 
-  /**
-   * What stopped the latest turn of each of the Claude worker threads among `ids`: its usage limit, or its death. Derived
-   * from the newest entries rather than stored, so it holds whichever of the turn's end and the transcript's read comes
-   * first.
-   */
-  function claudeStops(ids: readonly ThreadId[]): Map<ThreadId, Pick<Thread, "usageLimit" | "turnDied">> {
-    const stops = new Map<ThreadId, Pick<Thread, "usageLimit" | "turnDied">>();
-    if (ids.length === 0) return stops;
-    const workers = sql(`SELECT w.thread, w.turn_at, w.died_at, t.thread IS NOT NULL AS read FROM claude_workers w LEFT JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
-      WHERE w.thread IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids));
-    const entries = new Map<ThreadId, ClaudeEntry[]>();
-    // Each thread's newest 16 through the index, as a window over the threads' entries would rank every one it keeps.
-    for (const r of sql(`SELECT j.value AS thread, e.entry FROM json_each(?) j JOIN claude_entries e ON e.thread = j.value
-      AND e.seq > coalesce((SELECT seq FROM claude_entries WHERE thread = j.value ORDER BY seq DESC LIMIT 1 OFFSET 16), -1) ORDER BY j.value, e.seq`).all(JSON.stringify(workers.filter((w) => w.read === 1).map((w) => w.thread)))) {
-      const of = r.thread as ThreadId;
-      entries.set(of, [...entries.get(of) ?? [], json<ClaudeEntry>(r.entry)]);
-    }
-    for (const w of workers) {
-      const id = w.thread as ThreadId;
-      const turnAt = w.turn_at as number | null;
-      const stop = errorStop(entries.get(id) ?? []);
-      // A turn that started after the stop, by the pylon's clock as the record's time is, ended it, though its prompt may not be read yet.
-      const current = stop !== null && (turnAt === null || turnAt <= stop.at) ? stop : null;
-      if (current?.usageLimit !== undefined) {
-        stops.set(id, { usageLimit: { stoppedAt: current.at, resetsAt: current.usageLimit.resetsAt } });
-        continue;
-      }
-      // A turn that ends with a background task running reports a heartbeat for its end, so its session may end after a
-      // turn whose end only the transcript shows, as a turn's duration or an interrupt.
-      const finished = turnAt !== null && (entries.get(id) ?? []).some((e) => e.at !== null && e.at >= turnAt && (e.kind === "turn" || (e.kind === "notice" && e.text === "Interrupted")));
-      const ended = typeof w.died_at === "number" && turnAt !== null && w.died_at >= turnAt && !finished ? w.died_at : null;
-      if (ended !== null && (current === null || ended >= current.at)) stops.set(id, { turnDied: { at: ended, cause: "session-ended", reason: "its Claude session ended during the turn" } });
-      else if (current !== null) stops.set(id, { turnDied: { at: current.at, cause: "model-error", reason: current.text } });
-    }
-    return stops;
-  }
-
   const threadStatus = (id: ThreadId) => sql("SELECT status FROM threads WHERE id = ?").get(id)?.status as ThreadStatus | undefined;
-  function updateAttention(id: ThreadId) {
+  function updateAttention(id: ThreadId): void {
     const t = thread(id);
     if (t === undefined) return;
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = pylon(t.pylonId);
-    const workerFailed = ["failed", "stalled"].includes(String(sql("SELECT state FROM claude_workers WHERE thread = ?").get(id)?.state));
     // An archived thread's pylon stays paused, so its failure waits for no one until an unarchive.
-    const failed = t.status !== "archived" && (p?.failed != null || workerFailed);
+    const failed = t.status !== "archived" && (p?.failed != null || workerFailed(id));
     const attention = attentionOf({
       failed, parked: old?.parked === 1, lastReplyAt: t.lastReplyAt, seenAt: t.seenAt, working: t.working, waiting: t.sessionWaiting === true, needs: needs(id), limited: t.usageLimit !== undefined,
     });
@@ -468,33 +392,15 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     return { events, watermark: String(Math.max(cursor, newest ?? 0)) };
   }
 
-  function claudeWorker(thread: ThreadId): ClaudeWorker | undefined {
-    const row = sql("SELECT prompt, state, message, model, session FROM claude_workers WHERE thread = ?").get(thread);
-    return row === undefined ? undefined : {
-      model: row.model as string | null, prompt: row.prompt as string, state: row.state as string, session: row.session as string | null,
-      ...(row.message == null ? {} : { message: row.message as string }),
-    };
-  }
-
   /** What waits on the person for the thread. A review that asks about its holds has its question's need, which shows the review too. */
   function needs(thread: ThreadId): Need[] {
-    const resume = claudeResume(thread);
+    const resume = claude.claudeResume(thread);
     const all = [...participants.flatMap((p) => p.needs?.(thread) ?? []), ...resume?.state === "person" ? [{ kind: "resume" as const, why: resume.why, since: resume.turn }] : []];
     return all.filter((n) => n.kind !== "review" || !all.some((q) => q.kind === "question" && q.question.kind === "holds" && q.question.holds.review === n.review));
   }
 
-  function claudeResume(thread: ThreadId): ClaudeResume | null {
-    return jsonOrNull<ClaudeResume>(sql("SELECT resume FROM claude_workers WHERE thread = ?").get(thread)?.resume ?? null);
-  }
-
-  function claudeTranscript(thread: ThreadId): ClaudeTranscript | undefined {
-    const row = sql("SELECT * FROM claude_transcripts WHERE thread = ?").get(thread);
-    return row === undefined ? undefined : {
-      session: row.session as string, cursor: { offset: row.byte_offset as number, skipping: row.skipping === 1, before: row.before_hash as string }, dropped: row.dropped as number, readAt: row.read_at as number,
-    };
-  }
-
   return {
+    ...claude,
     updateAttention,
     threadRecord,
     saveStartKey,
@@ -522,63 +428,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         updateAttention(id);
       });
     },
-    claudeWorker,
-    claudeResume,
     needs,
-    /** Replaces the worker's resume record, or with null deletes it. */
-    saveClaudeResume(thread: ThreadId, resume: ClaudeResume | null) {
-      transaction(() => {
-        sql("UPDATE claude_workers SET resume = ? WHERE thread = ?").run(resume === null ? null : JSON.stringify(resume), thread);
-        updateAttention(thread);
-      });
-    },
-    /** The threads with a resume record that a later pass may still change or clear, which is every one but left-alone. */
-    resumedThreads: (): ThreadId[] => sql("SELECT thread FROM claude_workers WHERE resume IS NOT NULL AND json_extract(resume, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
     agent(t: Pick<Thread, "id" | "conversationId">): ThreadAgent {
-      const worker = claudeWorker(t.id);
+      const worker = claude.claudeWorker(t.id);
       return worker !== undefined ? { kind: "claude", worker } : t.conversationId !== null ? { kind: "harness", conversationId: t.conversationId } : { kind: "none" };
-    },
-    /** The snapshot ID of the latest session.turn-started of any session on a Claude worker thread. */
-    latestClaudeTurn(thread: ThreadId): string | null {
-      const row = sql("SELECT turn_session, turn_at FROM claude_workers WHERE thread = ? AND turn_at IS NOT NULL").get(thread);
-      return row === undefined ? null : claudeTurn(row.turn_session as string, row.turn_at as number);
-    },
-    claudeTranscript,
-    /** The stored entries from the one numbered `from`, where the oldest kept is numbered as the transcript's `dropped`. */
-    claudeEntries: (thread: ThreadId, from = 0): ClaudeEntry[] => sql("SELECT entry FROM claude_entries WHERE thread = ? AND seq >= ? ORDER BY seq").all(thread, from).map((r) => json<ClaudeEntry>(r.entry)),
-    /**
-     * Appends what a read found and keeps the newest maxEntries. A read of another session than the stored one, or of
-     * a file that was replaced, replaces the stored entries. A read that did not start where the stored reader stands, such
-     * as one applied twice, changes nothing and answers false.
-     */
-    appendClaudeRead(thread: ThreadId, read: ClaudeRead): boolean {
-      return transaction(() => {
-        const stored = claudeTranscript(thread);
-        const same = stored?.session === read.session;
-        const at = same ? stored!.cursor : transcriptStart;
-        if (at.offset !== read.from.offset || at.skipping !== read.from.skipping || at.before !== read.from.before) return false;
-        const replace = !same || read.reset;
-        if (replace) sql("DELETE FROM claude_entries WHERE thread = ?").run(thread);
-        const base = replace ? 0 : Number(sql("SELECT coalesce(max(seq) + 1, 0) AS next FROM claude_entries WHERE thread = ?").get(thread)!.next);
-        const total = base + read.entries.length;
-        const insert = sql("INSERT INTO claude_entries (thread, seq, entry) VALUES (?, ?, ?)");
-        const first = Math.max(0, read.entries.length - maxEntries);
-        read.entries.slice(first).forEach((entry, i) => insert.run(thread, base + first + i, JSON.stringify(entry)));
-        sql("DELETE FROM claude_entries WHERE thread = ? AND seq < ?").run(thread, total - maxEntries);
-        sql(`INSERT INTO claude_transcripts (thread, session, byte_offset, skipping, before_hash, dropped, read_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT (thread) DO UPDATE SET session = excluded.session, byte_offset = excluded.byte_offset, skipping = excluded.skipping, before_hash = excluded.before_hash,
-            dropped = excluded.dropped, read_at = excluded.read_at`)
-          .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
-        // An image without the StopFailure hook reports no end to the turn a usage limit stopped, so the transcript ends it.
-        const stop = claudeStops([thread]).get(thread)?.usageLimit;
-        if (stop !== undefined) {
-          sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
-            .run(thread, read.session, thread, read.session, stop.stoppedAt);
-        }
-        reconcile(thread);
-        updateAttention(thread);
-        return true;
-      });
     },
     /** Records, before an archive's settle sends the delete of its disk, that the pylon's disk is going. */
     requestDiskDelete(pylonId: PylonId, thread: ThreadId) {
@@ -595,8 +448,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       transaction(() => {
         const thread = sql("DELETE FROM disk_cleanups WHERE pylon = ? RETURNING thread").get(pylonId)?.thread as ThreadId | undefined;
         if (thread === undefined) return;
-        sql("UPDATE claude_transcripts SET byte_offset = ?, skipping = ?, before_hash = ? WHERE thread = ?")
-          .run(transcriptStart.offset, transcriptStart.skipping ? 1 : 0, transcriptStart.before, thread);
+        rewindTranscript(thread);
         sql(`UPDATE pylons SET failed = NULL, attempts = '${JSON.stringify(noAttempts)}', retrying = 0 WHERE id = ?`).run(pylonId);
         updateAttention(thread);
       });
@@ -637,32 +489,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     recordBackedUp(at: number) {
       if (at > (backedUpAt() ?? -Infinity)) setSetting("backed-up-at", String(at));
     },
-    claudeMessage(thread: ThreadId, requestId: string): ClaudeMessage | undefined {
-      const row = sql("SELECT state, result FROM claude_messages WHERE thread = ? AND request_id = ?").get(thread, requestId);
-      return row === undefined ? undefined : row.state === "sent" ? { state: "sent", result: json<ClaudeSent>(row.result) } : { state: "sending" };
-    },
-    /** Null forgets the message, as for a send that typed nothing. `typed` is who typed it and the hash of its text, kept from the first write. */
-    setClaudeMessage(thread: ThreadId, requestId: string, message: ClaudeMessage | null, typed?: { sender: Exclude<ClaudeMessageSender, "unknown">; sha256: string }) {
-      transaction(() => {
-        if (message === null) {
-          for (const table of ["claude_messages", "claude_senders"]) sql(`DELETE FROM ${table} WHERE thread = ? AND request_id = ?`).run(thread, requestId);
-          return;
-        }
-        sql("INSERT INTO claude_messages (thread, request_id, state, result) VALUES (?, ?, ?, ?) ON CONFLICT (thread, request_id) DO UPDATE SET state = excluded.state, result = excluded.result")
-          .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
-        if (typed !== undefined) sql("INSERT OR IGNORE INTO claude_senders (thread, request_id, sender, text_sha256) VALUES (?, ?, ?, ?)").run(thread, requestId, typed.sender, typed.sha256);
-      });
-    },
-    /** Who typed each message recorded for the thread's Claude worker, and the hash of its text, null for one recorded before senders were. */
-    claudeMessageSenders: (thread: ThreadId) => sql("SELECT coalesce(s.sender, 'unknown') AS sender, s.text_sha256 FROM claude_messages m LEFT JOIN claude_senders s USING (thread, request_id) WHERE m.thread = ?").all(thread)
-      .map((r) => ({ sender: r.sender as ClaudeMessageSender, sha256: r.text_sha256 as string | null })),
-    setClaudeWorker(thread: ThreadId, prompt: string, state: string, message?: string, session?: string) {
-      transaction(() => {
-        sql("INSERT INTO claude_workers (thread, prompt, state, message, session, model) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(thread) DO UPDATE SET state = excluded.state, message = excluded.message, session = coalesce(excluded.session, claude_workers.session)").run(thread, prompt, state, message ?? null, session ?? null, defaultClaudeModel);
-        reconcile(thread);
-        updateAttention(thread);
-      });
-    },
     eventReceipt,
     reportSession(node: NodeName, report: ReportedEvent) {
       const event = pylonEventSchema.parse(report.event);
@@ -689,12 +515,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         } else if (floor !== undefined && at <= floor) return;
         const current = sql("SELECT state, started_at FROM session_activity WHERE thread = ? AND session = ?").get(thread, session);
         if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting") return;
-        if (event.kind === "session.turn-started" && event.session !== undefined) {
-          sql("UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN ('starting', 'stalled', 'failed')").run(thread, event.session);
-        }
-        if (event.kind === "session.turn-started") {
-          sql("UPDATE claude_workers SET turn_session = ?, turn_at = ? WHERE thread = ? AND (turn_at IS NULL OR turn_at < ?)").run(session, at, thread, at);
-        }
+        if (event.kind === "session.turn-started") turnStarted(thread, session, at, event.session !== undefined);
         // Only reports at the cursor's own stamp can still be resent and pass the stamp checks, so only their IDs are kept.
         const ids = [...(previous !== undefined && at === previous.at ? previousIds : []), ...(event.id === undefined ? [] : [event.id])];
         sql("INSERT INTO session_order (thread, session, at, kind, event_ids) VALUES (?, ?, ?, ?, ?) ON CONFLICT(thread, session) DO UPDATE SET at = excluded.at, kind = excluded.kind, event_ids = excluded.event_ids")
@@ -704,9 +525,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           .all(thread, thread, maxActiveSessions * 2);
         if (evicted.length > 0) sql("INSERT INTO session_order_floor VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET at = max(at, excluded.at)").run(thread, Math.max(...evicted.map((r) => Number(r.at))));
         // The session's order outlives its activity, which a long command without a heartbeat outlasts.
-        if (event.kind === "session.ended" && (previous?.kind === "session.turn-started" || previous?.kind === "session.heartbeat")) {
-          sql("UPDATE claude_workers SET died_at = ? WHERE thread = ? AND turn_session = ? AND turn_at <= ?").run(at, thread, session, at);
-        }
+        if (event.kind === "session.ended" && (previous?.kind === "session.turn-started" || previous?.kind === "session.heartbeat")) sessionEnded(thread, session, at);
         if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
           sql("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
         } else {
@@ -723,8 +542,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         // A side session that finishes while the Claude worker's own session still has a turn is no reply, so the thread
         // never waits on the person while the builder works. Any other session's turn end is one, as Claude gives the
         // worker's pane a new session after /clear and a person may run Claude by hand after a failed launch.
-        const side = sql(`SELECT 1 FROM claude_workers w JOIN session_activity a ON a.thread = w.thread AND a.session = w.session
-          WHERE w.thread = ? AND w.session != ? AND (a.state = 'session.waiting' OR a.updated_at > ?)`).get(thread, session, clock() - sessionActivityTtlMs) !== undefined;
+        const own = claude.claudeWorker(thread)?.session ?? null;
+        const side = own !== null && own !== session
+          && sql("SELECT 1 FROM session_activity WHERE thread = ? AND session = ? AND (state = 'session.waiting' OR updated_at > ?)").get(thread, own, clock() - sessionActivityTtlMs) !== undefined;
         if (event.kind === "session.turn-ended" && !side) recordReply(clock(), thread);
         appendEvent(event.kind, thread, { at, ...(event.session === undefined ? {} : { session: event.session }), ...(event.message === undefined ? {} : { message: event.message }) });
         updateAttention(thread);
@@ -759,7 +579,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           thread.setup === undefined ? null : JSON.stringify(thread.setup), thread.standingRules === undefined ? null : JSON.stringify(thread.standingRules));
         sql(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)
           VALUES ($id, $thread, $node, $boot, $firstBoot, $live, $liveHash, $pauses, $submitted, $attempts, $failed, $retrying)`).run(pylonParams(pylon));
-        if (claudePrompt !== undefined) sql("INSERT INTO claude_workers (thread, prompt, state, model) VALUES (?, ?, 'pending', ?)").run(thread.id, claudePrompt, model);
+        if (claudePrompt !== undefined) addWorker(thread.id, claudePrompt, model);
         if (key !== undefined) saveStartKey(key, thread.id);
       });
     },
@@ -837,8 +657,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     pylonIdsToTick: (node: NodeName, present: readonly PylonId[]) =>
       (sql(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status != 'deleted'
         OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
-        OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id AND state = 'starting'))
-        ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present) }) as Row[]).map((r) => r.id as PylonId),
+        OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR t.id IN (SELECT value FROM json_each($launching)))
+        ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present), $launching: JSON.stringify(launching()) }) as Row[]).map((r) => r.id as PylonId),
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
     savePylon(saved: Omit<PylonRecord, "desired">) {
       transaction(() => {

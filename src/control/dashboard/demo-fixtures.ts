@@ -123,7 +123,8 @@ function talk(d: Demo, t: Thread, messages: readonly Message[]) {
 }
 
 function claudeTranscript(d: Demo, t: Thread, entries: readonly ClaudeEntry[], session = `${t.id}-s1`) {
-  d.registry.setClaudeWorker(t.id, "/poteto-mode", "started", undefined, session);
+  d.registry.moveClaudeWorker(t.id, { to: "starting", session });
+  d.registry.moveClaudeWorker(t.id, { to: "started" });
   d.registry.appendClaudeRead(t.id, { session, from: transcriptStart, entries, cursor: { ...transcriptStart, offset: entries.length }, reset: false, readAt: now() });
 }
 
