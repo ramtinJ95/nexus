@@ -18,7 +18,7 @@ import { artifactDirectory, manifestFiles, tarCodec } from "../../image/artifact
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
-import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
+import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, type BootInputs, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
@@ -27,19 +27,18 @@ import { imageIdOf, type TemplateManifest } from "../../protocol/images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
-import { agentKinds, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
-import { launchers } from "../../probe/guest/launchers.ts";
 import { run, socketPathLimit, sweepScratch } from "../../pylon-vm/client.ts";
 import { imageLabel, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
-import { asUserIn, controllerLog, controllerLogTail, pylonGuest, type Sandbox, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
+import { controllerLog, controllerLogTail, pylonGuest, type Sandbox, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
 import { readJson, saveJson } from "../../node-base/json-file.ts";
 import { diskBytes } from "../../node-base/disk-bytes.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
 import { existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";
-import { bakedDotfilesDir, bridgeRequestPath, checkoutDir, dotfilesDir, home, workspaceDir } from "../../../images/pylon/nexus-contract.ts";
+import { bridgeRequestPath, workspaceDir } from "../../../images/pylon/nexus-contract.ts";
+import { bootHooks, diskSetup, resumeCommands, setupRemoved, templateSetup } from "../pylon-boot.ts";
 
 export interface PylonVmBackendOptions {
   /**
@@ -132,80 +131,11 @@ function checkSshRemotes(subject: string, remotes: readonly SshRemote[]): void {
   }
 }
 
-/**
- * Every boot, as user, before setup or resume. A failed or slow pull keeps what the disk has, which is the
- * image's baked copy until a pull succeeds. Then the layer's install runs and Herdr's integrations are
- * reinstalled. Each step's outcome (pull, install, Herdr) is one `dotfiles:` or `herdr:` line in the controller log, and none fails the
- * boot. The fetch has its own limit, so the fork's 120 s hook deadline never cuts off what follows it.
- */
-function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
-  const at = `$(git -C ${dotfilesDir} rev-parse --short HEAD 2>/dev/null || echo nothing)`;
-  return asUserIn([
-    `test -d ${dotfilesDir}/.git || git clone --quiet ${bakedDotfilesDir} ${dotfilesDir} || git init --quiet ${dotfilesDir}`,
-    `if timeout 60 git -C ${dotfilesDir} fetch --quiet --depth 1 ${q(repo)} ${q(ref)} && git -C ${dotfilesDir} checkout --quiet --detach FETCH_HEAD`,
-    `then echo ${q(`dotfiles: pulled ${repo} ${ref} at`)} "${at}"`,
-    `else echo ${q(`dotfiles: the pull of ${repo} ${ref} failed, keeping`)} "${at}"`,
-    "fi",
-    `if ! test -x ${dotfilesDir}/install; then echo 'dotfiles: no install script'`,
-    `elif (cd ${dotfilesDir} && ./install); then echo 'dotfiles: installed'`,
-    `else echo "dotfiles: install exited $?"; fi`,
-    // The layer's install may replace ~/.claude and ~/.pi/agent files that hold Herdr's hooks, which report session IDs.
-    "if ! command -v herdr >/dev/null; then echo 'herdr: not installed, integrations skipped'",
-    "elif herdr integration install pi && herdr integration install claude; then echo 'herdr: reinstalled the pi and claude integrations'",
-    "else echo 'herdr: reinstalling the pi and claude integrations failed'; fi",
-  ].join("\n"), home);
-}
-
-/** Every boot's hooks, in order. The agents' logins follow the dotfiles pull, whose install may replace their files. */
-export function bootHooks(boot: Pick<BootInputs, "dotfiles" | "gitIdentity" | "network">): string[] {
-  const granted = (harness: SessionHarness) => agentKinds[harness].signIn?.grants.some((grant) => boot.network.secrets.some((s) => s.name === grant.name)) ?? false;
-  return [
-    dotfilesPull(boot.dotfiles),
-    ...sessionHarnessSchema.options.flatMap((harness) => {
-      const login = launchers[harness]?.login;
-      return login !== undefined && granted(harness) ? [asUserIn(login, home)] : [];
-    }),
-    ...boot.gitIdentity === undefined ? [] : [asUserIn(`git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, home)],
-  ];
-}
-
-/**
- * Records what the pylon booted at as refs/nexus/base, which the Changes view diffs against (checkout-files.ts): the
- * commit it checked out, or the empty tree of an empty repository, which has no commit.
- */
-const recordBase = (repo: string, object: string) => `git -C ${q(repo)} update-ref refs/nexus/base ${object}`;
-
-/**
- * Runs as root from the workspace once, inside the instance's or template build's controller, on a fresh disk. 20-minute limit.
- * A clone fetches and checks out. An empty repository is only initialized, so a scratch pylon fetches nothing.
- */
-function setupCommands(repo: RepoInit, preSetup: string | null): string[] {
-  return [
-    `chown user:user ${q(workspaceDir)}`,
-    asUserIn(repoInitCommand(repo), workspaceDir),
-    ...(preSetup === null ? [] : [asUserIn(`bash -c ${q(preSetup)}`, checkoutDir)]),
-    asUserIn("if test -e .nexus/setup; then ./.nexus/setup; fi", checkoutDir),
-  ];
-}
-
-/** Makes the pylon's checkout at `dir` on its first boot. Tests run it to make a checkout as a pylon does. */
-export function repoInitCommand(repo: RepoInit, dir = checkoutDir): string {
-  switch (repo.kind) {
-    case "clone": return `git clone --no-checkout ${q(repo.url)} ${q(dir)} && git -C ${q(dir)} checkout -B ${q(repo.checkout.branch)} ${q(repo.checkout.commit)} && ${recordBase(dir, "HEAD")}`;
-    case "empty": return `git init --quiet --initial-branch=${q(repo.branch)} ${q(dir)} && ${recordBase(dir, `"$(git -C ${q(dir)} hash-object -t tree -w /dev/null)"`)}`;
-  }
-}
-
 function bootRemotes(repo: RepoInit): string[] {
   switch (repo.kind) {
     case "clone": return [repo.url];
     case "empty": return [];
   }
-}
-
-/** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
-function checkoutCommands({ url, checkout }: CloneRepo): string[] {
-  return [asUserIn(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(checkoutDir, "HEAD")}`, checkoutDir)];
 }
 
 /**
@@ -341,32 +271,18 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
   async function create(boot: BootInputs, live: LiveSpec, signal: AbortSignal): Promise<void> {
     await holding(requiredArtifacts(boot), async () => {
-      let setup: string[];
-      let disk: string | undefined;
-      switch (boot.source.kind) {
-        case "resume":
-          throw new JobFailure("artifact-missing", `checkpoint ${boot.source.checkpoint} of ${boot.pylonId} is not on this node`);
-        case "template":
-          switch (boot.repo.kind) {
-            case "empty": throw new JobFailure("invalid", `${boot.pylonId} boots from template ${boot.source.template}, but its project is scratch, which has no template`);
-            case "clone":
-              disk = await templates.templateDisk(store, boot.source.template, boot.image);
-              setup = checkoutCommands(boot.repo);
-          }
-          break;
-        case "fresh":
-          setup = setupCommands(boot.repo, boot.source.preSetup);
-          break;
-      }
+      const { source } = boot;
+      if (source.kind === "resume") throw new JobFailure("artifact-missing", `checkpoint ${source.checkpoint} of ${boot.pylonId} is not on this node`);
+      const setup = diskSetup({ ...boot, source });
+      const disk = source.kind === "template" ? await templates.templateDisk(store, source.template, boot.image) : undefined;
       const config: SandboxConfig = {
         version: 1,
         diskGiB: boot.resources.diskGiB,
         image: assetsOf(boot.image),
         workspace: workspaceDir,
-        setup,
-        retrySetup: boot.source.kind === "template",
-        // The fork runs resume on every boot from a disk: each wake, and a template boot after its checkout.
-        resume: [asUserIn("if test -e .nexus/resume; then ./.nexus/resume; fi", checkoutDir)],
+        setup: setup.commands,
+        retrySetup: setup.retry,
+        resume: [...resumeCommands],
         services: {},
       };
       const spec = await bootSpec(boot, live);
@@ -394,8 +310,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     if (!checkoutFailed && !freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
     const name = instanceName(pylonId);
     await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
-    if (freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh`, log);
-    return new JobFailure("backend", `${pylonId} could not check out its commit on its template's disk, so it was removed and boots from the template again: ${startupError}`, log);
+    return setupRemoved(pylonId, checkoutFailed, startupError, log);
   }
 
   /** CPUs, memory, the allowlist, secrets and SSH remotes apply at every boot. The image and the disk size are fixed at create. */
@@ -627,7 +542,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (resources.memoryGiB < minPylonMemoryGiB) throw new JobFailure("invalid", `template ${template} asks for ${resources.memoryGiB} GiB, but pylon VMs need at least ${minPylonMemoryGiB} GiB`);
       const remote = sshRemoteOf(repo.url);
       await holding([key.image], async () => templates.buildTemplate(stateRoot, sandbox, store, {
-        config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace: workspaceDir, setup: setupCommands({ kind: "clone", url: repo.url, checkout: { branch: repo.branch, commit: repo.commit } }, inputs.preSetup), retrySetup: false, resume: [], services: {} },
+        config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace: workspaceDir, setup: templateSetup(inputs), retrySetup: false, resume: [], services: {} },
         // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
         boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], publicUrls: {}, hostBridge: null },
         manifest: { id: template, key, commit: repo.commit },
