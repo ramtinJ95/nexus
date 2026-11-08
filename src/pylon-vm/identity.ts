@@ -19,7 +19,6 @@ export const identitySchema = z.strictObject({
 });
 export type ProcessIdentity = z.infer<typeof identitySchema>;
 
-/** Null when no process has this PID. */
 export async function identityOf(pid: number): Promise<ProcessIdentity | null> {
 	if (process.platform === "linux") {
 		let stat: string;
@@ -63,7 +62,7 @@ export async function publishIdentity(file: string): Promise<void> {
 	await saveJson(file, identity);
 }
 
-/** Null when the file is missing. A file that does not hold an identity is an error, never a dead process. */
+/** A file that does not hold an identity is an error, never a dead process. */
 export async function readIdentity(file: string): Promise<ProcessIdentity | null> {
 	let raw: string;
 	try {

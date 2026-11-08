@@ -40,7 +40,6 @@ export interface FakeVm {
 	readonly refused: string[];
 }
 
-/** `hold` says where a write to `path` holds, or undefined for one that ends at once, and `fails` which commands exit 1. */
 /** The shell command a guest.ts watchdog runs, or undefined for a direct exec. */
 export function watched(argv: readonly string[]): string | undefined {
 	return argv[0] === "python3" && argv[1] === "-c" && argv[2]!.startsWith("import json,os,signal,subprocess,sys,time") ? argv[3] : undefined;
@@ -48,6 +47,7 @@ export function watched(argv: readonly string[]): string | undefined {
 /** Gondolin's error for a read of a file the guest does not have (sandbox/server.js, sandboxd/main.zig). */
 export const fileNotFound = (path: string) => new Error(`failed to read guest file '${path}': file_read_failed: FileNotFound`);
 
+/** `hold` says where a write to `path` holds, or undefined for one that ends at once, and `fails` which commands exit 1. */
 export function fakeVm(hold: (path: string) => WritePhase | undefined = () => undefined, fails: (cmd: string) => boolean = () => false, hangs: (cmd: string) => boolean = () => false): FakeVm {
 	type Write = { path: string; phase: WritePhase; end(error?: Error): void };
 	const held: Write[] = [];

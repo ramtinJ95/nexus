@@ -460,7 +460,6 @@ async function create(
 		);
 	}
 }
-/** Runs one action, and parses its reply with the action's schema in `actions` in contracts.ts. */
 export async function run<I extends ActionInput>(
 	root: string,
 	input: I,
