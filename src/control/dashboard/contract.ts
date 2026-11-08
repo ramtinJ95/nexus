@@ -1,0 +1,54 @@
+/**
+ * What the dashboard's pages and its client agree on. The templates and the client import it, so a rename here fails
+ * the typecheck, the client's build or src/control/dashboard/actions.test.js. The client bundles this file, so it
+ * imports only types.
+ */
+import type { ActualState, ThreadStatus } from "../reconcile.ts";
+import type { Attention } from "../attention.ts";
+
+/** The `data-action` of each button, which actions.js runs. */
+export const actions = [
+  "archive", "unarchive", "start-queued", "delete", "abort", "retry", "retry-pylon", "link-port", "unpublish",
+  "cancel-review", "land", "review-again", "approve-item", "cancel-item", "auto-review", "answer",
+  "open-session", "close-session", "show-session",
+] as const;
+export type Action = (typeof actions)[number];
+
+/**
+ * What a thread page's `#facts` says, which checkout.js reads to decide when to read the checkout's changes. `open`
+ * is false for an archived or deleted thread, whose pylon stays paused.
+ */
+export interface Facts { pylon: ActualState; turn: boolean; agentAt: number; status: ThreadStatus; open: boolean }
+/** Facts as the `dataset` of the element that carries them. */
+export const factsData = (f: Facts) => ({ pylon: f.pylon, turn: String(f.turn), agentAt: String(f.agentAt), threadStatus: f.status, open: String(f.open) });
+export const factsOf = (data: Readonly<Record<string, string | undefined>>): Facts => ({
+  pylon: data.pylon as ActualState, turn: data.turn === "true", agentAt: Number(data.agentAt), status: data.threadStatus as ThreadStatus, open: data.open === "true",
+});
+
+/**
+ * Each part of the conversation region that grows in place while the run streams: an element with the `data-grow`
+ * attribute, whose inside the comments bound. Every string in a page is escaped, so no text can forge the comments.
+ */
+export const grow = { attr: "data-grow", slots: "[data-grow]", open: "<!--grow-->", close: "<!--/grow-->" } as const;
+const grown = new RegExp(`${grow.open}([\\s\\S]*?)${grow.close}`, "g");
+/** A region with each growing part's inside cut out, and those insides in order. */
+export const growParts = (region: string) => ({ shape: region.replace(grown, grow.open), parts: [...region.matchAll(grown)].map((m) => m[1]!) });
+
+/**
+ * A region as the client compares it with what the server sent before: without the text of each run clock, which the
+ * client ticks, as view.ts `since` writes it.
+ */
+export const unticked = (region: string) => region.replace(/(<time data-since="\d+">)[^<]*/g, "$1");
+
+/** What a notice is for: an attention that waits on the person. A reply's notice opens its thread instead. */
+export type NoticeAttention = Exclude<NonNullable<Attention>, "reply" | "working">;
+/** The home page's hash that opens the card for what a thread waits on, which home.ts marks by `data-attention`. */
+export const noticeHash = (thread: string, attention: NoticeAttention) => `#needs-you:${thread}:${attention}`;
+export function noticeOf(hash: string): { thread: string; attention: string } | null {
+  const m = /^#needs-you:([\w-]+):(\w+)$/.exec(hash);
+  return m === null ? null : { thread: m[1]!, attention: m[2]! };
+}
+
+/** The pages whose `data-page` makes client.js load the modules no other page needs, as pages.js lists them. */
+export const pages = ["home", "cluster"] as const;
+export type Page = (typeof pages)[number];

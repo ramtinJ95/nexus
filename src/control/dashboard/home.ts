@@ -6,7 +6,7 @@ import type { Thread } from "../thread-store.ts";
 import { landsOnItsOwn, type Project } from "../project.ts";
 import { cannotLand, settled, type Review } from "../review-model.ts";
 import { needWording, reviewPr, roundOf, type NeedAction } from "../wording.ts";
-import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, threadState, dims, ago, workingFor, type Part } from "./view.ts";
+import { Html, html, act, actualBadge, desiredTone, dot, state, icon, menu, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, FoldView, HomeView, Latest, Peek } from "./context.ts";
 import type { HeldWork, InboxNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
@@ -56,7 +56,7 @@ function autoReviewSwitch(c: Context, p: Project): Html {
   const by = p.autoReview == null ? "" : `, set by ${p.autoReview.enabledBy}`;
   return html`<span class="auto-review" role="group" aria-label="Auto review for ${p.id}${by}"><span class="dim">Auto review</span>${autoModes.map(([mode, label]) => {
   const refused = mode !== current && (mode === "land" || mode === "yolo") && c.landRefusal === "not a deployer";
-  return html`<button type="button" class="btn btn-xs${mode === current ? " btn-primary" : ""}" data-action="auto-review" data-project="${p.id}" data-mode="${mode}" aria-pressed="${mode === current ? "true" : "false"}"${(mode === current || refused) && html` disabled`}${refused && html` title="Landing deploys, so only a deployer may turn it on"`}${mode === "yolo" && html` data-confirm="Turn on yolo for project ${p.id}? Nexus then answers each review's holds question with Land for you, waiving every hold the policy lets you waive, reserved paths and data-deleting migrations included, until you switch it off."`}>${label}</button>`;
+  return html`<button type="button" class="btn btn-xs${mode === current ? " btn-primary" : ""}"${act("auto-review")} data-project="${p.id}" data-mode="${mode}" aria-pressed="${mode === current ? "true" : "false"}"${(mode === current || refused) && html` disabled`}${refused && html` title="Landing deploys, so only a deployer may turn it on"`}${mode === "yolo" && html` data-confirm="Turn on yolo for project ${p.id}? Nexus then answers each review's holds question with Land for you, waiving every hold the policy lets you waive, reserved paths and data-deleting migrations included, until you switch it off."`}>${label}</button>`;
 })}</span>`;
 }
 
@@ -237,5 +237,5 @@ ${card}`];
 
 function needAction(t: Thread, a: NeedAction): Html {
   if (a.kind === "terminal") return html`<a class="btn btn-xs" href="/threads/${t.id}#terminal">${icon("terminal")}Open terminal</a>`;
-  return html`<button type="button" class="btn btn-xs${a.danger && " danger"}" data-action="${a.action}" data-thread="${t.id}"${a.confirm !== undefined && html` data-confirm="${a.confirm}"`}>${a.label}</button>`;
+  return html`<button type="button" class="btn btn-xs${a.danger && " danger"}"${act(a.action)} data-thread="${t.id}"${a.confirm !== undefined && html` data-confirm="${a.confirm}"`}>${a.label}</button>`;
 }

@@ -8,7 +8,8 @@ import { refreshAfter, showError, whenRunning } from "./page.js";
 import { setOpen } from "./nav.js";
 import { showSession } from "./checkout.js";
 
-const actions = {
+/** What each `data-action` in contract.ts does. */
+export const handlers = {
   archive: (thread) => request(threadRoutes.archive, { thread }),
   unarchive: (thread) => request(threadRoutes.unarchive, { thread }),
   // A started thread's page has a conversation and an inspector, which the queued page has no regions for.
@@ -54,7 +55,7 @@ document.addEventListener("click", async (event) => {
   button.disabled = true;
   setOpen(null);
   try {
-    await actions[action](thread, button.dataset);
+    await handlers[action](thread, button.dataset);
     showError("action-error", null);
     await refreshAfter();
   } catch (err) {

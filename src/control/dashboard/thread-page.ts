@@ -13,7 +13,7 @@ import { freshVm, liveNote, plannerGaveUp, prWatchText, reviewersNote, reviewLin
 import type { QueuedThread, Wait } from "../../contract/threads.ts";
 import { tokenCount, type UsageTotals } from "../../contract/usage.ts";
 import { attentionLabels } from "../plain-wording.ts";
-import { Html, html, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
+import { Html, html, act, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context, ThreadView } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { modelOf } from "./items.ts";
@@ -64,7 +64,7 @@ export function threadPage(c: Context, page: ThreadView, streaming = false): Htm
   const life = role === "builder" ? lifeOfThread(c, t.id) : null;
   const bar = threadBar(t, headState(d, row, run, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
-    t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
+    t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete"${act("delete")} data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
   return layout(c, {
     title: t.title,
@@ -131,8 +131,8 @@ ${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}
 }
 
 const archiveButton = (id: ThreadId, archived: boolean) => archived
-  ? html`<button type="button" class="btn btn-ghost" id="unarchive" data-action="unarchive" data-thread="${id}">Unarchive</button>`
-  : html`<button type="button" class="btn btn-ghost" id="archive" data-action="archive" data-thread="${id}">Archive</button>`;
+  ? html`<button type="button" class="btn btn-ghost" id="unarchive"${act("unarchive")} data-thread="${id}">Unarchive</button>`
+  : html`<button type="button" class="btn btn-ghost" id="archive"${act("archive")} data-thread="${id}">Archive</button>`;
 
 /**
  * A thread that has not started: what it waits for, what it will start with, and the actions a queued thread has. It
@@ -144,7 +144,7 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
     title: q.title,
     active: q.id,
     main: html`${threadBar(q, queuedLook(q), [
-      q.status === "queued" && html`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${q.id}">Start now</button>`,
+      q.status === "queued" && html`<button type="button" class="btn" id="start-queued"${act("start-queued")} data-thread="${q.id}">Start now</button>`,
       q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
     ])}
 <nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(lifeOfThread(c, q.id), false)}</nav>
@@ -238,7 +238,7 @@ function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number, usage: U
 ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul class="list">${d.previews.map((p) => {
   const look = lookOf(d, p);
   return html`<li class="pv pv-${look.tone}">
-<div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${p.url}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}${open && linkedPort(p.service) !== null && html`<button type="button" class="btn btn-xs btn-ghost" data-action="unpublish" data-thread="${t.id}" data-port="${linkedPort(p.service)}" aria-label="Unpublish ${p.service}">Unpublish</button>`}</div>
+<div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${p.url}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}${open && linkedPort(p.service) !== null && html`<button type="button" class="btn btn-xs btn-ghost"${act("unpublish")} data-thread="${t.id}" data-port="${linkedPort(p.service)}" aria-label="Unpublish ${p.service}">Unpublish</button>`}</div>
 <div class="pv-url">${host(p.url)}</div>
 ${look.hint !== null && html`<div class="pv-hint">${look.hint}</div>`}
 </li>`;
@@ -248,7 +248,7 @@ ${look.hint !== null && html`<div class="pv-hint">${look.hint}</div>`}
 ${unpublished === null ? html`<p class="empty">The pylon's ports could not be read.</p>`
   : unpublished.length > 0 ? html`<ul class="list">${unpublished.map((l) => html`<li class="pv pv-muted">
 <div class="pv-top">${dot("muted")}<span class="pv-name">${l.port}</span>${l.service === null
-  ? html`<button type="button" class="btn btn-xs" data-action="link-port" data-thread="${t.id}" data-port="${l.port}" aria-label="Open port ${l.port}">Open</button>`
+  ? html`<button type="button" class="btn btn-xs"${act("link-port")} data-thread="${t.id}" data-port="${l.port}" aria-label="Open port ${l.port}">Open</button>`
   : html`<span class="pv-note">${l.service}</span>`}</div>
 </li>`)}</ul>`
   : pylon.actualState !== "running" ? html`<p class="empty">Ports show while the pylon runs.</p>`
@@ -287,7 +287,7 @@ ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSe
 ${s.state === "failed" && html`<p class="error s-why">It did not come back from the last wake, which the next tries again: ${s.message}</p>`}
 ${t.status === "active" && sessionActions(t.id, s, worker !== null && s.harness === "claude-code" && s.harnessSessionId === worker)}
 </li>`)}</ul>`}
-${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, label]) => html`<button type="button" class="btn btn-xs" data-action="open-session" data-thread="${t.id}" data-harness="${harness}">${label}</button>`)}</div>
+${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, label]) => html`<button type="button" class="btn btn-xs"${act("open-session")} data-thread="${t.id}" data-harness="${harness}">${label}</button>`)}</div>
 <p class="dim small">Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, <code>nexus attach</code> included.</p>`}
 <p class="attach-h">Attach from a shell in the pylon</p>
 <div class="attach"><code id="attach-command">${d.attach}</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>
@@ -303,5 +303,5 @@ const newSessions = [["shell", "New shell"], ["pi", "New pi"], ["claude-code", "
  */
 function sessionActions(thread: string, s: ThreadDetail["sessions"][number], own: boolean): Html {
   const named = `${harnessNamed(s.harness)?.label ?? s.harness} session${s.title === null ? "" : ` "${s.title}"`}`;
-  return html`<span class="s-acts">${s.state === "running" && html`<button type="button" class="btn btn-xs" data-action="show-session" data-thread="${thread}" data-pane="${s.herdrPane}">${icon("terminal")}Show in terminal</button>`}${s.state !== "paused" && !own && html`<button type="button" class="btn btn-xs btn-ghost danger" data-action="close-session" data-thread="${thread}" data-session="${s.id}" data-confirm="${`Close the ${named}? ${s.state === "running" ? "Its pane closes, and what runs there ends." : "No wake tries it again."}`}">Close</button>`}</span>`;
+  return html`<span class="s-acts">${s.state === "running" && html`<button type="button" class="btn btn-xs"${act("show-session")} data-thread="${thread}" data-pane="${s.herdrPane}">${icon("terminal")}Show in terminal</button>`}${s.state !== "paused" && !own && html`<button type="button" class="btn btn-xs btn-ghost danger"${act("close-session")} data-thread="${thread}" data-session="${s.id}" data-confirm="${`Close the ${named}? ${s.state === "running" ? "Its pane closes, and what runs there ends." : "No wake tries it again."}`}">Close</button>`}</span>`;
 }

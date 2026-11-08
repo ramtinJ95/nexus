@@ -9,6 +9,7 @@ import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { limitText } from "../wording.ts";
 import { agoText, clock } from "./elapsed.ts";
+import type { Action } from "./contract.ts";
 
 interface Page { status: number; headers: Record<string, string>; body: string }
 
@@ -119,6 +120,9 @@ export function workingFor(t: Thread, now: number): Html | null {
   if (!t.working) return null;
   return t.workingSince === undefined ? html`working` : html`working <time data-since="${t.workingSince}">${clock(now - t.workingSince)}</time>`;
 }
+
+/** A button's `data-action`, which actions.js runs. */
+export const act = (action: Action) => html` data-action="${action}"`;
 
 export const short = (commit: string) => html`<code title="${commit}">${commit.slice(0, 12)}</code>`;
 

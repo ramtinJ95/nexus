@@ -7,7 +7,7 @@ import type { AgentView } from "../../contract/threads.ts";
 import { isOpen } from "../questions.ts";
 import { clock } from "./elapsed.ts";
 import { dialogWaits, freshVm, limitText, parkedText } from "../wording.ts";
-import { Html, html, dot, icon, unseen, ago, grows, type Tone } from "./view.ts";
+import { Html, html, act, dot, icon, unseen, ago, grows, type Tone } from "./view.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item, type ToolItem, type AskItem, type UserItem } from "./items.ts";
 import { shotsView, stepsView } from "./tools.ts";
@@ -55,9 +55,9 @@ function working(d: ThreadDetail, items: readonly Item[], asks: (item: UserItem)
  */
 export function stateBar(t: Thread, run: Run, now: number): Html {
   const open = isOpenStatus(t.status);
-  const abort = html`<button type="button" class="btn btn-xs btn-abort" id="abort" data-action="abort" data-thread="${t.id}">Abort</button>`;
+  const abort = html`<button type="button" class="btn btn-xs btn-abort" id="abort"${act("abort")} data-thread="${t.id}">Abort</button>`;
   // The abort route presses Esc in a Claude worker's pane, as a person at its terminal interrupts a turn.
-  const interrupt = html`<button type="button" class="btn btn-xs btn-abort" id="abort" data-action="abort" data-thread="${t.id}" title="Presses Esc in Claude's terminal">Interrupt</button>`;
+  const interrupt = html`<button type="button" class="btn btn-xs btn-abort" id="abort"${act("abort")} data-thread="${t.id}" title="Presses Esc in Claude's terminal">Interrupt</button>`;
   const terminal = html`<button type="button" class="btn btn-xs" data-terminal>${icon("terminal")}Open terminal</button>`;
   const attach = open && html`<span class="attach-line"><code id="attach-line">nexus attach ${t.id}</code><button type="button" class="btn btn-xs btn-ghost" data-copy="attach-line" aria-label="Copy nexus attach ${t.id}">Copy</button></span>`;
   const [label, detail, end] = (() => {
@@ -65,7 +65,7 @@ export function stateBar(t: Thread, run: Run, now: number): Html {
       case "idle": return [html`Idle`, html`${run.repliedAt !== null && html`replied ${ago(run.repliedAt, now)}`}${run.paused && html`${run.repliedAt !== null && " · "}the pylon is paused, and a message wakes it`}`, html``];
       case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`<time data-since="${run.since}">${clock(now - run.since)}</time> · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, run.claude ? interrupt : abort];
       case "waiting": return [html`Waiting for you`, html`${run.why}`, open && run.inTerminal && terminal];
-      case "parked": return [html`Stuck`, html`${parkedText(run.tasks)}. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry" data-action="retry" data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
+      case "parked": return [html`Stuck`, html`${parkedText(run.tasks)}. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry"${act("retry")} data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
     }
   })();
   return html`<div class="state-bar state-${run.kind}" id="agent-state" data-state="${run.kind}" role="status">${run.kind === "working" ? html`<span class="spin" aria-hidden="true"></span>` : dot(runTone[run.kind])}<span class="state-label">${label}</span><span class="state-detail">${detail}</span>${end}${attach}</div>`;
@@ -103,7 +103,7 @@ export function composer(d: ThreadDetail, agent: ThreadAgent["kind"], run: Run, 
       ? `${d.pylon.retryRefused}.`
       : "Fix the cause, such as the project's git access, and retry, or start again from the same project. A retry runs setup again on a new pylon whose setup failed, and resumes a broken pylon from its newest disk."}</p>
 <pre class="diag">${d.pylon.failed}</pre>
-<div class="failed-actions">${!refused && html`<button type="button" class="btn" id="retry-pylon" data-action="retry-pylon" data-thread="${t.id}">Retry</button>`}<button type="button" class="btn" data-start="${t.project}" data-title="${t.title}">Start again</button></div></div>`;
+<div class="failed-actions">${!refused && html`<button type="button" class="btn" id="retry-pylon"${act("retry-pylon")} data-thread="${t.id}">Retry</button>`}<button type="button" class="btn" data-start="${t.project}" data-title="${t.title}">Start again</button></div></div>`;
   }
   if (t.status === "archived") return html`<p class="note-box">An archived thread takes no messages, because its pylon stays paused. Unarchive the thread to send one.${asOf !== null && html` ${asOf}`}</p>`;
   const { primary, queue } = sends(run, claude !== null);

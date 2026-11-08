@@ -8,7 +8,7 @@ import type { QueuedThread } from "../../contract/threads.ts";
 import type { Project } from "../project.ts";
 import type { PipelineItem } from "../pipeline.ts";
 import { needKind, needLabels, roundOf } from "../wording.ts";
-import { Html, html, dot, icon, ago, state, actualBadge, threadState, dims, type Part, type Tone } from "./view.ts";
+import { Html, html, act, dot, icon, ago, state, actualBadge, threadState, dims, type Part, type Tone } from "./view.ts";
 import type { Context, HomeView, Latest, Peek } from "./context.ts";
 import type { HeldWork } from "../work.ts";
 import { clock, span } from "./elapsed.ts";
@@ -20,8 +20,8 @@ import { isOpenStatus } from "../reconcile.ts";
 
 /** An item's Approve, while its project waits for the person to approve each item, and its Cancel, until it has a thread. */
 export const itemActions = (i: PipelineItem, p: Project): Part => i.thread === null && i.phase.kind !== "cancelled" && html`<div class="need-act">${[
-  p.pipeline?.autoStart === false && i.approved === null && html`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${i.id}">Approve</button>`,
-  html`<button type="button" class="btn btn-xs btn-ghost" data-action="cancel-item" data-item="${i.id}" data-confirm="Cancel ${i.title}? It never becomes a thread.">Cancel</button>`,
+  p.pipeline?.autoStart === false && i.approved === null && html`<button type="button" class="btn btn-xs"${act("approve-item")} data-item="${i.id}">Approve</button>`,
+  html`<button type="button" class="btn btn-xs btn-ghost"${act("cancel-item")} data-item="${i.id}" data-confirm="Cancel ${i.title}? It never becomes a thread.">Cancel</button>`,
 ]}</div>`;
 
 /**
