@@ -117,7 +117,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const bootId = randomUUID();
   const log = options.log ?? console.error;
   const nodeShutdown = await probeShutdown(options.shutdownFile, log);
-  if (backend.eventJournal !== undefined) await mkdir(dirname(backend.eventJournal), { recursive: true, mode: 0o700 });
+  if (backend.eventJournal !== null) await mkdir(dirname(backend.eventJournal), { recursive: true, mode: 0o700 });
   const journal = eventJournal(backend.eventJournal ?? ":memory:");
   const shutdown = new AbortController();
   const previews = options.previews === undefined ? null : await startPreviews({
@@ -170,7 +170,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     if (await pylons.listeningChanged()) await publishSnapshot();
   }, () => shutdown.signal.aborted);
 
-  const storage = backend.storage ?? null;
   const watched = options.watched ?? [];
   const cleanup = artifactCleanup(backend.artifacts, log);
 
@@ -209,7 +208,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
     const retained = jobs.retained();
-    const [listed, host] = await Promise.all([backend.list(), hostCapacity(storage, watched)]);
+    const [listed, host] = await Promise.all([backend.list(), hostCapacity(backend.storage, watched)]);
     // A running pylon's disk has moved on from the checkpoint it booted from, so only stopped disks count.
     const artifacts = [...await backend.artifacts.list(), ...listed.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : [])];
     const present = new Set(listed.map((p) => p.pylonId));
@@ -229,8 +228,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       jobs: retained,
       pylons: await Promise.all(listed.map(async (p) => nodeShutdown.marked(await pylons.observation(p)))),
       previewRoutes: previews?.routes() ?? [],
-      grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
-      ...backend.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
+      grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh },
+      ...backend.nestedVirtualization ? { nestedVirtualization: true as const } : {},
       heldSecrets,
     };
   }
@@ -412,7 +411,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       return send(res, 200, JSON.stringify({ outcomes }), "application/json");
     },
     async health(_req, res) {
-      const health = await readNodeHealth(node, { root: "/", storage, watched, pylons: await backend.processes?.() ?? null, sampleMs: healthSampleMs });
+      const health = await readNodeHealth(node, { root: "/", storage: backend.storage, watched, pylons: await backend.processes(), sampleMs: healthSampleMs });
       return send(res, 200, JSON.stringify(health), "application/json");
     },
   };

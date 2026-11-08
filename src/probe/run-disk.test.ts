@@ -27,7 +27,7 @@ async function deps(t: import("node:test").TestContext, vm: BackendPylon["vm"] |
   t.after(() => rm(dir, { recursive: true, force: true }));
   const calls: string[] = [];
   const backend = {
-    ...storage ? { storage: dir } : {},
+    storage: storage ? dir : null,
     state: async () => vm,
     async ensureRunning() { calls.push("ensureRunning"); },
   } as Partial<VmBackend> as VmBackend;

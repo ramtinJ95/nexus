@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { ThreadDetail } from "./wire.ts";
 import { ingest } from "./reconcile.ts";
 import { processStream } from "../process-stream.ts";
-import { repoInitCommand } from "../backends/pylon-vm/pylon-vm-backend.ts";
+import { repoInitCommand } from "../backends/pylon-boot.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { PausedSession, ServiceFact } from "../protocol/observations.ts";

@@ -47,8 +47,8 @@ Preconditions:
 
 ## Gotchas
 
-- A pylon-vm records `refs/nexus/base` on its first boot, and the Docker backend never does. The stack's image therefore carries the ref at its one commit. Without it, `changes` and `diff` without `--uncommitted`, and the Changes tab by default, fail with exit 1 and the API's 422, `the checkout has no refs/nexus/base ...`. That boot records the ref is proven only on a real node.
-- The Docker checkout is always the image's one-commit repo. A scratch project's empty repository, whose base is the empty tree with a null `commit`, is not shown here.
+- A pylon's setup records `refs/nexus/base` on its first boot, at the commit it cloned, on Docker as on a pylon-vm. Without the ref, `changes` and `diff` without `--uncommitted`, and the Changes tab by default, fail with exit 1 and the API's 422, `the checkout has no refs/nexus/base ...`.
+- A scratch project's pylon gets an empty repository, whose base is the empty tree with a null `commit`. [Add a project](./add-project.md) starts one on `quill-scratch`.
 - The inspector remembers its last tab across pages, in `localStorage`. Select the Changes tab before you assert on it, rather than relying on it being the default.
 - An open diff tab hides the conversation and the composer. Return with `[data-tab="convo"]` before a step that types a message.
 - `Only uncommitted` and `Latest turn` are remembered in `localStorage` too, and turning one on turns the other off. Turn both off at the end, or later runs open on the last commit or the latest turn.

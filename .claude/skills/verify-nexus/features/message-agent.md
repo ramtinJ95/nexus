@@ -43,7 +43,7 @@ Preconditions:
 ## Gotchas
 
 - Tool calls run as root through Docker, so `~` is `/root`, not `/home/user`. The overlay files are under `/home/user/.nexus`, and the working directory is `/home/user/workspace/repo`. A real pylon runs them as `user`.
-- A Docker pylon's environment has a working bridge, `NEXUS_API=http://host.docker.internal:7482/<token>`, but the agent's tools run in a login shell, where the overlay's `/etc/profile.d/nexus.sh` sets `NEXUS_API` to `http://nexus.pylon`. Nothing in a Docker pylon resolves that name, so an agent's in-pylon `nexus` command fails here, though it works on a Gondolin pylon. Don't map outputs or previews through this stack until that is solved.
+- A Docker pylon's bridge is `NEXUS_API=http://host.docker.internal:7482/<token>`, in the container's environment and in `/etc/profile.d/nexus-api.sh`, which the Docker backend writes on every boot, so an agent's in-pylon `nexus` command reaches the probe from a login shell too.
 - The composer and `#agent-state` change only on the page's 5 s poll, not with the answer's stream, so a snapshot taken right after a send can still read `Idle` and `Send ⌘↵`. Poll for the busy state rather than snapshotting once.
 - Only messages that start with `bash: ` make a tool call. Only a `stream: <n>` message streams, so only its answer shows a `partial` in `watch --json` and grows in place on the thread page.
 - The conversation route serves the active context, not the full history. Find entries by kind and text, not by position or ID order. A `pi.system` entry with no text and the tool definitions sits between the first `pi.user` and its answer. Skip it.

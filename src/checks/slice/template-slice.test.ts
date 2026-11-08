@@ -3,8 +3,10 @@
  * with its own artifact store, and the test submits jobs to them as the control plane would. One body runs
  * against one backend fixture:
  *
- * - Docker (the default), against the local Docker. Everything it creates carries nexus.test=<run>, and cleanup
- *   removes only that. A template is a committed image, and its artifact that image's `docker save` archive.
+ * - Docker (the default), against the local Docker, in an image the test builds on Debian with git and python3, which
+ *   holds the repository the template clones and its pylons fetch (slice-repo.ts). Everything it creates carries
+ *   nexus.test=<run>, and cleanup removes only that. A template is a committed image, and its artifact that image's
+ *   `docker save` archive.
  * - pylon-vm, when NEXUS_SLICE_BACKEND=pylon-vm, with NEXUS_PYLON_VM_IMAGE=<an image's directory in A's artifact
  *   store> and NEXUS_PYLON_VM_STATE=<A's state root, at most 37 bytes>. B's store and state root are fresh
  *   directories beside them, so B first fetches the image itself, and B's template boot runs on B's copy of it.
@@ -18,7 +20,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -38,6 +40,9 @@ import type { TemplateBuildInputs, TemplateManifest } from "../../protocol/image
 import type { BootInputs, Checkout } from "../../protocol/spawn.ts";
 import type { ProjectId } from "../../ids.ts";
 import type { Guest, VmBackend } from "../../backends/backend.ts";
+import { asUserIn } from "../../backends/pylon-boot.ts";
+import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
+import { sliceCommits, sliceRepo, sliceRepoStep } from "./slice-repo.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,8 +70,8 @@ interface TemplateFixture {
   imageOnlyOnA: boolean;
   /** Why A refuses to drop its image while its pylon runs. Docker's images are configured, so it refuses every image drop. */
   imageDropRefusal: RegExp;
-  /** A template boot fetches and checks out the pylon's commit. The Docker double clones nothing. */
-  checksOut: boolean;
+  /** The boot whose template checkout cannot fetch. */
+  unfetchable(boot: BootInputs): BootInputs;
   checkTemplateBoot(guest: Guest, side: Side): Promise<void>;
   /** Leaves work in the pylon that a wake must keep, and that a rerun setup would undo. */
   leaveWork(guest: Guest): Promise<void>;
@@ -81,33 +86,63 @@ async function dockerFixture(): Promise<TemplateFixture> {
   const baseImage = "debian:bookworm-slim";
   const image: ImageId = "img-tslicetest000";
   const testLabel = `nexus.test=tslice-${run}`;
+  const tag = `nexus-tslice-test:${run}`;
   const scratch = await mkdtemp(join(tmpdir(), "nexus-tslice-"));
   const stores = { a: join(scratch, "a"), b: join(scratch, "b") };
-  const backend = (side: Side) => createDockerBackend({ images: { [image]: baseImage }, labels: { "nexus.test": `tslice-${run}`, "nexus.side": side }, artifacts: stores[side] });
+  const backend = (side: Side) => createDockerBackend({ images: { [image]: tag }, labels: { "nexus.test": `tslice-${run}`, "nexus.side": side }, artifacts: stores[side] });
+  const home = "/home/user";
+  // Docker execs run as root, and git refuses a repository root does not own, so the checks run as user.
+  const sh = (guest: Guest, script: string, cwd = checkoutDir) => guest.exec(["sh", "-c", asUserIn(script, cwd)], { cwd: "/", timeoutMs: 30_000 });
+  /** A resume runs in the background, as in a pylon, so its log is read until it holds `runs` of them. */
+  const resumeLog = async (guest: Guest, runs: number) => {
+    let log = await sh(guest, `cat ${home}/resume.log`);
+    for (let tries = 0; (log.output.match(/^resumed$/gm)?.length ?? 0) < runs && tries < 50; tries++) log = await sh(guest, `sleep 0.2; cat ${home}/resume.log`);
+    return log;
+  };
   return {
     image,
     backends: { a: backend("a"), b: backend("b") },
     stores,
-    repo: { url: "git@example.com:tslice.git", branch: "main", commit: "0000000" },
-    checkout: { branch: "main", commit: "0000000" },
+    // The template is built at main's first commit, and its pylons check out the second.
+    repo: { url: sliceRepo, branch: "main", commit: sliceCommits[0] },
+    checkout: { branch: "nexus-tslice", commit: sliceCommits[1] },
     resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
     allowedHosts: [],
-    preSetup: `echo ${run} > /root/template-marker`,
-    marker: "/root/template-marker",
+    preSetup: `echo ${run} > ${home}/template-marker && mkdir -p .nexus && printf '#!/bin/sh\\necho resumed >> ${home}/resume.log\\n' > .nexus/resume && chmod +x .nexus/resume`,
+    marker: `${home}/template-marker`,
     cwd: "/",
     imageOnlyOnA: false,
     imageDropRefusal: /neither copied nor dropped/,
-    checksOut: false,
-    async checkTemplateBoot() {},
+    unfetchable: (boot) => ({ ...boot, repo: boot.repo.kind === "clone" ? { ...boot.repo, url: "/srv/missing.git" } : boot.repo }),
+    async checkTemplateBoot(guest) {
+      assert.deepEqual(await sh(guest, "git rev-parse HEAD && git symbolic-ref --short HEAD"), { exitCode: 0, output: `${sliceCommits[1]}\nnexus-tslice\n`, truncated: false }, "the pylon checked out its own commit");
+      assert.deepEqual(await resumeLog(guest, 1), { exitCode: 0, output: "resumed\n", truncated: false }, "the template's first boot ran .nexus/resume once");
+    },
     async leaveWork(guest) {
-      assert.equal((await guest.exec(["sh", "-c", `echo ${run} > /root/work`], { cwd: "/", timeoutMs: 30_000 })).exitCode, 0);
+      const commit = "git -c user.name=tslice -c user.email=tslice@example.com commit --allow-empty --quiet -m 'work since the boot'";
+      assert.equal((await sh(guest, `${commit} && git rev-parse HEAD > ${home}/work-head`)).exitCode, 0);
     },
     async checkWork(guest) {
-      assert.deepEqual(await guest.exec(["cat", "/root/work"], { cwd: "/", timeoutMs: 30_000 }), { exitCode: 0, output: `${run}\n`, truncated: false });
+      const head = (await sh(guest, `cat ${home}/work-head`)).output;
+      assert.notEqual(head, `${sliceCommits[1]}\n`);
+      assert.deepEqual(await sh(guest, "git rev-parse HEAD && git symbolic-ref --short HEAD"), { exitCode: 0, output: `${head}nexus-tslice\n`, truncated: false }, "the wake kept the commit made after the checkout, so setup did not run again");
+      assert.deepEqual(await resumeLog(guest, 2), { exitCode: 0, output: "resumed\nresumed\n", truncated: false }, "the wake ran .nexus/resume");
     },
     async checkImageCopy() {},
     async setUp() {
-      if (await docker("images", "-q", "--filter", `reference=${baseImage}`) === "") await docker("pull", baseImage);
+      const dir = await mkdtemp(join(tmpdir(), "nexus-tslice-image-"));
+      try {
+        await writeFile(join(dir, "Dockerfile"), [
+          `FROM ${baseImage}`,
+          "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git python3 && rm -rf /var/lib/apt/lists/*",
+          `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user ${home}/workspace`,
+          sliceRepoStep,
+        ].join("\n") + "\n");
+        if (await docker("images", "-q", "--filter", `reference=${baseImage}`) === "") await docker("pull", baseImage);
+        await docker("build", "--quiet", "--label", testLabel, "--tag", tag, dir);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     },
     async cleanUp() {
       const ids = (await docker("ps", "-a", "-q", "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
@@ -148,7 +183,7 @@ async function pylonVmFixture(): Promise<TemplateFixture> {
     cwd: home,
     imageOnlyOnA: true,
     imageDropRefusal: /still needed by pylon /,
-    checksOut: true,
+    unfetchable: (boot) => ({ ...boot, network: { allowedHosts: [], secrets: [] } }),
     async checkTemplateBoot(guest, side) {
       assert.deepEqual(await sh(guest, "git rev-parse HEAD && git symbolic-ref --short HEAD"), { exitCode: 0, output: "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d\nnexus-tslice\n", truncated: false }, "the pylon checked out its own commit");
       assert.deepEqual(await sh(guest, "cat resume.log", home), { exitCode: 0, output: "resumed\n", truncated: false }, "the template's first boot ran .nexus/resume once");
@@ -276,9 +311,9 @@ test("a setup that fails publishes nothing and reports setup-failed with its out
   assert.ok(!(await held("a")).includes(broken));
 });
 
-test("a template boot whose checkout cannot fetch is retryable and leaves no instance", { skip: !fixture.checksOut && "this backend checks nothing out" }, async () => {
+test("a template boot whose checkout cannot fetch is retryable and leaves no instance", async () => {
   const job = spawn("a", built) as Extract<Job, { kind: "spawn" }>;
-  const offline: Job = { ...job, boot: { ...job.boot, network: { allowedHosts: [], secrets: [] } } };
+  const offline: Job = { ...job, boot: fixture.unfetchable(job.boot) };
   const status = await runJob("a", offline);
   assert.ok(status.state === "failed" && status.code === "backend" && /could not check out its commit/.test(status.message), JSON.stringify(status));
   assert.ok(!(await fixture.backends.a.list()).some((p) => p.pylonId === pylons.a), "the failed instance was removed, so the next spawn boots from the template again");

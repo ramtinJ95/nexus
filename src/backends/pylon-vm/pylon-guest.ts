@@ -17,10 +17,7 @@ import { stamped } from "../../pylon-vm/controller-log.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { existsError, readLogTail } from "../../pylon-vm/storage.ts";
 import { instanceFiles } from "../../pylon-vm/instance-layout.ts";
-import { asUser } from "../../guest-contract.ts";
-
-/** A login shell as `user`, in `cwd`, as one command string. The fork runs guest commands as root. */
-export const asUserIn = (script: string, cwd: string) => asUser(`cd ${q(cwd)} && ${script}`).map(q).join(" ");
+import { asUserIn } from "../pylon-boot.ts";
 
 /** The instance's controller log, which `logs` without a service reads. The controller appends to it too. */
 export const controllerLog = (dir: string): PylonLog => (line) => appendFile(instanceFiles(dir).log, `${stamped(line)}\n`, { mode: 0o600 });

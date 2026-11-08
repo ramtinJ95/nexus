@@ -48,7 +48,7 @@ export async function runJob(job: Job, deps: ProbeDeps, signal: AbortSignal): Pr
           if (deps.secrets.value(grant.name) === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
         }
         // A pylon that is up already holds its overlay.
-        if (deps.backend.storage !== undefined && ["absent", "stopped"].includes(await deps.backend.state(job.pylonId))) await refuseShortDisk(deps.backend.storage, job.boot.resources.diskGiB);
+        if (deps.backend.storage !== null && ["absent", "stopped"].includes(await deps.backend.state(job.pylonId))) await refuseShortDisk(deps.backend.storage, job.boot.resources.diskGiB);
         await deps.backend.ensureRunning(job.boot, job.live, signal, job.relaunch ?? true);
         await deps.serve.converge(job.pylonId, job.live.previews, signal);
         return;

@@ -88,6 +88,7 @@ function fakeBackend(guest: Guest | null = null) {
     async buildTemplate(id) { calls.push(`build-template ${id}`); },
     async buildImage(id, _recipe, on) { calls.push(`build-image ${id} on ${on}`); },
     guest: () => { if (guest === null) throw new Error("this test has no guest"); return guest; },
+    gitSsh: false, nestedVirtualization: false, eventJournal: null, hostBridge: null, storage: null, processes: async () => null,
     async updateSecret(name, value) {
       secretUpdates.push([name, value]);
       return unreachable.map((id) => ({ pylonId: id, reason: "its controller did not answer" }));
@@ -102,6 +103,7 @@ function fakeBackend(guest: Guest | null = null) {
       },
       async import(manifest, stream) { imported.set(manifest.id, { manifest, body: Buffer.concat(await stream.toArray()).toString() }); },
       async drop(id) { calls.push(`drop ${id}`); },
+      bytes: async () => null,
     },
   };
   return {
@@ -662,7 +664,7 @@ test("node health is the control plane's to read, read-only, with the backend's 
   for (const method of ["POST", "PUT", "DELETE"]) assert.equal((await fetch(`${base}/v1/node-health`, { method })).status, 405, `${method} changes nothing`);
   callAs(peer);
   assert.equal((await fetch(`${base}/v1/node-health`)).status, 403, "a peer probe may not read it");
-  delete backend.processes;
+  backend.processes = async () => null;
   callAs(controlPlane);
   assert.equal((await client.health()).pylons, null, "a backend that cannot name its pylons' processes");
 });
@@ -758,11 +760,11 @@ test("an observer learns at once that the probe got a held secret it did not hav
 });
 
 test("observations say the node nests KVM only when its backend does", async (t) => {
-  for (const nestedVirtualization of [true, false, undefined]) {
-    const { client } = await setup(t, { backend: { ...fakeBackend().backend, ...nestedVirtualization === undefined ? {} : { nestedVirtualization } } });
+  for (const nestedVirtualization of [true, false]) {
+    const { client } = await setup(t, { backend: { ...fakeBackend().backend, nestedVirtualization } });
     for await (const e of client.observe(AbortSignal.timeout(5000))) {
       const observation = e.type === "snapshot" ? e.observation : assert.fail();
-      assert.equal(observation.nestedVirtualization, nestedVirtualization === true ? true : undefined);
+      assert.equal(observation.nestedVirtualization, nestedVirtualization ? true : undefined);
       break;
     }
   }

@@ -83,7 +83,6 @@ test("the profile script exports the NEXUS_ facts to a login shell, quoting ever
     NEXUS_THREAD_ID: "it's $HOME `id`",
     NEXUS_PROJECT: "acme-web",
     NEXUS_NODE: "rj-firebat",
-    NEXUS_API: "http://nexus.pylon",
   });
 });
 

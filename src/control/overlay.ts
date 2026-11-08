@@ -29,7 +29,8 @@ export interface PylonOverlay {
 
 /**
  * Renders three files:
- * - /etc/profile.d/nexus.sh: NEXUS_PYLON=1, NEXUS_PYLON_ID, NEXUS_THREAD_ID, NEXUS_PROJECT, NEXUS_NODE, NEXUS_API.
+ * - /etc/profile.d/nexus.sh: NEXUS_PYLON=1, NEXUS_PYLON_ID, NEXUS_THREAD_ID, NEXUS_PROJECT, NEXUS_NODE. NEXUS_API is the
+ *   backend's: the in-pylon CLI defaults to the pylon VM's nexusApi, and the Docker double sets its own in the container.
  * - pylonInfoFile: the same facts for `nexus info --json`.
  * - pylonGuideFile: prose for the agent. It is in a pylon, where its repository came from and how to
  *   commit and publish from it, which hosts it can reach and that everything else is blocked, the names and hosts
@@ -48,7 +49,6 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
     NEXUS_THREAD_ID: overlay.threadId,
     NEXUS_PROJECT: overlay.project,
     NEXUS_NODE: overlay.node,
-    NEXUS_API: nexusApi,
   };
   const info: PylonInfo = {
     pylonId: overlay.pylonId,

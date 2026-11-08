@@ -9,8 +9,12 @@
  *
  * A template is a Docker image committed from a build container, and its artifact is that image's
  * `docker save` archive in the artifact store, so templates move between probes as they do between nodes. A
- * template that arrived as an archive is loaded into Docker on its first boot. The double clones nothing: its
- * setup is the project's preSetup, run as root in the build container.
+ * template that arrived as an archive is loaded into Docker on its first boot.
+ *
+ * Each boot runs the pylon boot policy (pylon-boot.ts) in the container as a pylon's controller does: the boot hooks,
+ * then the setup of a container made from an image or a template, then the resume of one booted from a disk. A setup
+ * that fails removes the container, which holds nothing of the user's. A probe that dies during a setup leaves a
+ * container that never finishes it.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -31,14 +35,15 @@ import { parse, parseJson } from "../parse.ts";
 import { serialQueue } from "../single-flight.ts";
 import { processStream } from "../process-stream.ts";
 import { installFileCommand, shellQuote as q } from "../shell.ts";
-import type { OverlayFile } from "../protocol/spawn.ts";
+import type { BootInputs, LiveSpec } from "../protocol/spawn.ts";
 import { type CheckpointId, type ImageId, isImageId, isTemplateId, type PortableArtifactId, type PylonId, type TemplateId } from "../ids.ts";
 import { pausedSessionsSchema, type PausedSession } from "../protocol/observations.ts";
 import { publicUrls } from "../public-urls.ts";
 import { diskBytes } from "../node-base/disk-bytes.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "../probe/guest/session-wake.ts";
 import { pausedSessionsIn } from "../probe/guest/sessions.ts";
-import { checkoutDir, servicesFile, sessionsFile } from "../../images/pylon/nexus-contract.ts";
+import { checkoutDir, servicesFile, sessionsFile, workspaceDir } from "../../images/pylon/nexus-contract.ts";
+import { bootHooks, diskSetup, resumeCommands, setupRemoved, templateSetup } from "./pylon-boot.ts";
 
 const encoded = (sessions: readonly PausedSession[] | null) => sessions === null ? "" : Buffer.from(JSON.stringify(sessions)).toString("base64url");
 const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {
@@ -47,6 +52,39 @@ const decoded = (labels: Record<string, string>): readonly PausedSession[] | nul
 };
 const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
+/** A pylon's controller gives each boot hook as long. */
+const hookLimitMs = 120_000;
+const nexusApiProfile = "/etc/profile.d/nexus-api.sh";
+
+/** Runs each resume command in turn, and prints its outcome as a pylon's controller logs it. */
+const resumeScript = 'for c in "$@"; do sh -lc "$c" || { echo "resume: exited $?"; exit; }; done; echo "resume: exited 0"';
+/**
+ * Starts resumeScript ($0, with its commands) in the background, its output in the container log, and waits up to 10 s
+ * for it, as a pylon's controller does before the services start. A resume that runs longer goes on.
+ */
+const startResume = `sh -c "$0" sh "$@" >/proc/1/fd/1 2>&1 & pid=$!; i=0; while [ $i -lt 100 ] && kill -0 $pid 2>/dev/null && [ "$(cut -d ' ' -f 3 /proc/$pid/stat 2>/dev/null)" != Z ]; do sleep 0.1; i=$((i + 1)); done`;
+
+/**
+ * `command` in a login shell as root, as a pylon's controller runs it. Past `limitMs` the container's `timeout` stops its
+ * process group, as the controller's watchdog does, since killing the docker CLI would leave it running.
+ */
+const asRoot = (command: string, limitMs: number) => ["timeout", "-k", "2", String(Math.max(1, Math.ceil(limitMs / 1000))), "sh", "-lc", command];
+/** How long past a command's own limit its docker exec is given up on, should `timeout` not stop it. */
+const execGraceMs = 10_000;
+
+/** Runs each command as the pylon's controller does, from the workspace, until one fails. */
+async function runSetup(container: string, commands: readonly string[]): Promise<{ exitCode: number | null; output: string }> {
+  const deadline = Date.now() + setupLimitMs;
+  let output = "";
+  for (const command of commands) {
+    const left = deadline - Date.now();
+    if (left <= 0) return { exitCode: null, output };
+    const step = await dockerExec(container, asRoot(command, left), { cwd: workspaceDir, timeoutMs: left + execGraceMs });
+    output += step.output;
+    if (step.exitCode !== 0) return { exitCode: step.exitCode, output };
+  }
+  return { exitCode: 0, output };
+}
 
 export interface DockerBackendOptions {
   /**
@@ -173,9 +211,9 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   }
   const checkpointRef = (pylonId: PylonId, checkpoint: CheckpointId) => `nexus-checkpoint/${pylonId}:${checkpoint}`;
 
-  /** The container's own log, `docker logs`, by way of the init process's stdout. */
+  /** The container's own log, `docker logs`, by way of the init process's stdout. Through stdin, so a setup's output fits. */
   const containerLog = (pylonId: PylonId): PylonLog => async (line) => {
-    await docker(["exec", pylonId, "sh", "-c", 'printf "%s\\n" "$1" > /proc/1/fd/1', "sh", line]);
+    await docker(["exec", "--interactive", pylonId, "sh", "-c", "cat > /proc/1/fd/1"], { input: `${line}\n` });
   };
 
   /**
@@ -208,17 +246,41 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     }
   }
 
-  /**
-   * Writes the overlay, applies the live spec's URLs to the services, and relaunches the sessions of a boot from an
-   * existing disk, unless `relaunch` is false, which leaves the mark for a later spawn.
-   */
-  async function afterBoot(pylonId: PylonId, overlay: readonly OverlayFile[], urls: Record<string, string>, disk: "fresh" | "existing" | "running", relaunch: boolean): Promise<void> {
+  /** A container made now from its image or its template, one booted from a disk it had, or one already running. */
+  type Booted = "created" | "disk" | "running";
+
+  /** With `relaunch` false, a boot from a disk leaves its relaunch mark for a later spawn instead of relaunching its sessions. */
+  async function afterBoot(boot: BootInputs, live: LiveSpec, booted: Booted, relaunch: boolean): Promise<void> {
+    const { pylonId, source } = boot;
+    const log = containerLog(pylonId);
     // A checkpoint carries the mark from its pause. A container stopped some other way gets it here.
-    if (disk === "existing") await markRelaunch(pylonId);
+    if (booted === "disk") await markRelaunch(pylonId);
+    if (booted !== "running") await dockerExec(pylonId, ["mkdir", "-p", workspaceDir]);
     // Before the services and sessions start, as in a pylon, so both read this spawn's files.
-    await guest(pylonId).writeFiles(overlay);
-    await supervise(pylonId, urls, disk !== "running");
-    await finishRelaunch(pylonId, guest(pylonId), containerLog(pylonId), containerMark(pylonId), relaunch);
+    await guest(pylonId).writeFiles(live.overlay);
+    if (booted !== "running") {
+      // Login shells, which the boot policy and the services run in, start from a clean env, without the container's.
+      if (options.hostBridgePort !== undefined) await dockerExec(pylonId, ["sh", "-c", `printf 'export NEXUS_API=%s\\n' "$NEXUS_API" > ${nexusApiProfile}`]);
+      for (const hook of bootHooks(boot)) {
+        const { exitCode, output } = await dockerExec(pylonId, asRoot(hook, hookLimitMs), { cwd: "/", timeoutMs: hookLimitMs + execGraceMs });
+        if (output !== "") await log(output.trimEnd());
+        if (exitCode !== 0) await log(`Boot hook exited ${exitCode}`);
+      }
+    }
+    if (booted === "created" && source.kind !== "resume") {
+      const setup = diskSetup({ ...boot, source });
+      const { exitCode, output } = await runSetup(pylonId, setup.commands);
+      if (exitCode !== 0) {
+        await removeContainer(pylonId);
+        throw setupRemoved(pylonId, setup.retry, `Setup ${exitCode === null ? "passed its 20-minute limit" : `exited ${exitCode}`}`, output.slice(-4096));
+      }
+      if (output !== "") await log(output.trimEnd());
+    }
+    if (booted === "disk" || booted === "created" && source.kind === "template") {
+      await dockerExec(pylonId, ["sh", "-c", startResume, resumeScript, ...resumeCommands], { cwd: workspaceDir, timeoutMs: 30_000 });
+    }
+    await supervise(pylonId, publicUrls(pylonId, live.previews, options.previewHost), booted !== "running");
+    await finishRelaunch(pylonId, guest(pylonId), log, containerMark(pylonId), relaunch);
   }
 
   function guest(pylonId: PylonId): Guest {
@@ -331,17 +393,22 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
   return {
     artifacts,
+    gitSsh: false,
+    nestedVirtualization: false,
+    eventJournal: null,
     // Each container's NEXUS_API names the port, so only a backend given a fixed one answers it.
-    ...(options.hostBridgePort === undefined ? {} : { hostBridge: dockerHostBridge(options.hostBridgePort, options.labels) }),
+    hostBridge: options.hostBridgePort === undefined ? null : dockerHostBridge(options.hostBridgePort, options.labels),
+    // Docker keeps the containers' disks, and Docker Desktop runs their processes in its VM, where the probe cannot read them.
+    storage: null,
+    async processes() { return null; },
 
     async ensureRunning(boot, live, signal, relaunch = true) {
-      const urls = publicUrls(boot.pylonId, live.previews, options.previewHost);
       const existing = await container(boot.pylonId, signal);
-      if (existing?.State.Status === "running") return afterBoot(boot.pylonId, live.overlay, urls, "running", relaunch);
+      if (existing?.State.Status === "running") return afterBoot(boot, live, "running", relaunch);
       // A container that exists holds the newest disk, newer than any checkpoint, so it is started as it is.
       if (existing !== null) {
         await docker(["start", existing.Id], { signal });
-        return afterBoot(boot.pylonId, live.overlay, urls, "existing", relaunch);
+        return afterBoot(boot, live, "disk", relaunch);
       }
       let from: string;
       let bootedFrom: CheckpointId | null = null;
@@ -368,7 +435,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         ...(options.hostBridgePort === undefined ? [] : dockerBridgeRunArgs(options.hostBridgePort)),
         from, "sleep", "infinity",
       ], { signal });
-      await afterBoot(boot.pylonId, live.overlay, urls, bootedFrom === null ? "fresh" : "existing", relaunch);
+      await afterBoot(boot, live, bootedFrom === null ? "created" : "disk", relaunch);
     },
 
     async ensurePaused(pylonId, checkpoint, signal) {
@@ -447,10 +514,9 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       await removeContainer(build);
       await docker(["run", "--detach", "--init", "--pull", "never", "--name", build, "--label", `${label.templateBuild}=${template}`, ...scope.flatMap(([k, v]) => ["--label", `${k}=${v}`]), from, "sleep", "infinity"], { signal });
       try {
-        if (inputs.preSetup !== null) {
-          const setup = await dockerExec(build, ["sh", "-c", inputs.preSetup], { cwd: "/", timeoutMs: setupLimitMs });
-          if (setup.exitCode !== 0) throw new JobFailure("setup-failed", `the setup of template ${template} ${setup.exitCode === null ? "passed its 20-minute limit" : `exited ${setup.exitCode}`}`, setup.output.slice(-4096));
-        }
+        await dockerExec(build, ["mkdir", "-p", workspaceDir]);
+        const setup = await runSetup(build, templateSetup(inputs));
+        if (setup.exitCode !== 0) throw new JobFailure("setup-failed", `the setup of template ${template} ${setup.exitCode === null ? "passed its 20-minute limit" : `exited ${setup.exitCode}`}`, setup.output.slice(-4096));
         await docker(["stop", build], { signal });
         await docker(["commit", build, templateRef(template)], { signal });
       } finally {
