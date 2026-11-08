@@ -424,7 +424,7 @@ test("a boot a settle sealed is paused before an unarchive runs work on it, thou
   await until("the pylon is woken for reading", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
   const sealed = fake.pylons.get(thread.pylonId) as Extract<PylonObservation, { phase: "running" }>;
   registry.sealBoot(thread.pylonId, sealed.bootedAt);
-  registry.releaseSettle();
+  registry.releaseUsageHold({ by: "settle" });
 
   registry.setThreadStatus(thread.id, "active");
   registry.apply({ record: "activity", pylonId: thread.pylonId, human: Date.now(), agent: null });

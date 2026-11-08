@@ -225,9 +225,24 @@ export function usageStore(db: Db, threads: {
       if (reason === null) settleWaits.delete(thread);
       else settleWaits.set(thread, reason);
     },
-    /** The settle lets go of the pylon it holds, once it is paused. */
-    releaseSettle() { settle = null; },
-    /** The run lets go of the pylon it holds, once it is paused. */
-    releaseUsageBackfill() { sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run(); },
+    /** The pylon held to be read whole: a settle's, which goes first, or the running run's. */
+    usageHold(): UsageHold | null {
+      if (settle !== null) return { by: "settle", thread: settle.thread, phase: settle.phase, since: settle.since };
+      const run = usageBackfill();
+      return run.state === "running" && run.current !== null ? { by: "run", ...run.current } : null;
+    },
+    /**
+     * The holder records the thread read, with a null reason, or given up on, and its hold then waits for the pause. A
+     * settle's failure keeps its first line, as a pylon's failure ends with its log.
+     */
+    finishUsageHold(hold: Pick<UsageHold, "by" | "thread">, reason: string | null, now: number) {
+      if (hold.by === "run") finishUsageBackfillThread(hold.thread, reason === null ? "done" : "skipped", reason, now);
+      else finishSettle(hold.thread, reason === null ? null : reason.split("\n")[0]!, now);
+    },
+    /** The holder lets go of the pylon it holds, once it is paused. */
+    releaseUsageHold(hold: Pick<UsageHold, "by">) {
+      if (hold.by === "run") sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run();
+      else settle = null;
+    },
   };
 }
