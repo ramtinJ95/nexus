@@ -331,6 +331,18 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
 
   const read = (c: Capture) => within(c).then(normal);
   const texts = [...await pool(reads, 8, read), ...await pool(visits, 8, read)];
+
+  const listed: { id: string; thread: string | null; phase: { kind: string } }[] = JSON.parse((await call("GET", "/v1/items")).text);
+  const homeText = (await call("GET", "/")).text;
+  const flight = homeText.slice(homeText.indexOf('id="flight"'), homeText.indexOf('id="overview"'));
+  const stacked = new Map(flight.split('<section class="phase').slice(1).flatMap((section) => {
+    const stage = /data-stage="([a-z]+)"/.exec(section)![1]!;
+    return [...section.matchAll(/data-peek="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)].map(([, key, row]): [string, string] => [key!, row!.includes("needs you") ? "held" : stage]);
+  }));
+  const stageOfKind: Record<string, string | undefined> = { planned: "planned", queued: "queued", building: "building", reviewing: "review", held: "held", landing: "landing", landed: "deployed" };
+  for (const item of listed) {
+    assert.equal(stacked.get(item.thread ?? item.id), stageOfKind[item.phase.kind], `GET /v1/items and the home stack name one stage for ${normal(item.id)}`);
+  }
   minting = true;
   texts.push(...await pool(writes, 1, read));
   const all = [...reads, ...visits, ...writes];
