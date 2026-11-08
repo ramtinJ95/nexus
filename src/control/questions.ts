@@ -69,7 +69,11 @@ export const isOpen = (q: Pick<Question, "answer" | "withdrawn">) => q.answer ==
 export interface HeldQuestion { review: string; head: string; base: string | null; holds: readonly Hold[] }
 export const holdOptions = ["Land", "Leave it"] as const;
 
-/** One item of a planning thread's block. `after` holds keys of earlier items of the block, or pipeline item IDs. */
+/**
+ * One item of a planning thread's block, as Question.proposal holds it. `block` is 12 hex characters, a hash of the
+ * block's items, and `index` its place in the block, from 1. `after` holds keys of earlier items of the block, or
+ * pipeline item IDs.
+ */
 export interface Proposal { block: string; index: number; key: string; title: string; brief: string; after: readonly string[] }
 
 /** One question of a Claude worker's AskUserQuestion call, as the call's input holds it. */

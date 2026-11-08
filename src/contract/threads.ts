@@ -44,10 +44,13 @@ export interface QueuedThread {
   id: ThreadId;
   title: string;
   project: ProjectId;
+  /** Who queued it, and the thread's startedBy once it starts. */
   startedBy: string;
+  /** When it was queued, in Unix milliseconds. */
   createdAt: number;
   /** Archived means cancelled. */
   status: "queued" | "archived" | "deleted";
+  /** The threads it waits for, without repeats. */
   after: readonly ThreadId[];
   /** One per predecessor, in `after` order. */
   waits: readonly Wait[];
@@ -56,13 +59,17 @@ export interface QueuedThread {
   /** A node, or "auto". */
   node: string;
   worker: "harness" | "claude";
+  /** A Claude worker's model, null for a Nexus agent thread. */
   model: string | null;
   /** The first message, or the Claude prompt as given, without the `/poteto-mode` a start puts in front. */
   prompt: string | null;
   branch: string | null;
   commit: string | null;
+  /** The size its pylon boots with, as ThreadDetail.pylon.resources. */
   resources: BootInputs["resources"];
+  /** Who asked `start-queued` to start it now, and when. */
   startNow: { by: string; at: number } | null;
+  /** Why the last start attempt failed. */
   lastError: string | null;
 }
 

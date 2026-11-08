@@ -36,18 +36,24 @@ type JudgmentRegistry = Pick<Registry, "agent" | "askQuestion" | "failure" | "ju
 
 /** A judgment as `nexus show` and the thread page show it. */
 export interface JudgmentView {
+  /** The failure's thread.failed event ID. */
   failure: number;
+  /** Where the pylon failed. */
   node: NodeName;
+  /** The failure's reason. */
   failed: string;
+  /** Unix milliseconds. */
   startedAt: number;
   phase: Phase["kind"];
   /** Null while it judges. */
   verdict: Verdict | null;
-  /** What Nexus did, once done. */
+  /** What Nexus did, once done, such as "retried the pylon on node-a". */
   outcome: string | null;
-  /** The question the person answers, while it is asked. */
+  /** The question the person answers, `judgment:<failure>`, while it is asked. */
   question: string | null;
+  /** What the judgment was asked, null when the control plane decided without one. */
   brief: string | null;
+  /** The judgment's reply, at most its last 8,000 characters. */
   reply: string | null;
 }
 

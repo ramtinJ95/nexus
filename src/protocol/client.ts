@@ -63,7 +63,9 @@ export interface ProbeClient {
  */
 export interface NodeHealth {
   node: NodeName;
+  /** The ISO time the probe read it. */
   readAt: string;
+  /** What capacity counts. */
   cpus: number;
   load: { one: number; five: number; fifteen: number } | null;
   memory: { totalGiB: number; availableGiB: number; swapTotalGiB: number; swapFreeGiB: number } | null;

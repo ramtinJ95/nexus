@@ -13,14 +13,17 @@ export interface Verdict { status: Status; text: string }
 export type Check = Verdict & ({ node: NodeName; name: NodeCheckName } | { node: null; name: ControlCheckName });
 
 export interface DoctorReport {
+  /** The ISO time the checks ran. */
   at: string;
   /** The worst of the checks' statuses. */
   status: Status;
   checks: readonly Check[];
 }
 /**
- * A check's status changed, as two passes in a row confirmed it: `from` is what it was, and `text` what the pass that
- * set `status` found. `seenAt` is when the person saw the problem on the Health page, null for one not seen yet.
+ * A check's status changed, as two passes in a row confirmed it: `at` is the ISO time of the pass that confirmed it,
+ * `from` what it was, and `text` what the pass that set `status` found, or "no longer checked". `seenAt` is when the
+ * person saw the problem on the Health page, null for one not seen yet, and a problem that got better keeps its
+ * predecessor's.
  */
 export type HealthChange = Check & { id: number; at: string; from: Status; seenAt: string | null };
 
@@ -28,11 +31,11 @@ export type HealthChange = Check & { id: number; at: string; from: Status; seenA
 export interface HealthView {
   /** When the latest pass ran, or null before this control plane's first. */
   at: string | null;
-  /** That pass's checks, the control plane's first and then each node's. */
+  /** That pass's checks, the control plane's first and then each node's, which may differ from what two passes confirmed. */
   checks: readonly Check[];
   /** For each check whose confirmed status is warn or fail, the change that made it so, oldest first. */
   problems: readonly HealthChange[];
-  /** How many of those the person has not seen. */
+  /** How many of those have no `seenAt`. */
   unseen: number;
 }
 

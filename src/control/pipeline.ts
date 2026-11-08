@@ -39,14 +39,20 @@ export const phaseStep: Record<ItemPhase["kind"], Step | null> = {
 
 /** The API's view of an item, which `nexus items`, `nexus item show` and the dashboard's pipeline page show. */
 export interface PipelineItem {
+  /** `it-` and 12 hex. */
   id: ItemId;
   project: ProjectId;
   title: string;
+  /** Who added it, and its thread's startedBy. */
   addedBy: string;
+  /** Unix milliseconds. */
   addedAt: number;
+  /** Items of the same project whose threads must merge first. */
   after: readonly ItemId[];
   worker: "harness" | "claude";
+  /** A Claude worker's model, null for a Nexus agent thread. */
   model: string | null;
+  /** The first message, or the Claude prompt without `/poteto-mode`. */
   brief: string | null;
   /** The thread it became, queued or started, or null before it is queued. */
   thread: ThreadId | null;

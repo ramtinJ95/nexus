@@ -23,6 +23,7 @@ export interface ImageStep {
   state: "pending" | "running" | "done" | "failed" | "skipped";
   /** The job last sent for this step, saved before it is sent, so a restarted control plane asks the probe about it. */
   job: { id: JobId; notAfter: string } | null;
+  /** Why it failed or was skipped, or "recorded already" for a build that needed no job. */
   reason: string | null;
 }
 
@@ -33,8 +34,11 @@ export type Outcome = { state: "running" } | { state: "done"; finishedAt: number
  * deployed while it runs must not record in its place. A rollout has one step per registry node.
  */
 export type ImageOperation = ({ kind: "build"; release: string | null } | { kind: "rollout" }) & {
+  /** `img-` and 12 hex as `nexus image build` makes it. POST /v1/images takes `img-` and 1 to 40 lowercase letters or digits. */
   image: ImageId;
+  /** The caller's stable tailnet node ID. */
   requestedBy: TailnetNodeId;
+  /** Unix milliseconds. */
   requestedAt: number;
   steps: readonly ImageStep[];
 } & Outcome;

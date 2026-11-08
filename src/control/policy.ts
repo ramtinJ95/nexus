@@ -144,7 +144,7 @@ export const staleQuote = (round: Round, body: string) => quoteOf(round) !== nul
  * `early` is what the head alone decides, read from its change before the loop recorded it, so the person can answer
  * while the reviewer and the check run.
  */
-type LandPress = { kind: "stuck"; holds: Hold[] } | { kind: "lands"; waives: Hold[]; quotes: boolean };
+export type LandPress = { kind: "stuck"; holds: Hold[] } | { kind: "lands"; waives: Hold[]; quotes: boolean };
 export function landPress(review: Review, early: readonly Hold[] | null = null): LandPress {
   const holds = holdsAt(review, { early });
   const stuck = holds.filter((h) => holdRule(h.code).holdsAgain && !holdRule(h.code).waivable);

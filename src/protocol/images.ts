@@ -110,6 +110,7 @@ export interface ImageManifest {
   gondolinBuildId: string;
   pins: ImageRecipe["pins"];
   builtOn: NodeName;
+  /** ISO 8601. */
   builtAt: string;
   sha256: string; // of the sparse archive peers fetch, artifactArchive in src/image/artifacts.ts
 }

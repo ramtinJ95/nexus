@@ -19,10 +19,13 @@ export const reportStates = ["pending", "waiting-for-control", "waiting-for-idle
 export interface ReleaseReport {
   node: string;
   role: Role;
+  /** The release behind the role's current link. */
   commit: string | null;
+  /** The desired release it attempted. */
   target: string | null;
   state: (typeof reportStates)[number];
   reason: string | null;
+  /** When the control plane received the report, in Unix milliseconds, or 0 before the first. */
   observedAt: number;
 }
 /** What the worker posts to /v1/deployer/report. */
@@ -30,7 +33,7 @@ export type ReportBody = Omit<ReleaseReport, "node" | "observedAt">;
 /** What the control plane answers, which has already turned a stale report into a pending one. */
 export interface ReleaseView {
   desired: DesiredRelease | null;
-  /** The node the control plane runs on, or null when it does not know. A control plane older than 0.71.0 sends none. */
+  /** The node the control plane runs on, or null when it does not know. */
   controlNode?: string | null;
   nodes: ReleaseReport[];
 }
