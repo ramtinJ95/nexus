@@ -119,7 +119,6 @@ export function agentReader(registry: AgentConversationRegistry, harness: Pick<H
       if (first === undefined) return null;
       return typeof first.content === "string" ? first.content : first.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("");
     },
-    /** An agent's replies, oldest first. */
     replies: async (t: Thread): Promise<string[]> => repliesOf(await read(t)),
     personWrote: async (t: Thread): Promise<boolean> => personWrote(await read(t)),
   };

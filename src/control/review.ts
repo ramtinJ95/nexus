@@ -1122,7 +1122,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
   }
 
-  /** Refuses a review of the builder's while one that has not ended runs. */
   function refuseIfRunning(builder: ThreadId): void {
     const existing = registry.review(builder);
     if (existing !== null && !ended(existing)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
