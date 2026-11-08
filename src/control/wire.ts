@@ -8,7 +8,7 @@ import type { ActualState, DesiredPhase } from "./reconcile.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { GuestNotAnswering } from "../protocol/observations.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { ClaudeResume, ClaudeSent } from "./claude-worker.ts";
+import type { ClaudeResume, ClaudeSent, ClaudeWorkerState } from "./claude-worker.ts";
 import type { Output, Preview, Session, Thread } from "./thread-store.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { WatchedPr } from "./pr-watch-store.ts";
@@ -21,7 +21,7 @@ import type { ReviewView } from "./review-view.ts";
 /** One card of the inbox for a thread. */
 export type ThreadNeed = PersonNeed & { d: ThreadDetail };
 export interface ThreadDetail {
-  claudeWorker?: { model: string | null; state: string; message?: string };
+  claudeWorker?: { model: string | null; state: ClaudeWorkerState; message?: string };
   /** Nexus resuming the Claude worker after its turns died, or null. A control plane older than 0.64.0 sends none. */
   resume?: ClaudeResume | null;
   attention: Attention;
