@@ -6,7 +6,7 @@ import { HttpError } from "../http-error.ts";
 import { commitSchema, releaseView, releasesSchema, reportSchema, resolveMain } from "../releases.ts";
 import type { CleanupPass } from "../cleanup.ts";
 import { ok, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed, refusal, type Deployment } from "./access.ts";
+import { anyAllowed, demand, type Deployment } from "./access.ts";
 
 /** The deployment, and what `main` resolves to, which a test fixes. */
 export type DeploymentOptions = Deployment & { resolveMain?: () => Promise<string> };
@@ -40,8 +40,7 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
     ["POST", /^\/v1\/deployer\/report$/, { role: "reporter" }, async (_, r) => {
       const node = registry.nodeByTailnetId(r.caller)!;
       const report = parse(reportSchema, await r.body());
-      const refused = report.role === "control" ? refusal(r.roles, { role: "control-node", action: "reports control health" }) : null;
-      if (refused !== null) throw refused;
+      if (report.role === "control") demand(r.roles, { role: "control-node", action: "reports control health" });
       registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
       return ok({ ok: true });
     }],

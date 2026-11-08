@@ -7,7 +7,7 @@ import { HttpError } from "../http-error.ts";
 import { commitSchema } from "../releases.ts";
 import { maxRounds } from "../review-model.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { landing, mayLand } from "./access.ts";
+import { demand, landing } from "./access.ts";
 
 const reviewSchema = z.strictObject({
   pr: z.int().positive().optional(),
@@ -33,7 +33,7 @@ export function reviewRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null
     ["POST", /^\/v1\/threads\/([^/]+)\/review$/, { role: "person", action: "start a review" }, async (m, r) => {
       const body = parse(reviewSchema, await r.body({}));
       const t = thread(m[1]!);
-      if (body.land) mayLand(r.roles);
+      if (body.land) demand(r.roles, landing);
       return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
     }],
     ["POST", /^\/v1\/threads\/([^/]+)\/review\/cancel$/, { role: "person", action: "cancel a review" }, (m, r) => {

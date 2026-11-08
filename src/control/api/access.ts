@@ -162,9 +162,9 @@ export type Access = ReturnType<typeof apiAccess>;
 /** Landing merges and may deploy, so it takes the same right as `nexus deploy`, whatever the repository. */
 export const landing = { role: "deployer", action: "land a pull request, which deploys" } satisfies Policy;
 
-/** For a route whose body asks for a landing, which the land route's own role checks otherwise. */
-export function mayLand(roles: ReadonlySet<Role>) {
-  const refused = refusal(roles, landing);
+/** Refuses a caller holding `roles` that does not hold `policy`'s role: a route's, or one its body asks for, such as a landing. */
+export function demand(roles: ReadonlySet<Role>, policy: Policy) {
+  const refused = refusal(roles, policy);
   if (refused !== null) throw refused;
 }
 
