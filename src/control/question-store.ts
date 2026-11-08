@@ -10,6 +10,7 @@ import type { NodeName, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
 import { askQuestionId, askRecord, isNodeQuestion, isOpen, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
+import type { Need } from "./attention.ts";
 
 export function questionStore(db: Db, clock: () => number, threadStatus: (id: ThreadId) => ThreadStatus | undefined, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql, recordOf } = db;
@@ -40,7 +41,8 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
     return changes > 0;
   }
 
-  const needsPerson = (thread: ThreadId) => sql("SELECT 1 FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL").get(thread) !== undefined;
+  const needs = (thread: ThreadId): Need[] => sql(`SELECT record FROM questions WHERE thread = ? AND json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL
+    ORDER BY json_extract(record, '$.askedAt'), rowid`).all(thread).map((r) => { const question = json<ThreadQuestion>(r.record); return { kind: "question", question, since: question.askedAt }; });
   /** An archived thread's failure needs nothing more from the person, so its open question is withdrawn and kept. */
   function closed(thread: ThreadId) {
     sql("DELETE FROM waiting_asks WHERE thread = ?").run(thread);
@@ -50,7 +52,7 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
   }
 
   return {
-    participant: { needsPerson, closed, reconcile: reconcileAsks },
+    participant: { needs, closed, reconcile: reconcileAsks },
     /** Stores the question unless one with its ID exists, and answers the stored one either way. */
     askQuestion<Q extends Unanswered>(question: Q): Q extends Omit<NodeQuestion, "answer"> ? NodeQuestion : ThreadQuestion {
       return transaction(() => {

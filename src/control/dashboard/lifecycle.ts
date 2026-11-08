@@ -10,7 +10,8 @@ import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pip
 import { checkBeside, checkThread, liveNote, roundsSpent, type PhaseKind, type Review } from "../review-model.ts";
 import { html, limitText, type Html, type Tone } from "./view.ts";
 import { landingAt } from "./cards.ts";
-import type { Context, ThreadNeed } from "./context.ts";
+import type { Context } from "./context.ts";
+import type { ThreadNeed } from "../work.ts";
 
 /** The steps every piece of work takes, in order. Held is not a step: work is held for the person at one of them. */
 export const steps = ["planned", "queued", "building", "review", "landing", "deployed"] as const;

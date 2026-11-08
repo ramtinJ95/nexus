@@ -4,6 +4,7 @@
  */
 import type { Db } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
+import type { Need } from "./attention.ts";
 
 export type Nudge =
   /** `turn` is the end (the thread's lastReplyAt) of the stalled turn the latest nudge answered; `count` nudges in a row. */
@@ -29,7 +30,12 @@ export type Nudge =
 export function nudgeStore(db: Db, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql, recordOf, saveRecord } = db;
   return {
-    participant: { needsPerson: (thread: ThreadId) => recordOf<Nudge>("nudges", "thread", thread)?.state === "person" },
+    participant: {
+      needs(thread: ThreadId): Need[] {
+        const nudge = recordOf<Nudge>("nudges", "thread", thread);
+        return nudge?.state === "person" ? [{ kind: "nudge", since: nudge.turn }] : [];
+      },
+    },
     nudge: (thread: ThreadId): Nudge | null => recordOf<Nudge>("nudges", "thread", thread),
     /** The threads with a nudge record that a later pass may still change or clear, which is every one but left-alone. */
     nudgedThreads: (): ThreadId[] => sql("SELECT thread FROM nudges WHERE json_extract(record, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
