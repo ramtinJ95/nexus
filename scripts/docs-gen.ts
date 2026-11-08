@@ -1,15 +1,19 @@
 /**
- * Regenerates the TypeScript blocks of docs/cli.md from the source declarations they show. A block follows a line
+ * Regenerates the parts of the docs that copy the source. A TypeScript block follows a line
  * `<!-- types: <file> <Name> ... <file> <Name> ... -->`, and its body is each declaration as the file before its name has
  * it, with the TSDoc directly above it. A file's header comment stands apart from its first declaration by a blank line.
- * `node scripts/docs-gen.ts` rewrites the page, and src/docs.test.ts fails when the page and the source differ.
+ * The table after `<!-- holds -->` is each hold's rule from src/control/holds.ts.
+ * `node scripts/docs-gen.ts` rewrites the pages, and src/docs.test.ts fails when a page and the source differ.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { holdCodes, holdRule, remedyOf, waivedName } from "../src/control/holds.ts";
 
 const root = resolve(import.meta.dirname, "..");
 export const cliDoc = resolve(root, "docs/cli.md");
+export const generatedDocs = [cliDoc, resolve(root, "docs/merge-policy.md")];
 export const marker = /^<!-- types: (.+) -->\n```ts\n[\s\S]*?\n```$/gm;
+const holdsMarker = /^<!-- holds -->\n(?:\|.*\n?)*/gm;
 
 /** The declaration of `name` in `source`, with the TSDoc above it and without `export`. */
 export function declaration(source: string, name: string): string {
@@ -40,9 +44,33 @@ export function declaration(source: string, name: string): string {
   }
 }
 
-/** The page with each marked block rebuilt from its declarations. */
+/**
+ * One row per hold code, and one for each family of codes that differ only by their reserved case, which share a rule.
+ */
+function holdsTable(): string {
+  const yes = (b: boolean) => b ? "Yes" : "No";
+  const rows = new Map<string, string>();
+  for (const code of holdCodes) {
+    const family = code.replace(/:.*/, ":<case>");
+    const { waivable, holdsAgain, why } = holdRule(code);
+    const name = !waivable ? "" : family === code ? waivedName(code) : `the case's name, such as ${waivedName(code)}`;
+    const cells = [`\`${family}\``, name, yes(waivable), yes(holdsAgain), remedyOf(code) ?? "", why];
+    const row = `| ${cells.map((cell) => cell.replaceAll("|", "\\|")).join(" | ")} |`;
+    const first = rows.get(family) ?? row;
+    if (first.replace(/such as [^|]*/, "") !== row.replace(/such as [^|]*/, "")) throw new Error(`${code} has another rule than the rest of ${family}`);
+    rows.set(family, first);
+  }
+  return [
+    "<!-- holds -->",
+    "| Hold | A waiver names it | The person may waive it | It meets every landing of the head again | The loop's own remedy | Why, as the Land card tells the person |",
+    "|---|---|---|---|---|---|",
+    ...rows.values(),
+  ].join("\n") + "\n";
+}
+
+/** The page with each marked block rebuilt from the source. */
 export function generated(page: string): string {
-  return page.replace(marker, (_block, refs: string) => {
+  return page.replace(holdsMarker, holdsTable).replace(marker, (_block, refs: string) => {
     let file = "";
     const body = refs.trim().split(/\s+/).map((ref) => {
       if (!ref.endsWith(".ts")) return declaration(readFileSync(resolve(root, file), "utf8"), ref);
@@ -53,4 +81,4 @@ export function generated(page: string): string {
   });
 }
 
-if (import.meta.main) writeFileSync(cliDoc, generated(readFileSync(cliDoc, "utf8")));
+if (import.meta.main) for (const doc of generatedDocs) writeFileSync(doc, generated(readFileSync(doc, "utf8")));

@@ -4,26 +4,26 @@ This reference lists the Nexus records, their fields, and their states. Field na
 
 ## Records
 
-The control plane writes every record. Probes send facts in observations, and the control plane turns them into records. No probe writes to the registry.
+The control plane writes every record. Probes send facts in observations, and the control plane turns them into records. No probe writes to the registry. Each record is kept in a table of the registry, whose columns `src/control/schema.ts` creates, and most are read as a type whose TSDoc says what each field means. src/docs.test.ts checks that the tables and types below exist.
 
-| Record | Fields | Comes from |
-|---|---|---|
-| Node | `name`, `tailnetHost`, `tailnetNodeId`, `cpuVendor`, `memoryGiB`, `state` | You add a node. Capacity and `state` come from its probe's observations |
-| Project | `repoUrl`, `defaultBranch`, `defaultNode`, `resources`, `allowedHosts`, `secrets`, `logins`, `preSetup`, optional `gitIdentity`, `autoReview`, `pipeline`, `standingRules` and `secondReview` | You |
-| Image | `id`, `pins`, `builtOn`, `builtAt`, `sha256`, `release` | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
-| Template | `id`, `key`, `state`, `node`, `builtAt`, `commit` | Thread starts, which record a build, and the results of its `build-template` job |
-| Thread | `id`, `title`, `project`, `status`, `conversationId`, `pylonId`, `startedBy`, `seenAt`, `lastReplyAt`, `placement`, `setup`, `standingRulesRevision` | You, and the harness |
-| Queued thread | `id`, `title`, `project`, `startedBy`, `createdAt`, `after`, `request`, `message`, `status`, `startNow`, `lastError`, `startedAt`, `firstMessage` | `nexus start --after`, until the thread starts. [Queued thread records](#queued-thread-records) describes it |
-| Claude transcript | `thread`, `session`, `byte_offset`, `skipping`, `dropped`, `read_at`, and its entries | Reads of the Claude worker's transcript in the pylon |
-| Pylon | `id`, `thread`, `node`, `template` | Thread start |
-| Session | `pylon`, `id`, `herdrPane`, `harness`, `harnessSessionId`, `status`, `title`, `state`, `message` | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
-| Preview | `pylon`, `service`, `httpsPort` | The control plane allocates the port, never one its node's probe still routes. Observations list it once its node has published it and warmed its URL |
-| Output | `thread`, `kind`, `ref` | Observations, including outputs the agent declares with `nexus output add` |
-| NexusEvent | `id`, `time`, `thread`, `project`, `kind`, `payload` | Accepted pylon lifecycle reports and control-plane changes |
-| Question | `id`, `thread`, `text`, `options`, `reserved`, `answerer`, `askedAt`, optional `proposal`, `ask` and `holds`, `answer` | A failure judgment that leaves its failure to the person, one item a planning thread proposed, a Claude worker's AskUserQuestion call while its dialog waits, or the holds at a review's head that the person may waive, and the person's answer. [Question records](#question-records) describes it |
-| Judgment | `failure`, `thread`, `node`, `failed`, `startedAt`, `request`, `conversation`, `reply`, `phase` | The judgment pass, for a builder's failed pylon. [Judgment records](#judgment-records) describes it |
-| Aborted conversation | `conversation` | The harness, once it aborts a deleted thread's conversation at a delete or at open. Open aborts only the deleted threads' conversations without one, which a delete that crashed partway left running |
-| Usage record | `id`, `thread`, `project`, `role`, `agent`, `model`, `at`, `input`, `output`, `cacheWrite`, `cacheRead` | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
+| Record | Table | Type | Comes from |
+|---|---|---|---|
+| Node | `nodes` | [`NodeRecord`](../src/control/node-store.ts) | You add a node. Capacity and `state` come from its probe's observations |
+| Project | `projects` | [`Project`](../src/control/project.ts) | You |
+| Image | `images` | [`RecordedImage`](../src/control/image-store.ts) | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
+| Template | `templates` | [`TemplateRecord`](../src/control/templates.ts) | Thread starts, which record a build, and the results of its `build-template` job |
+| Thread | `threads` | [`Thread`](../src/control/thread-store.ts) | You, and the harness |
+| Queued thread | `queued_threads` | [`QueuedThread`](../src/contract/threads.ts) | `nexus start --after`, until the thread starts. [Queued thread records](#queued-thread-records) describes it |
+| Claude transcript | `claude_transcripts` and `claude_entries` |  | Reads of the Claude worker's transcript in the pylon |
+| Pylon | `pylons` | [`StoredPylon`](../src/control/thread-store.ts) | Thread start |
+| Session | `sessions` | [`Session`](../src/control/thread-store.ts) | Observations. Panes opened by hand in Herdr are adopted. A paused pylon's sessions keep their records |
+| Preview | `previews` | [`Preview`](../src/control/thread-store.ts) | The control plane allocates the port, never one its node's probe still routes. Observations list it once its node has published it and warmed its URL |
+| Output | `outputs` | [`Output`](../src/control/thread-store.ts) | Observations, including outputs the agent declares with `nexus output add` |
+| NexusEvent | `events` | [`NexusEvent`](../src/control/events.ts) | Accepted pylon lifecycle reports and control-plane changes |
+| Question | `questions` | [`Question`](../src/control/questions.ts) | A failure judgment that leaves its failure to the person, one item a planning thread proposed, a Claude worker's AskUserQuestion call while its dialog waits, or the holds at a review's head that the person may waive, and the person's answer. [Question records](#question-records) describes it |
+| Judgment | `judgments` | [`Judgment`](../src/control/judgment-store.ts) | The judgment pass, for a builder's failed pylon. [Judgment records](#judgment-records) describes it |
+| Aborted conversation | `aborted_conversations` |  | The harness, once it aborts a deleted thread's conversation at a delete or at open. Open aborts only the deleted threads' conversations without one, which a delete that crashed partway left running |
+| Usage record | `usage_records` |  | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
 
 Three settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent.
 

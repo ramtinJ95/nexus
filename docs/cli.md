@@ -92,10 +92,11 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | Command | Route | `--json` prints |
 |---|---|---|
 | `connect <host> [--socks HOST:PORT\|none]` | `GET /v1/health`, which must report this CLI's minimum `version` or later, then `GET /v1/whoami`, at each port it tries | `{"url", "socks", "config", "caller"}`, as [Connecting a device](#connecting-a-device) describes |
+| `events [--follow] [--since ID] [--thread T] [--project P] [--kind K]...` | `GET /v1/events?since=ID&thread=T&project=P&kind=K`, with `follow=true` and `--follow`, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes | One `NexusEvent` per line |
 | `review <thread> [--pr N] [--rounds N] [--land]` | `POST /v1/threads/<thread>/review` with `{"pr"?: number, "rounds"?: number, "land"?: true}`, which answers 201 | `Review`, the review it started |
 | `review --cancel <thread>` | `POST /v1/threads/<thread>/review/cancel` with `{}`. It takes no `--pr`, `--rounds` or `--land` | `Review`, ended `cancelled` |
 | `land <thread> [--waive]` | `POST /v1/threads/<thread>/land` with `{}`, or with `--waive` `{"head", "waive"?}` read from `GET /v1/threads/<thread>` | `Review`, moved back to its check |
-| `deploy <commit|main> [--wait]` | `PUT /v1/release` with `{"commit": string}`, then `GET /v1/release` while waiting | `ReleaseView`, described below |
+| `deploy <commit\|main> [--wait]` | `PUT /v1/release` with `{"commit": string}`, then `GET /v1/release` while waiting | `ReleaseView`, described below |
 | `release` | `GET /v1/release` | `ReleaseView` |
 | `image build [--wait]` | `POST /v1/images/build` with `{}`, then `GET /v1/images` while waiting | `ImageOperation`, the build, or `ImagesView` with `--wait` |
 | `image rollout <image> [--wait]` | `POST /v1/images/rollout` with `{"image": string}`, then `GET /v1/images` while waiting | `ImageOperation`, the rollout, or `ImagesView` with `--wait` |
@@ -109,13 +110,13 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `preview <thread> <port> [--wait]` | `POST /v1/threads/<thread>/previews` with `{"port": number}`, then with `--wait` polls `GET /v1/threads/<thread>` | `Preview`, the port's preview |
 | `unpreview <thread> <port>` | `DELETE /v1/threads/<thread>/previews/<port>` with `{}` and its `content-length`, which answers 204. Node's `http` module frames a DELETE's body only with an explicit length. While the pylon is not running, it tries again once a second | `null` |
 | `files <thread> [path]` | `GET /v1/threads/<thread>/files?path=<path>`. While the pylon is not running, it tries again once a second | `Listing`, the directory's entries |
-| `changes <thread> [--uncommitted | --turn]` | `GET /v1/threads/<thread>/changes?base=start`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Changes` |
-| `diff <thread> [path...] [--uncommitted | --turn]` | `GET /v1/threads/<thread>/diff?base=start&path=<path>...`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Diff` |
+| `changes <thread> [--uncommitted \| --turn]` | `GET /v1/threads/<thread>/changes?base=start`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Changes` |
+| `diff <thread> [path...] [--uncommitted \| --turn]` | `GET /v1/threads/<thread>/diff?base=start&path=<path>...`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Diff` |
 | `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView`, or a `ClaudeConversation` for a Claude worker thread |
 | `session open <thread> [--harness claude-code\|pi\|shell] [--title T]` | `POST /v1/threads/<thread>/sessions` with `{"harness"?: string, "title"?: string}`, which answers 201. While the pylon is not running, it tries again once a second | `OpenedSession`, the session it opened |
 | `session close <thread> <pane\|id>` | `DELETE /v1/threads/<thread>/sessions/<id>` with `{}`, which answers 204. It does not try again | `null` |
 | `attach <thread>` | `GET /v1/threads/<thread>/attach`, a WebSocket, as [the attach route](#the-attach-route) describes | Nothing. The terminal is the session's |
-| `start --project P [--title T] [--message M] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | One `POST /v1/threads`, with `"message": string` when `--message` is given and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
+| `start --project P [--title T] [--message M \| --claude PROMPT [--model ID]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | One `POST /v1/threads`, with `"message": string` when `--message` is given, `"claude": string` and `"model"?: string` when `--claude` is, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes, and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
 | `start --plan ...` | One `POST /v1/threads` with `"planning": true`, as for any start | `Thread`, the planning thread that was started |
 | `start ... --after THREAD[,THREAD...]` | One `POST /v1/threads` with `"after": string[]`, and `"message"` and `"requestId"` as for any start, which answers 201 | `QueuedThread`, the thread that was queued |
 | `start-queued <thread>` | `POST /v1/threads/<thread>/start` with no body, which answers 201 | `Thread`, the thread that was started |
@@ -136,7 +137,8 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `delete <thread>` | `DELETE /v1/threads/<thread>` | `Thread`, with status `deleted`, or `QueuedThread` with status `deleted` |
 | `projects` | `GET /v1/projects` | `Project[]`. A scratch project's `repoUrl` is null |
 | `project show <id>` | `GET /v1/projects`, from which it takes the project. One the list does not hold fails with exit code 4 | `Project`, as [Standing rules](#standing-rules) describes |
-| `project add <id> (<repo-url> \| --scratch) [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH\|-]` | `POST /v1/projects` | `Project`, the project that was added |
+| `project edit <id> [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL \| --clear-git-identity] [--auto-review off\|review\|land\|yolo] [--pipeline off\|approve\|start] [--second-reviewer off\|on\|always\|reserved,lines=N] [--rules-file PATH\|-] [--clear-rules]` | `PATCH /v1/projects/<id>`, as [Project editing](#project-editing) describes | `Project`, the project as edited |
+| `project add <id> (<repo-url> \| --scratch) [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH\|-] [--auto-review off\|review\|land\|yolo]` | `POST /v1/projects` | `Project`, the project that was added |
 | `nodes` | `GET /v1/nodes` | `NodeSummary[]` |
 | `node <name>` | `GET /v1/nodes/<name>/health` | `NodeHealth` |
 | `doctor` | `GET /v1/doctor` | `DoctorReport`, as [Doctor](#doctor) describes. It exits 1 with its report on stdout when a check failed |

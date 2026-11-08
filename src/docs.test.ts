@@ -2,8 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { cliDoc, declaration, generated, marker } from "../scripts/docs-gen.ts";
+import { cliDoc, declaration, generated, generatedDocs, marker } from "../scripts/docs-gen.ts";
+import { commands } from "./cli/commands/index.ts";
 import { minControlVersion } from "./cli/config.ts";
+import { openDb } from "./control/db.ts";
+import { reservedCases, reservedNames } from "./contract/reserved.ts";
 import { version } from "./version.ts";
 
 const root = resolve(import.meta.dirname, "..");
@@ -50,8 +53,8 @@ test("only the changelog says what an older control plane does, and only above t
   assert.deepEqual(belowFloor, []);
 });
 
-test("docs/cli.md's type blocks are the source declarations they name, which node scripts/docs-gen.ts writes", () => {
-  assert.equal(read(cliDoc), generated(read(cliDoc)));
+test("the docs' type blocks and holds table are the source they name, which node scripts/docs-gen.ts writes", () => {
+  for (const doc of generatedDocs) assert.equal(read(doc), generated(read(doc)), relative(root, doc));
 });
 
 test("every TypeScript block in docs/cli.md names the declarations it shows, so none is a hand copy", () => {
@@ -75,4 +78,63 @@ test("docs-gen copies a declaration whole, with its TSDoc and its last line's co
   assert.equal(declaration(source, "After"), "type After = 1; // last");
   assert.equal(declaration("/** A file's header. */\n\nexport type First = 1;", "First"), "type First = 1;");
   assert.equal(declaration("/** The first type. */\nexport type First = 1;", "First"), "/** The first type. */\ntype First = 1;");
+});
+
+/** The rows of the table whose header row starts with `| <first> |`, each as its cells. */
+const table = (file: string, first: string) => {
+  const rows = new RegExp(`^\\| ${first} \\|.*\\n\\|---.*\\n((?:\\|.*\\n?)*)`, "m").exec(read(file))![1]!.trim().split("\n");
+  return rows.map((row) => row.slice(1, -1).split(/(?<!\\)\|/).map((cell) => cell.trim()));
+};
+const ticked = (text: string) => [...text.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
+
+test("docs/cli.md's command table has a row for every command, with exactly the flags it parses", () => {
+  const global = ["--json", "--url", "--socks"];
+  const flags = (text: string) => [...text.matchAll(/--[a-z][a-z-]*/g)].map((match) => match[0]).filter((flag) => !global.includes(flag));
+  const names = Object.keys(commands).sort((a, b) => b.length - a.length);
+  const documented = new Map<string, Set<string>>();
+  for (const [cell] of table(cliDoc, "Command")) {
+    const shown = ticked(cell!)[0];
+    if (shown === undefined) continue;
+    const name = names.find((n) => shown === n || shown.startsWith(`${n} `));
+    assert.ok(name, `no command runs the row ${shown}`);
+    documented.set(name, new Set([...documented.get(name) ?? [], ...flags(shown)]));
+  }
+  const wrong = Object.entries(commands).flatMap(([name, command]) => {
+    if (!documented.has(name)) return [`${name}: no row`];
+    const parsed = new Set(Object.keys(command.options ?? {}).map((option) => `--${option}`));
+    const shown = documented.get(name)!;
+    return [...[...parsed].filter((flag) => !shown.has(flag)).map((flag) => `${name}: ${flag} has no row`), ...[...shown].filter((flag) => !parsed.has(flag)).map((flag) => `${name}: ${flag} is not parsed`)];
+  });
+  assert.deepEqual(wrong, []);
+});
+
+test("docs/merge-policy.md's reserved-path table names every path and folder policy.ts reserves, and no src/ path it does not", () => {
+  const policy = resolve(root, "docs/merge-policy.md");
+  const code = new Map<string, Set<string>>();
+  for (const entry of declaration(read(join(root, "src/control/policy.ts")), "reservedPaths").split("{ case: ").slice(2)) {
+    const [reserved, ...literals] = [...entry.matchAll(/"([^"]*)"/g)].map((match) => match[1]!);
+    code.set(reserved!, new Set([...code.get(reserved!) ?? [], ...literals.filter((literal) => /[/.]/.test(literal))]));
+  }
+  const doc = new Map(table(policy, "Reserved case").map(([name, ...cells]) => {
+    const reserved = reservedCases.find((c) => reservedNames[c].endsWith(name!.toLowerCase()));
+    assert.ok(reserved, `no reserved case is ${name}`);
+    return [reserved, new Set(ticked(cells.join(" ")))] as const;
+  }));
+  const undocumented = [...code].flatMap(([reserved, paths]) => [...paths].filter((path) => !doc.get(reserved as never)?.has(path)).map((path) => `${reserved}: ${path}`));
+  assert.deepEqual(undocumented, []);
+  const stale = [...doc].flatMap(([reserved, paths]) => [...paths].filter((path) => path.startsWith("src/") && !code.get(reserved)?.has(path)).map((path) => `${reserved}: ${path}`));
+  assert.deepEqual(stale, []);
+});
+
+test("docs/data-model.md's records name registry tables and source types that exist", () => {
+  const db = openDb(":memory:");
+  const tables = new Set(db.sql("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+  db.db.close();
+  const missing = table(join(root, "docs/data-model.md"), "Record").flatMap(([record, stored, type]) => [
+    ...ticked(stored!).filter((name) => !tables.has(name)).map((name) => `${record}: table ${name}`),
+    ...[...type!.matchAll(/\[`(\w+)`\]\(\.\.\/([^)]+)\)/g)].flatMap(([, name, file]) => {
+      try { declaration(read(join(root, file!)), name!); return []; } catch { return [`${record}: ${file} ${name}`]; }
+    }),
+  ]);
+  assert.deepEqual(missing, []);
 });

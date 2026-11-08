@@ -53,6 +53,7 @@ const holdRows: Record<HoldCode, HoldRow> = {
   "waiver-not-carried": notWaivable("Your Land was for the change at an earlier commit, so the holds it waived are yours to look at again here."),
   loop: loopRow,
 };
+export const holdCodes = Object.keys(holdRows) as HoldCode[];
 export const holdRule = (code: HoldCode): HoldRule => holdRows[code].rule;
 export const waivable = (code: HoldCode) => holdRule(code).waivable;
 export const remedyOf = (code: HoldCode): Remedy | null => holdRows[code].remedy ?? null;
