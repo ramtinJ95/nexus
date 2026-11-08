@@ -3,7 +3,7 @@
  * holds it reads, so a client renders the merge policy's answer instead of running the policy itself.
  */
 import { holdRule, type Hold } from "./holds.ts";
-import { heldBy, landPress } from "./policy.ts";
+import { holdsAt, landPress } from "./policy.ts";
 import { isOpen, type Question } from "./questions.ts";
 import { ended, type Review } from "./review-model.ts";
 
@@ -28,7 +28,7 @@ export function reviewView(review: Review, questions: readonly Question[]): Revi
     id: review.id,
     head: review.rounds.at(-1)!.head,
     ended: ended(review),
-    holds: heldBy(review).map((h) => ({ ...h, ...holdRule(h.code) })),
+    holds: holdsAt(review).map((h) => ({ ...h, ...holdRule(h.code) })),
     press: landPress(review),
     question: asking?.holds === undefined ? null : { id: asking.id, head: asking.holds.head, holds: asking.holds.holds },
   };
