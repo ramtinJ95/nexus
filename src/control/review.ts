@@ -28,8 +28,8 @@ import { defaultClaudeModel, modelFamily, secondReviewerModels } from "../protoc
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
-import { caseOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
-import { askedHolds, carryWaiver, headHolds, heldBy, landingHolds, landPress, secondReviewRule, staleQuote, unwaived } from "./policy.ts";
+import { caseOf, remedyOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
+import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule, staleQuote, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, reviewedPr, watchedPrs, watchStopped } from "./pr-watch-model.ts";
@@ -40,7 +40,7 @@ import { holdOptions, isOpen, type HeldQuestion, type Question, type ThreadQuest
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, gateRun, heldForGate, humanLabel,
   inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, seatsFor, seatsOf, verdictAt, verdictsFor, verdictSchema,
-  type Answer, type Finding, type GateRun, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
+  type Answer, type Finding, type GateRun, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
 import { landing } from "./landing.ts";
@@ -345,25 +345,24 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const ranOut = (r: Review, ...items: (Hold | string)[]): Review => end(r, { ...personPhase("rounds", ...items), label: { state: "adding" } });
   const checking = (): Phase => ({ kind: "checking", startedAt: now(), thread: null });
   /**
-   * `r` with the holds its latest round's head decides against the PR's base recorded, and those holds, or null when
-   * the PR is at another head, which gets a round of its own. A retargeted PR's files change at the same head, so they are read
+   * `r` with the holds its latest round's head decides against the PR's base recorded, or null when the PR is at
+   * another head, which gets a round of its own. A retargeted PR's files change at the same head, so they are read
    * again. They are read before the head and base are confirmed, so files of a push or a retarget meanwhile are not
    * recorded as this head's.
    */
-  const recordHolds = async (r: Review): Promise<{ review: Review; heldAt: HeldAt } | null> => {
+  const recordHolds = async (r: Review): Promise<Review | null> => {
     const round = r.rounds.at(-1)!;
     const { base } = (await read(r)).detail;
-    if (round.heldAt?.base === base) return { review: r, heldAt: round.heldAt };
+    if (round.heldAt?.base === base) return r;
     const files = await github.files(r.pr.repo, r.pr.number);
     reads.delete(prKey(r));
     const { detail } = await read(r);
     if (detail.head !== round.head || detail.base !== base) return null;
-    const heldAt = { base, holds: headHolds({ review: r, files, deploys: deploys(r) }) };
-    return { review: withRound(r, { heldAt }), heldAt };
+    return withRound(r, { heldAt: { base, holds: headHolds({ review: r, files, deploys: deploys(r) }) } });
   };
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
   const checked = async (r: Review): Promise<Review> => {
-    const next = (await recordHolds(r))?.review ?? r;
+    const next = await recordHolds(r) ?? r;
     return { ...next, phase: r.land === null ? { kind: "approved" } : { kind: "merging", authorized: null } };
   };
   /** Past the check at the round's head: the live check runs where the head has a `.nexus/verify` and none ran there yet. */
@@ -560,7 +559,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (early.get(r.id)?.at !== at) early.set(r.id, { at, files: await github.change(r.pr.repo, round.base, round.head) });
       files = early.get(r.id)!.files;
     }
-    const holds = askedHolds(r, files === null ? null : headHolds({ review: r, files, deploys: deploys(r) }));
+    const press = landPress(r, files === null ? null : headHolds({ review: r, files, deploys: deploys(r) }));
+    const holds = press.kind === "lands" ? press.waives : [];
     const base = async () => round.base ?? (await read(r)).detail.base;
     // As the landing does, the change a waiver is for is read once the person gave it, so a rebase can be compared with it.
     if (r.waiver !== null && r.waiver.change === null && r.waiver.head === round.head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, await base(), round.head) } };
@@ -611,7 +611,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (waive?.length === 0) throw new Refusal("invalid", "a waiver names at least one hold");
     // The person names each hold by the text they saw, which must be one of the review's holds now.
     const waived = (text: string) => {
-      const hold = heldBy(r).find((h) => h.text === text);
+      const hold = holdsAt(r).find((h) => h.text === text);
       if (hold === undefined) throw new Refusal("conflict", `review ${r.id} is not held by "${text}", so there is nothing to waive. Look at it again`);
       if (!waivable(hold.code)) throw new Refusal("conflict", `"${text}" cannot be waived: only the holds the merge policy reserves for the person`);
       return hold.code;
@@ -794,10 +794,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const holds = async () => {
         if (snapshot.checksUnread) throw new Error("GitHub's checks for the head could not be read");
         // A landing that began before Nexus recorded what holds its head, or whose PR was retargeted since, reads them here.
-        const recorded = await recordHolds(r);
-        if (recorded === null) throw new Error("the pull request's head moved while its files were read");
-        const { review: held, heldAt } = recorded;
-        const all = [...landings.unauthorized(held, builder), ...landingHolds({ review: held, pr: snapshot, heldAt })];
+        const held = await recordHolds(r);
+        if (held === null) throw new Error("the pull request's head moved while its files were read");
+        const all = [...landings.unauthorized(held, builder), ...holdsAt(held, { pr: snapshot })];
         const left = unwaived(held, all);
         const { review, why } = left.length && held.waiver !== null && held.waiver.head !== head ? carryWaiver(held, await changeAt(held, snapshot.detail.base, head), all) : { review: held, why: null };
         return { all, left: unwaived(review, all), review, why: why === null ? [] : [why] };
@@ -825,9 +824,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
         const { all, left, review, why } = await holds();
-        if (left.length === 1 && left[0]!.code === "conflict") return rebase(review, snapshot.detail.base);
+        const remedy = left.length === 1 ? remedyOf(left[0]!.code) : null;
+        if (remedy === "rebase") return rebase(review, snapshot.detail.base);
         // A quote the description lost since the reviewer gave it is asked for again, once per description.
-        if (left.length === 1 && left[0]!.code === "not-checked-live" && staleQuote(r.rounds.at(-1)!, snapshot.detail.body)) return { ...review, phase: { kind: "quoting", asked: null } };
+        if (remedy === "quote" && staleQuote(r.rounds.at(-1)!, snapshot.detail.body)) return { ...review, phase: { kind: "quoting", asked: null } };
         if (left.length) return toPerson(review, "policy", ...why, ...all);
         if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
@@ -902,7 +902,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (r.phase.kind === "approved" && r.rounds.at(-1)!.heldAt === undefined && due(holdReads, r)) {
         holdReads.set(r.id, now());
         const recorded = await recordHolds(r);
-        if (recorded !== null) return recorded.review;
+        if (recorded !== null) return recorded;
         const snapshot = await read(r);
         const gone = outside(r, snapshot.pr.state) ?? await pushedAfter(r, snapshot);
         if (gone !== null) return gone;

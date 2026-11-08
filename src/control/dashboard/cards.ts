@@ -10,7 +10,7 @@ import { answerFinal } from "../plain-wording.ts";
 import { needLabels, reviewersNote, reviewPr, roundNote, roundOf, stoppedShort } from "../wording.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { landsOnItsOwn } from "../project.ts";
-import { heldBy, landPress } from "../policy.ts";
+import { holdsAt, landPress } from "../policy.ts";
 import { isOpen, type AnswerRefusal, type AskedQuestion, type NodeQuestion, type Question } from "../questions.ts";
 import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
 import { Html, html, ago, short } from "./view.ts";
@@ -158,7 +158,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   : phase.kind === "deploying" ? html`<p class="land-note">Deploying the merge commit ${short(phase.commit)} until every service reports it healthy.</p>`
   : phase.kind === "rolling-back" ? html`<p class="error">${phase.why} Rolling back to ${short(phase.previous)}.</p>`
   : phase.kind === "landed" ? html`<p class="land-note">Merged as ${short(phase.commit)}${c.deploys(r) && ", deployed, and every service reports it healthy"}.</p>`
-  : phase.kind === "needs-person" && html`<ul class="error">${phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>
+  : phase.kind === "needs-person" && html`<ul class="error">${phase.holds.map((h) => html`<li>${h.text}</li>`)}</ul>
 <p class="land-note">The merge commit ${short(r.merged!)} is on the default branch, but not deployed. Deploy it from a deployer with nexus deploy ${r.merged!}, or leave the fleet where it is, and cancel the review once nothing more is needed.</p>
 <div class="land-act need-act">${cancelReview(d.thread.id, r, "btn-ghost")}</div>`}
 </section>`;
@@ -169,7 +169,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   // The PR watch can read a push before the loop's next pass starts a round on it.
   const moved = pushedHead(r, pr);
   const held = r.phase.kind === "needs-person";
-  const reasons = heldBy(r);
+  const reasons = holdsAt(r);
   const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));
   const press = landPress(r);
   const waived = press.kind === "lands" ? press.waives.map((h) => h.text) : [];
@@ -228,7 +228,7 @@ function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeo
 ${!card && html`<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2><a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a></div>`}
 <p class="land-meta">${card ? "Reviewer" : `Ended in ${roundOf(r)} · reviewer`} <a href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind})${r.second?.kind === "claude" && html` · second reviewer <a href="/threads/${r.second.thread}">${r.second.thread}</a> on ${r.second.model}`}</p>
 ${reviewersNote(r) !== null && html`<p class="land-note">${reviewersNote(r)}</p>`}
-${r.phase.kind === "needs-person" && html`<ul class="error">${r.phase.reasons.map((reason) => html`<li>${reason}</li>`)}</ul>`}
+${r.phase.kind === "needs-person" && html`<ul class="error">${r.phase.holds.map((h) => html`<li>${h.text}</li>`)}</ul>`}
 ${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} merged on GitHub outside this review, so nothing is left to review or land.${c.deploys(r) && " Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run."} Cancel the review once nothing more is needed.</p>`
   : outside === "closed" ? html`<p class="land-note">Pull request #${r.pr.number} closed on GitHub, so nothing is left to review or land. Cancel the review once nothing more is needed.</p>`
   : !again && html`<p class="land-note">The thread is ${d.thread.status}, so it cannot be reviewed again.</p>`}

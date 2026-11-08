@@ -55,7 +55,7 @@ function reviewNext(r: Review): string | null {
     case "deploying": return `Deploying ${r.phase.commit.slice(0, 12)}`;
     case "rolling-back": return `Rolling back: ${r.phase.why}`;
     case "landed": return `Merged as ${r.phase.commit.slice(0, 12)}`;
-    case "needs-person": return r.phase.reasons[0] ?? null;
+    case "needs-person": return r.phase.holds[0]?.text ?? null;
     case "merged": case "closed": case "cancelled": return null;
     default: return r.phase satisfies never;
   }
