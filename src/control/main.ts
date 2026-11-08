@@ -17,7 +17,7 @@ import { ingest } from "./reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../node-base/tailscaled.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
-import { openHarnessHost, type ConversationId } from "./harness/host.ts";
+import { gateTurns, openHarnessHost, type ConversationId } from "./harness/host.ts";
 import { startApi } from "./api/server.ts";
 import { registryLocator } from "./locator.ts";
 import { jobDeadlineMs } from "../protocol/jobs.ts";
@@ -199,14 +199,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }));
 
   const gate = turnGate(() => isDraining(registry.drain()));
-  const harness: typeof rawHarness = {
-    ...rawHarness,
-    startThread: (...args) => gate.run(() => rawHarness.startThread(...args)),
-    send: (...args) => gate.run(() => rawHarness.send(...args)),
-    retry: (...args) => gate.run(() => rawHarness.retry(...args)),
-    startJudgment: (...args) => gate.run(() => rawHarness.startJudgment(...args)),
-    sendJudgment: (...args) => gate.run(() => rawHarness.sendJudgment(...args)),
-  };
+  const harness = gateTurns(rawHarness, gate);
   const images = services.start(startImageRollout({
     registry, probes: probeMap, buildNode: (config.imageBuildNode ?? "infra-testbench") as NodeName, recipe: () => loadImageRecipe(), release: runningCommit,
   }));
