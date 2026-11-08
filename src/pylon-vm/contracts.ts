@@ -285,7 +285,8 @@ const serviceFacts = z.array(z.strictObject({
 const ignored = z.unknown();
 /**
  * Each action's reply, which `run` parses, and whether the controller runs it beside its lifecycle queue: one that
- * waits on a process, only reads, or touches only the host, so that it never waits behind the queue.
+ * waits on a process, only reads, or touches only the host, so that it never waits behind the queue. The client answers
+ * list, retry-stop, finish-retry-stop and recorded itself and never sends them, so no controller runs them.
  */
 export const actions = {
 	list: { reply: z.array(inspectionSchema), beside: false },

@@ -563,7 +563,6 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async ensurePaused(pylonId, checkpoint, signal, retry = false) {
       const name = instanceName(pylonId);
-      // A retry gives the controller 1 s to answer, and then reads what it last recorded.
       const forPause = async (): Promise<Pick<Inspection, "status"> | null> => {
         if (!retry) return settledInstance(pylonId, signal);
         try {
