@@ -850,7 +850,7 @@ type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: 
 
 `holds` is the same list as `reasons`, one per reason in the same order, each with the code that decides whether the person may waive it, which [the merge policy](merge-policy.md#what-the-person-may-waive) lists. A waiver's `codes` are the codes of the holds it names in `holds`, and the landing matches a waiver by code at its head, so a waiver keeps covering its hold if the hold's wording changes. `reasons` and a waiver's `holds` stay the texts the person reads, and the Land route still takes `waive` as those texts. Both fields are additive: a control plane without them sends neither, and one with them reads a review stored before them with codes worked out from its texts.
 
-<!-- types: src/control/holds.ts Hold HoldCode ReservedCase reservedCases -->
+<!-- types: src/control/holds.ts Hold HoldCode src/contract/reserved.ts ReservedCase reservedCases -->
 ```ts
 // src/control/holds.ts
 interface Hold { code: HoldCode; text: string }
@@ -865,7 +865,9 @@ type HoldCode =
   | "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
   | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed"
   | "verify-changed" | "no-second-reviewer" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "waiver-not-carried" | "loop";
+// src/contract/reserved.ts
 type ReservedCase = typeof reservedCases[number];
+/** The cases the merge policy reserves for the person, which a question or a hold names, and what each is called. It imports nothing. */
 const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
 ```
 
@@ -1371,11 +1373,11 @@ The control plane records every model call the agents of its threads make, one r
 
 `usage` prints the tokens spent since `--since`, in all and by each breakdown. `--since` is `today` (since midnight UTC), `7d` or `30d` (today and the 6 or 29 UTC days before it), `all`, or the UTC day to start at, such as `2026-10-01`, and `7d` when it is not given, as the dashboard's Usage page defaults to. `--project P` counts only that project's threads. `--by` prints only that breakdown, or those named, comma-separated, and every one when it is not given: `model`, `project`, `kind` (the agent), `role`, and `day`, a UTC day. The text starts with the period and when counting started, then the backfill's line, then a table of the totals, then a table per breakdown, each count shortened, such as `1.2M`. With `--json` it prints the report as the API answers it, every count exact:
 
-<!-- types: src/control/agent-usage.ts Tokens src/control/usage.ts UsageTotals UsageRow UsageReport Breakdown breakdowns -->
+<!-- types: src/control/agent-usage.ts Tokens src/contract/usage.ts UsageTotals UsageRow UsageReport Breakdown breakdowns -->
 ```ts
 // src/control/agent-usage.ts
 interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
-// src/control/usage.ts
+// src/contract/usage.ts
 interface UsageTotals extends Tokens { total: number; calls: number }
 /** `key` is the model, project, agent kind, thread role, or UTC day as YYYY-MM-DD. */
 type UsageRow = UsageTotals & { key: string };
@@ -1961,9 +1963,9 @@ th-5c1e0b2d9a77  Old spike  rj-firebat holds no disk for its pylon
 
 A thread is read once it is done or skipped, and `recovered` counts the calls no read had counted before and the tokens they added. A stopped or finished run lists what it skipped. With `--json` the commands print the API's shapes:
 
-<!-- types: src/control/usage.ts UsageBackfill BackfillThread BackfillPlanRow -->
+<!-- types: src/contract/usage.ts UsageBackfill BackfillThread BackfillPlanRow -->
 ```ts
-// src/control/usage.ts
+// src/contract/usage.ts
 /**
  * The usage backfill, which wakes archived threads' pylons one at a time to read their transcripts from the start.
  * `current` is the pylon a run holds: woken to be read, or read or given up on and waiting for its pause. `read` counts

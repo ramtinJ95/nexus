@@ -1,7 +1,7 @@
 /**
  * Regenerates the TypeScript blocks of docs/cli.md from the source declarations they show. A block follows a line
  * `<!-- types: <file> <Name> ... <file> <Name> ... -->`, and its body is each declaration as the file before its name has
- * it, TSDoc included.
+ * it, with the TSDoc directly above it. A file's header comment stands apart from its first declaration by a blank line.
  * `node scripts/docs-gen.ts` rewrites the page, and src/docs.test.ts fails when the page and the source differ.
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -16,7 +16,7 @@ export function declaration(source: string, name: string): string {
   const head = new RegExp(`^(?:export )?(?:interface|type|const) ${name}\\b`, "m").exec(source);
   if (head === null) throw new Error(`no declaration of ${name}`);
   const doc = /\/\*\*(?:[^*]|\*(?!\/))*\*\/\n$/.exec(source.slice(0, head.index));
-  const start = doc === null || doc.index === 0 ? head.index : doc.index;
+  const start = doc?.index ?? head.index;
   const isInterface = head[0].includes("interface");
   let angle = 0;
   let depth = 0;
