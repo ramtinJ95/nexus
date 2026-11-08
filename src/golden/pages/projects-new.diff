@@ -9,7 +9,7 @@ what differs from pages/index.html:
  <script>{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }</script>
  <link rel="icon" href="/assets/favicon.svg?v=<hash>" type="image/svg+xml">
  <link rel="stylesheet" href="/assets/style.css?v=<hash>">
-@@ -4248,7 +4248,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -3998,7 +3998,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </form>
  </div>
  </dialog>

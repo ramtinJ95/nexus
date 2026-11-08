@@ -1,6 +1,6 @@
 200 text/html; charset=utf-8
 what differs from pages/index.html:
-@@ -857,8 +857,8 @@
+@@ -780,8 +780,8 @@
  <span class="count">16</span>
  </div>
  <div class="need-list">
@@ -11,7 +11,7 @@ what differs from pages/index.html:
  <summary class="need-sum" data-why="Finding F3 (P2) is still open after the last round.">
  <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
  <path d="M6 4l4 4-4 4"/>
-@@ -2581,7 +2581,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -2504,7 +2504,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </a>
  </li>
  <li>

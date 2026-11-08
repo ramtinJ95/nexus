@@ -9,7 +9,7 @@ what differs from pages/index.html:
  <script>{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }</script>
  <link rel="icon" href="/assets/favicon.svg?v=<hash>" type="image/svg+xml">
  <link rel="stylesheet" href="/assets/style.css?v=<hash>">
-@@ -4151,7 +4151,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -3901,7 +3901,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>
  </svg>
  </template>
@@ -18,7 +18,7 @@ what differs from pages/index.html:
  <header>
  <h2 id="start-h">Start a thread</h2>
  <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
-@@ -4192,7 +4192,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -3942,7 +3942,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  <fieldset class="seg">
  <legend>Project</legend>
  <label class="seg-opt">
@@ -27,7 +27,7 @@ what differs from pages/index.html:
  <span class="seg-name">field-notes</span>
  <span class="seg-repo">https://github.com/ramtinJ95/field-notes.git</span>
  </label>
-@@ -4202,7 +4202,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -3952,7 +3952,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  <span class="seg-repo">https://github.com/ramtinJ95/nexus.git</span>
  </label>
  <label class="seg-opt">
@@ -36,7 +36,7 @@ what differs from pages/index.html:
  <span class="seg-name">storefront</span>
  <span class="seg-repo">https://github.com/ramtinJ95/storefront.git</span>
  </label>
-@@ -4211,7 +4211,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -3961,7 +3961,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  <div>
  <label for="start-node">Node</label>
  <select id="start-node" name="node">
@@ -45,7 +45,7 @@ what differs from pages/index.html:
  <option value="auto">auto, where it fits best</option>
  <option value="infra-testbench">infra-testbench</option>
  <option value="rj-firebat">rj-firebat</option>
-@@ -4219,7 +4219,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -3969,7 +3969,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </div>
  <div>
  <label for="start-branch">Branch</label>

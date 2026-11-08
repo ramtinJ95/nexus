@@ -1,6 +1,6 @@
 200 text/html; charset=utf-8
 what differs from pages/index.html:
-@@ -1998,8 +1998,8 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -1921,8 +1921,8 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </div>
  </details>
  </article>
@@ -11,7 +11,7 @@ what differs from pages/index.html:
  <summary class="need-sum" data-why="Approved, and lands once you press Land">
  <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
  <path d="M6 4l4 4-4 4"/>
-@@ -2497,7 +2497,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -2420,7 +2420,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </a>
  </li>
  <li>

@@ -1,6 +1,6 @@
 200 text/html; charset=utf-8
 what differs from pages/index.html:
-@@ -1863,8 +1863,8 @@
+@@ -1786,8 +1786,8 @@
  </div>
  </details>
  </article>
@@ -11,7 +11,7 @@ what differs from pages/index.html:
  <summary class="need-sum" data-why="Land pull request #97, &quot;feat(db): drop the legacy carts table&quot;, at e0e0e0e0e0e0, waiving database migrations that delete or rewrite existing data and a review without its second reviewer?">
  <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
  <path d="M6 4l4 4-4 4"/>
-@@ -2486,7 +2486,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -2409,7 +2409,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </a>
  </li>
  <li>

@@ -30,7 +30,7 @@ import type { Context } from "../dashboard/context.ts";
 import { needsOf, type InboxNeed } from "../work.ts";
 import { assets } from "../dashboard/assets.ts";
 import { notFound } from "../dashboard/shell.ts";
-import { home } from "../dashboard/home.ts";
+import { home, foldPage } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
 import { clusterPage } from "../dashboard/cluster-page.ts";
 import { itemView } from "../pipeline.ts";
@@ -123,6 +123,14 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       return ok(await cluster(c, r.roles, first.name));
     }],
     ["GET", /^\/health$/, anyAllowed, (_, r) => ok(healthPage(context(r), options.health?.() ?? null))],
+    ...(["closed", "quiet"] as const).map((kind): RouteEntry => ["GET", new RegExp(`^\\/threads\\/${kind}$`), anyAllowed, (_, r) => {
+      const c = context(r);
+      const id = r.query.get("project");
+      const project = id === null ? null : registry.project(id as ProjectId);
+      if (project === undefined) return { ...ok(notFound(c, `No project ${id!}.`)), status: 404 };
+      const page = Number(r.query.get("page"));
+      return ok(foldPage(c, kind, project, Number.isInteger(page) && page > 0 ? page : 1));
+    }]),
     ["GET", /^\/threads\/([^/]+)$/, anyAllowed, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {

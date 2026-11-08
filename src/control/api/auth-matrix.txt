@@ -126,6 +126,8 @@ deployer GET /usage -> 200
 deployer GET /pipeline -> 303
 deployer GET /cluster -> 200
 deployer GET /health -> 200
+deployer GET /threads/closed -> 200
+deployer GET /threads/quiet -> 200
 deployer GET /threads/th-000000000000 -> 404
 deployer GET /threads/th-000000000000/stream -> 404 no thread th-000000000000
 deployer GET /nodes/nosuch -> 404
@@ -265,6 +267,8 @@ person GET /usage -> 200
 person GET /pipeline -> 303
 person GET /cluster -> 200
 person GET /health -> 200
+person GET /threads/closed -> 200
+person GET /threads/quiet -> 200
 person GET /threads/th-000000000000 -> 404
 person GET /threads/th-000000000000/stream -> 404 no thread th-000000000000
 person GET /nodes/nosuch -> 404
@@ -414,6 +418,8 @@ control-node GET /usage -> 200
 control-node GET /pipeline -> 303
 control-node GET /cluster -> 200
 control-node GET /health -> 200
+control-node GET /threads/closed -> 200
+control-node GET /threads/quiet -> 200
 control-node GET /threads/th-000000000000 -> 404
 control-node GET /threads/th-000000000000/stream -> 404 no thread th-000000000000
 control-node GET /nodes/nosuch -> 404
@@ -549,6 +555,8 @@ control-node-without-key GET /usage -> 200
 control-node-without-key GET /pipeline -> 303
 control-node-without-key GET /cluster -> 200
 control-node-without-key GET /health -> 200
+control-node-without-key GET /threads/closed -> 200
+control-node-without-key GET /threads/quiet -> 200
 control-node-without-key GET /threads/th-000000000000 -> 404
 control-node-without-key GET /threads/th-000000000000/stream -> 404 no thread th-000000000000
 control-node-without-key GET /nodes/nosuch -> 404
@@ -678,6 +686,8 @@ reporter GET /usage -> 403 caller is not a tailnet node this control plane allow
 reporter GET /pipeline -> 403 caller is not a tailnet node this control plane allows
 reporter GET /cluster -> 403 caller is not a tailnet node this control plane allows
 reporter GET /health -> 403 caller is not a tailnet node this control plane allows
+reporter GET /threads/closed -> 403 caller is not a tailnet node this control plane allows
+reporter GET /threads/quiet -> 403 caller is not a tailnet node this control plane allows
 reporter GET /threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
 reporter GET /threads/th-000000000000/stream -> 403 caller is not a tailnet node this control plane allows
 reporter GET /nodes/nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -795,6 +805,8 @@ reporter-wrong-key GET /usage -> 403 caller is not a tailnet node this control p
 reporter-wrong-key GET /pipeline -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /cluster -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /health -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /threads/closed -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /threads/quiet -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /threads/th-000000000000/stream -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /nodes/nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -912,6 +924,8 @@ node-without-key GET /usage -> 403 caller is not a tailnet node this control pla
 node-without-key GET /pipeline -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /cluster -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /health -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /threads/closed -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /threads/quiet -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /threads/th-000000000000/stream -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /nodes/nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -1029,6 +1043,8 @@ stranger GET /usage -> 403 caller is not a tailnet node this control plane allow
 stranger GET /pipeline -> 403 caller is not a tailnet node this control plane allows
 stranger GET /cluster -> 403 caller is not a tailnet node this control plane allows
 stranger GET /health -> 403 caller is not a tailnet node this control plane allows
+stranger GET /threads/closed -> 403 caller is not a tailnet node this control plane allows
+stranger GET /threads/quiet -> 403 caller is not a tailnet node this control plane allows
 stranger GET /threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
 stranger GET /threads/th-000000000000/stream -> 403 caller is not a tailnet node this control plane allows
 stranger GET /nodes/nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -1140,6 +1156,8 @@ unnamed GET /usage -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /pipeline -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /cluster -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /health -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /threads/closed -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /threads/quiet -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /threads/th-000000000000/stream -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /nodes/nosuch -> 403 caller is not a tailnet node this control plane allows

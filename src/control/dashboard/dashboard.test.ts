@@ -8,7 +8,7 @@ import type { QueuedThread } from "../../contract/threads.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadDetail } from "../wire.ts";
 import { detailText } from "../../cli/thread-text.ts";
-import { testPr, testReview } from "../../test-support/registry-kit.ts";
+import { addThread, observeNode, testPr, testReview } from "../../test-support/registry-kit.ts";
 import { personPhase, type Review } from "../review-model.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { Judgment } from "../judgment-store.ts";
@@ -176,8 +176,10 @@ test("the overview lists each project's open threads with their phases, node and
   assert.equal(overviewRow(res.text, fix), "Fix checkout running running rj-firebat just now never");
   assert.match(overviewRow(res.text, docs), /^Write docs running not on its node rj-firebat just now working 1m 03s$/);
   assert.match(beta!, new RegExp(`<td class="wide">working <time data-since="${started}">1m 03s</time></td>`), "the client ticks the turn's clock from its start");
-  assert.match(textOf(acme!), /Thread Desired Observed Node Human Agent Fix checkout .* 1 archived Thread .* Old spike archived paused not on its node/);
-  assert.match(acme!, /<details class="ov-closed"[^>]*><summary>1 archived<\/summary>/, "archived threads start folded away");
+  assert.match(textOf(acme!), /^acme .* Thread Desired Observed Node Human Agent Fix checkout .* 1 archived$/, "the archived thread is counted, not listed");
+  assert.match(acme!, /<a href="\/threads\/closed\?project=acme">1 archived<\/a>/);
+  const closed = sectionOf((await s.call("GET", "/threads/closed?project=acme")).text, "project-acme");
+  assert.match(textOf(closed), /^acme 1 Thread Desired Observed Node Human Agent Old spike archived paused not on its node/, "the archived thread is listed on its fold's page");
 });
 
 test("an archived thread's timeline says why its disk is kept past its 24 hours, until its usage was read and backed up", async (t) => {
@@ -223,7 +225,7 @@ test("an archive whose usage will not be read without the person needs them, as 
   assert.doesNotMatch(await archived(), /kept/);
 });
 
-test("the sidebar lists every project's threads with their state, folds the archived and marks the open one", async (t) => {
+test("the sidebar lists every project's threads with their state, counts the archived with a link to them and marks the open one", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
@@ -240,16 +242,74 @@ test("the sidebar lists every project's threads with their state, folds the arch
     const html = (await s.call("GET", path)).text;
     const sidebar = sidebarOf(html);
     // Threads started in the same millisecond have no order between them.
-    assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs working 1m 03s", "archived Old spike now", "deleted Gone now", "running Fix checkout now"], `${path} lists the threads`);
-    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted (Gone now Old spike now|Old spike now Gone now) beta main Write docs working 1m 03s$/);
+    assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs working 1m 03s", "running Fix checkout now"], `${path} lists the open threads`);
+    assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted beta main Write docs working 1m 03s$/);
+    assert.match(html, /<a class="archived-link" id="archived-acme" href="\/threads\/closed\?project=acme">1 archived, 1 deleted<\/a>/, `${path} links the closed threads' page`);
     assert.match(html, new RegExp(`<span class="row-at">working <time data-since="${started}">1m 03s</time></span>`), `${path} ticks the working thread's clock`);
   }
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.equal(sidebarOf(page).active, fix.id);
-  assert.match(page, /<details class="archived" id="archived-acme">/, "the archived fold starts closed");
-  assert.match((await s.call("GET", `/threads/${old.id}`)).text, /<details class="archived" id="archived-acme" open>/, "an archived thread's page opens its fold");
+  const archived = sidebarOf((await s.call("GET", `/threads/${old.id}`)).text);
+  assert.deepEqual([archived.active, archived.rows.includes("archived Old spike now"), archived.rows.includes("deleted Gone now")], [old.id, true, false], "an archived thread's page lists and marks it alone of the closed");
   assert.doesNotMatch(page, /id="side-nodes"/, "the sidebar leaves the nodes to the Cluster page");
   assert.match(textOf(await nodeHeads(s)), /rj-firebat/);
+});
+
+test("thousands of closed threads leave the home page small, and their page lists them newest first a hundred at a time", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const title = (i: number) => `Closed ${String(i).padStart(4, "0")}`;
+  const closed = Array.from({ length: 2000 }, (_, i) => addThread(s.registry, { thread: { title: title(i), status: i % 2 === 0 ? "archived" : "deleted", createdAt: Date.now() - (3000 - i) * 1000 } }));
+  await s.start("acme", "Fix checkout");
+  await s.start("acme", "Write docs");
+  s.registry.saveQueued({
+    id: "th-cancelled01" as ThreadId, title: "Never ran", project: "acme" as ProjectId, startedBy: laptop, createdAt: Date.now(), after: [],
+    request: { project: "acme", title: "Never ran", resources: defaultProjectResources }, message: "go", status: "archived", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+
+  const home = (await s.call("GET", "/")).text;
+  assert.ok(Buffer.byteLength(home) < 100_000, `GET / is ${Buffer.byteLength(home)} bytes`);
+  assert.deepEqual(closed.filter((c) => home.includes(c.title)), [], "no closed thread's title is on the home page");
+  assert.match(textOf(home), /Fix checkout/);
+  assert.match(sectionOf(home, "project-acme"), /<a href="\/threads\/closed\?project=acme">1000 archived, 1000 deleted<\/a>/);
+
+  const first = (await s.call("GET", "/threads/closed?project=acme")).text;
+  const listed = (html: string) => [...sectionOf(html, "project-acme").matchAll(/>(Closed \d{4})</g)].map((m) => m[1]);
+  assert.deepEqual(listed(first), Array.from({ length: 100 }, (_, i) => title(1999 - i)), "the newest hundred");
+  assert.match(textOf(first), /Never started Thread Never ran cancelled/, "a queued thread cancelled before it started is listed with the closed");
+  assert.match(first, /<a class="link" href="\/threads\/closed\?project=acme&amp;page=2">Show older<\/a>/);
+  assert.doesNotMatch(first, />Newer</);
+  assert.match(sectionOf(first, "project-acme"), /<span class="count">2000<\/span>/, "the closed page counts what the home page's line counts");
+  assert.match(first, /<div class="page" id="fold-list" data-live>/, "the client's poll swaps the list as threads close");
+  const second = (await s.call("GET", "/threads/closed?project=acme&page=2")).text;
+  assert.deepEqual(listed(second), Array.from({ length: 100 }, (_, i) => title(1899 - i)), "the next hundred");
+  assert.match(second, /<a class="link" href="\/threads\/closed\?project=acme">Newer<\/a>/);
+  assert.equal(listed((await s.call("GET", "/threads/closed?project=acme&page=20")).text).at(-1), title(0), "the last page ends at the oldest");
+  assert.equal((await s.call("GET", "/threads/closed?project=nosuch")).status, 404);
+
+  const oldest = sidebarOf((await s.call("GET", `/threads/${closed[0]!.id}`)).text);
+  assert.equal(oldest.active, closed[0]!.id, "a closed thread's page marks its row in the sidebar");
+  assert.equal(oldest.rows.filter((r) => r.includes("Closed")).length, 1, "and lists no other closed thread");
+});
+
+test("a quiet fold lists its newest hundred, and the open one past them, and links the rest", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const title = (i: number) => `Quiet ${String(i).padStart(3, "0")}`;
+  const day = Date.now() - 24 * 60 * 60_000;
+  const quiet = Array.from({ length: 150 }, (_, i) => addThread(s.registry, { thread: { title: title(i), createdAt: day + i * 1000, lastHumanActivityAt: day } }));
+  observeNode(s.registry);
+
+  const listed = (html: string) => [...html.matchAll(/>(Quiet \d{3})</g)].map((m) => m[1]);
+  const home = (await s.call("GET", "/")).text;
+  const newest = Array.from({ length: 100 }, (_, i) => title(149 - i));
+  assert.deepEqual(listed(sectionOf(home, "project-acme")), newest, "the overview's fold");
+  assert.deepEqual(listed(home.split('id="side-threads"')[1]!.split("</nav>")[0]!), newest, "the sidebar's fold");
+  assert.match(sectionOf(home, "project-acme"), /<a class="link" href="\/threads\/quiet\?project=acme">All 150 quiet<\/a>/);
+  assert.match(home, /<a class="archived-link" href="\/threads\/quiet\?project=acme">All 150 quiet<\/a><\/details>/);
+  const page = sidebarOf((await s.call("GET", `/threads/${quiet[0]!.id}`)).text);
+  assert.equal(page.active, quiet[0]!.id, "an old quiet thread's page still marks its row");
+  assert.deepEqual(listed((await s.call("GET", "/threads/quiet?project=acme&page=2")).text.split('id="project-acme"')[1]!), Array.from({ length: 50 }, (_, i) => title(49 - i)));
 });
 
 test("a review the person cancelled says which thread they archived, and asks nothing of them", async (t) => {
