@@ -615,7 +615,7 @@ test("Claude turn events keep a pylon awake until it ends, independently of harn
 
 test("a lost turn end expires while heartbeats keep a long turn awake", async (t) => {
   const { desiredPhase } = await import("./reconcile.ts");
-  const { sessionActivityTtlMs } = await import("../events.ts");
+  const { sessionActivityTtlMs } = await import("./events.ts");
   let now = 10_000_000;
   const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
@@ -645,7 +645,7 @@ test("a lost turn end expires while heartbeats keep a long turn awake", async (t
 
 test("session state is capped at sixteen, removed at end and pruned with event retention", async (t) => {
   const { DatabaseSync } = await import("node:sqlite");
-  const { sessionActivityTtlMs, maxActiveSessions } = await import("../events.ts");
+  const { sessionActivityTtlMs, maxActiveSessions } = await import("./events.ts");
   const path = tempDb();
   let now = 10_000_000;
   const registry = seed(openRegistry(path, () => now));
@@ -708,7 +708,7 @@ test("ended sessions reject late heartbeats and starts, including after registry
   let now = 10_000_000;
   let registry = seed(openRegistry(path, () => now));
   let sequence = 0;
-  const report = (kind: import("../events.ts").PylonEvent["kind"], at: number) => {
+  const report = (kind: import("../protocol/observations.ts").PylonEvent["kind"], at: number) => {
     now++;
     registry.reportSession(node, { sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at } });
   };
@@ -741,7 +741,7 @@ test("an outbox event sent again under its ID has no effect, even after another 
   let now = 10_000_000;
   const registry = seed(openRegistry(tempDb(), () => now));
   let sequence = 0;
-  const report = (kind: import("../events.ts").PylonEvent["kind"], at: number, id: string) => {
+  const report = (kind: import("../protocol/observations.ts").PylonEvent["kind"], at: number, id: string) => {
     now += 1000;
     registry.reportSession(node, { sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at, id } });
   };
@@ -783,11 +783,11 @@ test("distinct reports at the same stamp all apply, with or without IDs", () => 
 
 test("a newer heartbeat resumes waiting with a fresh lease, while older or equal stamps do not", async (t) => {
   const { desiredPhase } = await import("./reconcile.ts");
-  const { sessionActivityTtlMs } = await import("../events.ts");
+  const { sessionActivityTtlMs } = await import("./events.ts");
   let now = 10_000_000;
   const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
-  const report = (kind: import("../events.ts").PylonEvent["kind"], at: number) => registry.reportSession(node, {
+  const report = (kind: import("../protocol/observations.ts").PylonEvent["kind"], at: number) => registry.reportSession(node, {
     sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at },
   });
   const attention = () => registry.events("0", { kinds: ["attention.changed"] }).at(-1)!.payload.attention;
@@ -899,7 +899,7 @@ test("a thread is working since the earliest start of its running harness turn a
   let now = 10_000_000;
   const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
-  const report = (kind: import("../events.ts").PylonEvent["kind"], session: string) => registry.reportSession(node, {
+  const report = (kind: import("../protocol/observations.ts").PylonEvent["kind"], session: string) => registry.reportSession(node, {
     sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session, at: now },
   });
   const since = () => registry.thread(threadId)!.workingSince;
@@ -933,11 +933,11 @@ test("a thread is working since the earliest start of its running harness turn a
 });
 
 test("a thread works while its harness turn or a live session turn runs, such as a Claude worker's", async (t) => {
-  const { sessionActivityTtlMs } = await import("../events.ts");
+  const { sessionActivityTtlMs } = await import("./events.ts");
   let now = 10_000_000;
   const registry = seeded(t, tempDb(), () => now);
   let sequence = 0;
-  const report = (kind: import("../events.ts").PylonEvent["kind"]) => registry.reportSession(node, {
+  const report = (kind: import("../protocol/observations.ts").PylonEvent["kind"]) => registry.reportSession(node, {
     sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session: "c1", at: now },
   });
   const working = () => registry.thread(threadId)!.working;
@@ -984,7 +984,7 @@ test("a turn running before turn starts were recorded has no known start", (t) =
  */
 async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: number }) {
   const { holdTurnEnd, reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
-  type Kind = import("../events.ts").PylonEvent["kind"];
+  type Kind = import("../protocol/observations.ts").PylonEvent["kind"];
   let sequence = 0;
   const held: number[] = [];
   const send = (kind: Kind, at: number, message?: string) => registry.reportSession(node, {
@@ -1042,7 +1042,7 @@ test("a main turn that ends while a background subagent runs stays working until
 
 test("a background subagent that never reports its finish expires with the session's lease, without a reply", async (t) => {
   const { desiredPhase } = await import("./reconcile.ts");
-  const { sessionActivityTtlMs } = await import("../events.ts");
+  const { sessionActivityTtlMs } = await import("./events.ts");
   const clock = { now: 10_000_000 };
   const registry = seeded(t, tempDb(), () => clock.now);
   const hook = await claudeHooks(registry, clock);

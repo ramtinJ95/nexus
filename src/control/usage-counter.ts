@@ -12,7 +12,7 @@ import type { ConversationId } from "./harness/host.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
-import type { EventKind } from "../events.ts";
+import type { EventKind } from "./events.ts";
 import { followEvents } from "./follow-events.ts";
 import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";

@@ -5,12 +5,22 @@
  * domain types below. The control plane reads through `parseProbeEvent`, and the probe writes through `encodeProbeEvent`.
  */
 import { z } from "zod";
-import { pylonEventSchema, type ReportedEvent } from "../events.ts";
 import { agentKinds, type SessionHarness } from "./agent-kinds.ts";
 import { asSent, parse, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import { pylonIdField, pylonIdSchema } from "./fields.ts";
 import { jobStatusSchema, type JobStatus } from "./jobs.ts";
+import { eventIdPattern, maxEventMessageLength, maxSessionLength, sessionKinds } from "../guest-contract.ts";
+
+export const pylonEventSchema = z.strictObject({
+  kind: z.enum(sessionKinds),
+  at: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  session: z.string().min(1).max(maxSessionLength).optional(),
+  message: z.string().max(maxEventMessageLength).optional(),
+  id: z.string().regex(eventIdPattern).optional(),
+});
+export type PylonEvent = z.infer<typeof pylonEventSchema>;
+export interface ReportedEvent { sequence: number; pylon: PylonId; event: PylonEvent; time: number }
 
 export interface NodeObservation {
   events: readonly ReportedEvent[];

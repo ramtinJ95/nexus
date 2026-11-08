@@ -3,7 +3,7 @@
  * with when the person saw it in its record.
  */
 import { json, type Db } from "./db.ts";
-import type { EventKind } from "../events.ts";
+import type { EventKind } from "./events.ts";
 import { checkKey, statuses, type HealthChange, type Status } from "./doctor-model.ts";
 
 export type NewHealthChange = Omit<HealthChange, "id" | "seenAt">;

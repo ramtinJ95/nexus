@@ -2,7 +2,7 @@
  * The event log and each thread's conversation, as server-sent event streams.
  */
 import { HttpError } from "../http-error.ts";
-import { eventCursor, eventKinds, type EventFilter } from "../../events.ts";
+import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
 import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
 
 export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {

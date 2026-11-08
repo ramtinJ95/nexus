@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { NexusEvent } from "../events.ts";
+import type { NexusEvent } from "./events.ts";
 import { followEvents } from "./follow-events.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { testRegistry } from "../test-support/registry-kit.ts";

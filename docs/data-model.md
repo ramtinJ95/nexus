@@ -280,7 +280,7 @@ On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, tar
 
 ## Nexus events and Claude workers
 
-`NexusEvent` is defined in `src/events.ts`. It has `id` (a decimal string), `time`
+`NexusEvent` is defined in `src/control/events.ts`. It has `id` (a decimal string), `time`
 (control-plane receipt time in Unix milliseconds), nullable `thread` and `project`,
 `kind`, and a small JSON `payload`. IDs increase globally, not per thread. The
 registry's `events` table retains the most recent 10,000 records across restarts.

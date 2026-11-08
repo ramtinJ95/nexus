@@ -10,9 +10,7 @@
  * features with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention, type Need } from "./attention.ts";
-import { pylonEventSchema } from "../events.ts";
-import type { ReportedEvent } from "../events.ts";
-import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "../events.ts";
+import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "./events.ts";
 import type { Sender } from "./agent-protocol.ts";
 import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
@@ -21,7 +19,7 @@ import { json, jsonOrNull, type Db, type Row } from "./db.ts";
 import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
-import type { HerdrStatus, NodeObservation } from "../protocol/observations.ts";
+import { pylonEventSchema, type HerdrStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import { defaultClaudeModel, type SessionHarness } from "../protocol/agent-kinds.ts";

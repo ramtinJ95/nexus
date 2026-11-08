@@ -1,4 +1,4 @@
-import type { EventKind, NexusEvent } from "../events.ts";
+import type { EventKind, NexusEvent } from "./events.ts";
 import type { Registry } from "./registry.ts";
 
 /**

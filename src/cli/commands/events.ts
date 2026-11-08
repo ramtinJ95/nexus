@@ -1,7 +1,7 @@
 /** `nexus events`: the control plane's events, once or followed. */
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { NexusEvent } from "../../events.ts";
+import type { NexusEvent } from "../../control/events.ts";
 import { CliError } from "../transport.ts";
 import { type Command, reconnectMs, str, strs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";

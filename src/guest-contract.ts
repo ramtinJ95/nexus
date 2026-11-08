@@ -28,6 +28,12 @@ export const piEnv = "/usr/local/libexec/nexus/pi-env";
 export const nexusKvm = "/usr/local/libexec/nexus/nexus-kvm";
 export const nexusTurn = "/usr/local/bin/nexus-turn.ts";
 
+export const sessionKinds = ["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"] as const;
+export const maxSessionLength = 200;
+export const maxEventMessageLength = 2048;
+/** Set by the pylon's outbox on each event, and kept when it sends the event again. */
+export const eventIdPattern = /^[0-9a-z-]{1,64}$/;
+
 /** How long one ordinary guest exec may take. */
 export const callTimeoutMs = 10_000;
 
