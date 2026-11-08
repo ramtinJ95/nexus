@@ -13,6 +13,9 @@ import type { PylonId } from "../ids.ts";
 import { probeRoutes } from "./routes.ts";
 import { routePath } from "../util/route-path.ts";
 
+/** How long the control plane waits for the probe to answer a stream request. */
+export const streamAnswerMs = 10_000;
+
 /**
  * A stream is a raw pipe to a process in the guest, such as the pi-env daemon. It carries the process's stdout
  * only, and its stderr goes to the probe's log under the pylon's ID, so a diagnostic can never corrupt a framed
@@ -24,9 +27,6 @@ import { routePath } from "../util/route-path.ts";
  * `interrupted` result appears only when the harness process itself died mid-call. A terminal's relay hangs up
  * when its stdin ends, so Herdr's client detaches and the session stays.
  */
-/** How long the control plane waits for the probe to answer a stream request. */
-export const streamAnswerMs = 10_000;
-
 export type StreamEnd = { kind: "exited"; code: number } | { kind: "lost" };
 export interface ByteStream extends AsyncIterable<Uint8Array> {
   write(chunk: Uint8Array): Promise<void>;
