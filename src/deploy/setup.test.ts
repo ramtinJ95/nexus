@@ -144,6 +144,7 @@ test("a deployer.json that lacks a token gains one, and the report never prints 
   assert.equal(value(files(result), paths.deployer).token, token);
   const text = report(result.ok ? result.files : []);
   assert.match(text, /added a new deployer token/);
+  assert.doesNotMatch(text, /kept the existing deployer token/, "a token this run added is not also kept");
   assert.doesNotMatch(text, /c{64}/);
 });
 

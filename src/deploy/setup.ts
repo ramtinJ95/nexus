@@ -167,15 +167,17 @@ export interface FileWrite {
   value: Json;
   state: "new" | "updated" | "unchanged";
   changes: readonly Change[];
+  /** The paths whose values the report never prints, each with what to call it. */
+  secrets: Readonly<Record<string, string>>;
 }
 
 export type Setup = { ok: false; errors: readonly string[] } | { ok: true; files: readonly FileWrite[] };
 
-function file(path: string, mode: number, existing: Json | undefined, generated: Json, derived: readonly string[] = []): FileWrite {
+function file(path: string, mode: number, existing: Json | undefined, generated: Json, derived: readonly string[] = [], secrets: Readonly<Record<string, string>> = {}): FileWrite {
   const changes: Change[] = [];
-  if (existing === undefined) return { path, mode, value: generated, state: "new", changes };
+  if (existing === undefined) return { path, mode, value: generated, state: "new", changes, secrets };
   const value = merge(existing, generated, changes, "", new Set(derived));
-  return { path, mode, value, state: changes.some((c) => c.kind !== "kept") ? "updated" : "unchanged", changes };
+  return { path, mode, value, state: changes.some((c) => c.kind !== "kept") ? "updated" : "unchanged", changes, secrets };
 }
 
 /** Every config this machine needs, merged over what is on disk. `newToken` is used only when deployer.json has none. */
@@ -294,12 +296,13 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     previews: { gatewayPort: ports.gateway },
   }));
 
-  files.push(file(paths.deployer, 0o600, existing.deployer, { token, drainTimeoutMs: 300_000, healthTimeoutMs: 60_000 }));
+  files.push(file(paths.deployer, 0o600, existing.deployer, { token, drainTimeoutMs: 300_000, healthTimeoutMs: 60_000 }, [], { token: "deployer token" }));
   return { ok: true, files };
 }
 
-function describe(change: Change): string {
-  if (change.at === "token") return "added a new deployer token";
+function describe(change: Change, secrets: FileWrite["secrets"]): string {
+  const secret = secrets[change.at];
+  if (secret !== undefined) return `added a new ${secret}`;
   if (change.kind === "added") return `added ${change.at} ${JSON.stringify(change.value)}`;
   if (change.kind === "replaced") return `replaced ${change.at} ${JSON.stringify(change.existing)} with ${JSON.stringify(change.value)}, which follows from this machine's deployer`;
   return `left ${change.at} alone: it is ${JSON.stringify(change.existing)}, and this run would write ${JSON.stringify(change.value)}. Edit the file to change it`;
@@ -308,8 +311,8 @@ function describe(change: Change): string {
 export function report(files: readonly FileWrite[]): string {
   return files.flatMap((f) => [
     f.state === "new" ? `wrote ${f.path}` : f.state === "updated" ? `updated ${f.path}` : `${f.path} needs nothing new`,
-    ...f.path === paths.deployer && f.state !== "new" ? ["  kept the existing deployer token"] : [],
-    ...f.changes.map((c) => `  ${describe(c)}`),
+    ...f.state === "new" ? [] : Object.entries(f.secrets).flatMap(([at, secret]) => f.changes.some((c) => c.at === at) ? [] : [`  kept the existing ${secret}`]),
+    ...f.changes.map((c) => `  ${describe(c, f.secrets)}`),
   ]).join("\n");
 }
 
