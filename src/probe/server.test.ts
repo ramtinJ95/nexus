@@ -19,6 +19,7 @@ import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
 import { connectProbe } from "../protocol/client.ts";
+import { probeRoutes, type CallerRole, type ProbeRoute } from "../protocol/routes.ts";
 import { envelope, ingest } from "../control/reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { type BackendPylon, type Guest, type VmBackend } from "../backends/backend.ts";
@@ -165,6 +166,37 @@ test("the probe trusts the control plane control-plane.json names, not the one a
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 403);
   callAs(moved);
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
+});
+
+test("each route of the table answers only its caller role, and refuses every other caller with 403", async (t) => {
+  const { base, probe, callAs } = await setup(t);
+  const params: Record<string, string> = { jobId: "job-x", pylonId: "pylon-x", artifact: image, name: "NOT_A_SECRET" };
+  const status = async (route: ProbeRoute): Promise<number> => {
+    const path = route.path.replace(/\{(\w+)\}/g, (_, key: string) => params[key]!);
+    if (route.upgrade !== undefined) {
+      const socket = connect(probe.port, "127.0.0.1");
+      socket.write(`${route.method} ${path}?request=${encodeURIComponent(JSON.stringify({ argv: ["true"] }))} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${route.upgrade}\r\n\r\n`);
+      const [head] = await once(socket, "data") as [Buffer];
+      socket.destroy();
+      return Number(/^HTTP\/1\.1 (\d+)/.exec(head.toString())![1]);
+    }
+    const left = new AbortController();
+    const body = route === probeRoutes.command ? JSON.stringify({ kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }) : null;
+    const res = await fetch(`${base}${path}`, { method: route.method, body, signal: left.signal });
+    left.abort();
+    return res.status;
+  };
+  const answered: Record<keyof typeof probeRoutes, number> = {
+    submit: 400, job: 404, observe: 200, command: 409, readGit: 409, stream: 409, manifest: 404, putSecret: 404, putPeers: 400,
+    health: process.platform === "linux" ? 200 : 500, artifactUsage: 200, dropArtifacts: 400, wakeDeployer: 404, fetchArtifact: 400,
+  };
+  const callers: [CallerRole | null, TailnetNodeId | null][] = [["control-plane", controlPlane], ["peer-probe", peer], [null, "nSTRANGER" as TailnetNodeId], [null, null]];
+  for (const [name, route] of Object.entries(probeRoutes) as [keyof typeof probeRoutes, ProbeRoute][]) {
+    for (const [role, caller] of callers) {
+      callAs(caller);
+      assert.equal(await status(route), role === route.role ? answered[name] : 403, `${route.method} ${route.path} as ${caller ?? "an unknown caller"}`);
+    }
+  }
 });
 
 test("a method a route does not serve gets that route's answer: 405 or 404", async (t) => {
