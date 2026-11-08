@@ -1,0 +1,4 @@
+exit 64
+--- stdout
+--- stderr
+nexus: --plan starts a Nexus agent thread now, so it takes neither --claude nor --after. Run nexus --help for usage

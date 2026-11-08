@@ -1,9 +1,9 @@
 /** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
-import { defaultProjectResources, defaultSecondReview, upgradeProject, type LoginKind, type Project, type SecondReview } from "../../control/project.ts";
+import { defaultSecondReview, upgradeProject, type LoginKind, type Project, type SecondReview } from "../../control/project.ts";
 import { secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
 import { CliError } from "../transport.ts";
-import { type Command, str, strs, int, request, resourcesOf, placementOptions, table } from "../kit.ts";
+import { type Command, str, strs, request, resourcesOf, resourceOptions, table } from "../kit.ts";
 import { projectRoutes } from "../../contract/projects.ts";
 
 /**
@@ -84,6 +84,7 @@ function projectText(p: Project): string {
 
 export const projectsCommands: Readonly<Record<string, Command>> = {
   projects: {
+    help: ["  nexus projects"],
     args: [0, 0],
     async run(api) {
       const projects = await request(api, projectRoutes.list, {});
@@ -91,6 +92,10 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "project show": {
+    help: [
+      "  nexus project show <id>                      a project's settings, and the standing rules each builder thread gets with its first message",
+      "    project add and project edit set the rules with --rules-file PATH, or - for stdin, and project edit --clear-rules clears them",
+    ],
     args: [1, 1],
     async run(api, [id]) {
       // From the list, so the command needs no route newer than `projects`.
@@ -100,9 +105,17 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "project edit": {
+    help: [
+      "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]",
+      "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...",
+      "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]",
+      "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer",
+      "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own",
+      "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names",
+    ],
     args: [1, 1],
     options: {
-      ...placementOptions,
+      node: { type: "string" }, branch: { type: "string" }, ...resourceOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
       "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
@@ -143,9 +156,14 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "project add": {
+    help: [
+      "  nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]",
+      "                    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH|-]",
+      "                    [--auto-review off|review|land|yolo]",
+    ],
     args: [1, 2],
     options: {
-      ...placementOptions,
+      node: { type: "string" }, branch: { type: "string" }, ...resourceOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       scratch: { type: "boolean" }, "rules-file": { type: "string" }, "auto-review": { type: "string" },
     },
@@ -153,14 +171,15 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       // A forgotten URL must not quietly make a scratch project.
       if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
       const repoUrl = url ?? null;
-      const resources = { cpus: int(str(v, "cpus"), "--cpus", defaultProjectResources.cpus), memoryGiB: int(str(v, "memory"), "--memory", defaultProjectResources.memoryGiB), diskGiB: int(str(v, "disk"), "--disk", defaultProjectResources.diskGiB) };
+      const resources = resourcesOf(v);
       const secrets = strs(v, "secret").map(secretGrantOf);
       const rulesFile = str(v, "rules-file");
       const auto = autoReviewOf(v);
+      const [branch, node] = [str(v, "branch"), str(v, "node")];
       const added = await request(api, projectRoutes.add, { body: {
-        id: id!, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
+        id: id!, repoUrl, ...branch === undefined ? {} : { defaultBranch: branch }, ...node === undefined ? {} : { defaultNode: node }, ...resources === undefined ? {} : { resources },
         // The API refuses a login it does not know.
-        allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login") as LoginKind[], preSetup: null,
+        allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login") as LoginKind[],
         ...rulesFile === undefined ? {} : { standingRules: rulesFileOf(rulesFile) },
       } });
       // Only an edit records who turned auto review on, so a new project's add cannot name someone else.

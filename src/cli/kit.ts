@@ -1,8 +1,10 @@
 /** What the commands share: their types, the flag readers, the table, and the waits on a thread's pylon. */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ParseArgsOptionsConfig } from "node:util";
+import type { z } from "zod";
 import type { Project } from "../control/project.ts";
-import { titleOf } from "../thread-title.ts";
+import { brokenRule, startFields } from "../contract/threads-parse.ts";
+import type { itemSchema } from "../contract/projects-parse.ts";
 import type { WebSocket } from "ws";
 import { CliError, type ErrorKind } from "./transport.ts";
 import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/route.ts";
@@ -26,6 +28,8 @@ interface Local {
   connect(path: string): Promise<WebSocket>;
 }
 export interface Command {
+  /** Its lines of `nexus --help`, which its own --help prints. Commands that share an entry share the array. */
+  help: readonly string[];
   args: readonly [min: number, max: number];
   options?: ParseArgsOptionsConfig;
   /** Nothing when the command printed its own output, as watch does. */
@@ -43,7 +47,7 @@ export function int(value: string | undefined, flag: string, fallback: number): 
   return n;
 }
 
-/** The --cpus, --memory and --disk given, or undefined for none, as `project edit` and `start` send them. */
+/** The --cpus, --memory and --disk given, or undefined for none, as a project, a start and an item send them. */
 export function resourcesOf(v: Values): Partial<Project["resources"]> | undefined {
   const resources: Partial<Project["resources"]> = {};
   for (const [flag, field] of [["cpus", "cpus"], ["memory", "memoryGiB"], ["disk", "diskGiB"]] as const) {
@@ -52,29 +56,31 @@ export function resourcesOf(v: Values): Partial<Project["resources"]> | undefine
   return Object.keys(resources).length > 0 ? resources : undefined;
 }
 
-/** Where a thread's pylon runs and how big it is, which a start, an item and a project's defaults share. */
-export const placementOptions = { node: { type: "string" }, branch: { type: "string" }, cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" } } as const;
-/** What briefs a worker, which `start` and `item add` share. */
-export const workerOptions = {
-  ...placementOptions, model: { type: "string" }, claude: { type: "string" }, project: { type: "string" }, title: { type: "string" }, message: { type: "string" },
-  commit: { type: "string" }, after: { type: "string" },
-} as const;
+export const resourceOptions = { cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" } } as const;
 
-/** The worker flags that `start` and `item add` check alike. The title is undefined when no flag gives one. */
-export function briefOf(v: Values, verb: string) {
-  const message = str(v, "message");
-  const claude = str(v, "claude");
-  if (v.model !== undefined && claude === undefined) throw new CliError("invalid", "--model requires --claude");
-  if (message !== undefined && claude !== undefined) throw new CliError("invalid", "--claude and --message are mutually exclusive");
-  const project = str(v, "project");
-  if (project === undefined) throw new CliError("invalid", `${verb} needs --project`);
+/**
+ * The start fields that a flag of the same name gives as text. The rest have flags of their own: --cpus, --memory
+ * and --disk give `resources`, --after a list, and start's --request-id and --plan `requestId` and `planning`.
+ */
+const textFields = Object.keys(startFields.shape).filter((field) => !["resources", "after", "requestId", "planning"].includes(field));
+export const briefOptions = { ...Object.fromEntries(textFields.map((field) => [field, { type: "string" }])), ...resourceOptions, after: { type: "string" } } as const satisfies ParseArgsOptionsConfig;
+const flagOf = (field: string) => `--${field === "planning" ? "plan" : field}`;
+
+/** The body that `start` and `item add` send, held to the API's `rules` with the fields named as flags. */
+export function briefOf(v: Values, verb: string, rules: Parameters<typeof brokenRule>[0]): z.input<typeof itemSchema> & { requestId?: string; planning?: true } {
+  if (v.project === undefined) throw new CliError("invalid", `${verb} needs --project`);
   const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
   if (after?.length === 0) throw new CliError("invalid", "--after needs a thread");
-  return {
-    project, title: str(v, "title") ?? (message === undefined && claude === undefined ? undefined : titleOf(message ?? claude!)),
-    optional: Object.fromEntries((["node", "branch", "commit", "claude", "model", "message"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]])),
-    resources: resourcesOf(v), after,
+  const resources = resourcesOf(v);
+  const requestId = str(v, "request-id");
+  const body = {
+    ...Object.fromEntries(textFields.flatMap((field) => v[field] === undefined ? [] : [[field, v[field]]])) as { project: string },
+    ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after },
+    ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true as const } : {},
   };
+  const broken = brokenRule(rules, body, flagOf);
+  if (broken !== undefined) throw new CliError("invalid", broken);
+  return body;
 }
 
 export function ago(at: number, now = Date.now()): string {

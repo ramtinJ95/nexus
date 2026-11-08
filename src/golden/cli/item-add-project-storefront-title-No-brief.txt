@@ -1,0 +1,4 @@
+exit 64
+--- stdout
+--- stderr
+nexus: an item needs a brief: --message for a Nexus agent thread, or --claude for a Claude worker. Run nexus --help for usage

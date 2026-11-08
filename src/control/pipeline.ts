@@ -21,6 +21,7 @@ import { personNeeds, prLocationOf, type PersonNeed } from "./work-model.ts";
 import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
 import type { ItemRecord } from "./pipeline-store.ts";
+import { brokenRule, itemRules } from "../contract/threads-parse.ts";
 
 type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "latestHealthSample" | "needs" | "node" | "nodes" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
 
@@ -193,9 +194,8 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
      * proposal's item takes an ID made from its question, which the planning thread is told.
      */
     add(request: StartRequest, message: string | null, after: readonly string[], caller: string, id = newItemId()): ItemRecord {
-      if (request.model !== undefined && request.claude === undefined) throw new Refusal("invalid", "model requires claude");
-      if (message !== null && request.claude !== undefined) throw new Refusal("invalid", "message is for a Nexus agent thread. A Claude worker's brief is its claude");
-      if (message === null && request.claude === undefined) throw new Refusal("invalid", "an item needs a brief: message for a Nexus agent thread, or claude for a Claude worker");
+      const broken = brokenRule(itemRules, { ...request, message });
+      if (broken !== undefined) throw new Refusal("invalid", broken);
       const project = checkStart(registry, request, caller);
       if (project.pipeline == null) throw new Refusal("conflict", `the pipeline does not run for project ${project.id}. nexus project edit ${project.id} --pipeline start turns it on`);
       const ids = [...new Set(after)] as ItemId[];

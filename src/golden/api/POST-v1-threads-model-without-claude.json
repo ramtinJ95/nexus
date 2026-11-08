@@ -1,0 +1,6 @@
+400 application/json
+{
+  "error": "✖ model requires claude",
+  "code": null,
+  "retryable": false
+}

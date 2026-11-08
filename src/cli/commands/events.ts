@@ -10,6 +10,7 @@ import { transient } from "../config.ts";
 
 export const eventsCommands: Readonly<Record<string, Command>> = {
   events: {
+    help: ["  nexus events [--follow] [--since ID] [--thread T] [--project P] [--kind K]..."],
     args: [0, 0],
     options: { follow: { type: "boolean" }, since: { type: "string" }, thread: { type: "string" }, project: { type: "string" }, kind: { type: "string", multiple: true } },
     async run(api, _, v, follow) {

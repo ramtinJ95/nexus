@@ -1,7 +1,7 @@
 /** The pipeline items: `items` and the `item` commands. */
 import type { PipelineItem } from "../../control/pipeline.ts";
-import { CliError } from "../transport.ts";
-import { type Command, str, request, workerOptions, briefOf, ago, table, clip } from "../kit.ts";
+import { type Command, str, request, briefOptions, briefOf, ago, table, clip } from "../kit.ts";
+import { itemRules } from "../../contract/threads-parse.ts";
 import { itemRoutes } from "../../contract/projects.ts";
 
 const itemRow = (i: PipelineItem) => [i.id, i.phase.kind, i.phase.why, i.thread ?? "no thread yet", i.project, ago(i.addedAt), i.title];
@@ -23,6 +23,7 @@ function itemText(i: PipelineItem): string {
 
 export const itemsCommands: Readonly<Record<string, Command>> = {
   items: {
+    help: ["  nexus items [--project P] [--all]            pipeline items and the phase each is in; cancelled ones only with --all"],
     args: [0, 0],
     options: { project: { type: "string" }, all: { type: "boolean" } },
     async run(api, _, v) {
@@ -31,16 +32,20 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "item add": {
+    help: [
+      "  nexus item add --project P [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]",
+      "                 [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]",
+      "    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge",
+    ],
     args: [0, 0],
-    options: workerOptions,
+    options: briefOptions,
     async run(api, _, v) {
-      const { project, title, optional, resources, after } = briefOf(v, "item add");
-      if (v.message === undefined && v.claude === undefined) throw new CliError("invalid", "item add needs a brief: --message, or --claude for a Claude worker");
-      const i = await request(api, itemRoutes.add, { body: { project, title: title!, ...optional, ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after } } });
+      const i = await request(api, itemRoutes.add, { body: briefOf(v, "item add", itemRules) });
       return { json: i, text: `Added ${i.id} to ${i.project}: ${i.title}. It is ${i.phase.kind}: ${i.phase.why}.` };
     },
   },
   "item show": {
+    help: ["  nexus item show <item>                       an item with its phase, its thread and its brief"],
     args: [1, 1],
     async run(api, [id]) {
       const i = await request(api, itemRoutes.show, { item: id! });
@@ -48,6 +53,7 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "item approve": {
+    help: ["  nexus item approve <item>                    let an item become a thread, in a project whose pipeline waits for approval"],
     args: [1, 1],
     async run(api, [id]) {
       const i = await request(api, itemRoutes.approve, { item: id! });
@@ -55,6 +61,7 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "item cancel": {
+    help: ["  nexus item cancel <item>                     an item that is not a thread yet, which then never becomes one"],
     args: [1, 1],
     async run(api, [id]) {
       const i = await request(api, itemRoutes.cancel, { item: id! });

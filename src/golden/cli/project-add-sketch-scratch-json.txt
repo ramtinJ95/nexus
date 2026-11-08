@@ -1,0 +1,18 @@
+exit 0
+--- stdout
+{
+  "id": "sketch",
+  "repoUrl": null,
+  "defaultBranch": "main",
+  "defaultNode": "auto",
+  "resources": {
+    "cpus": 2,
+    "memoryGiB": 4,
+    "diskGiB": 10
+  },
+  "allowedHosts": [],
+  "secrets": [],
+  "logins": [],
+  "preSetup": null
+}
+--- stderr

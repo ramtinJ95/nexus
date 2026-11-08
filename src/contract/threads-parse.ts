@@ -2,15 +2,52 @@
 import { z } from "zod";
 import { maxPromptChars } from "../protocol/commands.ts";
 import { minPylonMemoryGiB, minPylonMemoryReason } from "../protocol/spawn.ts";
+import { titleOf } from "../thread-title.ts";
 
 /** A pylon's size, which a project gives its threads and a thread's start may change. */
 export const resourcesSchema = z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().min(minPylonMemoryGiB, minPylonMemoryReason), diskGiB: z.int().positive() });
 
-export const startSchema = z.strictObject({
+/** The fields of a start or an item that the rules below read together. */
+interface Brief { title?: string | undefined; message?: string | null | undefined; claude?: string | undefined; model?: string | undefined; after?: readonly string[] | undefined; planning?: true | undefined }
+/** `name` gives a field as the caller knows it: the API's field, or the CLI's flag. */
+interface BriefRule { broken(b: Brief): boolean; message(name: (field: keyof Brief) => string): string }
+
+const workerRules: readonly BriefRule[] = [
+  { broken: (b) => b.model !== undefined && b.claude === undefined, message: (name) => `${name("model")} requires ${name("claude")}` },
+  { broken: (b) => b.message != null && b.claude !== undefined, message: (name) => `${name("message")} is for a Nexus agent thread. A Claude worker's first prompt is its ${name("claude")}` },
+];
+export const startRules: readonly BriefRule[] = [
+  ...workerRules,
+  { broken: (b) => b.planning === true && (b.claude !== undefined || b.after !== undefined), message: (name) => `${name("planning")} starts a Nexus agent thread now, so it takes neither ${name("claude")} nor ${name("after")}` },
+  { broken: (b) => b.title === undefined && b.message == null && b.claude === undefined, message: (name) => `start needs ${name("title")}, ${name("message")} or ${name("claude")}` },
+];
+export const itemRules: readonly BriefRule[] = [
+  ...workerRules,
+  { broken: (b) => b.message == null && b.claude === undefined, message: (name) => `an item needs a brief: ${name("message")} for a Nexus agent thread, or ${name("claude")} for a Claude worker` },
+];
+export const brokenRule = (rules: readonly BriefRule[], b: Brief, name = (field: keyof Brief): string => field) => rules.find((rule) => rule.broken(b))?.message(name);
+
+/**
+ * `fields` held to `rules`. Without a title, it takes its brief's first line, which the rules make sure it has, in
+ * the title's place among the fields: a start's request ID is stored with a hash of them, which a repeat must match
+ * whether or not its caller sent the title, as callers before the server's default did.
+ */
+export const briefSchema = <S extends z.ZodObject & z.ZodType<Brief>>(fields: S, rules: readonly BriefRule[]) => fields
+  .superRefine((b, ctx) => {
+    const broken = brokenRule(rules, b);
+    if (broken !== undefined) ctx.addIssue({ code: "custom", message: broken });
+  })
+  .transform((b: z.output<S>): z.output<S> & { title: string } => {
+    if (b.title !== undefined) return b as z.output<S> & { title: string };
+    const title = titleOf(b.message ?? b.claude!);
+    return Object.fromEntries(Object.keys(fields.shape).flatMap((key): [string, unknown][] => key === "title" ? [[key, title]] : key in b ? [[key, b[key as keyof typeof b]]] : [])) as z.output<S> & { title: string };
+  });
+
+export const startFields = z.strictObject({
   model: z.string().trim().min(1).max(200).optional(),
   claude: z.string().trim().min(1).max(maxPromptChars).refine((prompt) => !prompt.includes("\0"), "a Claude prompt cannot hold a NUL character, which no command-line argument can").optional(),
   project: z.string().min(1),
-  title: z.string().min(1),
+  title: z.string().min(1).optional(),
   node: z.string().min(1).optional(),
   branch: z.string().min(1).optional(),
   /**
@@ -29,6 +66,7 @@ export const startSchema = z.strictObject({
   /** A Nexus agent thread that plans: its proposals become questions for the person. */
   planning: z.literal(true).optional(),
 });
+export const startSchema = briefSchema(startFields, startRules);
 
 export const seenSchema = z.strictObject({ lastReplyAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional() });
 // Agent activity comes from the harness.

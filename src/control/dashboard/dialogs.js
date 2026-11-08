@@ -1,6 +1,5 @@
 // The start and new-project dialogs, which start a thread and add a project, and the page's keyboard shortcuts.
 import { startHint } from "./start-hint.ts";
-import { titleOf } from "../../thread-title.ts";
 import { request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { projectRoutes } from "../../contract/projects.ts";
@@ -94,7 +93,6 @@ document.addEventListener("submit", async (event) => {
   const { cpus, memoryGiB, diskGiB, ...body } = Object.fromEntries([...new FormData(form)].filter(([key, value]) => value !== "" && key !== "worker"));
   const resources = Object.fromEntries(Object.entries({ cpus, memoryGiB, diskGiB }).flatMap(([key, value]) => value === undefined ? [] : [[key, Number(value)]]));
   if (Object.keys(resources).length > 0) body.resources = resources;
-  if (body.claude !== undefined && body.title === undefined) body.title = titleOf(body.claude);
   if (body.planning !== undefined) body.planning = true;
   form.querySelector("button[type=submit]").disabled = true;
   try {
@@ -140,8 +138,8 @@ document.addEventListener("change", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.name === "repoKind" && event.target.form?.matches("#project")) syncRepoKind(event.target.form);
 });
 
-// The project `nexus project add` sends: the dialog's fields, the resources the form names, and the GitHub grant
-// when asked for. Once added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
+// The project `nexus project add` sends: the dialog's fields, and the GitHub grant when asked for. The API fills
+// the rest with a project's defaults. Once added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
 let adding = false;
 document.addEventListener("submit", async (event) => {
   // Not event.target.id: a form's field named "id" shadows its id.
@@ -156,8 +154,7 @@ document.addEventListener("submit", async (event) => {
   try {
     const project = await request(projectRoutes.add, { body: {
       id: field("id"), repoUrl: form.elements.repoKind.value === "scratch" ? null : field("repoUrl"), defaultBranch: field("defaultBranch"), defaultNode: field("defaultNode"),
-      resources: JSON.parse(form.dataset.resources), allowedHosts: [], secrets: form.elements.github.checked ? [JSON.parse(form.dataset.githubGrant)] : [],
-      logins: [], preSetup: null,
+      ...form.elements.github.checked ? { secrets: [JSON.parse(form.dataset.githubGrant)] } : {},
     } });
     form.reset();
     syncRepoKind(form);

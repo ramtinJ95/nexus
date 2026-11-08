@@ -6,6 +6,8 @@ import { threadRoutes } from "./threads.ts";
 import { noContent, ok, on } from "../control/api/kit.ts";
 import { anyAllowed } from "../control/api/access.ts";
 import type { ThreadDetail } from "../control/wire.ts";
+import { startSchema } from "./threads-parse.ts";
+import { itemSchema } from "./projects-parse.ts";
 
 /** Each route's method and RegExp as thread-routes.ts declared them before the contract. seen and unseen shared one. */
 const before = [
@@ -83,4 +85,12 @@ test("a call of either of two routes takes what both take, and a handler answers
   on(threadRoutes.show, anyAllowed, () => ok({} as ThreadDetail));
   // @ts-expect-error abort answers 204
   on(threadRoutes.abort, { role: "person", action: "abort" }, () => ok({}));
+});
+
+test("a start or item without a title parses to the fields a caller that sent its brief's first line as the title gets, in the same order", () => {
+  const brief = { project: "p", message: "\n  Fix the build  \nand run the tests", node: "auto" };
+  for (const schema of [startSchema, itemSchema]) {
+    assert.equal(JSON.stringify(schema.parse(brief)), JSON.stringify(schema.parse({ ...brief, title: "Fix the build" })));
+  }
+  assert.equal(startSchema.parse({ project: "p", claude: "x".repeat(90) }).title, `${"x".repeat(80)}...`);
 });
