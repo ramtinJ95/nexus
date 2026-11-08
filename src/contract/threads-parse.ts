@@ -27,13 +27,21 @@ export const itemRules: readonly BriefRule[] = [
 ];
 export const brokenRule = (rules: readonly BriefRule[], b: Brief, name = (field: keyof Brief): string => field) => rules.find((rule) => rule.broken(b))?.message(name);
 
-/** `fields` held to `rules`. Without a title, it takes its brief's first line, which the rules make sure it has. */
-export const briefSchema = <S extends z.ZodType<Brief>>(fields: S, rules: readonly BriefRule[]) => fields
+/**
+ * `fields` held to `rules`. Without a title, it takes its brief's first line, which the rules make sure it has, in
+ * the title's place among the fields: a start's request ID is stored with a hash of them, which a repeat must match
+ * whether or not its caller sent the title, as callers before the server's default did.
+ */
+export const briefSchema = <S extends z.ZodObject & z.ZodType<Brief>>(fields: S, rules: readonly BriefRule[]) => fields
   .superRefine((b, ctx) => {
     const broken = brokenRule(rules, b);
     if (broken !== undefined) ctx.addIssue({ code: "custom", message: broken });
   })
-  .transform((b: z.output<S>): z.output<S> & { title: string } => b.title !== undefined ? b as z.output<S> & { title: string } : { ...b, title: titleOf(b.message ?? b.claude!) });
+  .transform((b: z.output<S>): z.output<S> & { title: string } => {
+    if (b.title !== undefined) return b as z.output<S> & { title: string };
+    const title = titleOf(b.message ?? b.claude!);
+    return Object.fromEntries(Object.keys(fields.shape).flatMap((key): [string, unknown][] => key === "title" ? [[key, title]] : key in b ? [[key, b[key as keyof typeof b]]] : [])) as z.output<S> & { title: string };
+  });
 
 export const startFields = z.strictObject({
   model: z.string().trim().min(1).max(200).optional(),
