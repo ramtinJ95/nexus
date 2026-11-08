@@ -2,7 +2,6 @@
  * The release a deployer asks for, and the deployer's reports and drain.
  */
 import { HttpError } from "../http-error.ts";
-import { busyOf } from "../conversation-view.ts";
 import { releaseView, resolveMain } from "../releases.ts";
 import type { CleanupPass } from "../cleanup.ts";
 import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
@@ -19,10 +18,8 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
   async function busyTurns() {
     const entering = gate.busy();
     const threads: string[] = [];
-    for (const t of registry.harnessThreads()) {
-      if (t.status === "deleted") continue;
-      const { working, queued } = busyOf(await agents.harness.view(t));
-      if (working || queued > 0) threads.push(t.id);
+    for (const t of registry.storedThreads()) {
+      if (t.status !== "deleted" && await agents[registry.agent(t).kind].busy(t)) threads.push(t.id);
     }
     return { threads, entering: entering || gate.busy() };
   }
