@@ -15,7 +15,7 @@ import type { Access, Policy, Role } from "./access.ts";
 import type { PylonAccess } from "./pylon-access.ts";
 import type { EventStreams } from "./sse.ts";
 import type { ThreadViews } from "./thread-view.ts";
-import type { ApiRoute, QueryOf, ReplyOf } from "../../contract/route.ts";
+import type { ApiRoute, EventStream, FileBytes, RawQueryOf, ReplyOf } from "../../contract/route.ts";
 import { matchedParams, pathPattern, type ParamsOf } from "../../util/route-path.ts";
 
 /** A file is served as its bytes, a page as its text under its own headers, everything else as JSON. */
@@ -34,16 +34,22 @@ export const ok = <T>(body: T) => ({ status: 200, body });
 export const created = <T>(body: T) => ({ status: 201, body });
 export const noContent = { status: 204 } as const;
 
-/** A JSON reply whose body is the route's reply type. A route that answers null answers 204 with none. */
-type JsonReply<T> = [T] extends [null] ? typeof noContent : { status: number; body: T };
+/**
+ * A reply of the route's reply type: JSON whose body is it, a file for FileBytes, or a stream for an EventStream. A
+ * route that answers null answers 204 with none.
+ */
+type RouteReply<T> = [T] extends [null] ? typeof noContent
+  : | ([Exclude<T, FileBytes | EventStream<unknown>>] extends [never] ? never : { status: number; body: Exclude<T, FileBytes | EventStream<unknown>> })
+    | ([Extract<T, FileBytes>] extends [never] ? never : Extract<Reply, { file: Buffer }>)
+    | ([Extract<T, EventStream<unknown>>] extends [never] ? never : Extract<Reply, { stream: unknown }>);
 
 /** Registers `handle` as the contract's route, with its path's parameters and its decoded query. */
 export function on<R extends ApiRoute>(
   route: R,
   policy: R["method"] extends "GET" ? Policy : WritePolicy,
-  handle: (params: ParamsOf<R["path"]>, req: Omit<Request, "query"> & { query: QueryOf<R> }) => JsonReply<ReplyOf<R>> | Promise<JsonReply<ReplyOf<R>>>,
+  handle: (params: ParamsOf<R["path"]>, req: Omit<Request, "query"> & { query: RawQueryOf<R> }) => RouteReply<ReplyOf<R>> | Promise<RouteReply<ReplyOf<R>>>,
 ): RouteEntry {
-  const entry: Route = (m, r) => handle(matchedParams<R["path"]>(route.path, m), { ...r, query: route.query?.decode(r.query) as QueryOf<R> });
+  const entry: Route = (m, r) => handle(matchedParams<R["path"]>(route.path, m), { ...r, query: route.query?.decode(r.query) as RawQueryOf<R> });
   return [route.method, pathPattern(route.path), policy, entry] as RouteEntry;
 }
 

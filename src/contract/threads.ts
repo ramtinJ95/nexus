@@ -11,7 +11,7 @@ import type { ClaudeConversation } from "../control/claude-transcript.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { Sent, ThreadDetail, ThreadRow } from "../control/wire.ts";
 import type { activitySchema, messageSchema, seenSchema, startSchema } from "./threads-parse.ts";
-import { route, type QueryCodec } from "./route.ts";
+import { queryOf, route, type QueryCodec } from "./route.ts";
 
 /** What one predecessor means for the queued thread. */
 export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
@@ -43,21 +43,16 @@ export interface QueuedThread {
   lastError: string | null;
 }
 
-const encodeQuery = (entries: readonly (readonly [string, string | undefined])[]) => {
-  const params = new URLSearchParams(entries.filter((entry): entry is [string, string] => entry[1] !== undefined));
-  return params.size === 0 ? "" : `?${params}`;
-};
-
 /** `deleted: false` leaves out deleted threads. */
 export interface ThreadsQuery { project?: string | undefined; deleted?: false }
 const threadsQuery: QueryCodec<ThreadsQuery> = {
-  encode: ({ project, deleted }) => encodeQuery([["project", project], ["deleted", deleted === false ? "false" : undefined]]),
+  encode: ({ project, deleted }) => queryOf([["project", project], ["deleted", deleted === false ? "false" : undefined]]),
   decode: (params) => ({ ...params.has("project") ? { project: params.get("project")! } : {}, ...params.get("deleted") === "false" ? { deleted: false } : {} }),
 };
 
 export interface QueuedQuery { project?: string | undefined }
 const queuedQuery: QueryCodec<QueuedQuery> = {
-  encode: ({ project }) => encodeQuery([["project", project]]),
+  encode: ({ project }) => queryOf([["project", project]]),
   decode: (params) => params.has("project") ? { project: params.get("project")! } : {},
 };
 
