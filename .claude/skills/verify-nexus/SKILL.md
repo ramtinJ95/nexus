@@ -19,7 +19,7 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
   - tailscaled's whois is a fake LocalAPI socket. It names port 7480 as the probe and every other caller as the person's laptop, which the API allows and counts as a person, so the CLI and the dashboard may start and message threads. The probe's whois names every caller as the control plane.
   - The model is scripted (`src/control/harness/test-fixture.ts`). A message `bash: <command>` makes exactly one bash tool call in the pylon, then the answer `scripted answer after toolResult`. A message `stream: <n>` gets the answer `word0 word1 ...` of n words, written one word every 20 ms, so it streams as a real model's does. Any other message gets `scripted answer after user`.
   - `tailscale serve` is `src/probe/fake-tailscale.ts`, so the Mac's work tailnet is never touched.
-- Seed data, created through the API: image `img-0000000000aa` made current, node `verify-node`, and project `spoon` (Spoon-Knife on `main`, 1 CPU, 1 GiB).
+- Seed data, created through the API: image `img-0000000000aa` made current, node `verify-node`, and project `spoon` (Spoon-Knife on `main`, 1 CPU, 3 GiB, 1 GiB disk).
 
 Isolation: one stack per machine. The control plane reaches probes only on port 7480, and containers keep the bridge port they booted with, so all four ports are fixed: 7470 API, 7480 probe, 7481 preview gateway, 7482 in-pylon CLI bridge. `up` refuses to start while any of them is taken or a previous run was not cleaned up. Never drive a stack this skill did not start. If `doctor` fails on a stack you did not start, stop and report it rather than killing it.
 

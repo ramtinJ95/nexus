@@ -1,8 +1,9 @@
 /**
  * The Files and Changes views of a pylon's checkout: directory listings, file contents, the files that changed since
- * the pylon booted, since HEAD or since the latest turn began, and their diff. checkout-files.py does the reading in the guest, over one raw pipe
- * per request, because every pylon image has Python 3 and a guest exec returns at most 64 KiB. openPython sends the
- * helper on stdin, because the probe takes a stream's argv in its request's URL, whose length is limited.
+ * the pylon booted, since HEAD or since the latest turn began, and their diff. checkout-files.py does the reading in
+ * the guest, over one raw pipe per request, because every pylon image has Python 3 and a guest exec returns at most
+ * execOutputMaxBytes (src/guest-contract.ts). openPython sends the helper on stdin, because the probe takes a
+ * stream's argv in its request's URL, whose length is limited.
  *
  * The helper's output is the guest's, so every reply is parsed as untrusted input: one longer than the helper would
  * ever print, or with more entries, fails rather than being held in memory or checked entry by entry. A pipe cannot be

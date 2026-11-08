@@ -1876,7 +1876,7 @@ test("project add and edit set standing rules from a file or stdin, edit clears 
 
 test("concurrent project edits preserve independently changed resources", async (t) => {
   const s = await setup(t);
-  assert.equal((await s.nexus(["project", "add", "concurrent", "--scratch", "--node", node, "--cpus", "1", "--memory", "1", "--disk", "10"])).code, 0);
+  assert.equal((await s.nexus(["project", "add", "concurrent", "--scratch", "--node", node, "--cpus", "1", "--memory", "3", "--disk", "10"])).code, 0);
   const before = s.proxy.connects.length;
   const edits = await Promise.all([
     s.nexus(["project", "edit", "concurrent", "--cpus", "4"]),

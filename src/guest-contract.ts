@@ -1,12 +1,16 @@
 /**
- * How the probe and the control plane drive the pylon guest: the `services` actions and log limit, the user every
- * command runs as, the call timeout, and how a command reaches Herdr. It imports nothing, so every side reads this one
- * copy. The guest's layout and the in-pylon API, which the image defines, are in images/pylon/nexus-contract.ts.
+ * How the probe and the control plane drive the pylon guest: the `services` actions and log limit, the exec output
+ * cap, the user every command runs as, the call timeout, and how a command reaches Herdr. It imports nothing, so
+ * every side reads this one copy. The guest's layout and the in-pylon API, which the image defines, are in
+ * images/pylon/nexus-contract.ts.
  */
 
 export const servicesActions = ["ensure", "list", "restart", "stop"] as const;
 /** The fork returns at most this many lines of a service's log. */
 export const maxServiceLogLines = 500;
+
+/** The fork keeps at most this much of a guest exec's output, and reports `truncated` past it. */
+export const execOutputMaxBytes = 64 * 1024;
 
 /** How long one ordinary guest exec may take. */
 export const callTimeoutMs = 10_000;

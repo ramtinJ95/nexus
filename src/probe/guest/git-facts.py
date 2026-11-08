@@ -17,6 +17,7 @@ os.environ["GIT_NO_LAZY_FETCH"] = "1"
 # Also refuse transports on Git versions that predate GIT_NO_LAZY_FETCH.
 os.environ["GIT_ALLOW_PROTOCOL"] = ""
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
+reply_limit = int(sys.argv[1])
 
 
 def git(*args, allowed=(0,), dirty=False, raw=False):
@@ -96,7 +97,7 @@ def observe():
 
 try:
     result = json.dumps(observe(), ensure_ascii=True)
-    if len(result) > 60 * 1024:
+    if len(result) > reply_limit:
         raise ValueError("git observation exceeds the reply limit")
     print(result)
 except Exception as error:

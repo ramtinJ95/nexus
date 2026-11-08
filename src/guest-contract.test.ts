@@ -7,6 +7,7 @@ test("each name and limit equals the literal it replaced", () => {
   assert.deepEqual(values, {
     servicesActions: ["ensure", "list", "restart", "stop"],
     maxServiceLogLines: 500,
+    execOutputMaxBytes: 65_536,
     callTimeoutMs: 10_000,
     herdrSession: "nexus",
     herdrClient: "herdr --session nexus",

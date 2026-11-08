@@ -13,6 +13,9 @@ import type { PylonId } from "../ids.ts";
 import { probeRoutes } from "./routes.ts";
 import { routePath } from "../util/route-path.ts";
 
+/** How long the control plane waits for the probe to answer a stream request. */
+export const streamAnswerMs = 10_000;
+
 /**
  * A stream is a raw pipe to a process in the guest, such as the pi-env daemon. It carries the process's stdout
  * only, and its stderr goes to the probe's log under the pylon's ID, so a diagnostic can never corrupt a framed

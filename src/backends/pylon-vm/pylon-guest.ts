@@ -11,7 +11,7 @@ import { z } from "zod";
 import type { Guest, PreviewOrigin } from "../backend.ts";
 import { processStream } from "../../process-stream.ts";
 import type { PylonId } from "../../ids.ts";
-import type { ServiceFact } from "../../protocol/observations.ts";
+import { logTailBounds, type ServiceFact } from "../../protocol/observations.ts";
 import type { PylonLog } from "../../probe/guest/session-wake.ts";
 import { statusSchema } from "../../pylon-vm/contracts.ts";
 import { stamped } from "../../pylon-vm/controller-log.ts";
@@ -27,7 +27,7 @@ export const controllerLog = (dir: string): PylonLog => (line) => appendFile(joi
 
 /** The end of a build's or an instance's controller log, for a JobFailure's or a broken pylon's logTail. */
 export async function controllerLogTail(dir: string): Promise<string> {
-  return (await readLogTail(join(dir, "controller.log"), 60)).output.slice(-8192);
+  return (await readLogTail(join(dir, "controller.log"), logTailBounds.lines)).output.slice(-logTailBounds.chars);
 }
 
 /** gondolin build writes gondolin.json's env here, for login shells. sandboxd's execs get the same env directly. */

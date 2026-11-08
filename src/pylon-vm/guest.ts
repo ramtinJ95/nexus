@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 import type { VM } from "@earendil-works/gondolin";
 import { commandOutcomeSchema, type GuestFile, type Service } from "./contracts.ts";
+import { execOutputMaxBytes } from "../guest-contract.ts";
 import { installFileCommand, shellQuote as q } from "../shell.ts";
 
 /**
@@ -185,7 +186,7 @@ export async function execute(
 	let truncated = false;
 	const sink = new Writable({
 		write(chunk: Buffer, _encoding, done) {
-			const room = 65536 - bytes;
+			const room = execOutputMaxBytes - bytes;
 			if (chunk.length > room) truncated = true;
 			if (room > 0) {
 				const part = chunk.subarray(0, room);
