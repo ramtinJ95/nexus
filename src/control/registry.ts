@@ -15,7 +15,7 @@ import { reviewStore } from "./review-store.ts";
 import { questionStore } from "./question-store.ts";
 import { usageStore } from "./usage-store.ts";
 import { releaseStore } from "./release-store.ts";
-import { reportStore } from "./report-store.ts";
+import { healthStore } from "./health-store.ts";
 import { nodeStore } from "./node-store.ts";
 import { nodeMetricsStore } from "./node-metrics-store.ts";
 import { projectStore } from "./project-store.ts";
@@ -26,7 +26,7 @@ import { threadStore, type ThreadParticipant } from "./thread-store.ts";
 export type Registry = ReturnType<typeof openRegistry>;
 
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
-export function openRegistry(path: string, clock = Date.now) {
+export function openRegistry(path: string, clock = Date.now, log = (message: string) => console.error(message)) {
   const kernel = openDb(path);
   const participants: ThreadParticipant[] = [];
   const { saveObservation, saveNodeState, ...nodes } = nodeStore(kernel);
@@ -53,7 +53,7 @@ export function openRegistry(path: string, clock = Date.now) {
     ...judgmentStore(kernel),
     ...nudges,
     ...releaseStore(kernel, appendEvent),
-    ...reportStore(kernel, appendEvent),
+    ...healthStore(kernel, appendEvent, log),
     ...nodes,
     ...nodeMetricsStore(kernel),
     ...projectStore(kernel),

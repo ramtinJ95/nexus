@@ -8,10 +8,10 @@ import { tempDir } from "../test-support/kit.ts";
 import { openRegistry } from "./registry.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 import { testRegistry } from "../test-support/registry-kit.ts";
-import type { NewHealthChange } from "./report-store.ts";
+import type { NewHealthChange } from "./health-store.ts";
 import type { Status } from "./doctor-model.ts";
 
-const dir = await tempDir("nexus-report-store-");
+const dir = await tempDir("nexus-health-store-");
 const node = "rj-firebat" as NodeName;
 const change = (at: string, from: Status, status: Status, name: "disk" | "online" = "disk"): NewHealthChange => ({ at, node, name, from, status, text: `${name} ${status}` });
 
@@ -48,6 +48,24 @@ test("changes are read newest first and each check's latest as its state, and a 
   assert.deepEqual(registry.healthChanges().map((c) => c.id), [fail!.id, down!.id, warn!.id]);
   assert.deepEqual(registry.healthStates().map((c) => [c.name, c.status]), [["online", "fail"], ["disk", "fail"]]);
   assert.deepEqual(registry.events("0", { kinds: ["health.changed"] }).map((e) => [e.thread, e.payload.id, e.payload.status]), [[null, warn!.id, "warn"], [null, down!.id, "fail"], [null, fail!.id, "fail"]], "each change is an event the dashboard alerts on");
+});
+
+test("a row that is not a change is logged once, however often the history is read", (t) => {
+  const path = join(dir, `${randomUUID()}.db`);
+  const logged: string[] = [];
+  const registry = openRegistry(path, Date.now, (message) => logged.push(message));
+  t.after(() => registry.close());
+  const raw = new DatabaseSync(path);
+  const { id: unreadable } = raw.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?) RETURNING id").get(Date.parse("2026-11-01T00:06:00Z"), "{ not json")!;
+  const { id: shapeless } = raw.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?) RETURNING id").get(Date.parse("2026-11-01T00:07:00Z"), JSON.stringify({ name: "disk" }))!;
+  const { id: timeless } = raw.prepare("INSERT INTO doctor_reports (at, record) VALUES (?, ?) RETURNING id").get(8_640_000_000_000_001, JSON.stringify(change("2026-11-01T00:08:00.000Z", "ok", "warn")))!;
+  raw.close();
+  assert.deepEqual(registry.healthChanges(), []);
+  registry.healthStates();
+  assert.equal(logged.length, 3, logged.join("\n"));
+  assert.match(logged[0]!, new RegExp(`passes over change ${unreadable as number}, whose record does not read: `));
+  assert.match(logged[1]!, new RegExp(`passes over change ${shapeless as number}, whose record does not read: its fields are not a change's`));
+  assert.match(logged[2]!, new RegExp(`passes over change ${timeless as number}, whose record does not read: Invalid time value`));
 });
 
 test("seen marks each open problem up to the change named, a problem that gets better stays seen, and one that gets worse or comes back is unseen", (t) => {
