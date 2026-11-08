@@ -54,6 +54,26 @@ test("converge removes only this pylon's other ports, never another pylon's or a
   assert.deepEqual(tailscale.entries(), { 8443: foreign, 10002: gateway.origin });
 });
 
+// What tailscale 1.102.3 printed for `serve status --json` in S6 (spikes/S6.md), after the steps it ran.
+const s6Status = async (name: string) => JSON.parse(await readFile(new URL(`../../spikes/evidence/logs/s6-status-${name}-json.txt`, import.meta.url), "utf8")) as unknown;
+
+test("the fake tailscale prints what the real one printed for the commands S6 ran", async () => {
+  const { cli } = fakeTailscale();
+  const status = async () => JSON.parse(await cli(["serve", "status", "--json"])) as unknown;
+  const gateway = "http://127.0.0.1:18090";
+  const ports = [8443, 10000, 10001, 10002, 18443, 40000];
+  assert.deepEqual(await status(), await s6Status("before"));
+
+  for (const port of ports) await cli(["serve", "--bg", `--https=${port}`, gateway]);
+  assert.deepEqual(await status(), await s6Status("all-active"));
+
+  await cli(["serve", "--https=10001", "off"]);
+  assert.deepEqual(await status(), await s6Status("one-removed"));
+
+  for (const port of ports.filter((p) => p !== 10001)) await cli(["serve", `--https=${port}`, "off"]);
+  assert.deepEqual(await status(), await s6Status("final"));
+});
+
 test("after a restart, gateway entries no pylon has claimed are swept, and foreign ones are kept", async (t) => {
   // S6's capture of six live entries, pointed at this gateway, plus one entry Nexus does not own.
   const s6 = new URL("../../spikes/evidence/logs/s6-status-all-active-json.txt", import.meta.url);
