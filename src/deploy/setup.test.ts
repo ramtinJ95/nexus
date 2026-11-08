@@ -447,9 +447,9 @@ test("after the credentials, a new git key rewrites the configs and reinstalls t
   };
   assert.deepEqual(await after(["config", "probe", "control"]), [lockDir, write(`--dotfiles ${dotfiles}`), "bash ./deploy/install-probe.sh", "bash ./deploy/install-control.sh"]);
   assert.deepEqual(await after(["watch", "probe", "control"]), [
-    lockDir, write(`--dotfiles ${dotfiles} --github-watch`), "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
+    lockDir, write(`--github-watch --dotfiles ${dotfiles}`), "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
   ], "control.json gains github.tokenFile under the deployer's lock, from the file as it is then");
-  assert.deepEqual(await after(["config", "watch"]), [lockDir, write(`--dotfiles ${dotfiles} --github-watch`), "bash ./deploy/install-probe.sh"], "one config write does both");
+  assert.deepEqual(await after(["config", "watch"]), [lockDir, write(`--github-watch --dotfiles ${dotfiles}`), "bash ./deploy/install-probe.sh"], "one config write does both");
   assert.deepEqual(await after(["probe"]), ["systemctl try-restart nexus-probe.service"]);
   assert.deepEqual(await after([]), [], "a run that changed no credential restarts nothing");
 });
@@ -480,4 +480,10 @@ test("a config write that refuses, such as --join without --node, stops install 
 test("install.sh names the package manager it found, and parseFlags refuses one it does not know", () => {
   assert.equal(parseFlags(["install", "--package-manager", "dnf"]).flags.packageManager, "dnf");
   assert.throws(() => parseFlags(["install", "--package-manager", "pacman"]), /--package-manager pacman: give apt, dnf, other/);
+});
+
+test("the watch's config write names --github-watch where parseFlags reads it, even after arguments that end with --", async () => {
+  const { ran } = await installing(["--dotfiles", dotfiles, "--"], ["watch"]);
+  const rewrite = ran.filter((line) => line.includes(" write ")).at(-1)!;
+  assert.equal(parseFlags(rewrite.slice(rewrite.indexOf(" write ") + 1).split(" ")).flags.githubWatch, true, rewrite);
 });

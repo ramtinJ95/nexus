@@ -566,7 +566,8 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
   const lock = join(prefix, deployerFiles.lock);
   const write = async (more: readonly string[]) => {
     await run("install", "-d", "-o", "root", "-g", "root", "-m", "0700", dirname(lock));
-    await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...args, ...more);
+    // Before the person's arguments, which may end with `--`.
+    await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...more, ...args);
   };
   try {
     await write([]);
