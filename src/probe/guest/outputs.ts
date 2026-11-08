@@ -44,11 +44,10 @@ function parseRecord(text: string): DeclaredOutput | null {
     const parsed = recordSchema.safeParse(JSON.parse(text));
     return parsed.success ? parsed.data : null;
   } catch {
-    return null; // not JSON
+    return null;
   }
 }
 
-/** The bytes one record takes in the listing. */
 const listingBytes = (o: DeclaredOutput): number => Buffer.byteLength(`${o.id}.json\t${JSON.stringify(o)}\n`);
 
 /** Time first, so the directory lists in the order outputs were declared. */

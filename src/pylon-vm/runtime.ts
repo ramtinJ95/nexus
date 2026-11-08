@@ -56,7 +56,6 @@ export async function reportResume(
 	return true;
 }
 
-/** Logs the process's output as it comes until it ends, and returns its exit code. */
 async function runToEnd(processes: GuestProcesses, pid: string): Promise<number | undefined> {
 	let result = await processes.status(pid, 60000);
 	while (result.running) {
@@ -559,7 +558,6 @@ const setupMarker = "/var/lib/pi-sandbox/setup.json";
 export function setupMarkerOf(record: SandboxRecord, setupError: string | undefined): string {
 	return JSON.stringify({ instance: record.name, createdAt: record.createdAt, ...(setupError ? { setupError } : {}) });
 }
-/** A setup that ran, and how it failed if it did. */
 export type SetupRun = { setupError?: string };
 /** null when this instance's setup has not run on the disk. */
 export function setupOnDisk(marker: string | null, record: SandboxRecord): SetupRun | null {

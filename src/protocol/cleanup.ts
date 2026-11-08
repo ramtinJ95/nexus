@@ -25,7 +25,6 @@ export const deleteOutcomeSchema = z.discriminatedUnion("state", [
   z.strictObject({ state: z.literal("skipped"), reason: z.string().max(2_000) }),
 ]) satisfies z.ZodType<DeleteOutcome>;
 export const artifactUsageSchema = z.looseObject({ artifacts: z.array(z.looseObject({ id: artifactId, bytes })) }) satisfies z.ZodType<ArtifactUsage>;
-/** The most artifacts one POST /v1/cleanup names. */
 export const maxDrops = 1_000;
 export const dropRequestSchema = z.strictObject({ drop: z.array(artifactId).max(maxDrops) }) satisfies z.ZodType<DropRequest>;
 export const dropReplySchema = z.looseObject({ outcomes: z.record(z.string(), deleteOutcomeSchema) }).transform((reply) => reply as DropReply);

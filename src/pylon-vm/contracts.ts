@@ -11,7 +11,6 @@ const guestPath = z
 	.startsWith("/")
 	.refine((s) => !s.includes("\0"));
 const cwd = z.string().refine((s) => !s.includes("\0"));
-/** serviceDecl, with the defaults the supervisor runs a service with. */
 const serviceSchema = serviceDecl.extend({
 	cwd: serviceDecl.shape.cwd.default("."),
 	env: serviceDecl.shape.env.default({}),
@@ -65,10 +64,7 @@ export const bootSchema = z.strictObject({
 		nestedVirtualization: z.literal(true).optional(),
 	}),
 	allowedHosts: z.array(hostPattern),
-	/**
-	 * Keyed by the guest env name. A value is substituted only in requests to its own hosts, and is never
-	 * written into the guest. A host that echoes it back in a response still shows it to the guest.
-	 */
+	/** Keyed by the guest env name. */
 	secrets: z.record(
 		z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
 		z.strictObject({ hosts: z.array(hostPattern).min(1), value: z.string().min(1) }),
@@ -281,7 +277,6 @@ const serviceFacts = z.array(z.strictObject({
 	wantsPreview: z.boolean(),
 	unrouted: z.string().exactOptional(),
 })) satisfies z.ZodType<ServiceFact[]>;
-/** Nexus reads nothing of the reply. */
 const ignored = z.unknown();
 /**
  * Each action's reply, which `run` parses, and whether the controller runs it beside its lifecycle queue: one that

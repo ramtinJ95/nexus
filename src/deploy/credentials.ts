@@ -115,7 +115,6 @@ export function scripted(env: NodeJS.ProcessEnv): Answers {
   };
 }
 
-/** Reads one line from the terminal, echoing it unless `hidden`. */
 function readLine(prompt: string, hidden: boolean): Promise<string> {
   const { stdin, stderr } = process;
   stderr.write(prompt);

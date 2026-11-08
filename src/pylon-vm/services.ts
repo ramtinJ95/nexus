@@ -645,7 +645,7 @@ export class GuestServices {
 
 /**
  * How long ensure, restart and service-start wait for the services they started: the longest `timeoutMs` a
- * service may declare (contracts.ts), and a margin for its last health check. The supervisor fails each start
+ * service may declare (services-file.ts), and a margin for its last health check. The supervisor fails each start
  * that outlasts its own timeout, so a service still starting after this went unhealthy after it was ready.
  */
 const readyWaitMs = 130_000;

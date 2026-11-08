@@ -22,7 +22,7 @@ import type { createJobTable } from "./jobs.ts";
 /** How long a shutdown gives its pauses. deploy/nexus-probe.service's TimeoutStopSec leaves 30 s more for the close. */
 export const shutdownPauseMs = 150_000;
 
-/** Resolves to the command's stdout. It rejects on a nonzero exit, with that stdout on the error, as execFile does. */
+/** Rejects on a nonzero exit with its stdout on the error, as execFile does. */
 export type Systemctl = () => Promise<{ stdout: string }>;
 
 const isSystemRunning: Systemctl = () => promisify(execFile)("systemctl", ["is-system-running"], { timeout: 5_000 });
@@ -68,7 +68,6 @@ export async function closeProbe(
   }
 }
 
-/** How long a drain waits for its last events to leave for each observer. */
 const observerFlushMs = 1_000;
 
 export interface DrainDeps {
@@ -160,7 +159,6 @@ export async function probeShutdown(file: string | undefined, log: (message: str
   };
 }
 
-/** `failed`: why the shutdown's pause of the pylon did not finish. */
 export interface ShutdownEntry { failed?: string }
 export type ShutdownRecord = Map<PylonId, ShutdownEntry>;
 

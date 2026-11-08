@@ -246,7 +246,7 @@ export async function checked(
 		);
 	return result.output;
 }
-/** The guest file's bytes, or null when it does not exist. A read goes over sandboxd's file RPC and starts no process. */
+/** A read goes over sandboxd's file RPC and starts no process. */
 export async function readGuestFile(vm: VM, path: string, signal?: AbortSignal): Promise<Buffer | null> {
 	try {
 		return await vm.fs.readFile(path, signal ? { signal } : {});
@@ -265,7 +265,6 @@ export interface ServiceGuest {
 	execute(cmd: string, timeoutMs: number): Promise<{ exitCode: number; output: string }>;
 	/** The file's size, inode and mtime, which change whenever it does, or null when it does not exist. */
 	stamp(path: string): Promise<string | null>;
-	/** The file's bytes, or null when it does not exist. */
 	readFile(path: string): Promise<Buffer | null>;
 	writeFile(path: string, content: string): Promise<void>;
 	/** The base URL of the host's ingress, which sends each route's prefix to its port on the guest's 127.0.0.1. */

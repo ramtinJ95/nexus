@@ -1,4 +1,3 @@
-/** Probe contract, the errors a call to a probe fails with, checking who answered it, and reading a reply's body. */
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { TailnetNodeId } from "../ids.ts";

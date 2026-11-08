@@ -44,7 +44,6 @@ export const probeRoutes = {
   artifactUsage: { method: "GET", path: "/v1/cleanup", role: "control-plane" },
   dropArtifacts: { method: "POST", path: "/v1/cleanup", role: "control-plane" },
   wakeDeployer: { method: "POST", path: "/v1/deployer/wake", role: "control-plane" },
-  // Checkpoints hold the pylon's logins, so only the other probe may read them.
   fetchArtifact: { method: "GET", path: "/v1/artifacts/{artifact}", role: "peer-probe" },
 } as const satisfies Record<string, ProbeRoute>;
 
